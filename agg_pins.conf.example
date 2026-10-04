@@ -1,0 +1,4 @@
+# agg_pins.conf v1.0 -- MAC 钉死表 (wan_agg 启动时重放; 内核模块状态不跨重启)
+# 格式: <MAC> <op>    op: 1=钉WAN1(5G)  2=钉WAN2(家宽)  (cmd6, 任一WAN断自动旁路)
+# 游戏PC: 会话绑定源IP, 按流分桶会断登录 -> 钉家宽 (2026-10-04)
+aa:bb:cc:dd:ee:01 2

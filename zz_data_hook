@@ -1,0 +1,6 @@
+#!/bin/sh /etc/rc.common
+# LG6151M custom firmware v2: /data persistence hook
+START=99
+start() {
+	[ -f /data/rc.extend.sh ] && sh /data/rc.extend.sh > /tmp/rc.extend.log 2>&1 &
+}

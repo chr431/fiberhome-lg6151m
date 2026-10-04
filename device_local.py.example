@@ -1,0 +1,26 @@
+# Copy this file to device_local.py and fill in YOUR OWN device values.
+# device_local.py is gitignored -- keep personal data out of the repo.
+
+HOST = "192.168.8.1"            # CPE LAN address (factory default)
+LAN_CIDR = "192.168.8.0/24"     # your LAN subnet (for firewall rules)
+
+# --- Web login (owner account; printed on device label / set by you) ---
+WEB_USER = "admin"
+WEB_PASS = "<YOUR_ADMIN_PASSWORD>"
+
+# --- Device identifiers (from label / ARP) ---
+MAC6 = "<MAC_LAST_6_HEX>"       # bridge MAC last 6 hex, e.g. "AABBCC" (no separators)
+PHONE = "<YOUR_SIM_NUMBER>"     # the SIM number in the CPE, e.g. "+8613..."
+
+# --- Backdoor account installed by our custom firmware / rearm.py ---
+TOOR_USER = "toor"
+TOOR_PASS = "<YOUR_CHOSEN_ROOT_PASSWORD>"
+# MD5-crypt hash of TOOR_PASS, generate with:
+#   openssl passwd -1 -salt <yoursalt> '<YOUR_CHOSEN_ROOT_PASSWORD>'
+TOOR_HASH = "<1_DOLLAR_MD5_HASH>"
+
+
+
+# 环境变量可覆盖本文件(优先级更高):
+#   LG_HOST / LG_TOOR_USER / LG_TOOR_PASS / LG_WEB_PASS
+

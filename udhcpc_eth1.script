@@ -1,0 +1,22 @@
+#!/bin/sh
+# udhcpc event script for eth1 (home broadband). Applies lease to eth1.
+# Full dual-WAN policy is handled by wan_policy2.sh (table 200 + failover).
+case "$1" in
+bound|renew)
+    ip addr flush dev eth1 2>/dev/null
+    PFX=24
+    case "$subnet" in
+        255.255.255.0) PFX=24;;
+        255.255.255.128) PFX=25;;
+        255.255.254.0) PFX=23;;
+        255.255.0.0) PFX=16;;
+    esac
+    ip addr add "$ip/$PFX" dev eth1 2>/dev/null
+    echo "$router" > /tmp/eth1.gw
+    echo "$(date) lease $ip/$PFX gw $router" >> /tmp/udhcpc_eth1.log
+    ;;
+deconfig)
+    ip addr flush dev eth1 2>/dev/null
+    ;;
+esac
+exit 0

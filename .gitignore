@@ -1,0 +1,4 @@
+device_local.py
+__pycache__/
+*.log
+*.pyc

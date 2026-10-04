@@ -1,0 +1,59 @@
+# VERSIONS.tsv -- 版本注册表（唯一版本事实源）
+# 列: name <TAB> ver <TAB> kind <TAB> target <TAB> role
+# kind: manifest = deploy.py MANIFEST 成员(部署到设备) / tool = PC 侧工具
+#       doc  = 文档 / src  = 源码(构建产物随源码同版本)
+# 规则: 改文件必须 bump 版本(修复+0.1, 机制变化+1.0)并 commit;
+#       `python tools/vercheck.py check` 校验一致性, `render` 同步架构图版本表。
+#VER-REGISTRY
+rc.extend.sh	1.6	manifest	/data/rc.extend.sh	槽位调度器 v1.4极简(b=纯访问层,a=全栈)
+v3_rc10.extend.sh	2.16	manifest	/data/gw/rc19.sh	v3 启动编排 rc19v2(br-lan+wifi+wan+DNS; v2.5网口对调; v2.6/2.7 eth1 MAC钉死+归因修正)
+wifi_up.sh	1.10	manifest	/data/gw/wifi_up.sh	mt7992 AP 工厂配方拉起(apcfg+计算MAC)
+wan_agg.sh	2.13	manifest	/data/gw/wan_agg.sh	双上行聚合主管(照抄原厂quecadp内核分流+fwmark路由; v1.7 to-LAN护盾规则自愈(全灭黑洞终根因)
+udhcpc_wan.script	1.0	manifest	/data/gw/udhcpc_wan.script	WAN口 udhcpc 事件钩子(接口无关化)
+healthdog.sh	1.0	manifest	/data/gw/healthdog.sh	看门狗用户态心跳
+v3_babysit_v2.sh	2.0	manifest	/data/gw/babysit_v2.sh	启动保姆(T1杀rcS/T2核爆回B)
+night_report.sh	1.0	manifest	/data/gw/night_report.sh	夜间体检报告
+wifi_guard.sh	1.0	manifest	/data/gw/wifi_guard.sh	BA/TX 停滞自动恢复守卫
+mipc_dial_trace.sh	1.0	manifest	/data/gw/mipc_dial_trace.sh	5G 拨号取证(xtrace 抓真参)
+dial_5g.sh	1.1	manifest	/data/gw/dial_5g.sh	生产 5G 拨号器(check_ia+netagent补丁)
+consfeed.sh	1.0	manifest	/data/gw/consfeed.sh	v2 控制台喂食器(无setsid,v2_access拉起)
+rc_netfh.sh	1.9	manifest	/data/gw/rc_netfh.sh	路线A: FH modem栈环境(最小army, MODE.fh门控; v1.4=ULA+NAT66+radvd)
+radvd.conf	1.0	manifest	/data/gw/radvd.conf	IPv6 SLAAC+RDNSS通告(br-lan, ULA fd42:9ac1:7e50::/64)
+capture_ubus.sh	1.0	manifest	/data/gw/capture_ubus.sh	stock拨号一次性捕获(ubus monitor+ccmni采样)
+dial_variant.sh	1.1	manifest	/data/gw/dial_variant.sh	5G 拨号参数变体实验器(iptype/apn/plmn/roam)
+v2_access.sh	6.0	manifest	/data/gw/v2_access.sh	v2 极简访问层(串口/SSH/DHCP/防火墙22,零守护干涉)
+healthdog.ko	1.0	manifest	/data/gw/healthdog.ko	取证看门狗内核模块(forensic=1)
+v3_fix.ko	1.1	manifest	/data/gw/v3_fix.ko	TTL伪装/PPE解绑内核模块(wan_if/ttl_mode/unhook)
+v3_steth.ko	1.0	manifest	/data/gw/v3_steth.ko	hook槽位听诊器(bias/interval)
+healthdog.c	1.0	src	healthdog.ko	看门狗模块源码(版本随产物)
+v3_fix.c	1.1	src	v3_fix.ko	TTL/解绑模块源码(版本随产物)
+v3_steth.c	1.0	src	v3_steth.ko	听诊器模块源码(版本随产物)
+build_v3.sh	1.0	tool	-	v3 A槽镜像构建脚本(设备端运行)
+tools/deploy.py	2.0	tool	-	MANIFEST部署/漂移检查(版本注入+预检)
+tools/serial_server.py	1.6	tool	-	常驻串口控制台守护(:7717, 唯一登录驱动)
+tools/serial_cmd.py	1.2	tool	-	串口命令瘦客户端(marker输出捕获)
+tools/lk_flip2.py	1.1	tool	-	LK 一键翻槽(a|b, misc[2060]字节)
+tools/lk_write.py	1.5	tool	-	LK raw-shell 文件写入(回显校验+tmpfs挂载+cmdlist巡检, 取代lk_fix_access)
+tools/wait_ready.py	1.1	tool	-	轮询等待器(tcp/串口marker, 代替长sleep)
+tools/vercheck.py	1.0	tool	-	版本注册表校验/渲染/设备比对
+tools/lk_fix_access.py	1.0	tool	-	[已废弃]旧LK写入器(无回显校验,由lk_write.py取代)
+docs/ARCHITECTURE.md	1.0	doc	-	v2/v3 架构图+版本总表(本表生成)
+docs/DISCIPLINE.md	1.0	doc	-	项目纪律(仓库/版本/串口/反猜测规则)
+README.md	1.1	doc	-	仓库总览与快速上手
+multiwan_ctl	1.1	manifest	/data/gw/multiwan_ctl	原厂multiwan引擎ioctl控制器(zig动态链libfhdrv_net_api,36B结构体)
+.lib_build/fhstub.so	1.0	manifest	/data/gw/fhstub.so	FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径)
+led_mgr.sh	1.3	manifest	/data/gw/led_mgr.sh	原厂风格LED守护(v1.2 WiFi改盯operstate)(实测引脚映射:467WiFi/474,475,473=5G红绿橙/292=WAN)
+v3httpd	2.2	manifest	/data/gw/v3httpd	网关GUI HTTP服务(:80, 静态+JSON API)
+www/api.sh	2.11	manifest	/data/gw/www/api.sh	GUI JSON端点(状态聚合)
+www/index.html	2.5	manifest	/data/gw/www/index.html	v3控制台页面
+www/style.css	2.1	manifest	/data/gw/www/style.css	控制台主题
+www/app.js	3.10	manifest	/data/gw/www/app.js	控制台轮询逻辑
+agg_pins.conf.example	1.1	tool	-	MAC钉死表模板(真实表设备侧自管, 含个人MAC不入库)
+fan_mgr.sh	1.2	manifest	/data/gw/fan_mgr.sh	原厂梯度温控风扇守护(60-140占空比,255会罢工)
+fan_mode.conf	1.0	manifest	/data/gw/fan_mode.conf	风扇模式:performance|silent(静音+6°C偏移)
+wpapmk	1.0	manifest	/data/gw/wpapmk	WPA口令转PMK(纯C PBKDF2-SHA1; fh魔改hostapd只吃wpa_psk)
+fw_apply.sh	1.0	manifest	/data/gw/fw_apply.sh	端口映射/DMZ/禁网持久层安装器(rc_netfh开机+api变更共用)
+cellular_replay.sh	1.0	manifest	/data/gw/cellular_replay.sh	蜂窝锁定开机重放(频段/小区锁到cfgmgr树, 树每次开机由出厂档案重建)
+shmsnap	1.0	manifest	/data/gw/shmsnap	cfgmgr树共享内存快照工具(save/load 16MB原始字节, gzip后127KB, 开机恢复锁定状态)
+tools/webs_revive.sh	1.3	manifest	/data/gw/webs_revive.sh	原厂GUI复活器(自足nginx conf; 手动拉起)
+ntp_keeper.sh	1.0	manifest	/data/gw/ntp_keeper.sh	每小时NTP守时(ntclient多源; 设备无RTC)

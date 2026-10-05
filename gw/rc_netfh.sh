@@ -28,9 +28,11 @@ if ! awk 'NR>1 && $3==16777216' /proc/sysvipc/shm 2>/dev/null | grep -q .; then
         gunzip -c /data/gw/cfgtree.snap.gz > /tmp/cfgtree.snap 2>/dev/null &&             /data/gw/shmsnap load /tmp/cfgtree.snap >/dev/null 2>&1 &&             glog "cfgtree snapshot restored" && rm -f /tmp/cfgtree.snap
     fi
 fi
-pidof cfgmgr >/dev/null || { /fhrom/bin/cfgmgr >/dev/null 2>&1 & sleep 2; }
-pidof logmgr >/dev/null || { /fhrom/bin/logmgr -syslog /fhconf/message_syslog >/dev/null 2>&1 & sleep 2; }
-glog "cfgmgr=$(pidof cfgmgr) logmgr=$(pidof logmgr)"
+# v3.0 (P3-lite, 2026-10-06 实证): cfgmgr 守护与 logmgr 不再拉起 --
+#   kill cfgmgr 后 cfg_cmd get/set 全通(shm 由 cfg_tool 建立, libfhcfg 直操作),
+#   mobilenetwork 照常工作; logmgr 已死亡数周无人察觉(台账 CLM-LOGMGR-DEAD)。
+#   cfg_tool 的 shm 构建与快照恢复仍然保留(树翻译链的底座)。
+glog "P3-lite: cfgmgr/logmgr daemons retired (shm-only tree)"
 
 # 2. net plumbing, fresh MIPC sessions, stock order
 [ "$(cat /sys/kernel/ccci/boot 2>/dev/null | head -c 5)" = "md1:4" ] || glog "WARN cci=$(cat /sys/kernel/ccci/boot 2>/dev/null)"

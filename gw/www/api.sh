@@ -328,8 +328,22 @@ apply_airplane() {
     ok_json
 }
 net_plmn_scan() {
-    ubus call mobile_network start_search_network "{}" >/dev/null 2>&1
-    ok_json
+    # v2.24 (P4.1): AT+COPS=? 直扫(原 ubus mobile_network 属 mobilenetwork 过渡层)。
+    # 扫描阻塞 10-40s; 结果 +COPS: (...)
+    OUT=$(mipc_wan_cli --at_cmd "AT+COPS=?" 2>/dev/null | tr -d '')
+    LIST=$(printf '%s' "$OUT" | awk '
+        /\+COPS: ?\(/ {
+            line=$0
+            while (match(line, /\([0-9]+,"[^"]*","[0-9]*",[0-9]+\)/)) {
+                rec=substr(line, RSTART, RLENGTH); line=substr(line, RSTART+RLENGTH)
+                split(rec, a, ",")
+                long=a[2]; gsub(/"/, "", long)
+                numeric=a[3]; gsub(/"/, "", numeric)
+                act=a[4]; gsub(/[()]/, "", act)
+                printf "{\"name\":\"%s\",\"plmn\":\"%s\",\"act\":\"%s\"},", long, numeric, act
+            }
+        }' | sed 's/,$//')
+    printf '{"networks":[%s],"ts":%d}' "${LIST:-}" "$(date +%s)"
 }
 
 # -- 风扇/LED --
@@ -541,7 +555,21 @@ get_cellular() {
     NC=$(printf '%s' "$BANDS" | awk -F, '{print NF}')
     CSQ=$(mipc_wan_cli --at_cmd "AT+CSQ" 2>/dev/null | grep -oE "[0-9]+, ?99" | cut -d, -f1)
     RSSI=""; case "$CSQ" in ''|0) RSSI="未知";; *) RSSI="$(( -113 + CSQ * 2 )) dBm";; esac
-    [ -n "$SB" ] && RAT="5G NR" || RAT="--"
+    # v2.24 (P3): mipc/AT 直读优先, 树值为回退 -- RSRP 实时化 + PLMN/RAT 直查。
+    #   树值由 mobilenetwork 周期回填(有滞后), 直读消除断供风险(树死也有活数据)。
+    MR=$(mipc_wan_cli --nw_get_signal 2>/dev/null | grep -oE 'RSRP=-?[0-9]+')
+    [ -n "$MR" ] && SR="${MR#RSRP=}"
+    COPSR=$(mipc_wan_cli --at_cmd "AT+COPS?" 2>/dev/null | grep -oE '\+COPS: [^]*')
+    CNUM=$(printf '%s' "$COPSR" | grep -oE '"[0-9]{5,6}"' | tr -d '"')
+    [ -n "$CNUM" ] && PLMN="$CNUM"
+    ACT=$(printf '%s' "$COPSR" | awk -F, '{gsub(//,"");n=NF; gsub(/[^0-9]/,"",$n); print $n}')
+    case "$ACT" in
+        0|1|3) RAT="GSM" ;;
+        2|4|5|6) RAT="3G" ;;
+        7|13) RAT="LTE" ;;
+        11|12) RAT="5G NR" ;;
+        *) [ -n "$SB" ] && RAT="5G NR" || RAT="--" ;;
+    esac
     cat <<EOF4
 {"operator":{"plmn":"${PLMN:-}","name":"$(op_name "$PLMN")"},
 "serving":{"band":"${SB:--}","arfcn":"${SA:--}","pci":"${SP:--}","rsrp":"${SR:--}","sinr":"${SS:--}","rssi":"$RSSI","rat":"$RAT"},

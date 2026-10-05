@@ -12,7 +12,7 @@ gw/wifi_guard.sh	1.0	manifest	/data/gw/wifi_guard.sh	BA/TX 停滞自动恢复守
 gw/mipc_dial_trace.sh	1.0	manifest	/data/gw/mipc_dial_trace.sh	5G 拨号取证(xtrace 抓真参)
 gw/dial_5g.sh	1.2	manifest	/data/gw/dial_5g.sh	生产 5G 拨号器(check_ia+netagent补丁)
 gw/consfeed.sh	1.0	manifest	/data/gw/consfeed.sh	v2 控制台喂食器(无setsid,v2_access拉起)
-gw/rc_netfh.sh	2.2	manifest	/data/gw/rc_netfh.sh	路线A: FH modem栈环境(最小army, MODE.fh门控; v2.1=atci对复活修L14回归)
+gw/rc_netfh.sh	3.0	manifest	/data/gw/rc_netfh.sh	路线A: FH modem栈环境(最小army, MODE.fh门控; v2.1=atci对复活修L14回归)
 gw/radvd.conf	1.0	manifest	/data/gw/radvd.conf	IPv6 SLAAC+RDNSS通告(br-lan, ULA fd42:9ac1:7e50::/64)
 gw/capture_ubus.sh	1.1	manifest	/data/gw/capture_ubus.sh	stock拨号一次性捕获(ubus monitor+ccmni采样)
 gw/dial_variant.sh	1.1	manifest	/data/gw/dial_variant.sh	5G 拨号参数变体实验器(iptype/apn/plmn/roam)
@@ -35,7 +35,7 @@ gw/bin/multiwan_ctl	1.1	manifest	/data/gw/multiwan_ctl	原厂multiwan引擎ioctl
 gw/bin/fhstub.so	1.0	manifest	/data/gw/fhstub.so	FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径)
 gw/led_mgr.sh	1.6	manifest	/data/gw/led_mgr.sh	原厂风格LED守护(v1.4传输层改sysfs gpio; v1.6 配置统一overlay+信标看门狗(dmesg固件权威事件→no_bcn重装); v1.5 WAN走leds类节点5g_evb_voice=gpio292被leds-gpio占用, debugfs实证)
 gw/bin/v3httpd	2.2	manifest	/data/gw/v3httpd	网关GUI HTTP服务(:80, 静态+JSON API)
-gw/www/api.sh	2.23	manifest	/data/gw/www/api.sh	GUI JSON端点(v2.15: hostapd探测改iw AP-type(拓扑形态无关); v2.14: 配置统一cfg_load/gw_set读写defaults+settings overlay, 旧散落conf写路径全撤; v2.13端口强校验; v2.12: get_sys嵌套花括号默认值触发busybox ash展开bug多印1字节破坏JSON, 改-n分支; get_logs补\t\r反斜杠转义使严格JSON.parse通过; 状态聚合)
+gw/www/api.sh	2.24	manifest	/data/gw/www/api.sh	GUI JSON端点(v2.15: hostapd探测改iw AP-type(拓扑形态无关); v2.14: 配置统一cfg_load/gw_set读写defaults+settings overlay, 旧散落conf写路径全撤; v2.13端口强校验; v2.12: get_sys嵌套花括号默认值触发busybox ash展开bug多印1字节破坏JSON, 改-n分支; get_logs补\t\r反斜杠转义使严格JSON.parse通过; 状态聚合)
 gw/www/index.html	2.9	manifest	/data/gw/www/index.html	v3控制台页面
 gw/www/style.css	2.1	manifest	/data/gw/www/style.css	控制台主题
 gw/www/app.js	3.15	manifest	/data/gw/www/app.js	控制台轮询逻辑

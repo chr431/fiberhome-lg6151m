@@ -81,7 +81,13 @@ EasyMesh/VPN 三族/UPnP/DDNS/VoIP/fhdrv_net_forward 端口隔离（FEATURE_MATR
 - selftest 翻转：锁一致性断言从 conf=树=模组 改 conf=模组（双层）。
 - **出口判据**：selftest 全绿 + GUI 锁频段实操（锁→查→解）+ 重启持久 + 手机在线不掉线。
 
-### P2 拨号自持（必做 —— 闸门 A 已判 FAIL）
+### P2 拨号自持（必做 —— 闸门 A 已判 FAIL；**2026-10-06 验收通过**） <!--CLM:CLM-DIALKEEPER-->
+
+> dial_keeper v1.0 兜底拨号器验收：冷拨 35s 接管（deact_apn+act_type 配方 result:0，
+> netagent 自动配置新口）· mobilenetwork 死亡状态下 8 分钟稳定+流量 · 飞行循环
+> （CFUN4 拨号失败→退避→CFUN1 恢复后 DIAL OK 54s）· 附带发现：**呼叫所有权随
+> deact/act 转移** —— keeper 建立的呼叫不再随 mobilenetwork 退出而拆除（其 TERM
+> 清理只及自身呼叫），P3 下架的安全边际比预期更大。
 自研 dial keeper：`mipc_wan_cli --data_call_act`（APN 来自 `--apn_provision_by_sim`）+
 watchdog 集成（ccmni 无 IP→重拨）。出口：拔 SIM 重插自恢复 + 10 分钟流量观测。
 

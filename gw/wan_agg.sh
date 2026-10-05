@@ -159,6 +159,16 @@ fw_setup() {  # $1=p_w2(家宽概率0-1, busybox 无浮点 -> 用万分比整数
     # 已建流: 恢复 ct mark (粘性; ctmark 0 无害)
     iptables -t mangle -A WANAGG -m conntrack --ctstate ESTABLISHED,RELATED \
         -j CONNMARK --restore-mark --mask $W_MASK
+    # v2.16: v4 MAC 钉死(parity with v6) — vendor 引擎缺席时 v4 钉死原本失效;
+    # 钉死表 /data/gw/agg_pins.conf (op 1=5G 2=家宽), 主备模式下跳过(语义不适用)
+    if [ "$PMODE" = 0 ]; then
+        while read -r PIN_MAC PIN_OP; do
+            case "$PIN_MAC" in "#"*|"") continue ;; esac
+            if [ "$PIN_OP" = 1 ]; then PIN_MK=$W1_MARK; elif [ "$PIN_OP" = 2 ]; then PIN_MK=$W2_MARK; else continue; fi
+            iptables -t mangle -A WANAGG -m mac --mac-source "$PIN_MAC" \
+                -j MARK --set-xmark $PIN_MK $W_MASK
+        done < /data/gw/agg_pins.conf
+    fi
     # 新流: 按概率分流 (statistic --probability 只接受小数字符串, 0.60 形态)
     iptables -t mangle -A WANAGG -m conntrack --ctstate NEW -m statistic \
         --mode random --probability $1 -j MARK --set-xmark $W2_MARK $W_MASK
@@ -276,6 +286,12 @@ done < /data/gw/agg_pins.conf
 # 引擎探测: vendor ioctl (multiwan_ctl+fhstub; proc 写已证伪为只读) 失败则 iptables
 kernel_apply 1 1 && ENGINE=vendor || ENGINE=iptables
 echo "$ENGINE" > /tmp/wan_engine
+# v2.16: 自补 iptables 引擎依赖的 xtables 模块(精简启动下 ko_install 未载全;
+#        实证: statistic 规则静默安装失败 -> 新流全落 main 表)
+KDIR=/lib/modules/$(uname -r)
+for km in xt_statistic xt_mac; do
+    [ -d /sys/module/$km ] || insmod $KDIR/$km.ko 2>/dev/null
+done
 # v2.15: 聚合总开关 (agg.conf ENABLE=0|1, GUI agg_mode 端点热切)
 AGG_ON=1
 grep -q '^ENABLE=0' /data/gw/agg.conf 2>/dev/null && AGG_ON=0

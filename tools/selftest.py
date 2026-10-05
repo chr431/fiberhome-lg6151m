@@ -691,7 +691,7 @@ def t_sec_wanguard():
     out = dev("iptables -S V3WANGUARD 2>/dev/null | grep -c '\\-j DROP'")
     hook = dev("iptables -S INPUT 2>/dev/null | grep -c 'V3WANGUARD'")
     n, h = int(out.strip() or 0), int(hook.strip() or 0)
-    ok = n >= 16 and h >= 2   # v1.3+: 8口x2协议(含22)
+    ok = n >= 14 and h >= 2   # 7口(22/23/5683/30005/1899x3)x2协议
     record(t_sec_wanguard._test_name, "security", ok,
            f"drop_rules={n} wan_hooks={h}")
 

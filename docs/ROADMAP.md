@@ -56,6 +56,10 @@ EasyMesh/VPN 三族/UPnP/DDNS/VoIP/fhdrv_net_forward 端口隔离（FEATURE_MATR
 ## 3. 阶段计划
 
 ### P0 纵深与卫生（半天）
+
+> 2026-10-06 补录：P0 期间发现并修复首刷锁死 bug（payload 不带 gui_auth.conf，纯原厂
+> 直刷后任何口令都无法登录 GUI —— 回归未覆盖"无 /data 残留"场景）。login 现自举文档化
+> 默认口令并标记 default，GUI 强制改密；SSH(22) 亦入 WAN 封禁链。 <!--CLM:CLM-FIRSTBOOT-AUTH-->
 - WAN 面显式封禁：1899x/30005/5683/23 进 fw_apply 常备规则（守护虽不跑，纵深不靠假设）。
 - 凭据卫生：`_local/secrets` 的 GW_PASS 与设备同步（当前 stale，3 个 GUI 测试走 skip）。
 - lppe_service（低功耗定位，无 GNSS 消费者）纳入下次裁剪批次评估。

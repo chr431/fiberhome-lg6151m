@@ -120,6 +120,8 @@ pgrep -x dropbear >/dev/null || {
 #        需要烽火终端App时手动: sh /data/gw/webs_revive.sh
 pgrep -f fan_mgr.sh >/dev/null || nohup sh /data/gw/fan_mgr.sh >/dev/null 2>&1 &
 pgrep -f ntp_keeper >/dev/null || nohup sh /data/gw/ntp_keeper.sh >/dev/null 2>&1 &
+# v2.19: 持续不变量看门狗 (L13: 部署后静默失效问题制度化对策)
+pgrep -f watchdog.sh >/dev/null || nohup sh /data/gw/watchdog.sh >/dev/null 2>&1 &
 
 # --- dual-uplink aggregation last (v2.8: wan_agg supersedes wan_policy2;
 #     vendor quecadp kernel split via /proc/multi_wan + fwmark policy routing;

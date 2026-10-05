@@ -84,6 +84,7 @@ MANIFEST = [
     ("gw/bin/v3_steth.ko", "/data/gw/v3_steth.ko"),
     ("gw/udhcpc_eth1.script", "/data/gw/udhcpc_eth1.script"),
     ("gw/defaults.conf", "/data/gw/defaults.conf"),
+    ("gw/watchdog.sh", "/data/gw/watchdog.sh"),  # L13: continuous invariant monitor
     ("gw/wedge_watch.sh", "/data/gw/wedge_watch.sh"),
     ("gw/zz_data_hook", "/data/build/rootfs/etc/init.d/zz_data_hook"),     # hook-slot watchdog (stethoscope)
 ]
@@ -430,5 +431,15 @@ if __name__ == "__main__":
           "attic": attic, "snapshot": snapshot}[cmd]
     if cmd == "push":
         names = [a for a in sys.argv[2:] if not a.startswith("-")]
-        sys.exit(fn(names or None))
+        rc = fn(names or None)
+        # post-deploy selftest (L13: 部署后自动验证, 非 push 之外的操作)
+        if rc in (0, None) and "--no-test" not in sys.argv:
+            print("\n--- post-deploy selftest ---")
+            st = subprocess.run(
+                [sys.executable, os.path.join(REPO, "tools", "selftest.py")],
+                cwd=REPO, timeout=120)
+            if st.returncode != 0:
+                print("!! selftest FAILURES after deploy -- check above")
+                return 1
+        sys.exit(rc)
     sys.exit(fn())

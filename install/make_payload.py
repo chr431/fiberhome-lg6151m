@@ -52,7 +52,9 @@ def main():
                 data = data.replace(CRLF, LF)
             ti = tarfile.TarInfo(remote.lstrip("/"))
             ti.size = len(data)
-            ti.mode = 0o755 if local.endswith((".sh", ".script")) or os.path.basename(local) == "zz_data_hook" else 0o644
+            exe = (local.endswith((".sh", ".script")) or local.startswith("gw/bin/")
+                   or os.path.basename(local) == "zz_data_hook")
+            ti.mode = 0o755 if exe else 0o644
             ti.mtime = int(os.path.getmtime(lp))
             import io
             tf.addfile(ti, io.BytesIO(data))

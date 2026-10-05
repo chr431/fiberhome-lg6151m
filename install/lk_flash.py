@@ -127,7 +127,8 @@ def main():
     def ping(ip):
         try:
             r = subprocess.run(["ping", "-n", "1", "-w", "1000", ip],
-                               capture_output=True, text=True, timeout=5)
+                               capture_output=True, encoding="gbk",
+                               errors="replace", timeout=5)
             return "TTL=" in r.stdout
         except Exception:
             return False

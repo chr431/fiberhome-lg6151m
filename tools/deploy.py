@@ -440,6 +440,6 @@ if __name__ == "__main__":
                 cwd=REPO, timeout=120)
             if st.returncode != 0:
                 print("!! selftest FAILURES after deploy -- check above")
-                return 1
+                rc = 1
         sys.exit(rc)
     sys.exit(fn())

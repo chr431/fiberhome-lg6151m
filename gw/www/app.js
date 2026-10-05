@@ -120,8 +120,8 @@ PAGES.status = {
             T("cel-sig", `RSRP ${cel.serving.rsrp} dBm · SINR ${cel.serving.sinr} dB`);
             T("cel-n", `${cel.cells.n} 个小区`);
         } else { setTag("tg-cel", false); T("cel-op", "--"); T("cel-cell", "--"); T("cel-sig", "--"); T("cel-n", "--"); }
-        setTag("tg-agg", j.agg.mode === "1");
-        T("agg-eng", j.agg.mode === "1" ? "quecadp (原厂)" : "关闭");
+        setTag("tg-agg", j.agg.on === "1");
+        T("agg-eng", j.agg.on === "1" ? (j.agg.engine === "vendor" ? "quecadp (原厂)" : "iptables") : "已旁路");
         const wp = /^\d+$/.test(j.agg.w1pct) ? `${j.agg.w1pct}% / ${100 - j.agg.w1pct}%` : "—";
         T("agg-w", wp);
         T("agg-st", j.agg.state);
@@ -545,11 +545,16 @@ window.fwdDel = async (i, p, e) => {
 /* ================ 聚合 ================ */
 PAGES.agg = {
     html: `<div>
+      ${card("聚合模式 " + tag("ag-on", "已启用", "已旁路"), `
+        <div class="frm"><label>总开关</label><select id="ag-en"><option value="1">启用（按权重分流 / 主备）</option><option value="0">旁路（全走当前主路，拆除分流）</option></select></div>
+        <button class="pri" onclick="agEn()">应用开关</button>
+        ${kv("引擎", "ag-eng") + kv("当前形态", "ag-wm")}
+        <span class="hint">旁路 = 纯路由器单路上网（双活时走 5G，家宽主备时走家宽）；断线看门狗与 NAT 不受影响；重新启用即恢复分流</span>`)}
       ${card("聚合权重 (5G / 家宽)", `
         <div class="slider-row"><input type="range" id="ag-w" min="0" max="100" step="5" oninput="T('ag-wv', this.value+'% / '+(100-this.value)+'%')"><b id="ag-wv">--</b></div>
         <button class="pri" onclick="agW()">应用权重</button>
         <span class="hint">新连接按此比例分流; 已有连接保持粘性; 极端值(95~100/0~5)引擎按 95/5 实际执行</span>`)}
-      ${card("引擎状态", kv("模式", "ag-mode") + kv("状态机", "ag-sm") + kv("最近", "ag-log", 1))}
+      ${card("引擎状态", kv("状态机", "ag-sm") + kv("最近", "ag-log", 1))}
       ${card("MAC 钉死表", `<table><thead><tr><th>MAC</th><th>钉到</th><th></th></tr></thead><tbody id="pin-tb"></tbody></table>
          <div class="row3" style="margin-top:8px">
            <div class="frm"><label>MAC</label><input id="ap-mac" class="mono" placeholder="aa:bb:cc:dd:ee:ff"></div>
@@ -558,16 +563,25 @@ PAGES.agg = {
          <span class="hint">会话绑定源 IP 的应用建议钉单侧</span>`, 1)}
     </div>`,
     async tick() {
-        const s = await api("status");
-        const w1 = +s.agg.w1pct || 40;
-        F("ag-w", w1); T("ag-wv", `${w1}% / ${100 - w1}%`);
-        T("ag-mode", s.agg.mode === "1" ? "quecadp 内核聚合" : "关闭");
-        T("ag-sm", s.agg.wanmode);
         const a = await api("agg");
+        F("ag-en", a.enable); setTag("ag-on", a.enable === "1");
+        T("ag-eng", a.engine === "vendor" ? "quecadp 内核" : (a.engine ? "iptables 用户态" : "--"));
+        T("ag-wm", a.wanmode || "--");
+        const s = await api("status");
+        if (/^\d+$/.test(s.agg.w1pct)) {
+            const w1 = +s.agg.w1pct;
+            F("ag-w", w1); T("ag-wv", `${w1}% / ${100 - w1}%`);
+        }
+        T("ag-sm", s.agg.wanmode);
         T("ag-log", a.log);
         const pins = (a.pins_conf || "").split(";").filter(Boolean);
         H("pin-tb", pins.map(p => { const [m, op] = p.trim().split(/\s+/); return `<tr><td class="mono">${m}</td><td>${op === "2" ? "家宽 WAN2" : "5G WAN1"}</td><td><button class="mini ghost" onclick="agPin('${m}',0)">删除</button></td></tr>`; }).join(""));
     }
+};
+window.agEn = async () => {
+    const j = await api("agg_mode", `enable=${$("ag-en").value}`).catch(e => ({ error: e.message }));
+    j.ok ? toast($("ag-en").value === "1" ? "聚合已启用（约 5s 内恢复分流）" : "聚合已旁路（约 5s 内单路化）") : toast("失败: " + j.error, 1);
+    setTimeout(() => PAGES.agg.tick(), 6500);
 };
 window.agW = async () => {
     const j = await api("agg_weights", `w1=${$("ag-w").value}`).catch(e => ({ error: e.message }));

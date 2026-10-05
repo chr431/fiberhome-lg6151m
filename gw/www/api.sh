@@ -182,9 +182,21 @@ apply_agg_weights() {
     echo "$W1" | grep -qE '^[0-9]{1,3}$' || jerr bad_pct   # v2.10: {1,2}曾拒绝'100'(100:0引擎实测支持)
     [ "$W1" -ge 0 ] && [ "$W1" -le 100 ] || jerr bad_pct
     W2=$((100 - W1))
-    printf 'W1_PCT=%s\nW2_PCT=%s\n' "$W1" "$W2" > $GWDATA/agg.conf
-    LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib LD_PRELOAD=/data/gw/fhstub.so \
-        $GWDATA/multiwan_ctl 1 $W1 $W2 1 1 >/dev/null 2>&1 || jerr ioctl_fail
+    EN=$(grep -m1 '^ENABLE=' $GWDATA/agg.conf 2>/dev/null | cut -d= -f2)
+    case "$EN" in 0|1) ;; *) EN=1 ;; esac
+    printf 'W1_PCT=%s\nW2_PCT=%s\nENABLE=%s\n' "$W1" "$W2" "$EN" > $GWDATA/agg.conf
+    # v2.20: vendor ioctl 只是引擎可用时的即时加速, 守护热载为准 — 不再因 ioctl 失败误报
+    LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib LD_PRELOAD=$GWDATA/fhstub.so \
+        $GWDATA/multiwan_ctl 1 $W1 $W2 1 1 >/dev/null 2>&1
+    ok_json
+}
+apply_agg_mode() {   # v2.20: 聚合总开关 0=旁路(单路) 1=参战(分流/主备), wan_agg 热载生效
+    E=$(form_kv enable)
+    [ "$E" = 0 ] || [ "$E" = 1 ] || jerr bad_mode
+    W=$(grep -m1 '^W1_PCT=' $GWDATA/agg.conf 2>/dev/null | cut -d= -f2)
+    echo "$W" | grep -qE '^[0-9]{1,3}$' || W=40
+    [ "$W" -ge 0 ] && [ "$W" -le 100 ] || W=40
+    printf 'W1_PCT=%s\nW2_PCT=%s\nENABLE=%s\n' "$W" "$((100-W))" "$E" > $GWDATA/agg.conf
     ok_json
 }
 apply_agg_pin() {
@@ -648,7 +660,7 @@ get_status() {
 {"uptime":"${UP_D}天${UP_H}时${UP_M}分","load":"$LOAD","mem":{"total":${MEM%% *},"avail":${MEM##* }},
 "wan5g":{"if":"$W5G_IF","ip":"${W5G_IP:-无}","v6":"${W5G_V6:-无}"},
 "home":{"ip":"${ETH_IP:-无}","v6":"${ETH_V6:-无}","carrier":"$ETH_C"},
-"agg":{"mode":"${AGG_M:-0}","w1pct":"${AGG_W:-?}","state":"$(tail -1 /tmp/wan_agg.log 2>/dev/null | sed 's/"/\\"/g')","wanmode":"$WAN_MODE"},
+"agg":{"mode":"${AGG_M:-0}","engine":"$(cat /tmp/wan_engine 2>/dev/null)","on":"$(grep -q '^off' /tmp/wan_mode 2>/dev/null && echo 0 || echo 1)","w1pct":"${AGG_W:-?}","state":"$(tail -1 /tmp/wan_agg.log 2>/dev/null | sed 's/"/\\"/g')","wanmode":"$WAN_MODE"},
 "wifi":{$(wifi_state)},
 "temps":{$TEMPS},
 "counters":{"tx5g":"$TX5","rx5g":"$RX5","txeth":"$TXE","rxeth":"$RXE"},
@@ -667,8 +679,12 @@ get_clients() {
 get_agg() {
     PINS=$(grep -v '^#' $GWDATA/agg_pins.conf 2>/dev/null | tr '\n' ';' | sed 's/;$/\n/')
     MACS=$(grep -A9 'Current configuration:' /proc/multi_wan/mac_config 2>/dev/null | grep -E '^[0-9a-f]{2}:' | tr '\n' ';' | sed 's/;$//')
+    AGG_EN=$(grep -m1 '^ENABLE=' $GWDATA/agg.conf 2>/dev/null | cut -d= -f2)
+    case "$AGG_EN" in 0|1) ;; *) AGG_EN=1 ;; esac
     cat <<EOF3
-{"weights":{"w1":"$(grep "WAN1 weight" /proc/multi_wan/weight 2>/dev/null | grep -oE "[0-9]+" | tail -1)"},
+{"enable":"$AGG_EN",
+"engine":"$(cat /tmp/wan_engine 2>/dev/null)",
+"weights":{"w1":"$(grep "WAN1 weight" /proc/multi_wan/weight 2>/dev/null | grep -oE "[0-9]+" | tail -1)"},
 "wanmode":"$(cat /tmp/wan_mode 2>/dev/null)",
 "pins_conf":"${PINS}",
 "pins_live":"${MACS}",
@@ -833,6 +849,7 @@ case "$EP" in
     dmz_set)      need_tok; apply_dmz ;;
     block_set)    need_tok; apply_block ;;
     agg_weights)  need_tok; apply_agg_weights ;;
+    agg_mode)     need_tok; apply_agg_mode ;;
     uplink_set)   need_tok; apply_uplink ;;
     uplink_form)  need_tok; apply_uplink_form ;;
     agg_pin)      need_tok; apply_agg_pin ;;

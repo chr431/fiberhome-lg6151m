@@ -251,6 +251,20 @@ w2_alive() {
     probe $W2_IF "$BB_GW" || probe $W2_IF 223.5.5.5
 }
 
+# v2.15: 旁路模式 — 拆全部分流装置(mangle 链 + fwmark 策略规则 v4/v6 高/低
+# 位), 流量回落 main 表 = 走状态机当前主路; NAT/租约/路由看门狗不受影响
+agg_bypass() {
+    iptables  -t mangle -D PREROUTING -i br-lan -j WANAGG 2>/dev/null
+    iptables  -t mangle -F WANAGG 2>/dev/null;  iptables  -t mangle -X WANAGG 2>/dev/null
+    ip6tables -t mangle -D PREROUTING -i br-lan -j WANAGG6 2>/dev/null
+    ip6tables -t mangle -F WANAGG6 2>/dev/null; ip6tables -t mangle -X WANAGG6 2>/dev/null
+    for R in "fwmark $W1_MARK/$W_MASK table $T1" "fwmark $W2_MARK/$W_MASK table $T2" \
+             "fwmark $M6_LOW1/0xff table $T1" "fwmark $M6_LOW2/0xff table $T2"; do
+        while ip rule del $R 2>/dev/null; do :; done
+        while ip -6 rule del $R 2>/dev/null; do :; done
+    done
+}
+
 # ---------- 主循环 ----------
 log "===== wan_agg v2.12 start ====="
 # v1.8: MAC 钉死表重放(内核模块状态不跨重启, 游戏PC等需开机重新钉)
@@ -261,11 +275,20 @@ while read -r MAC OP; do
 done < /data/gw/agg_pins.conf
 # 引擎探测: vendor ioctl (multiwan_ctl+fhstub; proc 写已证伪为只读) 失败则 iptables
 kernel_apply 1 1 && ENGINE=vendor || ENGINE=iptables
+echo "$ENGINE" > /tmp/wan_engine
+# v2.15: 聚合总开关 (agg.conf ENABLE=0|1, GUI agg_mode 端点热切)
+AGG_ON=1
+grep -q '^ENABLE=0' /data/gw/agg.conf 2>/dev/null && AGG_ON=0
 dp_setup
 S1=1; S2=1; D1=0; D2=0; U1=0; U2=0
-[ "$ENGINE" = iptables ] && fw_setup 0.60
-fw6_rules; fw6_setup 1   # v2.4: v6 低8位自建分流(模块v6哈希常数缺陷的对策)
-log "init: engine=$ENGINE weights=$W1_PCT/$W2_PCT s1=$S1 s2=$S2"
+if [ "$AGG_ON" = 1 ]; then
+    [ "$ENGINE" = iptables ] && fw_setup 0.60
+    fw6_rules; fw6_setup 1   # v2.4: v6 低8位自建分流(模块v6哈希常数缺陷的对策)
+else
+    agg_bypass
+    echo "off" > $MODE_FILE
+fi
+log "init: engine=$ENGINE agg_on=$AGG_ON weights=$W1_PCT/$W2_PCT s1=$S1 s2=$S2"
 
 while :; do
     # 5G 承载漂移检测: 活跃 ccmni 变了就刷新 表100/main/NAT/FORWARD (幂等)
@@ -286,9 +309,24 @@ while :; do
         D1=99; U1=0   # 迫使下一轮重新评估 5G 探活
         ip -6 route replace default dev $W1_IF table $T1 2>/dev/null
     fi
+    # v2.15: 总开关热切 (agg.conf ENABLE) — 0=旁路 1=参战
+    NEW_EN=$(grep -m1 '^ENABLE=' /data/gw/agg.conf 2>/dev/null | cut -d= -f2)
+    case "$NEW_EN" in 0|1) ;; *) NEW_EN=1 ;; esac
+    if [ "$NEW_EN" != "$AGG_ON" ]; then
+        AGG_ON=$NEW_EN
+        if [ "$AGG_ON" = 0 ]; then
+            agg_bypass
+            echo "off" > $MODE_FILE
+            log "agg: OFF -> bypass (单路 main 表; NAT/看门狗保留)"
+        else
+            dp_setup; fw6_rules
+            FORCE=1   # 状态机按当前有效态整体重装分流
+            log "agg: ON -> re-engage"
+        fi
+    fi
     # v2.9: 权重在线热更 — GUI(api.sh agg_weights)写 /data/gw/agg.conf,
     # 本守护每周期重读, 值变即下发 ioctl + 记日志(状态迁移不再用旧权重打回)
-    if [ -r /data/gw/agg.conf ]; then
+    if [ -r /data/gw/agg.conf ] && [ "$AGG_ON" = 1 ]; then
         OW1=$W1_PCT
         . /data/gw/agg.conf
         case "$W1_PCT" in
@@ -309,7 +347,7 @@ while :; do
         fi
     fi
     ensure_lease
-    ensure_rules
+    [ "$AGG_ON" = 1 ] && ensure_rules
     if w1_alive; then U1=$((U1+1)); D1=0; else D1=$((D1+1)); U1=0; fi
     if w2_alive; then U2=$((U2+1)); D2=0; else D2=$((D2+1)); U2=0; fi
     NS1=$S1; NS2=$S2
@@ -330,7 +368,7 @@ while :; do
     if [ "$PMODE" = 1 ] && [ $NS1 -eq 1 ]; then E2=0
     elif [ "$PMODE" = 2 ] && [ $NS2 -eq 1 ]; then E1=0
     fi
-    if [ "$E1$E2" != "$S1$S2" ] || [ "${FORCE:-0}" = 1 ]; then
+    if [ "$AGG_ON" = 1 ] && { [ "$E1$E2" != "$S1$S2" ] || [ "${FORCE:-0}" = 1 ]; }; then
         FORCE=0
         log "state: 5g $S1->$E1 (d1=$D1) home $S2->$E2 (d2=$D2) pmode=$PMODE"
         kernel_apply $E1 $E2 2>>$LOG   # vendor 引擎下即生效; iptables 引擎下无害空写

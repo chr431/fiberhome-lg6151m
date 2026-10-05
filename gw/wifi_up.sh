@@ -18,6 +18,15 @@ echo -n /etc/wireless > /sys/module/firmware_class/parameters/path 2>/dev/null
 
 # ---- MAC plan (factory algorithm from brmac) ----
 brmac=$(uci get /fhdata/factory_conf.brmac.value 2>/dev/null)
+# 兜底1: 出厂档案不可读时由 eth0 原生MAC反推基址(第二字节-1, 与出厂算法互逆)
+if [ -z "$brmac" ]; then
+    E0=$(cat /sys/class/net/eth0/address 2>/dev/null)
+    if [ -n "$E0" ]; then
+        b0=$(printf %d 0x$(echo $E0 | cut -d: -f2)); b0=$(( (b0 + 255) % 256 ))
+        brmac="$(echo $E0 | cut -d: -f1):$(printf %02X $b0):$(echo $E0 | cut -d: -f3-)"
+    fi
+fi
+# 兜底2: 合成本地管理地址(不可路由, 非任何真实设备)
 [ -z "$brmac" ] && brmac=02:03:7F:00:00:00
 mac1=${brmac:0:2}; mac2=${brmac:3:2}; mac3=${brmac:6:2}
 mac4=${brmac:9:2};  mac5=${brmac:12:2}; mac6=${brmac:15:2}

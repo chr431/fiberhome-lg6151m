@@ -744,11 +744,14 @@ apply_uplink_form() {  # 档案切换: home(DHCP) <-> static(静态IP; 认证由
         # 原生值 = 出厂brmac计算(wifi_up同款算法, 排除伪装态误存)
         NATIVE=$(cat /sys/class/net/eth0/address 2>/dev/null)
         if [ "${MAC_SPOOF:-0}" = 1 ] && [ -n "$SPOOF_MAC" ] && [ "$NATIVE" = "$SPOOF_MAC" ]; then
-            BM=$(uci get /fhdata/factory_conf.brmac.value 2>/dev/null || echo 02:03:7F:00:00:00)
-            b2=$(printf %d 0x$(echo $BM | cut -d: -f2)); b2=$(( (b2+1) % 256 )); b2=$(printf %02X $b2)
-            ORIG="$(echo $BM | cut -d: -f1):$b2:$(echo $BM | cut -d: -f3-)"
-            ip link set eth0 down 2>/dev/null
-            ip link set eth0 address "$(echo $ORIG | tr 'A-F' 'a-f')" 2>/dev/null
+            # 出厂档案可读才还原(此刻 eth0 处于伪装态, 无法反推原生值; 读不到则跳过)
+            BM=$(uci get /fhdata/factory_conf.brmac.value 2>/dev/null)
+            if [ -n "$BM" ]; then
+                b2=$(printf %d 0x$(echo $BM | cut -d: -f2)); b2=$(( (b2+1) % 256 )); b2=$(printf %02X $b2)
+                ORIG="$(echo $BM | cut -d: -f1):$b2:$(echo $BM | cut -d: -f3-)"
+                ip link set eth0 down 2>/dev/null
+                ip link set eth0 address "$(echo $ORIG | tr 'A-F' 'a-f')" 2>/dev/null
+            fi
         fi
         ip link set eth0 up
         pkill -f "[a]uthd" 2>/dev/null

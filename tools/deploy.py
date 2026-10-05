@@ -31,9 +31,13 @@ import sys, os, re, hashlib, subprocess
 import datetime
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# 凭证外置: _local/secrets/device_local.py (LG_SECRETS_DIR 可覆盖)
+SECRETS = os.path.abspath(os.environ.get("LG_SECRETS_DIR")
+                          or os.path.join(REPO, "..", "_local", "secrets"))
+sys.path.insert(0, SECRETS)
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import device_local as D  # noqa: E402
+import device_local as D  # noqa: E402  (from _local/secrets/)
 import paramiko           # noqa: E402
 import vercheck           # noqa: E402  (pure-stdlib; registry single source)
 
@@ -42,42 +46,46 @@ MGMT_CANDIDATES = ["192.168.9.1", "192.168.1.1", "192.168.8.1", "192.168.3.75"]
 
 # local (relative to repo) -> device path. Order = boot-time order.
 MANIFEST = [
-    ("rc.extend.sh",          "/data/rc.extend.sh"),         # slot dispatcher (boot entry)
-    ("v3_rc10.extend.sh",     "/data/gw/rc19.sh"),         # rc19v2: br-lan+wifi+wan stack
-    ("wifi_up.sh",            "/data/gw/wifi_up.sh"),      # AP bring-up (factory recipe)
-    ("wan_agg.sh",           "/data/gw/wan_agg.sh"),       # dual-uplink aggregation supervisor (v2.8+, supersedes wan_policy2)
-    ("multiwan_ctl",         "/data/gw/multiwan_ctl"),     # vendor multiwan ioctl control (zig, links libfhdrv_net_api)
-    (".lib_build/fhstub.so", "/data/gw/fhstub.so"),        # FH symbol stubs: load libfhdrv_net_api standalone
-    ("udhcpc_wan.script",     "/data/gw/udhcpc_wan.script"), # WAN udhcpc event hook (iface-agnostic)
-    ("healthdog.sh",          "/data/gw/healthdog.sh"),    # userspace heartbeat
-    ("v3_babysit_v2.sh",      "/data/gw/babysit_v2.sh"),   # boot babysitter
-    ("night_report.sh",       "/data/gw/night_report.sh"),
-    ("wifi_guard.sh",         "/data/gw/wifi_guard.sh"),   # BA-stall auto-recovery
-    ("wpapmk",                "/data/gw/wpapmk"),          # WPA passphrase->PMK (fh hostapd only eats wpa_psk)
-    ("mipc_dial_trace.sh",    "/data/gw/mipc_dial_trace.sh"),  # 5G dial forensics
-    ("dial_5g.sh",            "/data/gw/dial_5g.sh"),      # production 5G dialer
-    ("v2_access.sh",          "/data/gw/v2_access.sh"),    # slot-B serial/SSH hardening
-    ("consfeed.sh",           "/data/gw/consfeed.sh"),      # v2 console feeder (spawned by v2_access)
-    ("dial_variant.sh",        "/data/gw/dial_variant.sh"),   # 5G dial param experiments (iptype/apn/plmn)
-    ("capture_ubus.sh",        "/data/gw/capture_ubus.sh"),   # one-shot stock-dial ubus monitor capture
-    ("rc_netfh.sh",            "/data/gw/rc_netfh.sh"),       # route A: FH modem-stack env (minimal army)
-    ("radvd.conf",             "/data/gw/radvd.conf"),        # IPv6 SLAAC+RDNSS advert (FH radvd 1.6)
-    ("led_mgr.sh",            "/data/gw/led_mgr.sh"),        # stock-style LED state supervisor (visual-mapped GPIOs)
-    ("v3httpd",               "/data/gw/v3httpd"),           # gateway GUI http server (:80)
-    ("www/api.sh",            "/data/gw/www/api.sh"),        # JSON endpoints
-    ("www/index.html",        "/data/gw/www/index.html"),    # console page
-    ("www/style.css",         "/data/gw/www/style.css"),     # theme
-    ("www/app.js",            "/data/gw/www/app.js"),        # SPA router+pages (v2.0)
-    ("fw_apply.sh",           "/data/gw/fw_apply.sh"),       # port-fwd/DMZ/block installer (boot+api)
-    ("cellular_replay.sh",    "/data/gw/cellular_replay.sh"),# cellular band/cell-lock boot replay
-    ("shmsnap",               "/data/gw/shmsnap"),          # cfgmgr tree shm snapshot tool
-    ("ntp_keeper.sh",         "/data/gw/ntp_keeper.sh"),    # hourly NTP keeper (no RTC battery)
-    ("tools/webs_revive.sh",  "/data/gw/webs_revive.sh"),   # stock GUI revival (manual, self-contained)
-    ("fan_mgr.sh",            "/data/gw/fan_mgr.sh"),        # stock-ladder thermal fan supervisor
-    ("fan_mode.conf",         "/data/gw/fan_mode.conf"),     # performance | silent
-    ("healthdog.ko",          "/data/gw/healthdog.ko"),
-    ("v3_fix.ko",             "/data/gw/v3_fix.ko"),
-    ("v3_steth.ko",           "/data/gw/v3_steth.ko"),     # hook-slot watchdog (stethoscope)
+    ("gw/rc.extend.sh", "/data/rc.extend.sh"),         # slot dispatcher (boot entry)
+    ("gw/v3_rc10.extend.sh", "/data/gw/rc19.sh"),         # rc19v2: br-lan+wifi+wan stack
+    ("gw/wifi_up.sh", "/data/gw/wifi_up.sh"),      # AP bring-up (factory recipe)
+    ("gw/wan_agg.sh", "/data/gw/wan_agg.sh"),       # dual-uplink aggregation supervisor (v2.8+, supersedes wan_policy2)
+    ("gw/bin/multiwan_ctl", "/data/gw/multiwan_ctl"),     # vendor multiwan ioctl control (zig, links libfhdrv_net_api)
+    ("gw/bin/fhstub.so", "/data/gw/fhstub.so"),        # FH symbol stubs: load libfhdrv_net_api standalone
+    ("gw/udhcpc_wan.script", "/data/gw/udhcpc_wan.script"), # WAN udhcpc event hook (iface-agnostic)
+    ("gw/healthdog.sh", "/data/gw/healthdog.sh"),    # userspace heartbeat
+    ("gw/v3_babysit_v2.sh", "/data/gw/babysit_v2.sh"),   # boot babysitter
+    ("gw/night_report.sh", "/data/gw/night_report.sh"),
+    ("gw/wifi_guard.sh", "/data/gw/wifi_guard.sh"),   # BA-stall auto-recovery
+    ("gw/bin/wpapmk", "/data/gw/wpapmk"),          # WPA passphrase->PMK (fh hostapd only eats wpa_psk)
+    ("gw/mipc_dial_trace.sh", "/data/gw/mipc_dial_trace.sh"),  # 5G dial forensics
+    ("gw/dial_5g.sh", "/data/gw/dial_5g.sh"),      # production 5G dialer
+    ("gw/v2_access.sh", "/data/gw/v2_access.sh"),    # slot-B serial/SSH hardening
+    ("gw/consfeed.sh", "/data/gw/consfeed.sh"),      # v2 console feeder (spawned by v2_access)
+    ("gw/dial_variant.sh", "/data/gw/dial_variant.sh"),   # 5G dial param experiments (iptype/apn/plmn)
+    ("gw/capture_ubus.sh", "/data/gw/capture_ubus.sh"),   # one-shot stock-dial ubus monitor capture
+    ("gw/rc_netfh.sh", "/data/gw/rc_netfh.sh"),       # route A: FH modem-stack env (minimal army)
+    ("gw/radvd.conf", "/data/gw/radvd.conf"),        # IPv6 SLAAC+RDNSS advert (FH radvd 1.6)
+    ("gw/led_mgr.sh", "/data/gw/led_mgr.sh"),        # stock-style LED state supervisor (visual-mapped GPIOs)
+    ("gw/bin/v3httpd", "/data/gw/v3httpd"),           # gateway GUI http server (:80)
+    ("gw/www/api.sh", "/data/gw/www/api.sh"),        # JSON endpoints
+    ("gw/www/index.html", "/data/gw/www/index.html"),    # console page
+    ("gw/www/style.css", "/data/gw/www/style.css"),     # theme
+    ("gw/www/app.js", "/data/gw/www/app.js"),        # SPA router+pages (v2.0)
+    ("gw/fw_apply.sh", "/data/gw/fw_apply.sh"),       # port-fwd/DMZ/block installer (boot+api)
+    ("gw/cellular_replay.sh", "/data/gw/cellular_replay.sh"),# cellular band/cell-lock boot replay
+    ("gw/bin/shmsnap", "/data/gw/shmsnap"),          # cfgmgr tree shm snapshot tool
+    ("gw/ntp_keeper.sh", "/data/gw/ntp_keeper.sh"),    # hourly NTP keeper (no RTC battery)
+    ("gw/webs_revive.sh", "/data/gw/webs_revive.sh"),   # stock GUI revival (manual, self-contained)
+    ("gw/fan_mgr.sh", "/data/gw/fan_mgr.sh"),        # stock-ladder thermal fan supervisor
+    ("gw/fan_mode.conf", "/data/gw/fan_mode.conf"),     # performance | silent
+    ("gw/bin/healthdog.ko", "/data/gw/healthdog.ko"),
+    ("gw/bin/v3_fix.ko", "/data/gw/v3_fix.ko"),
+    ("gw/bin/v3_steth.ko", "/data/gw/v3_steth.ko"),
+    ("gw/udhcpc_eth1.script", "/data/gw/udhcpc_eth1.script"),
+    ("gw/defaults.conf", "/data/gw/defaults.conf"),
+    ("gw/wedge_watch.sh", "/data/gw/wedge_watch.sh"),
+    ("gw/zz_data_hook", "/data/build/rootfs/etc/init.d/zz_data_hook"),     # hook-slot watchdog (stethoscope)
 ]
 
 DEVICE_SET = {remote for _, remote in MANIFEST}
@@ -85,6 +93,7 @@ DEVICE_SET = {remote for _, remote in MANIFEST}
 EXTRA_KEEP = ["DEPLOY_MANIFEST", "ppe_reg",
               "udhcpc_eth1.script", "portal_auth", "restore_wan.sh",
               "agg_pins.conf",   # 含用户MAC的钉死表: 设备侧自管(模板见 agg_pins.conf.example)
+              "dropbear_keys",   # rc.extend v1.8 唯一属主启动的宿主密钥目录(设备侧生成)
               "DO_UBUS_CAP", "MODE.fh"]  # rc.extend.sh 运行时模式标记(dispatcher引用, 非脚本)
 MD5_LINE = re.compile(r"^([0-9a-f]{32})  (.*)$", re.M)
 
@@ -253,8 +262,10 @@ def push(names=None):
             print("%-22s -> %-26s SKIP (identical)" % (local, remote))
             continue
         data = stamp(local, data)
+        ssh_cmd(c, "mkdir -p %s" % os.path.dirname(remote))
         ssh_cmd(c, "cat > %s && chmod +x %s" % (remote, remote), stdin_data=data)
-        got = ssh_cmd(c, "md5sum %s" % remote).split()[0]
+        got_out = ssh_cmd(c, "md5sum %s 2>/dev/null" % remote).split()
+        got = got_out[0] if got_out else "ABSENT"
         want = hashlib.md5(data).hexdigest()
         print("%-22s -> %-26s %s" % (local, remote, "OK" if got == want else "MD5-MISMATCH"))
     c.close()
@@ -341,6 +352,70 @@ def snapshot():
     c.close()
 
 
+def put():
+    """标准文件推送接口: put <local> <remote> [--mode 755]
+    二进制安全(ssh stdin 管道) + 原子替换(临时文件 + mv) + md5 强校验
+    (写后即校验, mv 后复核, 3 次重试; 任何失败保持设备原文件不动).
+    字节精确: 不注入 #DEPLOY 戳 -- 需要溯源戳的 manifest 文件走 push."""
+    import time as _t
+    argv = sys.argv[2:]
+    mode = None
+    if "--mode" in argv:
+        i = argv.index("--mode")
+        mode = argv[i + 1]
+        del argv[i:i + 2]
+    if len(argv) != 2:
+        sys.exit("usage: deploy.py put <local> <remote> [--mode 755]")
+    local, remote = argv
+    if not os.path.isfile(local):
+        sys.exit("!! 本地文件不存在: %s" % local)
+    if not remote.startswith("/"):
+        sys.exit("!! remote 必须是以 / 开头的绝对路径(得到 %r)。"
+                 "Git-Bash/MSYS 会把 /xx 转成 Windows 路径——调用时加 MSYS_NO_PATHCONV=1" % remote)
+    data = open(local, "rb").read()
+    want = hashlib.md5(data).hexdigest()
+    c, ip = connect()
+    print("put %s -> %s:%s (%d bytes, md5 %s)" % (local, ip, remote, len(data), want))
+    tmp = remote + ".putting"
+    try:
+        for attempt in range(1, 4):
+            ssh_cmd(c, "rm -f %s" % tmp, timeout=10)
+            try:
+                si, so, se = c.exec_command("cat > %s" % tmp, timeout=120)
+                si.write(data)
+                si.flush()
+                si.channel.shutdown_write()
+                rc = so.channel.recv_exit_status()
+            except Exception as e:
+                print("  attempt %d: 通道异常 %r" % (attempt, e))
+                _t.sleep(1)
+                continue
+            if rc != 0:
+                print("  attempt %d: cat rc=%d err=%s" % (attempt, rc, se.read()[:120]))
+                _t.sleep(1)
+                continue
+            if mode:
+                ssh_cmd(c, "chmod %s %s" % (mode, tmp), timeout=10)
+            out = ssh_cmd(c, "md5sum %s" % tmp, timeout=30)
+            got = out.split()[0] if out.split() else None
+            if got != want:
+                print("  attempt %d: md5 %s != %s (损坏, 重推)" % (attempt, got, want))
+                _t.sleep(1)
+                continue
+            ssh_cmd(c, "mv -f %s %s" % (tmp, remote), timeout=15)
+            out2 = ssh_cmd(c, "md5sum %s" % remote, timeout=30)
+            verify = out2.split()[0] if out2.split() else None
+            if verify == want:
+                print("put OK (双次 md5 一致): %s" % remote)
+                return 0
+            print("  attempt %d: mv 后复核失败 %s" % (attempt, verify))
+            _t.sleep(1)
+        sys.exit("!! put FAILED: 3 次尝试 md5 均不一致, 设备原文件未改动")
+    finally:
+        ssh_cmd(c, "rm -f %s" % tmp, timeout=10)
+        c.close()
+
+
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "doctor"
     # 版本注册表预检: 注册表/MANIFEST/磁盘/架构图任何不一致 -> 拒绝一切操作
@@ -351,4 +426,9 @@ if __name__ == "__main__":
         names = [a for a in sys.argv[2:] if not a.startswith("-")]
         push_serial(names or None)
         sys.exit(0)
-    sys.exit({"doctor": doctor, "push": push, "attic": attic, "snapshot": snapshot}[cmd]())
+    fn = {"doctor": doctor, "push": push, "put": put,
+          "attic": attic, "snapshot": snapshot}[cmd]
+    if cmd == "push":
+        names = [a for a in sys.argv[2:] if not a.startswith("-")]
+        sys.exit(fn(names or None))
+    sys.exit(fn())

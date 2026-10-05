@@ -41,7 +41,7 @@ python tools/deploy.py attic      # 设备侧流浪脚本归档
 | SSH 不通 GUI 通 | GUI 系统页重启；或 serial_cmd.py（serial_server.py :7717 自动登录） |
 | 整机死 | 断电重启；babysitter 保证最坏 6 分钟自动翻 B |
 | A 槽起不来 | `python tools/lk_flip2.py COM6 b`（串口 921600；流程：陷阱→kcmdline→堆耗尽→写 bootctrl→sysrq-b） |
-| 双槽皆坏 | UART + 全盘镜像恢复（D:\Repo\lg6151m\backup\mmcblk0.img.gz，md5 双向） |
+| 双槽皆坏 | UART + 全盘镜像恢复（D:\Repo\lg6151m-project\lg6151m\backup\mmcblk0.img.gz，md5 双向） |
 
 **串口注意**：CH340 拔插后 COM 口可能进坏状态（重复打开失败）→ 物理重插；
 强杀持有进程会 wedge 驱动，用 serial_server 的 QUIT 优雅退出。

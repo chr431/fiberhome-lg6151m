@@ -22,6 +22,8 @@ Usage:
 import socket, sys, os, time, threading, re, traceback
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.abspath(os.environ.get("LG_SECRETS_DIR") or os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "_local", "secrets")))
 import serial
 import device_local as D
 

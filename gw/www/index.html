@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LG6151M 网关控制台</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span class="logo">LG</span>
+    <div>
+      <div class="t1">6151M 网关控制台</div>
+      <div class="t2" id="hdr-sub">v4 · 5G 聚合</div>
+    </div>
+  </div>
+  <nav id="nav">
+    <a href="#/status" data-p="status">状态</a>
+    <a href="#/clients" data-p="clients">设备</a>
+    <a href="#/wifi"   data-p="wifi">WiFi</a>
+    <a href="#/net"    data-p="net">网络</a>
+    <a href="#/cellular" data-p="cellular">蜂窝</a>
+    <a href="#/sms" data-p="sms">短信</a>
+    <a href="#/agg"    data-p="agg">聚合</a>
+    
+    <a href="#/sys"    data-p="sys">系统</a>
+  </nav>
+</header>
+<main id="main"><div class="card">加载中…</div></main>
+<div id="toast"></div>
+<div id="modal" class="hidden">
+  <div class="modal-box">
+    <h3 id="modal-title">登录</h3>
+    <div id="modal-body"></div>
+  </div>
+</div>
+<script src="/app.js?v=34"></script>
+</body>
+</html>

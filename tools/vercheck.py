@@ -7,6 +7,17 @@
      源码与产物版本一致（healthdog.c 与 healthdog.ko 同版本号）
   3. 注册表 <-> docs/ARCHITECTURE.md：架构图内版本表由 `render` 生成、
      `check` 强制与注册表逐字节一致（VERCHECK 标记块内禁手改）
+  4. image 行（v1.1）：不可入库的大产物（镜像/封包，gitignore 本地保留），
+     target 列 = 32hex md5 指纹，`check` 强制磁盘文件 md5 与之一致——
+     产物内容被机械钉死，换一个字节即 fail。
+  5. 性质分区（v1.2）：位置必须匹配性质，杜绝设备载荷/永久工具/一次性混杂：
+       gw/            设备载荷(manifest 件 + gw/bin + gw/src + gw/www)
+       tools/         PC 永久工具(必须登记)
+       tools/oneoff/  一次性/取证/历史归档(**禁止登记**)
+       analysis/ *_analysis/ ref/  RE 数据与厂商转储(不登记)
+       _drill_backup/ 刷机资产(image/tool 登记件)
+       根级白名单      .gitignore .gitattributes LICENSE README.md
+     双向强制: 登记行必须在正确区; 全部 git 跟踪文件必须可归类。
 
 设备同步（第 4 链）由 deploy.py 完成：push 时把版本注入 #DEPLOY 戳，
 snapshot 把注册表(含 md5)写到 /data/gw/VERSIONS，doctor 比对两侧。
@@ -16,8 +27,10 @@ Usage:
   python tools/vercheck.py render  # 重新生成 ARCHITECTURE.md 版本表
   python tools/vercheck.py device  # 对比设备 /data/gw/VERSIONS (需 SSH 环境)
 """
+import hashlib
 import os
 import re
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -44,8 +57,10 @@ def load_registry():
         name, ver, kind, target, note = parts
         if not VER_RE.match(ver):
             sys.exit("!! VERSIONS.tsv 第 %d 行版本号格式应为 N.N: %r" % (ln, ver))
-        if kind not in ("manifest", "tool", "doc", "src"):
+        if kind not in ("manifest", "tool", "doc", "src", "image"):
             sys.exit("!! VERSIONS.tsv 第 %d 行 kind 非法: %r" % (ln, kind))
+        if kind == "image" and not re.fullmatch(r"[0-9a-f]{32}", target):
+            sys.exit("!! VERSIONS.tsv 第 %d 行 image 的 target 应为 32hex md5: %r" % (ln, target))
         rows.append((name, ver, kind, target, note))
     if not rows:
         sys.exit("!! VERSIONS.tsv 为空")
@@ -99,7 +114,7 @@ def check(fail=True):
         if kind == "manifest" and mdest.get(name) != target:
             errs.append("%s: 注册表 target(%s) != MANIFEST(%s)" % (name, target, mdest.get(name)))
 
-    # 3) 文件存在；src 行要求同名产物同版本
+    # 3) 文件存在；src 行要求同名产物同版本；image 行 md5 必须与磁盘一致
     for name, ver, kind, target, note in reg:
         if not os.path.isfile(os.path.join(REPO, name)):
             errs.append("文件不存在: %s" % name)
@@ -110,6 +125,12 @@ def check(fail=True):
                 errs.append("src %s 的产物 %s 不在注册表" % (name, prod))
             elif prow[1] != ver:
                 errs.append("源码/产物版本脱钩: %s=%s vs %s=%s" % (name, ver, prod, prow[1]))
+        if kind == "image":
+            p = os.path.join(REPO, name)
+            if os.path.isfile(p):
+                got = hashlib.md5(open(p, "rb").read()).hexdigest()
+                if got != target:
+                    errs.append("image md5 不符: %s 磁盘=%s 注册=%s" % (name, got, target))
 
     # 4) .sh 文件禁 CRLF（行尾纪律的静态关卡）
     for name, ver, kind, target, note in reg:
@@ -129,6 +150,36 @@ def check(fail=True):
             errs.append("ARCHITECTURE.md 缺 VERCHECK 标记块")
     else:
         errs.append("docs/ARCHITECTURE.md 不存在")
+
+    # 6) 性质分区: 登记行位置 <-> kind (v1.2)
+    ZONE = {"manifest": ("gw/",), "src": ("gw/src/",), "doc": ("docs/",),
+            "tool": ("tools/", "_drill_backup/"),
+            "image": ("_drill_backup/",)}
+    for name, ver, kind, target, note in reg:
+        if kind == "doc" and name == "README.md":
+            continue
+        if not name.startswith(ZONE[kind]):
+            errs.append("性质分区: %s (kind=%s) 必须在 %s 下" % (name, kind, " 或 ".join(ZONE[kind])))
+        if name.startswith("tools/oneoff/"):
+            errs.append("一次性归档禁止登记: %s" % name)
+
+    # 7) 全跟踪文件必须可归类: 登记 / 豁免区 / 根级白名单
+    #    *_analysis/ 为动态发现(analysis 同类 RE 数据区, 免在代码里写死具体名)
+    ROOT_OK = {".gitignore", ".gitattributes", "LICENSE", "README.md", "tools/VERSIONS.tsv"}
+    FREE_ZONES = ("tools/oneoff/", "analysis/", "ref/", "docs/")
+    FREE_ZONES += tuple(d + "/" for d in os.listdir(REPO)
+                        if d.endswith("_analysis") and os.path.isdir(os.path.join(REPO, d)))
+    try:
+        ls = subprocess.run(["git", "ls-files"], capture_output=True, text=True,
+                            cwd=REPO).stdout.split("\n")
+    except Exception:
+        ls = []
+    regnames = {r[0] for r in reg}
+    for f in ls:
+        f = f.replace("\\", "/").strip()
+        if not f or f in regnames or f in ROOT_OK or f.startswith(FREE_ZONES):
+            continue
+        errs.append("未归类跟踪文件(登记/oneoff/analysis/白名单均无): %s" % f)
 
     for e in errs:
         print("VERCHECK-FAIL: %s" % e)

@@ -303,7 +303,7 @@ apply_pin() {
     esac
     R=$(ubus call mobile_network update_pin_info "{$ARGS}" 2>&1 | head -c 100)
     case "$R" in
-        "{"*) ok_json ',"ubus":"'"$(printf '%s' "$R" | tr -d '\n')"'"' ;;
+        "{"*) ok_json '"ubus":"'"$(printf '%s' "$R" | tr -d '\n')"'"' ;;
         *) jerr pin_fail ;;
     esac
 }
@@ -572,7 +572,7 @@ apply_bandlock() {
         # 状态持久化到自管 conf (mipc 模式不写树; 树同步由 mobilenetwork 上报被动跟随)
         { echo "BAND_EN=$EN"; echo "LTE_MASK=$LTE"; echo "NR_MASK=$NR";
           echo "CELL_EN=0"; } > $GWDATA/cellular.conf
-        ok_json ',"engine":"mipc","note":"modem重扫约20-60s"'
+        ok_json '"engine":"mipc","note":"modem重扫约20-60s"'
         return
     fi
     # 互斥: 开频段锁 -> 关小区锁 (原厂同款约束, 服务端强制)
@@ -583,7 +583,7 @@ apply_bandlock() {
     cfgset_ok $NS.LTELockBAND "$LTE" || jerr tree_fail
     cfgset_ok $NS.NRLockBAND "$NR"    || jerr tree_fail
     cell_persist
-    ok_json ',"engine":"tree"'
+    ok_json '"engine":"tree"'
 }
 
 apply_celllock() {

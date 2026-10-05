@@ -44,10 +44,15 @@ def md5f(p):
 
 
 def detect_pc_ip():
+    if "--pc-ip" in sys.argv:
+        return sys.argv[sys.argv.index("--pc-ip") + 1]
     try:
         out = subprocess.run(["ipconfig"], capture_output=True,
                              encoding="gbk", errors="replace", timeout=10).stdout
         m = re.findall(r"IPv4[^:]*:\s*(169\.254\.\d+\.\d+)", out)
+        if m:
+            return m[0]
+        m = re.findall(r"IPv4[^:]*:\s*(192\.168\.9\.\d+)", out)
         if m:
             return m[0]
     except Exception:
@@ -77,8 +82,12 @@ def main():
         sys.exit("!! 口令含单引号, 不支持")
     PC_IP = detect_pc_ip()
     if not PC_IP:
-        sys.exit("!! 未探测到 PC 的 169.254.x.x 地址（有线口未就绪?）")
-    log("PC link-local: %s   depot: %s" % (PC_IP, DEPOT))
+        sys.exit("!! 未探测到 PC 有线地址（169.254 或 192.168.9；可用 --pc-ip 指定）")
+    if PC_IP.startswith("169.254"):
+        DEV_IP, DEV_MASK = "169.254.77.1", "255.255.0.0"
+    else:
+        DEV_IP, DEV_MASK = ".".join(PC_IP.split(".")[:3]) + ".77", "255.255.255.0"
+    log("PC: %s   device link IP: %s   depot: %s" % (PC_IP, DEV_IP, DEPOT))
 
     want = md5f(KIT)
     try:
@@ -156,12 +165,12 @@ def main():
     paced("mount -t proc proc /proc; echo 0 > /proc/sysrq-trigger", 4)
     paced("mount -t tmpfs tmpfs /dev; mknod /dev/null c 1 3; mknod /dev/urandom c 1 9", 4)
     paced("mount -t tmpfs tmpfs /tmp", 4)
-    paced("ifconfig eth0 down; ifconfig eth1 up; ifconfig eth1 169.254.77.1 netmask 255.255.0.0", 6)
+    paced("ifconfig eth0 down; ifconfig eth1 up; ifconfig eth1 %s netmask %s" % (DEV_IP, DEV_MASK), 6)
     r = paced("/fhrom/bin/curl -s --connect-timeout 8 --max-time 300 -o /tmp/kit.tgz "
               "http://%s:8931/kit.tar.gz; md5sum /tmp/kit.tgz" % PC_IP, 30)
     if want not in r:
         log("eth1 拉取失败, 换 eth0 重试")
-        paced("ifconfig eth1 0.0.0.0; ifconfig eth1 down; ifconfig eth0 169.254.77.1 netmask 255.255.0.0", 6)
+        paced("ifconfig eth1 0.0.0.0; ifconfig eth1 down; ifconfig eth0 %s netmask %s" % (DEV_IP, DEV_MASK), 6)
         r = paced("/fhrom/bin/curl -s --connect-timeout 8 --max-time 300 -o /tmp/kit.tgz "
                   "http://%s:8931/kit.tar.gz; md5sum /tmp/kit.tgz" % PC_IP, 30)
     log("fetch kit: %s" % " ".join(r.split()[:4]))
@@ -189,7 +198,7 @@ def main():
         if "GATE" in r:
             failed = True
             break
-        if not tail and i > 4 and not ping("169.254.77.1"):
+        if not tail and i > 4 and not ping(DEV_IP):
             log("deploy.log 消失且 raw-shell IP 已下线 -> 判定重启(成功路径)")
             ok = True
             break
@@ -209,7 +218,7 @@ def main():
     t0 = time.time()
     died = False
     while time.time() - t0 < 150:
-        if not ping("169.254.77.1"):
+        if not ping(DEV_IP):
             died = True
             break
         time.sleep(3)

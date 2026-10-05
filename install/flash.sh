@@ -47,12 +47,11 @@ echo "data OK" >> $L
 
 printf '\017\003\000\000\000\016\000\001\002\000' > /tmp/bc
 dd if=/tmp/bc of=/dev/mmcblk0p1 bs=1 seek=2060 conv=notrunc >> $L 2>&1
-h=$(hexdump -C -n 10 -s 2060 /dev/mmcblk0p1 | head -1)
-echo "bootctrl: $h" >> $L
-case "$h" in
-  *"0f 03"*) ;;
-  *) echo "GATE: bootctrl verify" >> $L; exit 1 ;;
-esac
+# 读回校验: 本 busybox 无 hexdump/od, 用 dd 回读 + md5sum 对比
+dd if=/dev/mmcblk0p1 bs=1 skip=2060 count=10 of=/tmp/bc2 2>/dev/null
+W=$(md5sum /tmp/bc | cut -d' ' -f1); G=$(md5sum /tmp/bc2 | cut -d' ' -f1)
+echo "bootctrl: want=$W got=$G" >> $L
+[ "$W" = "$G" ] || { echo "GATE: bootctrl verify" >> $L; exit 1; }
 sync
 echo "=== ALL OK -- reboot into slot A ===" >> $L
 echo b > /proc/sysrq-trigger

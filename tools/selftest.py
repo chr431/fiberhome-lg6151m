@@ -608,6 +608,13 @@ def t_cel_apisim():
            f"api={imei_api[:6]}.. at={imei_at.group(1)[:6] if imei_at else '?'}..")
 
 
+@test("拨号兜底守护存活 (P2)")
+def t_cel_keeper():
+    out = dev("pgrep -f dial_keeper.sh | head -1")
+    ok = bool(out.strip())
+    record(t_cel_keeper._test_name, "cellular", ok, f"pid={out.strip()}" if ok else "dial_keeper 未运行")
+
+
 @test("GUI sms 端点 JSON 有效")
 def t_cel_apisms():
     tok = _token()

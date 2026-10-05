@@ -53,6 +53,8 @@ glog "plumbing netagent=$(pidof mtk_netagent) ql_netd=$(pidof ql_netd) ril=$(pid
 
 # 3. THE stock dialer (army spawn form, taskset like process_start_list)
 pidof mobilenetwork >/dev/null || taskset -c 0,2 /fhrom/bin/mobilenetwork >/tmp/mn_boot.log 2>&1 &
+# v2.2 (P2): 拨号自持兜底 — mobilenetwork 死亡后 35s 内由本守护接管重拨
+pgrep -f dial_keeper.sh >/dev/null || nohup sh /data/gw/dial_keeper.sh >/dev/null 2>&1 &
 # v1.8: mobilenetwork 就绪后重放蜂窝锁定(频段/小区)
 ( sleep 20; sh /data/gw/cellular_replay.sh ) >/dev/null 2>&1 &
 sleep 10

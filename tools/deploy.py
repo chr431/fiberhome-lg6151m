@@ -75,6 +75,7 @@ MANIFEST = [
     ("gw/www/app.js", "/data/gw/www/app.js"),        # SPA router+pages (v2.0)
     ("gw/fw_apply.sh", "/data/gw/fw_apply.sh"),       # port-fwd/DMZ/block installer (boot+api)
     ("gw/cellular_replay.sh", "/data/gw/cellular_replay.sh"),# cellular band/cell-lock boot replay
+    ("gw/dial_keeper.sh", "/data/gw/dial_keeper.sh"),        # P2: fallback dial keeper (mobilenetwork-independent)
     ("gw/bin/shmsnap", "/data/gw/shmsnap"),          # cfgmgr tree shm snapshot tool
     ("gw/ntp_keeper.sh", "/data/gw/ntp_keeper.sh"),    # hourly NTP keeper (no RTC battery)
     ("gw/webs_revive.sh", "/data/gw/webs_revive.sh"),   # stock GUI revival (manual, self-contained)

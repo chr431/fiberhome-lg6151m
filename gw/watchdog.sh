@@ -63,6 +63,16 @@ run_cycle() {
     check lan_ip    "ip -4 addr show br-lan | grep -q inet"  "LAN IP present"
 
     # ---- cellular control plane (L14) ----
+    # dial_keeper: 拨号兜底守护 (P2); 死则带环境拉起
+    if pgrep -f dial_keeper.sh >/dev/null 2>&1; then
+        set_state keeper 0 "dial keeper"
+    else
+        set_state keeper 1 "dial keeper"
+        FAILS=$((FAILS+1))
+        export LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib
+        export PATH=/usr/sbin:/usr/bin:/sbin:/bin:/fhrom/bin:/fhrom/fhshell
+        nohup sh /data/gw/dial_keeper.sh >/dev/null 2>&1 &
+    fi
     # atcid: AT 通道本体; 死则拉起 (替代厂商 procd respawn)
     if pidof atcid >/dev/null 2>&1; then
         set_state atcid 0 "atcid daemon"

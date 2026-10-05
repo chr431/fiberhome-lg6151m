@@ -133,7 +133,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `CLM-PMK-ONLY`@FINDINGS.md | ✅实证 | `gw/wifi_up.sh>=1.10` | 三 BSS 接口存在且为 AP 模式 | e76abba@2026-10-05 | hostapd只吃原始PMK(wpa_passphrase被libfhcrypto拦截) |
 | `CLM-MARK-OR`@FINDINGS.md | ✅实证 | `gw/wan_agg.sh>=2.15` | 分流规则已安装 (sport + mark),钉死规则与配置表一致 | e76abba@2026-10-05 | iptables MARK覆盖非OR;mark==0守卫 |
 | `CLM-PROCD-INTERCEPT`@VENDOR_MAP.md | ✅实证 | `—` | — | 54e89f0@2026-10-05 | RE静态+设备佐证: procd拦截sysinit,FH层由S99末行触发 |
-| `CLM-DIALER-QLNETD`@VENDOR_MAP.md | ⚠️推断 | `gw/rc_netfh.sh>=2.1` | — | e2fe2e3@2026-10-05 | 拨号者=ql_netd+mobilenetwork(proto脚本未落地);阶段2裁撤mobilenetwork前必须做kill存活实验 |
+| `CLM-DIALER-QLNETD`@VENDOR_MAP.md | ✅实证 | `gw/rc_netfh.sh>=2.2` | 拨号兜底守护存活 (P2) | 89dad51@2026-10-06 | 闸门A定案:mobilenetwork=PDN生命周期持有者(杀后ccmni≤10s掉IP,裸重启不够);P2 dial_keeper兜底接管,裁撤前置条件已备 |
 | `CLM-BANDLOCK-LIBQLRIL`@VENDOR_MAP.md | ✅实证 | `—` | — | 54e89f0@2026-10-05 | RE实证: ql_nw_set_band_mode(readelf UND),无AT面 |
 | `CLM-FHDRV-UNLOADED`@VENDOR_MAP.md | ✅实证 | `—` | — | 54e89f0@2026-10-05 | fhdrv链自定义启动下未载=ENOTTY真因;复活需完整加载链 |
 | `CLM-NGINX-PORTS`@VENDOR_MAP.md | ✅实证 | `—` | — | 54e89f0@2026-10-05 | 原厂nginx=80/443;8080是v4复活层 |

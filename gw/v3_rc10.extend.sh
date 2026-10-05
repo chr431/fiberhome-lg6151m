@@ -116,9 +116,8 @@ pgrep -x dropbear >/dev/null || {
     [ -s /data/gw/dropbear_keys/rsa ] || /usr/bin/dropbearkey -t rsa -f /data/gw/dropbear_keys/rsa >/dev/null 2>&1
     /usr/sbin/dropbear -r /data/gw/dropbear_keys/rsa -p 22 >/dev/null 2>&1
 }
-# --- FH-App API backend (v3.1, 烽火终端App): webs+nginx(:8080), v3httpd v2.2
-#     把 /fh_api/* 与 /api/tmp/* 从 :80 隧道过来。幂等; cfgmgr 已在跑则复用。
-WEBS_REVIVE_KEEP_CFGMGR=1 nohup sh /data/gw/webs_revive.sh >/tmp/webs_revive.log 2>&1 &
+# v2.18: FH-App 后端(webs/nginx:8080 + 冗余 cfgmgr -L 4)不再自启 —— 外围裁剪第一阶段;
+#        需要烽火终端App时手动: sh /data/gw/webs_revive.sh
 pgrep -f fan_mgr.sh >/dev/null || nohup sh /data/gw/fan_mgr.sh >/dev/null 2>&1 &
 pgrep -f ntp_keeper >/dev/null || nohup sh /data/gw/ntp_keeper.sh >/dev/null 2>&1 &
 

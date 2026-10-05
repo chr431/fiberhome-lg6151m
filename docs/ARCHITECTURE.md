@@ -67,7 +67,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/udhcpc_wan.script` | **v1.0** | manifest | `/data/gw/udhcpc_wan.script` | WAN口 udhcpc 事件钩子(接口无关化) |
 | `gw/v2_access.sh` | **v6.1** | manifest | `/data/gw/v2_access.sh` | v2 极简访问层(串口/SSH/DHCP/防火墙22,零守护干涉) |
 | `gw/v3_babysit_v2.sh` | **v2.0** | manifest | `/data/gw/babysit_v2.sh` | 启动保姆(T1杀rcS/T2核爆回B) |
-| `gw/v3_rc10.extend.sh` | **v2.17** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2(br-lan+wifi+wan+DNS; v2.5网口对调; v2.6/2.7 eth1 MAC钉死+归因修正) |
+| `gw/v3_rc10.extend.sh` | **v2.18** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2(br-lan+wifi+wan+DNS; v2.5网口对调; v2.6/2.7 eth1 MAC钉死+归因修正) |
 | `gw/wan_agg.sh` | **v2.14** | manifest | `/data/gw/wan_agg.sh` | 双上行聚合主管(照抄原厂quecadp内核分流+fwmark路由; v1.7 to-LAN护盾规则自愈(全灭黑洞终根因) |
 | `gw/webs_revive.sh` | **v1.3** | manifest | `/data/gw/webs_revive.sh` | 原厂GUI复活器(自足nginx conf; 手动拉起) |
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |

@@ -18,7 +18,7 @@
 | 双上行聚合 | 5G 蜂窝 + 有线宽带双活，原厂 quecadp 内核引擎按流分流（40/60 热调），主备模式（100:0/0:100 待命秒切），MAC 钉死表，故障切换实测 0 丢包 |
 | Web GUI | 自研 SPA（192.168.9.1:80，v3httpd 静态+JSON API，35+ 端点）：状态/设备/WiFi/网络/蜂窝/短信/聚合/上行认证/系统 九页 |
 | WiFi | hostapd 接管安全层（原厂 hwifi WPA 引擎在 MLD 组网下损坏）；统一 SSID 命名；启动自动选道（扫描评分）；仿 WiFi Analyzer 四视图分析仪（157 AP 实测）；访客网络/双频合一 |
-| 烽火终端 App | HTTP 探测（:80 隧道到原厂 webs）+ NDMP 本地控制（:18996 TLS mTLS / :18998 明文，iotagtd）+ 云连接全通 |
+| 烽火终端 App | 可选：webs_revive.sh 手动拉起（默认不自启，外围裁剪）· NDMP 本地控制链路保持 |
 | 网络工具 | 端口转发/DMZ/黑名单（fw_apply）、DHCP 静态租约、NTP 守护、可插拔上行认证（AUTHD_CMD 任意认证程序）、MAC/TTL 伪装 |
 | 运维 | deploy.py 单一事实源部署（版本注册表 + md5 漂移体检）、看门 babysitter（T1 杀挂起 rcS / T2 自动翻槽）、串口翻槽器 lk_flip2 |
 

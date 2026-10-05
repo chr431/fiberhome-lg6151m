@@ -24,18 +24,7 @@ grep -q '^toor:' $R/etc/passwd || echo 'toor:x:0:0:root:/root:/bin/ash' >> $R/et
 grep -q '^toor:' $R/etc/shadow || echo "toor:$(openssl passwd -1 -salt fhlg6151 "$TOOR_PASS"):19953:0:99999:7:::" >> $R/etc/shadow
 grep -c '^toor:' $R/etc/passwd $R/etc/shadow
 
-echo "== 3. dropbear config + rc.local"
-if [ ! -f $R/etc/config/dropbear ]; then
-cat > $R/etc/config/dropbear <<'EOC'
-config dropbear
-	option PasswordAuth 'on'
-	option RootPasswordAuth 'on'
-	option Port         '22'
-	option RootLogin    '0'
-	option MaxAuthTries '4'
-EOC
-fi
-grep -q dropbear $R/etc/rc.local || sed -i 's|^exit 0|/usr/sbin/dropbear -p 22 >/dev/null 2>\&1 \&\niptables -I INPUT 1 -p tcp -s 192.168.8.0/24 --dport 22 -j ACCEPT\nexit 0|' $R/etc/rc.local
+echo "== 3. rc.local (SSH 由 /data/rc.extend.sh 的带密钥 dropbear 唯一提供, 不加固件侧实例)"
 tail -4 $R/etc/rc.local
 
 echo "== 4. rcS surgical edits"
@@ -73,13 +62,21 @@ echo "== 7b. neutralize S99zmtk_boot_done"
 rm -f $R/etc/rc.d/S99zmtk_boot_done
 ls $R/etc/rc.d/ | grep -c zmtk || true
 
+echo "== 7c. vendor strip (外围裁剪: 只断启动路径, 不动二进制; 回滚=不裁剪重刷)"
+# 高成本/零功能/已被自有实现取代的 vendor 守护
+STRIP_S="S98mdlogger S96atci_service S96atcid S99log_controld S99ql_speed_monitor_mgr S99ql_entry_auto_qos S80wapp S80ucitrack S92baresip S85auto_adapt S98meta_tst S99slt2_test S55speech_daemon S56libmodem_afe_service S57audio-ctrl-service S60vnstat"
+STRIP_K="K1mdlogger K01ql_speed_monitor_mgr K01ql_entry_auto_qos K90wapp K15auto_adapt K1slt2_test K50vnstat"
+for S in $STRIP_S; do rm -f $R/etc/rc.d/$S; done
+for K in $STRIP_K; do rm -f $R/etc/rc.d/$K; done
+echo "stripped: $(echo $STRIP_S | wc -w) start + $(echo $STRIP_K | wc -w) stop links"
+
 echo "== 8. tree verify"
 [ "$(grep -c 'v3:' $R/etc/init.d/rcS)" -ge 2 ] || { echo "FAIL: rcS anchors"; exit 1; }
 [ -L $R/etc/rc.d/S98zz_data_hook ] || { echo "FAIL: S98 hook"; exit 1; }
 [ ! -e $R/etc/rc.d/S99zmtk_boot_done ] || { echo "FAIL: zmtk still linked"; exit 1; }
 grep -q babysit $R/etc/preinit || { echo "FAIL: preinit"; exit 1; }
 grep -q '^toor:' $R/etc/passwd || { echo "FAIL: toor"; exit 1; }
-grep -q dropbear $R/etc/rc.local || { echo "FAIL: rc.local"; exit 1; }
+for S in S98zz_data_hook; do [ -e $R/etc/rc.d/$S ] || { echo "FAIL: $S"; exit 1; }; done
 echo "tree OK"
 
 echo "== 9. mksquashfs"

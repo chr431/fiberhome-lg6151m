@@ -762,6 +762,7 @@ PAGES.sys = {
         <div class="row3">
           <div class="frm"><label>当前密码</label><input id="pw-old" type="password"></div>
           <div class="frm"><label>新密码 (8-63位)</label><input id="pw-new" type="password"></div>
+          <div class="frm"><label>确认新密码</label><input id="pw-new2" type="password"></div>
         </div>
         <button class="pri" onclick="pwDo()">修改密码</button>
         <span class="hint">修改后需重新登录</span>`)}
@@ -808,6 +809,7 @@ window.ntSync = async () => {
 };
 window.pwDo = async () => {
     if (!confirm("确认修改管理密码?")) return;
+    if ($("pw-new").value !== $("pw-new2").value) { toast("两次输入的新密码不一致", 1); return; }
     const j = await api("pass_set", `old=${encodeURIComponent($("pw-old").value)}&new=${encodeURIComponent($("pw-new").value)}`).catch(e => ({ error: e.message }));
     if (j.ok) { setLogin(false); toast("已修改, 请重新登录"); }
     else toast(j.error === "bad_old" ? "当前密码错误" : "失败: " + j.error, 1);

@@ -59,7 +59,7 @@ def scan_history(hits):
         scan_text("COMMIT-MSG " + line[:12], line, hits)
     revs = sh_out(["git", "rev-list", "--all"]).split()
     if revs:
-        out = sh_out(["git", "grep", "-l", "-E", "|".join(PAT_PARTS)] + revs)
+        out = sh_out(["git", "grep", "-l", "-i", "-E", "|".join(PAT_PARTS)] + revs)
         for line in out.splitlines():
             if line.strip():
                 hits.append("HISTORY: " + line[:200])

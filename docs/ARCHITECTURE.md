@@ -55,7 +55,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/dial_variant.sh` | **v1.1** | manifest | `/data/gw/dial_variant.sh` | 5G 拨号参数变体实验器(iptype/apn/plmn/roam) |
 | `gw/fan_mgr.sh` | **v1.3** | manifest | `/data/gw/fan_mgr.sh` | 原厂梯度温控风扇(v1.3: 配置统一overlay+修复v1.2双/data/gw路径bug——GUI静音切换从未生效的根因) |
 | `gw/fan_mode.conf` | **v1.0** | manifest | `/data/gw/fan_mode.conf` | 风扇模式:performance|silent(静音+6°C偏移) |
-| `gw/fw_apply.sh` | **v1.2** | manifest | `/data/gw/fw_apply.sh` | 端口映射/DMZ/禁网安装器(rc_netfh开机+api共用); v1.2/P0: +V3WANGUARD WAN面纵深封禁(23/5683/30005/1899x, 双WAN面) |
+| `gw/fw_apply.sh` | **v1.3** | manifest | `/data/gw/fw_apply.sh` | 端口映射/DMZ/禁网安装器(rc_netfh开机+api共用); v1.2/P0: +V3WANGUARD WAN面纵深封禁(23/5683/30005/1899x, 双WAN面) |
 | `gw/healthdog.sh` | **v1.1** | manifest | `/data/gw/healthdog.sh` | 看门狗用户态心跳 |
 | `gw/led_mgr.sh` | **v1.6** | manifest | `/data/gw/led_mgr.sh` | 原厂风格LED守护(v1.4传输层改sysfs gpio; v1.6 配置统一overlay+信标看门狗(dmesg固件权威事件→no_bcn重装); v1.5 WAN走leds类节点5g_evb_voice=gpio292被leds-gpio占用, debugfs实证) |
 | `gw/mipc_dial_trace.sh` | **v1.0** | manifest | `/data/gw/mipc_dial_trace.sh` | 5G 拨号取证(xtrace 抓真参) |
@@ -75,9 +75,9 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
 | `gw/wifi_up.sh` | **v1.17** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.17: 出厂brmac兜底去设备化(eth0反推+合成末级; 原硬编码本机MAC洗出)) |
-| `gw/www/api.sh` | **v2.22** | manifest | `/data/gw/www/api.sh` | GUI JSON端点(v2.15: hostapd探测改iw AP-type(拓扑形态无关); v2.14: 配置统一cfg_load/gw_set读写defaults+settings overlay, 旧散落conf写路径全撤; v2.13端口强校验; v2.12: get_sys嵌套花括号默认值触发busybox ash展开bug多印1字节破坏JSON, 改-n分支; get_logs补\t\r反斜杠转义使严格JSON.parse通过; 状态聚合) |
-| `gw/www/app.js` | **v3.14** | manifest | `/data/gw/www/app.js` | 控制台轮询逻辑 |
-| `gw/www/index.html` | **v2.8** | manifest | `/data/gw/www/index.html` | v3控制台页面 |
+| `gw/www/api.sh` | **v2.23** | manifest | `/data/gw/www/api.sh` | GUI JSON端点(v2.15: hostapd探测改iw AP-type(拓扑形态无关); v2.14: 配置统一cfg_load/gw_set读写defaults+settings overlay, 旧散落conf写路径全撤; v2.13端口强校验; v2.12: get_sys嵌套花括号默认值触发busybox ash展开bug多印1字节破坏JSON, 改-n分支; get_logs补\t\r反斜杠转义使严格JSON.parse通过; 状态聚合) |
+| `gw/www/app.js` | **v3.15** | manifest | `/data/gw/www/app.js` | 控制台轮询逻辑 |
+| `gw/www/index.html` | **v2.9** | manifest | `/data/gw/www/index.html` | v3控制台页面 |
 | `gw/www/style.css` | **v2.1** | manifest | `/data/gw/www/style.css` | 控制台主题 |
 | `gw/zz_data_hook` | **v1.1** | manifest | `/data/build/rootfs/etc/init.d/zz_data_hook` | S98数据钩子(v1.1: plain sh——原厂无/etc/rc.common, rc.common式shebang致开机栈全灭; 回归实测发现) |
 | `gw/src/fhstub.c` | **v1.0** | src | `gw/bin/fhstub.so` | FH符号桩库源码 |
@@ -109,7 +109,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/lk_flip2.py` | **v1.1** | tool | `-` | LK 一键翻槽(a|b, misc[2060]字节) |
 | `tools/lk_write.py` | **v1.6** | tool | `-` | LK raw-shell 文件写入(回显校验+tmpfs挂载+cmdlist巡检, 取代lk_fix_access) |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
-| `tools/selftest.py` | **v1.6** | tool | `-` | 断言式全功能测试(L13-L15: 7类51项; v1.3: +5G带宽跨层一致性(settings BW5G vs iw宽度, 守dat双字段链); v1.2: 设备侧强制ccmni探测+坏口令断言) |
+| `tools/selftest.py` | **v1.7** | tool | `-` | 断言式全功能测试(L13-L15: 7类51项; v1.3: +5G带宽跨层一致性(settings BW5G vs iw宽度, 守dat双字段链); v1.2: 设备侧强制ccmni探测+坏口令断言) |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |
 | `tools/serial_server.py` | **v1.7** | tool | `-` | 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets) |
 | `tools/vercheck.py` | **v1.5** | tool | `-` | 版本注册表校验/渲染/设备比对(v1.3: device()随deploy基座迁/data/gw; v1.2性质分区双向强制+全跟踪文件可归类; v1.1 image类md5钉死) |

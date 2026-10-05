@@ -850,10 +850,19 @@ case "$EP" in
     # auth POST
     login)
         [ "$V3_METHOD" = POST ] || jerr post_only
+        # v2.23: 首刷自举 -- payload 不带 gui_auth.conf(纯原厂直刷时 /data 无此文件),
+        # 缺失时任何口令都不可能通过(sha256 恒非空) = 首启锁死。以文档化默认口令
+        # 建档(README 有载), 并在响应标记 default=true 供 GUI 强制提醒改密。
+        if [ ! -s $GWDATA/gui_auth.conf ]; then
+            mkdir -p $GWDATA
+            printf '%s' "lg6151m" | sha256sum | cut -d' ' -f1 > $GWDATA/gui_auth.conf
+            chmod 600 $GWDATA/gui_auth.conf
+        fi
         P=$(form_kv pass)
         H=$(printf '%s' "$P" | sha256sum | cut -d' ' -f1)
         [ "$H" = "$(cat $GWDATA/gui_auth.conf 2>/dev/null)" ] || jerr bad_login
-        printf '{"ok":true,"token":"%s"}' "$(tok_new)"
+        _D=0; [ "$H" = "$(printf '%s' "lg6151m" | sha256sum | cut -d' ' -f1)" ] && _D=1
+        printf '{"ok":true,"token":"%s","default":%s}' "$(tok_new)" "$_D"
         ;;
     logout)
         need_tok; rm -f $TOKDIR/$(form_kv token); ok_json ;;

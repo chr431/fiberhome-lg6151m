@@ -639,6 +639,21 @@ def t_sec_auth():
     record(t_sec_auth._test_name, "security", ok, out.strip())
 
 
+@test("首刷口令自举就位 (不运行在默认口令)")
+def t_sec_bootpass():
+    # 首刷场景: gui_auth.conf 缺失时 login 以文档化默认口令建档(api.sh v2.23);
+    # 常态断言: 文件存在且非默认口令哈希(运行在默认口令 = 仅提示, 不判死)
+    import hashlib
+    out = dev("cat /data/gw/gui_auth.conf 2>/dev/null").strip()
+    d = hashlib.sha256(b"lg6151m").hexdigest()
+    if not out:
+        record(t_sec_bootpass._test_name, "security", False, "gui_auth.conf 缺失且自举未建")
+        return
+    on_default = out == d
+    record(t_sec_bootpass._test_name, "security", True,
+           "运行在默认口令!! 请改密" if on_default else "ok")
+
+
 @test("uplink.conf 权限 600")
 def t_sec_uplink():
     out = dev("ls -l /data/gw/uplink.conf 2>/dev/null | awk '{print $1}'")
@@ -676,7 +691,7 @@ def t_sec_wanguard():
     out = dev("iptables -S V3WANGUARD 2>/dev/null | grep -c '\\-j DROP'")
     hook = dev("iptables -S INPUT 2>/dev/null | grep -c 'V3WANGUARD'")
     n, h = int(out.strip() or 0), int(hook.strip() or 0)
-    ok = n >= 12 and h >= 2
+    ok = n >= 16 and h >= 2   # v1.3+: 8口x2协议(含22)
     record(t_sec_wanguard._test_name, "security", ok,
            f"drop_rules={n} wan_hooks={h}")
 

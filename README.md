@@ -35,6 +35,14 @@ python tools/deploy.py push                 # 部署(仅接受已提交状态)
 python tools/lgssh.py "uptime"              # SSH root 助手
 ```
 
+### 首次刷入的 GUI 默认口令
+
+从纯原厂固件直刷本固件后，Web 管理界面初始口令为 **`lg6151m`**（首次登录时自动建档，
+GUI 会弹窗强制提醒修改）。固件不预置任何隐藏口令：口令文件 `/data/gw/gui_auth.conf`
+只由 GUI 的"修改密码"动作写入；改密表单带二次确认。SSH(toor)口令在**构建时**随机生成
+并注入镜像，不与 GUI 口令共用。管理面仅限 LAN：GUI 只绑 LAN IP，SSH/厂商遗留端口在
+WAN 侧被 V3WANGUARD 规则链常备拦截。
+
 ## 攻破路径（精简时间线，详见 docs/FINDINGS.md）
 
 1. Web API 加密体系完全还原（RSA token + 厂商 Lua AES 派生），可编程登录

@@ -37,7 +37,7 @@ fw_apply() {
     # WAN 面纵深封禁 (deny 优先于任何后续 accept; 双 WAN 面: eth0 家宽 + ccmni 蜂窝)
     iptables -N V3WANGUARD 2>/dev/null
     iptables -F V3WANGUARD
-    for P in 23 5683 30005 18996 18997 18998; do
+    for P in 22 23 5683 30005 18996 18997 18998; do   # v1.3: +22(dropbear绑0.0.0.0, 管理面限LAN)
         iptables -A V3WANGUARD -p tcp --dport $P -j DROP
         iptables -A V3WANGUARD -p udp --dport $P -j DROP
     done

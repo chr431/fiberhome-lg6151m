@@ -833,10 +833,12 @@ function showLoginWall() {
         <div class="frm"><label>管理密码</label><input type="password" id="wall-pass" autofocus></div>
         <button class="pri" id="wall-go" style="width:100%">登 录</button>
         <span class="hint">未登录不可查看任何信息 (与原厂行为一致)</span>
+        <span class="hint">首次刷入的默认口令见 README (登录后请立即修改)</span>
       </div></div>`;
     const go = async () => {
         const j = await api("login", "pass=" + encodeURIComponent($("wall-pass").value)).catch(() => ({ error: "x" }));
-        if (j.token) { TOKEN = j.token; sessionStorage.setItem("gw_token", TOKEN); setLogin(true); toast("登录成功"); route(); }
+        if (j.token) { TOKEN = j.token; sessionStorage.setItem("gw_token", TOKEN); setLogin(true); route();
+            if (j.default) setTimeout(() => modal("安全警告", `<p><b>当前使用默认口令!</b></p><p>任何能接入本网络的人都可完全控制网关。请立即到 系统 → 管理密码 修改。</p><div class="row3"><button class="pri" onclick="modalClose();location.hash='#/sys'">去修改</button><button class="ghost" onclick="modalClose()">稍后</button></div>`), 400); }
         else { toast("密码错误", 1); $("wall-pass").value = ""; $("wall-pass").focus(); }
     };
     $("wall-go").onclick = go;

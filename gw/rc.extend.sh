@@ -36,7 +36,14 @@ case "$slot" in
   *) # v3: full stack (forensics, flight rc19, TTL/hnat are v3 duties)
      logger -t rc.extend "slot=$slot: v3 rc19.sh"
      # v1.6: route A -- FH modem-stack environment parallel to our layer
-     # (mobilenetwork dials; rc19 skips rmmod+dial_5g via MODE.fh gate)
+     # (dial: mobilenetwork 过渡期 + dial_keeper 兜底; rc19 skips rmmod+dial_5g via MODE.fh gate)
+     # v1.7 (D2 开箱审查): MODE.fh 首刷自建 — kit 从不创建该标志, 纯原厂直刷时
+     #       rc_netfh 不跑 = 无蜂窝栈。缺省即路由A(5G CPE 必须有 modem); 移除
+     #       该文件可回 frankenstein 模式(与原语义一致)。
+     if [ ! -f /data/gw/MODE.fh ]; then
+         touch /data/gw/MODE.fh
+         echo "$(date -u +%FT%TZ) MODE.fh auto-provisioned (first boot)" >> /tmp/rc.extend.log
+     fi
      [ -f /data/gw/MODE.fh ] && nohup sh /data/gw/rc_netfh.sh >/tmp/netfh.out 2>&1 &
      insmod /data/gw/healthdog.ko forensic=1 armed=0 2>/dev/null
      nohup sh /data/gw/rc19.sh >/tmp/rc19.log 2>&1 &

@@ -60,6 +60,21 @@ def detect_pc_ip():
     return None
 
 
+def warn_subnet_conflict():
+    """D2 开箱审查: PC 任一网卡已在 192.168.9.0/24 -> 刷后网关(192.168.9.1)
+    与现有网段冲突, 提示但不禁行(用户可能就是要直连场景)。"""
+    try:
+        out = subprocess.run(["ipconfig"], capture_output=True,
+                             encoding="gbk", errors="replace", timeout=10).stdout
+        hits = re.findall(r"IPv4[^:]*:\s*(192\.168\.9\.\d+)", out)
+        others = [h for h in hits if h != PC_IP]
+        if others:
+            log("!! 警告: PC 存在 192.168.9.0/24 网卡(%s) — 刷后网关固定使用"
+                "192.168.9.1, 将与该网段冲突; 如非直连场景请先调整" % ",".join(others))
+    except Exception:
+        pass
+
+
 def get_toor_pass():
     if "--toor-pass" in sys.argv:
         return sys.argv[sys.argv.index("--toor-pass") + 1]
@@ -81,6 +96,7 @@ def main():
     if "'" in toor:
         sys.exit("!! 口令含单引号, 不支持")
     PC_IP = detect_pc_ip()
+    warn_subnet_conflict()
     if not PC_IP:
         sys.exit("!! 未探测到 PC 有线地址（169.254 或 192.168.9；可用 --pc-ip 指定）")
     if PC_IP.startswith("169.254"):

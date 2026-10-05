@@ -559,6 +559,22 @@ apply_bandlock() {
     case "$LTE$NR" in *,,*|,*) jerr bad_bands;; esac
     [ "$EN" = 1 ] && [ -z "$LTE$NR" ] && jerr empty_bands
     NS=$FH_TREE.NetworkSettings
+    # v2.21 (P1): 频段锁双引擎 -- mipc=自研直连(libqlril ql_nw_set_band_mode,
+    # 168B 结构已逆向+实弹验证, 不经 mobilenetwork/cfgmgr); tree=原厂树路径。
+    # 切换: /data/gw/cellular_engine.conf 写 BAND_ENGINE=tree|mipc (缺省 mipc)。
+    BAND_ENGINE=mipc
+    [ -r $GWDATA/cellular_engine.conf ] && . $GWDATA/cellular_engine.conf
+    if [ "$BAND_ENGINE" = mipc ] && [ -x /data/gw/mipc_cellular ]; then
+        [ "$EN" = 1 ] && LTES=${LTE:-all} && NRS=${NR:-all} || { LTES=all; NRS=all; }
+        R=$(/data/gw/mipc_cellular setlock lte="$LTES" nr="$NRS" 2>&1)
+        RET=$(printf '%s' "$R" | grep -oE 'ret=[0-9-]+' | tail -1 | cut -d= -f2)
+        [ "$RET" = 0 ] || jerr mipc_fail
+        # 状态持久化到自管 conf (mipc 模式不写树; 树同步由 mobilenetwork 上报被动跟随)
+        { echo "BAND_EN=$EN"; echo "LTE_MASK=$LTE"; echo "NR_MASK=$NR";
+          echo "CELL_EN=0"; } > $GWDATA/cellular.conf
+        ok_json ',"engine":"mipc","note":"modem重扫约20-60s"'
+        return
+    fi
     # 互斥: 开频段锁 -> 关小区锁 (原厂同款约束, 服务端强制)
     if [ "$EN" = 1 ]; then
         cfgset_ok $FH_TREE.LockCellList.LockEnable 0 || jerr tree_fail
@@ -567,7 +583,7 @@ apply_bandlock() {
     cfgset_ok $NS.LTELockBAND "$LTE" || jerr tree_fail
     cfgset_ok $NS.NRLockBAND "$NR"    || jerr tree_fail
     cell_persist
-    ok_json
+    ok_json ',"engine":"tree"'
 }
 
 apply_celllock() {

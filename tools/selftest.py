@@ -542,42 +542,54 @@ def t_cel_tree():
     record(t_cel_tree._test_name, "cellular", ok, out.strip()[:40])
 
 
-@test("锁定状态跨层一致 (conf=树=模组)")
+@test("锁定状态跨层一致 (conf=树=模组 / mipc 引擎就位)")
 def t_cel_lockcons():
-    # 自管 conf ↔ cfg 树 ↔ 模组 EMMCHLCK 三层必须一致
+    # engine=tree: 自管 conf ↔ cfg 树 ↔ 模组 EMMCHLCK 三层一致
+    # engine=mipc (P1): 锁不经树 -- conf 状态合法 + 引擎二进制就位 + 互斥约束
     conf = dev("cat /data/gw/cellular.conf 2>/dev/null")
-    if not conf.strip():
-        record(t_cel_lockcons._test_name, "cellular", True, "no lock conf")
-        return
-    want_band = re.search(r"BAND_EN=(\d)", conf)
-    want_cell = re.search(r"CELL_EN=(\d)", conf)
-    tree = dev(
-        "LD_LIBRARY_PATH=/fhrom/lib /fhrom/bin/cfg_cmd get "
-        "InternetGatewayDevice.X_FH_MobileNetwork.NetworkSettings.LockBandEnable "
-        "2>/dev/null | tail -1; "
-        "LD_LIBRARY_PATH=/fhrom/lib /fhrom/bin/cfg_cmd get "
-        "InternetGatewayDevice.X_FH_MobileNetwork.LockCellList.LockEnable "
-        "2>/dev/null | tail -1")
-    tband = re.search(r"value=(\d)", tree.split("\n")[0] or "")
-    tcell = re.search(r"value=(\d)", tree.split("\n")[-1] or "")
+    eng = dev("sh -c '. /data/gw/cellular_engine.conf 2>/dev/null; echo ${BAND_ENGINE:-mipc}'").strip()
     mism = []
-    if want_band and tband and want_band.group(1) != tband.group(1):
-        mism.append(f"band conf={want_band.group(1)} tree={tband.group(1)}")
-    if want_cell and tcell and want_cell.group(1) != tcell.group(1):
-        mism.append(f"cell conf={want_cell.group(1)} tree={tcell.group(1)}")
-    # 模组层: 小区锁开则 EMMCHLCK 非 0, 关则必须为 0
-    emm = at("AT+EMMCHLCK?")
-    m = re.search(r"EMMCHLCK:\s*(\d+)", emm)
-    if want_cell and m:
-        w = want_cell.group(1)
-        g = m.group(1)
-        if w == "1" and g == "0":
-            mism.append("celllock conf=1 modem=0")
-        if w == "0" and g != "0":
-            mism.append(f"celllock conf=0 modem={g}")
+    if eng == "mipc":
+        out = dev("ls -la /data/gw/mipc_cellular 2>/dev/null | grep -c '^-rwx'")
+        if out.strip() != "1":
+            mism.append("mipc_cellular 缺失/不可执行")
+        be = re.search(r"BAND_EN=(\d)", conf)
+        ce = re.search(r"CELL_EN=(\d)", conf)
+        if be and ce and be.group(1) == "1" and ce.group(1) == "1":
+            mism.append("频段锁与小区锁互斥违反")
+        if not be:
+            mism.append("cellular.conf 无 BAND_EN")
+    else:
+        if not conf.strip():
+            record(t_cel_lockcons._test_name, "cellular", True, "no lock conf")
+            return
+        want_band = re.search(r"BAND_EN=(\d)", conf)
+        want_cell = re.search(r"CELL_EN=(\d)", conf)
+        tree = dev(
+            "LD_LIBRARY_PATH=/fhrom/lib /fhrom/bin/cfg_cmd get "
+            "InternetGatewayDevice.X_FH_MobileNetwork.NetworkSettings.LockBandEnable "
+            "2>/dev/null | tail -1; "
+            "LD_LIBRARY_PATH=/fhrom/lib /fhrom/bin/cfg_cmd get "
+            "InternetGatewayDevice.X_FH_MobileNetwork.LockCellList.LockEnable "
+            "2>/dev/null | tail -1")
+        tband = re.search(r"value=(\d)", tree.split("\n")[0] or "")
+        tcell = re.search(r"value=(\d)", tree.split("\n")[-1] or "")
+        if want_band and tband and want_band.group(1) != tband.group(1):
+            mism.append(f"band conf={want_band.group(1)} tree={tband.group(1)}")
+        if want_cell and tcell and want_cell.group(1) != tcell.group(1):
+            mism.append(f"cell conf={want_cell.group(1)} tree={tcell.group(1)}")
+        emm = at("AT+EMMCHLCK?")
+        m = re.search(r"EMMCHLCK:\s*(\d+)", emm)
+        if want_cell and m:
+            w = want_cell.group(1)
+            g = m.group(1)
+            if w == "1" and g == "0":
+                mism.append("celllock conf=1 modem=0")
+            if w == "0" and g != "0":
+                mism.append(f"celllock conf=0 modem={g}")
     ok = not mism
     record(t_cel_lockcons._test_name, "cellular", ok,
-           "3-layer consistent" if ok else "; ".join(mism)[:100])
+           f"engine={eng} ok" if ok else "; ".join(mism)[:100])
 
 
 @test("GUI sim 端点与 AT 实测一致 (IMEI)")

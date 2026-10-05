@@ -1,8 +1,9 @@
 #!/bin/sh
-# cellular_replay.sh v1.0 -- 开机重放蜂窝锁定 (频段/小区) 到 cfgmgr 树
-# 树每次开机由出厂档案重建(param.pdt.enc), 锁定状态存 /data/gw/cellular.conf
-# 由 rc_netfh 在 mobilenetwork 启动后调用 (mobilenetwork 的 lockband/celllock
-# 线程监听树变化并下发 ql_nw 到模组)
+# cellular_replay.sh v2.0 -- 开机重放蜂窝锁定 (频段/小区)
+# v2.0 (P1): 频段锁双引擎 -- BAND_ENGINE=mipc(缺省)时经 /data/gw/mipc_cellular
+#   直发模组(168B 结构, 不经树/不经 mobilenetwork 翻译), tree 时走原厂 cfg 树。
+#   小区锁仍走树 (mobilenetwork 在跑, EMMCHLCK 翻译可靠)。
+# 由 rc_netfh 在 modem 栈就绪后调用。
 CONF=/data/gw/cellular.conf
 [ -r "$CONF" ] || exit 0
 . "$CONF"
@@ -11,14 +12,22 @@ C=/fhrom/bin/cfg_cmd
 T=InternetGatewayDevice.X_FH_MobileNetwork
 NS=$T.NetworkSettings
 CL=$T.LockCellList
+BAND_ENGINE=mipc
+[ -r /data/gw/cellular_engine.conf ] && . /data/gw/cellular_engine.conf
 
 # 频段锁
 if [ "${BAND_EN:-0}" = 1 ]; then
-    $C set $NS.LockBandEnable 0 >/dev/null 2>&1      # 先关再开, 触发完整应用路径
-    $C set $NS.LTELockBAND "$LTE_MASK" >/dev/null 2>&1
-    $C set $NS.NRLockBAND "$NR_MASK" >/dev/null 2>&1
-    $C set $NS.LockBandEnable 1 >/dev/null 2>&1
-    echo "cellular_replay: bandlock 1 lte=[$LTE_MASK] nr=[$NR_MASK]" >> /tmp/rc_netfh.log
+    if [ "$BAND_ENGINE" = mipc ] && [ -x /data/gw/mipc_cellular ]; then
+        /data/gw/mipc_cellular setlock lte="${LTE_MASK:-all}" nr="${NR_MASK:-all}" \
+            >/tmp/bandlock_replay.log 2>&1
+        echo "cellular_replay: bandlock(mipc) 1 lte=[$LTE_MASK] nr=[$NR_MASK] rc=$?" >> /tmp/rc_netfh.log
+    else
+        $C set $NS.LockBandEnable 0 >/dev/null 2>&1      # 先关再开, 触发完整应用路径
+        $C set $NS.LTELockBAND "$LTE_MASK" >/dev/null 2>&1
+        $C set $NS.NRLockBAND "$NR_MASK" >/dev/null 2>&1
+        $C set $NS.LockBandEnable 1 >/dev/null 2>&1
+        echo "cellular_replay: bandlock(tree) 1 lte=[$LTE_MASK] nr=[$NR_MASK]" >> /tmp/rc_netfh.log
+    fi
 fi
 
 # 小区锁

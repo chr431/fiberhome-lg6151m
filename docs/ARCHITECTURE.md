@@ -40,7 +40,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `docs/ARCHITECTURE.md` | **v1.0** | doc | `-` | 架构+版本总表(本表生成) |
 | `gw/bin/fhstub.so` | **v1.0** | manifest | `/data/gw/fhstub.so` | FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径) |
 | `gw/bin/healthdog.ko` | **v1.0** | manifest | `/data/gw/healthdog.ko` | 取证看门狗内核模块(forensic=1) |
-| `gw/bin/mipc_cellular` | **v0.1** | manifest | `/data/gw/mipc_cellular` | 蜂窝MIPC直连CLI(getbands已通/ret=0实证; setbands达modem栈0x80070008参数域待映射) |
+| `gw/bin/mipc_cellular` | **v0.2** | manifest | `/data/gw/mipc_cellular` | 蜂窝MIPC直连CLI(getbands/setlock/unlock; 锁NR41+79实弹验证零扰动) |
 | `gw/bin/multiwan_ctl` | **v1.1** | manifest | `/data/gw/multiwan_ctl` | 原厂multiwan引擎ioctl控制器(zig动态链libfhdrv_net_api,36B结构体) |
 | `gw/bin/shmsnap` | **v1.0** | manifest | `/data/gw/shmsnap` | cfgmgr树共享内存快照工具(save/load 16MB原始字节, gzip后127KB, 开机恢复锁定状态) |
 | `gw/bin/v3_fix.ko` | **v1.1** | manifest | `/data/gw/v3_fix.ko` | TTL伪装/PPE解绑内核模块(wan_if/ttl_mode/unhook) |
@@ -48,7 +48,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/bin/v3httpd` | **v2.2** | manifest | `/data/gw/v3httpd` | 网关GUI HTTP服务(:80, 静态+JSON API) |
 | `gw/bin/wpapmk` | **v1.0** | manifest | `/data/gw/wpapmk` | WPA口令转PMK(纯C PBKDF2-SHA1; fh魔改hostapd只吃wpa_psk) |
 | `gw/capture_ubus.sh` | **v1.1** | manifest | `/data/gw/capture_ubus.sh` | stock拨号一次性捕获(ubus monitor+ccmni采样) |
-| `gw/cellular_replay.sh` | **v1.1** | manifest | `/data/gw/cellular_replay.sh` | 蜂窝锁定开机重放(频段/小区锁到cfgmgr树, 树每次开机由出厂档案重建) |
+| `gw/cellular_replay.sh` | **v2.0** | manifest | `/data/gw/cellular_replay.sh` | 蜂窝锁定开机重放(频段/小区锁到cfgmgr树, 树每次开机由出厂档案重建) |
 | `gw/consfeed.sh` | **v1.0** | manifest | `/data/gw/consfeed.sh` | v2 控制台喂食器(无setsid,v2_access拉起) |
 | `gw/defaults.conf` | **v1.0** | manifest | `/data/gw/defaults.conf` | 统一配置只读出厂基线(444); 消费方source叠加settings.conf稀疏覆盖 |
 | `gw/dial_5g.sh` | **v1.2** | manifest | `/data/gw/dial_5g.sh` | 生产 5G 拨号器(check_ia+netagent补丁) |
@@ -75,14 +75,14 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
 | `gw/wifi_up.sh` | **v1.17** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.17: 出厂brmac兜底去设备化(eth0反推+合成末级; 原硬编码本机MAC洗出)) |
-| `gw/www/api.sh` | **v2.20** | manifest | `/data/gw/www/api.sh` | GUI JSON端点(v2.15: hostapd探测改iw AP-type(拓扑形态无关); v2.14: 配置统一cfg_load/gw_set读写defaults+settings overlay, 旧散落conf写路径全撤; v2.13端口强校验; v2.12: get_sys嵌套花括号默认值触发busybox ash展开bug多印1字节破坏JSON, 改-n分支; get_logs补\t\r反斜杠转义使严格JSON.parse通过; 状态聚合) |
+| `gw/www/api.sh` | **v2.21** | manifest | `/data/gw/www/api.sh` | GUI JSON端点(v2.15: hostapd探测改iw AP-type(拓扑形态无关); v2.14: 配置统一cfg_load/gw_set读写defaults+settings overlay, 旧散落conf写路径全撤; v2.13端口强校验; v2.12: get_sys嵌套花括号默认值触发busybox ash展开bug多印1字节破坏JSON, 改-n分支; get_logs补\t\r反斜杠转义使严格JSON.parse通过; 状态聚合) |
 | `gw/www/app.js` | **v3.13** | manifest | `/data/gw/www/app.js` | 控制台轮询逻辑 |
 | `gw/www/index.html` | **v2.7** | manifest | `/data/gw/www/index.html` | v3控制台页面 |
 | `gw/www/style.css` | **v2.1** | manifest | `/data/gw/www/style.css` | 控制台主题 |
 | `gw/zz_data_hook` | **v1.1** | manifest | `/data/build/rootfs/etc/init.d/zz_data_hook` | S98数据钩子(v1.1: plain sh——原厂无/etc/rc.common, rc.common式shebang致开机栈全灭; 回归实测发现) |
 | `gw/src/fhstub.c` | **v1.0** | src | `gw/bin/fhstub.so` | FH符号桩库源码 |
 | `gw/src/healthdog.c` | **v1.0** | src | `gw/bin/healthdog.ko` | 看门狗模块源码(版本随产物) |
-| `gw/src/mipc_cellular.c` | **v0.1** | src | `gw/bin/mipc_cellular` | 蜂窝MIPC直连工具源(P1): dlopen libqlril 闭包预载+ql_nw_init+get/set_band_mode; setbands 168B结构语义待续 |
+| `gw/src/mipc_cellular.c` | **v0.2** | src | `gw/bin/mipc_cellular` | 蜂窝MIPC直连CLI源(P1): dlopen闭包预载+ql_nw_init; v0.2: 168B结构全破译(setlock lte/nr=列表 解锁=全1; NR三段位图1-32/34-64/65-96) |
 | `gw/src/multiwan_ctl.c` | **v1.1** | src | `gw/bin/multiwan_ctl` | multiwan控制器源码(随产物1.1) |
 | `gw/src/shmsnap.c` | **v1.0** | src | `gw/bin/shmsnap` | cfgmgr快照源码 |
 | `gw/src/v3_fix.c` | **v1.1** | src | `gw/bin/v3_fix.ko` | TTL/解绑模块源码(版本随产物) |
@@ -109,7 +109,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/lk_flip2.py` | **v1.1** | tool | `-` | LK 一键翻槽(a|b, misc[2060]字节) |
 | `tools/lk_write.py` | **v1.6** | tool | `-` | LK raw-shell 文件写入(回显校验+tmpfs挂载+cmdlist巡检, 取代lk_fix_access) |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
-| `tools/selftest.py` | **v1.4** | tool | `-` | 断言式全功能测试(L13-L15: 7类51项; v1.3: +5G带宽跨层一致性(settings BW5G vs iw宽度, 守dat双字段链); v1.2: 设备侧强制ccmni探测+坏口令断言) |
+| `tools/selftest.py` | **v1.5** | tool | `-` | 断言式全功能测试(L13-L15: 7类51项; v1.3: +5G带宽跨层一致性(settings BW5G vs iw宽度, 守dat双字段链); v1.2: 设备侧强制ccmni探测+坏口令断言) |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |
 | `tools/serial_server.py` | **v1.7** | tool | `-` | 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets) |
 | `tools/vercheck.py` | **v1.5** | tool | `-` | 版本注册表校验/渲染/设备比对(v1.3: device()随deploy基座迁/data/gw; v1.2性质分区双向强制+全跟踪文件可归类; v1.1 image类md5钉死) |

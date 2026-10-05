@@ -68,7 +68,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/v2_access.sh` | **v6.1** | manifest | `/data/gw/v2_access.sh` | v2 极简访问层(串口/SSH/DHCP/防火墙22,零守护干涉) |
 | `gw/v3_babysit_v2.sh` | **v2.0** | manifest | `/data/gw/babysit_v2.sh` | 启动保姆(T1杀rcS/T2核爆回B) |
 | `gw/v3_rc10.extend.sh` | **v2.18** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2(br-lan+wifi+wan+DNS; v2.5网口对调; v2.6/2.7 eth1 MAC钉死+归因修正) |
-| `gw/wan_agg.sh` | **v2.16** | manifest | `/data/gw/wan_agg.sh` | 双上行聚合主管(v2.16: 自补xt_statistic/xt_mac模块+v4 MAC钉死规则(parity v6, vendor引擎缺席时原失效); v2.15: 聚合总开关ENABLE=0旁路/1参战, 热切+GUI agg_mode; 照抄原厂quecadp内核分流+fwmark路由; v1.7 to-LAN护盾规则自愈(全灭黑洞终根因) |
+| `gw/wan_agg.sh` | **v2.17** | manifest | `/data/gw/wan_agg.sh` | 双上行聚合主管(v2.17: v4免插件配方(statistic插件缺libxtables.so.12/mac插件不存在——v4分流自精简启动以来从未生效): 源端口区间分流(v6同款)+钉死改源IP(邻居解析+漂移重建); v2.15: 聚合总开关ENABLE=0旁路/1参战, 热切+GUI agg_mode; 照抄原厂quecadp内核分流+fwmark路由; v1.7 to-LAN护盾规则自愈(全灭黑洞终根因) |
 | `gw/webs_revive.sh` | **v1.3** | manifest | `/data/gw/webs_revive.sh` | 原厂GUI复活器(自足nginx conf; 手动拉起) |
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |

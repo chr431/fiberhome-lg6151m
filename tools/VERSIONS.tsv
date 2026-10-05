@@ -3,7 +3,7 @@
 gw/rc.extend.sh	1.8	manifest	/data/rc.extend.sh	槽位调度器(v1.7: A槽TRY_A自清+hnat_qos恢复[S99误伤根治]+dropbear唯一属主; b=纯访问层,a=全栈; 设备gw路径正本回采)
 gw/v3_rc10.extend.sh	2.18	manifest	/data/gw/rc19.sh	v3 启动编排 rc19v2(br-lan+wifi+wan+DNS; v2.5网口对调; v2.6/2.7 eth1 MAC钉死+归因修正)
 gw/wifi_up.sh	1.17	manifest	/data/gw/wifi_up.sh	mt7992 AP 工厂配方(v1.17: 出厂brmac兜底去设备化(eth0反推+合成末级; 原硬编码本机MAC洗出))
-gw/wan_agg.sh	2.16	manifest	/data/gw/wan_agg.sh	双上行聚合主管(v2.16: 自补xt_statistic/xt_mac模块+v4 MAC钉死规则(parity v6, vendor引擎缺席时原失效); v2.15: 聚合总开关ENABLE=0旁路/1参战, 热切+GUI agg_mode; 照抄原厂quecadp内核分流+fwmark路由; v1.7 to-LAN护盾规则自愈(全灭黑洞终根因)
+gw/wan_agg.sh	2.17	manifest	/data/gw/wan_agg.sh	双上行聚合主管(v2.17: v4免插件配方(statistic插件缺libxtables.so.12/mac插件不存在——v4分流自精简启动以来从未生效): 源端口区间分流(v6同款)+钉死改源IP(邻居解析+漂移重建); v2.15: 聚合总开关ENABLE=0旁路/1参战, 热切+GUI agg_mode; 照抄原厂quecadp内核分流+fwmark路由; v1.7 to-LAN护盾规则自愈(全灭黑洞终根因)
 gw/udhcpc_wan.script	1.0	manifest	/data/gw/udhcpc_wan.script	WAN口 udhcpc 事件钩子(接口无关化)
 gw/healthdog.sh	1.1	manifest	/data/gw/healthdog.sh	看门狗用户态心跳
 gw/v3_babysit_v2.sh	2.0	manifest	/data/gw/babysit_v2.sh	启动保姆(T1杀rcS/T2核爆回B)

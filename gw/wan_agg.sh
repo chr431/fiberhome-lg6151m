@@ -150,8 +150,13 @@ kernel_apply() {  # $1=s1(5G) $2=s2(家宽) — vendor ioctl via multiwan_ctl+fh
     grep -q "Current mode: 1" /proc/multi_wan/mode 2>/dev/null
 }
 
-# iptables 引擎: WANAGG 链重建 (prob 为死侧归零后的有效权重)
-fw_setup() {  # $1=p_w2(家宽概率0-1, busybox 无浮点 -> 用万分比整数)
+# iptables 引擎: WANAGG 链重建 (v2.17: 免插件配方 — 本机 iptables 内建 tcp/udp/mark/
+# connmark 匹配, 而 libxt_statistic.so 缺 libxtables.so.12 不可用, libxt_mac 根本
+# 不存在; 分流改源端口区间确定性(v6 同款), 钉死改源 IP(pin MAC 经邻居表解析))
+pin_ip() {  # $1=mac -> 当前IP(空=未解析)
+    ip neigh | grep -i "$1" | awk '{print $1}' | grep -E '^[0-9.]+$' | head -1
+}
+fw_setup() {  # $1=w2_pct(家宽份额 0-100, 死侧归零后的有效值)
     iptables -t mangle -D PREROUTING -i br-lan -j WANAGG 2>/dev/null
     iptables -t mangle -F WANAGG 2>/dev/null
     iptables -t mangle -X WANAGG 2>/dev/null
@@ -159,21 +164,39 @@ fw_setup() {  # $1=p_w2(家宽概率0-1, busybox 无浮点 -> 用万分比整数
     # 已建流: 恢复 ct mark (粘性; ctmark 0 无害)
     iptables -t mangle -A WANAGG -m conntrack --ctstate ESTABLISHED,RELATED \
         -j CONNMARK --restore-mark --mask $W_MASK
-    # v2.16: v4 MAC 钉死(parity with v6) — vendor 引擎缺席时 v4 钉死原本失效;
-    # 钉死表 /data/gw/agg_pins.conf (op 1=5G 2=家宽), 主备模式下跳过(语义不适用)
+    # 钉死(源IP; MAC->IP 邻居解析, 未上线则跳过留待下轮重建; 主备模式跳过)
     if [ "$PMODE" = 0 ]; then
         while read -r PIN_MAC PIN_OP; do
             case "$PIN_MAC" in "#"*|"") continue ;; esac
             if [ "$PIN_OP" = 1 ]; then PIN_MK=$W1_MARK; elif [ "$PIN_OP" = 2 ]; then PIN_MK=$W2_MARK; else continue; fi
-            iptables -t mangle -A WANAGG -m mac --mac-source "$PIN_MAC" \
-                -j MARK --set-xmark $PIN_MK $W_MASK
+            PIN_IP=$(pin_ip "$PIN_MAC")
+            if [ -n "$PIN_IP" ]; then
+                iptables -t mangle -A WANAGG -s "$PIN_IP" -j MARK --set-mark $PIN_MK/$W_MASK
+                echo "$PIN_IP" > /tmp/pin_${PIN_MAC//:/}.ip
+            else
+                log "pin: $PIN_MAC 邻居未解析, 本轮跳过"
+            fi
         done < /data/gw/agg_pins.conf
     fi
-    # 新流: 按概率分流 (statistic --probability 只接受小数字符串, 0.60 形态)
-    iptables -t mangle -A WANAGG -m conntrack --ctstate NEW -m statistic \
-        --mode random --probability $1 -j MARK --set-xmark $W2_MARK $W_MASK
-    iptables -t mangle -A WANAGG -m conntrack --ctstate NEW \
-        -j MARK --set-xmark $W1_MARK $W_MASK
+    # 新流: 源端口区间确定性分流(OS 临时端口近似均匀; 与 v6 引擎同款设计)
+    if [ "$1" = "0" ]; then
+        iptables -t mangle -A WANAGG -m conntrack --ctstate NEW -m mark --mark 0/$W_MASK \
+            -j MARK --set-mark $W1_MARK/$W_MASK
+    elif [ "$1" = "100" ]; then
+        iptables -t mangle -A WANAGG -m conntrack --ctstate NEW -m mark --mark 0/$W_MASK \
+            -j MARK --set-mark $W2_MARK/$W_MASK
+    else
+        CUT=$(( (65535 * $1) / 100 ))
+        for PR in tcp udp; do
+            iptables -t mangle -A WANAGG -p $PR -m conntrack --ctstate NEW -m mark --mark 0/$W_MASK \
+                --sport 0:$CUT -j MARK --set-mark $W2_MARK/$W_MASK
+            iptables -t mangle -A WANAGG -p $PR -m conntrack --ctstate NEW -m mark --mark 0/$W_MASK \
+                --sport $((CUT+1)):65535 -j MARK --set-mark $W1_MARK/$W_MASK
+        done
+        # catchall: 未标记的非 tcp/udp 新流 -> 5G
+        iptables -t mangle -A WANAGG -m conntrack --ctstate NEW -m mark --mark 0/$W_MASK \
+            -j MARK --set-mark $W1_MARK/$W_MASK
+    fi
     # 保存 ct mark 供后续包恢复
     iptables -t mangle -A WANAGG -j CONNMARK --save-mark --mask $W_MASK
     iptables -t mangle -A PREROUTING -i br-lan -j WANAGG
@@ -286,19 +309,13 @@ done < /data/gw/agg_pins.conf
 # 引擎探测: vendor ioctl (multiwan_ctl+fhstub; proc 写已证伪为只读) 失败则 iptables
 kernel_apply 1 1 && ENGINE=vendor || ENGINE=iptables
 echo "$ENGINE" > /tmp/wan_engine
-# v2.16: 自补 iptables 引擎依赖的 xtables 模块(精简启动下 ko_install 未载全;
-#        实证: statistic 规则静默安装失败 -> 新流全落 main 表)
-KDIR=/lib/modules/$(uname -r)
-for km in xt_statistic xt_mac; do
-    [ -d /sys/module/$km ] || insmod $KDIR/$km.ko 2>/dev/null
-done
 # v2.15: 聚合总开关 (agg.conf ENABLE=0|1, GUI agg_mode 端点热切)
 AGG_ON=1
 grep -q '^ENABLE=0' /data/gw/agg.conf 2>/dev/null && AGG_ON=0
 dp_setup
 S1=1; S2=1; D1=0; D2=0; U1=0; U2=0
 if [ "$AGG_ON" = 1 ]; then
-    [ "$ENGINE" = iptables ] && fw_setup 0.60
+    [ "$ENGINE" = iptables ] && fw_setup 60
     fw6_rules; fw6_setup 1   # v2.4: v6 低8位自建分流(模块v6哈希常数缺陷的对策)
 else
     agg_bypass
@@ -364,6 +381,19 @@ while :; do
     fi
     ensure_lease
     [ "$AGG_ON" = 1 ] && ensure_rules
+    # v2.17: 钉死IP漂移检测 — pin MAC 的邻居IP变了(或新上线)则重建分流链
+    if [ "$AGG_ON" = 1 ] && [ "$PMODE" = 0 ] && [ "$ENGINE" = iptables ]; then
+        while read -r PIN_MAC PIN_OP; do
+            case "$PIN_MAC" in "#"*|"") continue ;; esac
+            [ "$PIN_OP" = 1 ] || [ "$PIN_OP" = 2 ] || continue
+            NOW_IP=$(pin_ip "$PIN_MAC")
+            OLD_IP=$(cat /tmp/pin_${PIN_MAC//:/}.ip 2>/dev/null)
+            if [ "$NOW_IP" != "$OLD_IP" ]; then
+                log "pin: $PIN_MAC ip $OLD_IP -> ${NOW_IP:-未解析}, 重建分流链"
+                FORCE=1
+            fi
+        done < /data/gw/agg_pins.conf
+    fi
     if w1_alive; then U1=$((U1+1)); D1=0; else D1=$((D1+1)); U1=0; fi
     if w2_alive; then U2=$((U2+1)); D2=0; else D2=$((D2+1)); U2=0; fi
     NS1=$S1; NS2=$S2
@@ -389,9 +419,9 @@ while :; do
         log "state: 5g $S1->$E1 (d1=$D1) home $S2->$E2 (d2=$D2) pmode=$PMODE"
         kernel_apply $E1 $E2 2>>$LOG   # vendor 引擎下即生效; iptables 引擎下无害空写
         if [ "$ENGINE" = iptables ]; then
-            if [ $E1 -eq 1 ] && [ $E2 -eq 1 ]; then fw_setup 0.60
-            elif [ $E2 -eq 0 ]; then fw_setup 0.00
-            else fw_setup 1.00; fi
+            if [ $E1 -eq 1 ] && [ $E2 -eq 1 ]; then fw_setup $W2_PCT
+            elif [ $E2 -eq 0 ]; then fw_setup 0
+            else fw_setup 100; fi
             # v2.5: conntrack二进制损坏(relocation: nfct_nlmsg_build_filter not found)
             #       conntrack -D 在v3从未生效, 移除死调用 — 断而必破由下方fwmark摘除承担
         fi

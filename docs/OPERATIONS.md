@@ -63,6 +63,15 @@ python tools/deploy.py attic      # 设备侧流浪脚本归档
 - CMGS 交互式 AT 会毒化 ril（需 sysrq-b 恢复）→ 短信发送未启用
 - 上行认证守护按 AUTHD_CMD 配置运行（现场 EAP 类认证建议先在测试口验证）
 
+## 守护拓扑（2026-10-06 P3-lite 后）
+
+- 已下架：cfgmgr / logmgr（树不经守护，shm 由 cfg_tool 建立；rc_netfh v3.0）
+- 仍在跑的原厂件：mobilenetwork（树翻译层, P3.5 待裁）· modem 栈军（ccci 三件
+  /mtk_netagent/ql_netd/ql_ril_service/mipc_submonitor/atcid 对/thermal_core）
+- 自研：dial_keeper（拨号兜底, 35s 宽限）· watchdog v1.3（17 不变量+自愈）·
+  v3httpd/api.sh · wan_agg · wifi_up/hostapd
+- 首刷默认：WiFi `LG6151M`/`lg6151m`，GUI `lg6151m`（均见 install/README）
+
 ## 日常观测点
 
 - `/tmp/wifi_up.log`（AP 拉起 + 自动选道结果 `/tmp/wifi_autoch`）

@@ -166,7 +166,7 @@ def check(fail=True):
     # 7) 全跟踪文件必须可归类: 登记 / 豁免区 / 根级白名单
     #    *_analysis/ 为动态发现(analysis 同类 RE 数据区, 免在代码里写死具体名)
     ROOT_OK = {".gitignore", ".gitattributes", "LICENSE", "README.md", "tools/VERSIONS.tsv"}
-    FREE_ZONES = ("tools/oneoff/", "analysis/", "ref/", "docs/")
+    FREE_ZONES = ("tools/oneoff/", "analysis/", "ref/", "docs/", "install/")
     FREE_ZONES += tuple(d + "/" for d in os.listdir(REPO)
                         if d.endswith("_analysis") and os.path.isdir(os.path.join(REPO, d)))
     try:

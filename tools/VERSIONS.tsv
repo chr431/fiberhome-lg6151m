@@ -29,7 +29,7 @@ tools/serial_cmd.py	1.3	tool	-	串口命令瘦客户端(marker输出捕获; v1.3
 tools/lk_flip2.py	1.1	tool	-	LK 一键翻槽(a|b, misc[2060]字节)
 tools/lk_write.py	1.6	tool	-	LK raw-shell 文件写入(回显校验+tmpfs挂载+cmdlist巡检, 取代lk_fix_access)
 tools/wait_ready.py	1.1	tool	-	轮询等待器(tcp/串口marker, 代替长sleep)
-tools/vercheck.py	1.4	tool	-	版本注册表校验/渲染/设备比对(v1.3: device()随deploy基座迁/data/gw; v1.2性质分区双向强制+全跟踪文件可归类; v1.1 image类md5钉死)
+tools/vercheck.py	1.5	tool	-	版本注册表校验/渲染/设备比对(v1.3: device()随deploy基座迁/data/gw; v1.2性质分区双向强制+全跟踪文件可归类; v1.1 image类md5钉死)
 README.md	1.1	doc	-	仓库总览与快速上手
 gw/bin/multiwan_ctl	1.1	manifest	/data/gw/multiwan_ctl	原厂multiwan引擎ioctl控制器(zig动态链libfhdrv_net_api,36B结构体)
 gw/bin/fhstub.so	1.0	manifest	/data/gw/fhstub.so	FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径)

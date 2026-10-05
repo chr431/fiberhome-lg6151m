@@ -75,4 +75,4 @@ gw/defaults.conf	1.0	manifest	/data/gw/defaults.conf	统一配置只读出厂基
 tools/leak_check.py	1.1	tool	-	敏感词+设备MAC零命中门禁(工作树+可选全历史; 建议pre-push)
 docs/ARCHITECTURE.md	1.0	doc	-	架构+版本总表(本表生成)
 gw/watchdog.sh	1.1	manifest	/data/gw/watchdog.sh	持续不变量看门狗(L13: 17项不变量; v1.2/L14: +蜂窝控制面 atcid自愈+CFUN探针+注册态, airplane容忍)
-tools/selftest.py	1.1	tool	-	断言式全功能测试(L13+L14: 7类~48项; v1.1: 全18 GET端点扫全+AT面+SIM/注册+锁三层一致性+看门狗/时钟/温度+厂商面封闭)
+tools/selftest.py	1.2	tool	-	断言式全功能测试(L13+L14: 7类50项; v1.2: 5G数据面探测改设备侧强制ccmni出口(与PC钉死解耦)+坏口令机制断言; v1.1: 全GET端点扫全+AT面+锁三层一致性)

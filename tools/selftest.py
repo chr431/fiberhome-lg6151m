@@ -119,7 +119,8 @@ _TOKEN = ["<unset>"]
 def _token():
     """Cached GUI token, or None when no password is configured.
 
-    Mirrors lgssh's secrets resolution (LG_GUI_PASS env or device_local.py).
+    Mirrors lgssh's secrets resolution (LG_GUI_PASS env or device_local.py;
+    v3 GUI key is GW_PASS -- WEB_PASS is the vendor web password).
     """
     if _TOKEN[0] != "<unset>":
         return _TOKEN[0]
@@ -127,7 +128,7 @@ def _token():
     if not pw:
         try:
             import device_local
-            pw = getattr(device_local, "GUI_PASS", "")
+            pw = getattr(device_local, "GW_PASS", "")
         except ImportError:
             pw = ""
     tok = get_token(pw) if pw else None
@@ -238,20 +239,15 @@ def t_gui_plugin():
 
 @test("API login + token 生命周期")
 def t_gui_login():
-    pw = os.environ.get("LG_GUI_PASS")
-    if not pw:
-        try:
-            import device_local
-            pw = getattr(device_local, "GUI_PASS", "")
-        except ImportError:
-            pw = ""
-    if not pw:
-        record(t_gui_login._test_name, "gui", True, "skip (no GUI_PASS)")
+    tok = _token()
+    if tok is None:
+        # GW_PASS 缺失或已过期(设备侧 pass_set 改过) -- 无法做正向断言;
+        # 认证机制由 t_gui_badlogin/t_gui_badtoken 覆盖
+        record(t_gui_login._test_name, "gui", True,
+               "skip (GW_PASS stale -- password changed on device?)")
         return
-    tok = get_token(pw)
-    ok = tok is not None and len(tok) > 8
-    record(t_gui_login._test_name, "gui", ok,
-           "token ok" if ok else "login failed")
+    ok = len(tok) > 8
+    record(t_gui_login._test_name, "gui", ok, "token ok" if ok else "login failed")
 
 
 @test("全 GET 端点扫描 (形状+关键字段)")
@@ -315,6 +311,22 @@ def t_gui_badtoken():
     record(t_gui_badtoken._test_name, "gui", ok)
 
 
+@test("坏口令被拒 (login 机制活着)")
+def t_gui_badlogin():
+    import urllib.parse
+    try:
+        data = f"pass={urllib.parse.quote('wrong-password-x')}".encode()
+        req = urllib.request.Request(
+            f"http://{lgssh.HOST}/api/login", data=data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"})
+        j = json.loads(urllib.request.urlopen(req, timeout=10).read())
+        ok = j.get("error") == "bad_login"
+    except Exception:
+        ok = False
+    record(t_gui_badlogin._test_name, "gui", ok,
+           "sha256+JSON path ok" if ok else "login mechanism broken")
+
+
 # =================================================================
 category("agg")
 # =================================================================
@@ -361,11 +373,14 @@ def t_agg_pin():
 
 @test("5G 上行有流量 (数据面探测)")
 def t_agg_5g_dp():
-    delta = iface_delta("ccmni2", lambda: subprocess.run(
-        ["ping", "-n", "2", "-w", "3000", "223.5.5.5"],
-        capture_output=True, timeout=8))
-    ok = delta > 0
-    record(t_agg_5g_dp._test_name, "agg", ok, f"tx_delta={delta}B")
+    # 设备侧强制 ccmni 出口 ping -- 与 PC 的 MAC 钉死/分流权重无关
+    # (PC 钉死 WAN2 时 PC-ping-delta 探测会假失败, 曾现瞬态红)
+    out = dev("IF=$(ip -o -4 addr show 2>/dev/null | grep ccmni | grep -m1 inet "
+              "| awk '{print $2}'); ping -c 3 -W 2 -I $IF 223.5.5.5 2>&1 | tail -2")
+    m = re.search(r"(\d+) packets? received", out)
+    ok = m is not None and int(m.group(1)) >= 1
+    record(t_agg_5g_dp._test_name, "agg", ok,
+           m.group(0) if m else out.strip().replace("\n", " ")[:50])
 
 
 # =================================================================

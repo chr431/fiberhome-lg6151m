@@ -159,7 +159,7 @@ fhdrv 家族（载入链 = common_init → pon_init → net_init）：
 
 WiFi 实际生效链（modules.d，非 fhrom BE5000 脚本——后者是多平台遗留参数）：
 `conninfra→wifi_md_coex→cfg80211→mt_wifi_cmn→mtk_warp→mt_wifi→mtk_hwifi→connac_if/mtk_pci→mt7992(option_type=3 rro_mode=0)→mtk_wed→hw_nat`
-dat 机制：l1profile → mt7992.5040.1.dat（BN0/BN1 → /var/wlan/apcfg(_5)，E2pAccessMode=4，WHNAT=1）。macOS 派生 brmac(+1/+8)。160MHz 被驱动侧 CSA 钳回 80MHz。
+dat 机制：l1profile → mt7992.5040.1.dat（BN0/BN1 → /var/wlan/apcfg(_5)，E2pAccessMode=4，WHNAT=1）。MAC 派生 brmac(+1/+8)。带宽语义坑：dat 的 `VHT_BW`(0=20/40,1=80,2=160) 与 `EHT_ApBw`(0=20,1=20/40,2=80,3=160) 档位错位、驱动取 min —— 160MHz 必须双字段齐设(2+3)，只设其一会被钳 80（2026-10-05 实测：双设后 160MHz 生效，WiFi7 客户端 2402/2882 Mbps PHY）。
 
 lib/modules 169 模块聚类：iptables 36/nft 23/ebtables 21/netfilter 19/ipset 17/**MTK WiFi 平台 16**/tc 8/crypto 6/sound 6/杂项 17（air_en8811h 2.5G PHY、gps_drv 等）。
 

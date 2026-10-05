@@ -107,7 +107,7 @@
 | Mesh/EasyMesh | map_master/slave 1905 全栈 | ✗ 单机模式 | `✗` |
 | 访客网络 | wifiguest.sh 隔离 | 访客 BSS+隔离 | `=` |
 | WiFi 分析 | — | 信道图/评级/AP 列表/时间图 canvas | `▲` |
-| 160MHz | 同样被驱动钳制 | 同样 80MHz(wifimgr 逆向中) | `=` 双方都被 hwifi 钳 |
+| 160MHz | 可用（同款 dat 链）| **可用**（EHT_ApBw/VHT_BW 双字段齐设后实测 2402/2882 Mbps PHY）| `=` 早期"驱动钳制"结论是 dat 语义错位误诊，2026-10-05 翻案 |
 | 漫游加速 | roaming_accel.ko(ARP 注入) | ✗ | `✗` 单 AP 无漫游场景 |
 
 ### 2.5 系统治理（差距最大的一域）
@@ -155,7 +155,7 @@
 
 ## 5. 明确放弃清单（理由）
 
-iotagtd/Kaa 云/TR-069（远程覆盖风险）· NDMP App（依赖云绑定）· filink CoAP · EasyMesh（单 AP）· VoIP（无硬件）· DDNS×4 · VPN 三族 · UPnP（攻击面）· 产测全层 · 160MHz（驱动钳制，双方同限）· SMS 发送（承载毒性）。
+iotagtd/Kaa 云/TR-069（远程覆盖风险）· NDMP App（依赖云绑定）· filink CoAP · EasyMesh（单 AP）· VoIP（无硬件）· DDNS×4 · VPN 三族 · UPnP（攻击面）· 产测全层 · SMS 发送（承载毒性）。（160MHz 曾在此清单，2026-10-05 实测翻案移除）
 
 ## 6. 第二阶段输入（本次逆向的直接产物）
 

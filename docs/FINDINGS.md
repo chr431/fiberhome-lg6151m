@@ -62,8 +62,11 @@
 - 原厂 hwifi 内部 WPA 在 MLD 组网下不发 EAPOL M1 → hostapd 接管安全层，apcfg 只管射频
 - MAC 计划从 brmac 派生（第二字节+1，rai0 第6字节+8）
 - 启动自动选道：apcli 扫描 → 线性 mW 功率和评分（2.4G 邻道±4 + 1/6/11 偏好；5G 80M 整组）
-- **160MHz 未解锁**：配置链全通（dat VHT_BW=2/EHT_BW=2 + hostapd he_oper_chwidth=2），
-  但 hwifi 架构驱动拥有射频权，持续 CSA 钳回 80MHz（wifimgr 逆向进行中）
+- **160MHz 已解锁（2026-10-05 实测翻案）**：早期结论"hwifi 驱动 CSA 钳回 80MHz"是误诊 ——
+  真因是 hwifi dat 的带宽语义错位：`VHT_BW`(0=20/40,1=80,2=160) 与 `EHT_ApBw`(0=20,1=20/40,2=80,3=160)
+  档位不一致，驱动最终带宽取两者 min，只设 VHT_BW=2 而 EHT_ApBw=2 时被钳 80（wifimgr
+  be_init_wlan_apcfg_file 逆向实证）。wifi_up.sh v1.10 双字段齐设(2+3)后实测：
+  rai0 ch36 `width: 160 MHz`，WiFi7 手机关联 PHY 2401.9/2882.3 Mbps EHT-MCS11/13 NSS2（80MHz 物理不可能）
 - 本机 BSS 不被自家 apcli 扫描报告 → 分析仪合成绘制本机标记
 
 ## 7. 双上行聚合（wan_agg v2.11）

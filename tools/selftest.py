@@ -188,6 +188,26 @@ def t_wifi_cross():
            f"kernel={kern} hostapd_procs={hap}")
 
 
+@test("5G 带宽配置与射频实际一致 (跨层)")
+def t_wifi_bwcons():
+    # L15 (2026-10-05): "160MHz 被驱动钳制"误诊数周 -- 实为 hwifi dat 双字段
+    # (VHT_BW/EHT_ApBw) 语义错位。本断言守住配置链: settings.conf 的 BW5G
+    # 必须反映到 iw 实际射频宽度, 任何一层丢失(如 EHT_ApBw 字段被删)当场红。
+    conf = dev("grep -h '^BW5G=' /data/gw/settings.conf /data/gw/defaults.conf "
+               "2>/dev/null | head -1 | cut -d= -f2").strip()
+    iw = dev("iw dev rai0 info 2>/dev/null | grep -oE 'width: [0-9]+ MHz' "
+             "| grep -oE '[0-9]+'").strip()
+    if not conf or not iw:
+        record(t_wifi_bwcons._test_name, "wifi", False,
+               f"conf={conf or '?'} iw={iw or '?'}")
+        return
+    expect = {"80": ("80",), "160": ("160",),
+              "20": ("20",), "40": ("20", "40")}.get(conf)
+    ok = expect is not None and iw in expect
+    record(t_wifi_bwcons._test_name, "wifi", ok,
+           f"BW5G={conf} iw={iw}MHz" + ("" if ok else f" (期望 {expect})"))
+
+
 # =================================================================
 category("gui")
 # =================================================================

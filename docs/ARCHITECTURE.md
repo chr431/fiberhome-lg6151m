@@ -134,7 +134,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `CLM-FHDRV-UNLOADED`@VENDOR_MAP.md | ✅实证 | `—` | — | 54e89f0@2026-10-05 | fhdrv链自定义启动下未载=ENOTTY真因;复活需完整加载链 |
 | `CLM-NGINX-PORTS`@VENDOR_MAP.md | ✅实证 | `—` | — | 54e89f0@2026-10-05 | 原厂nginx=80/443;8080是v4复活层 |
 | `CLM-ATTACK-SURFACE`@FEATURE_MATRIX.md | ✅实证 | `gw/v3_rc10.extend.sh>=2.19` | telnet 口关闭,厂商 Web/App 后端未复活 (8080/8840/1899x),SSH 可达 (dropbear 单监听) | e76abba@2026-10-05 | 自研监听面=80/22/53 |
-| `CLM-WATCHDOG-17`@FEATURE_MATRIX.md | ✅实证 | `gw/watchdog.sh>=1.2` | 不变量看门狗活着且无未恢复故障 | e76abba@2026-10-05 | 17项不变量+atcid自愈+LED告警 |
+| `CLM-WATCHDOG-17`@FEATURE_MATRIX.md | ✅实证 | `gw/watchdog.sh>=1.2` | 不变量看门狗活着且无未恢复故障 | 2ea76ed@2026-10-05 | 17项不变量+atcid自愈+LED告警 |
 | `CLM-SELFTEST-51`@FEATURE_MATRIX.md | ✅实证 | `tools/selftest.py>=1.3` | — | e76abba@2026-10-05 | 51断言7类+数据面+破坏性验证流程 |
 
 <!--CLMAUDIT:END-->

@@ -58,6 +58,7 @@ MANIFEST = [
     ("gw/night_report.sh", "/data/gw/night_report.sh"),
     ("gw/wifi_guard.sh", "/data/gw/wifi_guard.sh"),   # BA-stall auto-recovery
     ("gw/bin/wpapmk", "/data/gw/wpapmk"),          # WPA passphrase->PMK (fh hostapd only eats wpa_psk)
+    ("gw/bin/mipc_cellular", "/data/gw/mipc_cellular"),  # cellular MIPC direct CLI (P1 engine base)
     ("gw/mipc_dial_trace.sh", "/data/gw/mipc_dial_trace.sh"),  # 5G dial forensics
     ("gw/dial_5g.sh", "/data/gw/dial_5g.sh"),      # production 5G dialer
     ("gw/v2_access.sh", "/data/gw/v2_access.sh"),    # slot-B serial/SSH hardening

@@ -65,13 +65,17 @@ EasyMesh/VPN 三族/UPnP/DDNS/VoIP/fhdrv_net_forward 端口隔离（FEATURE_MATR
 流量正常 → 结论写回台账（CLM-DIALER-QLNETD 由 assumed 转 verified/翻案）。
 - A 通过 → 直接进 P3（mobilenetwork 非承重，ql_netd 独立维持 PDN）。
 - A 失败 → 先做 P2。
+
+> **闸门 A 已执行（2026-10-05）：FAIL** —— 杀 mobilenetwork 后 ccmni IP ≤10s 消失；
+> 裸重启不够（缺完整 PATH/LD_LIBRARY_PATH 时启动即退）；恢复 = 全环境重拉。
+> **P2 由条件项转为必做**。详见 VENDOR_MAP §0.3 与台账 CLM-DIALER-QLNETD。
 - `mipc_bandlock`：zig cc 动态 musl 二进制，set/get 双模式，绑 selftest。
 - api.sh 蜂窝域重写：`engine=tree|mipc` 特性开关平滑迁移（GUI 无感）。
 - cellular_replay v2：ql_ril_service 就绪门控 + 新引擎重放。
 - selftest 翻转：锁一致性断言从 conf=树=模组 改 conf=模组（双层）。
 - **出口判据**：selftest 全绿 + GUI 锁频段实操（锁→查→解）+ 重启持久 + 手机在线不掉线。
 
-### P2 拨号自持（仅当闸门 A 失败）
+### P2 拨号自持（必做 —— 闸门 A 已判 FAIL）
 自研 dial keeper：`mipc_wan_cli --data_call_act`（APN 来自 `--apn_provision_by_sim`）+
 watchdog 集成（ccmni 无 IP→重拨）。出口：拔 SIM 重插自恢复 + 10 分钟流量观测。
 

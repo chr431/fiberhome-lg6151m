@@ -656,6 +656,17 @@ def t_sec_vendorweb():
            "closed" if ok else f"listeners={out.strip()}")
 
 
+@test("WAN 面纵深封禁链在位 (P0)")
+def t_sec_wanguard():
+    # V3WANGUARD: 23/5683/30005/1899x 双协议 DROP, 挂在 eth0+ccmni INPUT
+    out = dev("iptables -S V3WANGUARD 2>/dev/null | grep -c '\\-j DROP'")
+    hook = dev("iptables -S INPUT 2>/dev/null | grep -c 'V3WANGUARD'")
+    n, h = int(out.strip() or 0), int(hook.strip() or 0)
+    ok = n >= 12 and h >= 2
+    record(t_sec_wanguard._test_name, "security", ok,
+           f"drop_rules={n} wan_hooks={h}")
+
+
 # =================================================================
 category("system")
 # =================================================================

@@ -19,5 +19,5 @@ CLM-FHDRV-UNLOADED	docs/VENDOR_MAP.md	verified	-	-	54e89f0	2026-10-05	fhdrv链�
 CLM-NGINX-PORTS	docs/VENDOR_MAP.md	verified	-	-	54e89f0	2026-10-05	原厂nginx=80/443;8080是v4复活层
 CLM-ATTACK-SURFACE	docs/FEATURE_MATRIX.md	verified	gw/v3_rc10.extend.sh>=2.19	telnet 口关闭,厂商 Web/App 后端未复活 (8080/8840/1899x),SSH 可达 (dropbear 单监听)	e76abba	2026-10-05	自研监听面=80/22/53
 CLM-WATCHDOG-17	docs/FEATURE_MATRIX.md	verified	gw/watchdog.sh>=1.2	不变量看门狗活着且无未恢复故障	2ea76ed	2026-10-05	17项不变量+atcid自愈+LED告警
-CLM-SELFTEST-51	docs/FEATURE_MATRIX.md	verified	tools/selftest.py>=1.3	-	e76abba	2026-10-05	51断言7类+数据面+破坏性验证流程
+CLM-SELFTEST-51	docs/FEATURE_MATRIX.md	verified	tools/selftest.py>=1.4	WAN 面纵深封禁链在位 (P0)	e76abba	2026-10-05	52断言7类+数据面+破坏性验证+文档漂移审计链
 CLM-LOGMGR-DEAD	docs/ROADMAP.md	verified	-	-	e76abba	2026-10-05	logmgr已死多周系统正常(rc_netfh拉起后自灭,无消费者);下架无风险

@@ -64,7 +64,8 @@ ls $R/etc/rc.d/ | grep -c zmtk || true
 
 echo "== 7c. vendor strip (外围裁剪: 只断启动路径, 不动二进制; 回滚=不裁剪重刷)"
 # 高成本/零功能/已被自有实现取代的 vendor 守护
-STRIP_S="S98mdlogger S96atci_service S96atcid S99log_controld S99ql_speed_monitor_mgr S99ql_entry_auto_qos S80wapp S80ucitrack S92baresip S85auto_adapt S98meta_tst S99slt2_test S55speech_daemon S56libmodem_afe_service S57audio-ctrl-service S60vnstat"
+# P0: +S53lppe_service (低功耗定位守护, 无 GNSS 消费者; atci 对保留剥离 -- 由 rc_netfh 按受控环境拉起, L14)
+STRIP_S="S53lppe_service S98mdlogger S96atci_service S96atcid S99log_controld S99ql_speed_monitor_mgr S99ql_entry_auto_qos S80wapp S80ucitrack S92baresip S85auto_adapt S98meta_tst S99slt2_test S55speech_daemon S56libmodem_afe_service S57audio-ctrl-service S60vnstat"
 STRIP_K="K1mdlogger K01ql_speed_monitor_mgr K01ql_entry_auto_qos K90wapp K15auto_adapt K1slt2_test K50vnstat"
 for S in $STRIP_S; do rm -f $R/etc/rc.d/$S; done
 for K in $STRIP_K; do rm -f $R/etc/rc.d/$K; done

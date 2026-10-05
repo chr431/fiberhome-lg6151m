@@ -40,6 +40,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `docs/ARCHITECTURE.md` | **v1.0** | doc | `-` | 架构+版本总表(本表生成) |
 | `gw/bin/fhstub.so` | **v1.0** | manifest | `/data/gw/fhstub.so` | FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径) |
 | `gw/bin/healthdog.ko` | **v1.0** | manifest | `/data/gw/healthdog.ko` | 取证看门狗内核模块(forensic=1) |
+| `gw/bin/mipc_cellular` | **v0.1** | manifest | `/data/gw/mipc_cellular` | 蜂窝MIPC直连CLI(getbands已通/ret=0实证; setbands达modem栈0x80070008参数域待映射) |
 | `gw/bin/multiwan_ctl` | **v1.1** | manifest | `/data/gw/multiwan_ctl` | 原厂multiwan引擎ioctl控制器(zig动态链libfhdrv_net_api,36B结构体) |
 | `gw/bin/shmsnap` | **v1.0** | manifest | `/data/gw/shmsnap` | cfgmgr树共享内存快照工具(save/load 16MB原始字节, gzip后127KB, 开机恢复锁定状态) |
 | `gw/bin/v3_fix.ko` | **v1.1** | manifest | `/data/gw/v3_fix.ko` | TTL伪装/PPE解绑内核模块(wan_if/ttl_mode/unhook) |
@@ -54,7 +55,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/dial_variant.sh` | **v1.1** | manifest | `/data/gw/dial_variant.sh` | 5G 拨号参数变体实验器(iptype/apn/plmn/roam) |
 | `gw/fan_mgr.sh` | **v1.3** | manifest | `/data/gw/fan_mgr.sh` | 原厂梯度温控风扇(v1.3: 配置统一overlay+修复v1.2双/data/gw路径bug——GUI静音切换从未生效的根因) |
 | `gw/fan_mode.conf` | **v1.0** | manifest | `/data/gw/fan_mode.conf` | 风扇模式:performance|silent(静音+6°C偏移) |
-| `gw/fw_apply.sh` | **v1.1** | manifest | `/data/gw/fw_apply.sh` | 端口映射/DMZ/禁网持久层安装器(rc_netfh开机+api变更共用) |
+| `gw/fw_apply.sh` | **v1.2** | manifest | `/data/gw/fw_apply.sh` | 端口映射/DMZ/禁网安装器(rc_netfh开机+api共用); v1.2/P0: +V3WANGUARD WAN面纵深封禁(23/5683/30005/1899x, 双WAN面) |
 | `gw/healthdog.sh` | **v1.1** | manifest | `/data/gw/healthdog.sh` | 看门狗用户态心跳 |
 | `gw/led_mgr.sh` | **v1.6** | manifest | `/data/gw/led_mgr.sh` | 原厂风格LED守护(v1.4传输层改sysfs gpio; v1.6 配置统一overlay+信标看门狗(dmesg固件权威事件→no_bcn重装); v1.5 WAN走leds类节点5g_evb_voice=gpio292被leds-gpio占用, debugfs实证) |
 | `gw/mipc_dial_trace.sh` | **v1.0** | manifest | `/data/gw/mipc_dial_trace.sh` | 5G 拨号取证(xtrace 抓真参) |
@@ -81,6 +82,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/zz_data_hook` | **v1.1** | manifest | `/data/build/rootfs/etc/init.d/zz_data_hook` | S98数据钩子(v1.1: plain sh——原厂无/etc/rc.common, rc.common式shebang致开机栈全灭; 回归实测发现) |
 | `gw/src/fhstub.c` | **v1.0** | src | `gw/bin/fhstub.so` | FH符号桩库源码 |
 | `gw/src/healthdog.c` | **v1.0** | src | `gw/bin/healthdog.ko` | 看门狗模块源码(版本随产物) |
+| `gw/src/mipc_cellular.c` | **v0.1** | src | `gw/bin/mipc_cellular` | 蜂窝MIPC直连工具源(P1): dlopen libqlril 闭包预载+ql_nw_init+get/set_band_mode; setbands 168B结构语义待续 |
 | `gw/src/multiwan_ctl.c` | **v1.1** | src | `gw/bin/multiwan_ctl` | multiwan控制器源码(随产物1.1) |
 | `gw/src/shmsnap.c` | **v1.0** | src | `gw/bin/shmsnap` | cfgmgr快照源码 |
 | `gw/src/v3_fix.c` | **v1.1** | src | `gw/bin/v3_fix.ko` | TTL/解绑模块源码(版本随产物) |
@@ -89,6 +91,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/src/wpapmk.c` | **v1.0** | src | `gw/bin/wpapmk` | WPA PMK转换源码(纯C PBKDF2) |
 | `tools/agg_pins.conf.example` | **v1.1** | tool | `-` | MAC钉死表模板(真实表设备侧自管, 含个人MAC不入库) |
 | `tools/build_healthdog.sh` | **v1.0** | tool | `-` | healthdog.ko内核模块构建(内核树) |
+| `tools/build_mipc_cellular.sh` | **v1.0** | tool | `-` | mipc_cellular构建(zig cc aarch64-musl动态) |
 | `tools/build_steth.sh` | **v1.0** | tool | `-` | v3_steth.ko构建 |
 | `tools/build_v3fix.sh` | **v1.0** | tool | `-` | v3_fix.ko构建 |
 | `tools/deploy.py` | **v2.8** | tool | `-` | MANIFEST部署/漂移检查(版本注入+预检); v2.7: push后自动跑selftest(L13制度化对策); v2.6: EXTRA_KEEP补dropbear_keys; v2.5: push建父目录+空md5防御; v2.4: push names参数修复; v2.3: 基座/data/gw迁移+凭证外置secrets; v2.1 put原子推送 |
@@ -106,7 +109,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/lk_flip2.py` | **v1.1** | tool | `-` | LK 一键翻槽(a|b, misc[2060]字节) |
 | `tools/lk_write.py` | **v1.6** | tool | `-` | LK raw-shell 文件写入(回显校验+tmpfs挂载+cmdlist巡检, 取代lk_fix_access) |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
-| `tools/selftest.py` | **v1.3** | tool | `-` | 断言式全功能测试(L13-L15: 7类51项; v1.3: +5G带宽跨层一致性(settings BW5G vs iw宽度, 守dat双字段链); v1.2: 设备侧强制ccmni探测+坏口令断言) |
+| `tools/selftest.py` | **v1.4** | tool | `-` | 断言式全功能测试(L13-L15: 7类51项; v1.3: +5G带宽跨层一致性(settings BW5G vs iw宽度, 守dat双字段链); v1.2: 设备侧强制ccmni探测+坏口令断言) |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |
 | `tools/serial_server.py` | **v1.7** | tool | `-` | 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets) |
 | `tools/vercheck.py` | **v1.5** | tool | `-` | 版本注册表校验/渲染/设备比对(v1.3: device()随deploy基座迁/data/gw; v1.2性质分区双向强制+全跟踪文件可归类; v1.1 image类md5钉死) |
@@ -135,7 +138,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `CLM-NGINX-PORTS`@VENDOR_MAP.md | ✅实证 | `—` | — | 54e89f0@2026-10-05 | 原厂nginx=80/443;8080是v4复活层 |
 | `CLM-ATTACK-SURFACE`@FEATURE_MATRIX.md | ✅实证 | `gw/v3_rc10.extend.sh>=2.19` | telnet 口关闭,厂商 Web/App 后端未复活 (8080/8840/1899x),SSH 可达 (dropbear 单监听) | e76abba@2026-10-05 | 自研监听面=80/22/53 |
 | `CLM-WATCHDOG-17`@FEATURE_MATRIX.md | ✅实证 | `gw/watchdog.sh>=1.2` | 不变量看门狗活着且无未恢复故障 | 2ea76ed@2026-10-05 | 17项不变量+atcid自愈+LED告警 |
-| `CLM-SELFTEST-51`@FEATURE_MATRIX.md | ✅实证 | `tools/selftest.py>=1.3` | — | e76abba@2026-10-05 | 51断言7类+数据面+破坏性验证流程 |
+| `CLM-SELFTEST-51`@FEATURE_MATRIX.md | ✅实证 | `tools/selftest.py>=1.4` | WAN 面纵深封禁链在位 (P0) | e76abba@2026-10-05 | 52断言7类+数据面+破坏性验证+文档漂移审计链 |
 | `CLM-LOGMGR-DEAD`@ROADMAP.md | ✅实证 | `—` | — | e76abba@2026-10-05 | logmgr已死多周系统正常(rc_netfh拉起后自灭,无消费者);下架无风险 |
 
 <!--CLMAUDIT:END-->

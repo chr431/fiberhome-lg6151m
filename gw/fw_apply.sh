@@ -1,6 +1,9 @@
 #!/bin/sh
-# fw_apply.sh v1.0 -- 端口映射/DMZ/禁网 持久层安装器 (幂等)
+# fw_apply.sh v1.1 -- 端口映射/DMZ/禁网/厂商面纵深封禁 持久层安装器 (幂等)
 #   被 rc_netfh.sh 开机调用 + api.sh 在配置变更时 source 调用
+# v1.1 (ROADMAP P0): WAN 面纵深封禁 -- iotagtd NDMP(18996-18998)/TR-069 连接请求
+#   (30005)/filink CoAP(5683)/telnet(23) 即使对应守护被裁/未启, 规则也常备。
+#   不依赖"进程不在"这一假设; 若未来任一守护意外复活, WAN 侧仍不可达。
 GWDATA=/data/gw
 
 fw_apply() {
@@ -31,6 +34,17 @@ fw_apply() {
                 iptables -I FORWARD -m mac --mac-source $M -j DROP
         done
     fi
+    # WAN 面纵深封禁 (deny 优先于任何后续 accept; 双 WAN 面: eth0 家宽 + ccmni 蜂窝)
+    iptables -N V3WANGUARD 2>/dev/null
+    iptables -F V3WANGUARD
+    for P in 23 5683 30005 18996 18997 18998; do
+        iptables -A V3WANGUARD -p tcp --dport $P -j DROP
+        iptables -A V3WANGUARD -p udp --dport $P -j DROP
+    done
+    for IF in eth0 ccmni+; do
+        iptables -C INPUT -i $IF -j V3WANGUARD 2>/dev/null || \
+            iptables -I INPUT -i $IF -j V3WANGUARD
+    done
     return 0
 }
 

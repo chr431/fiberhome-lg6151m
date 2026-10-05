@@ -11,7 +11,7 @@
 
 1. **PID1 是 procd，但 `/etc/init.d/rcS` 并非 sysinit 入口** <!--CLM:CLM-PROCD-INTERCEPT-->：procd 内建 rcS 扫描器拦截 inittab 的 `::sysinit:` 行，串行 glob 执行 `/etc/rc.d/S*`（56 个）。FH 定制的 rcS（烽火层）真正调用者是 **S99zmtk_boot_done 的末行** —— 烽火驱动/服务层在 rc.d 链最末端才启动。
 2. **应用层编排不在 procd 而在自研 sysmgr**：`process_start_list`（26 项，依赖 DAG + 两优先级）+ process_monitor（300s）+ process_check.sh（13s）构成三层看护。原厂已禁用 14 个标准 OpenWrt 服务（dnsmasq/dropbear/firewall/uhttpd/odhcpd/telnetd 等），FH 应用完全绕开标准网络栈。
-3. **拨号执行者不是 netifd** <!--CLM:CLM-DIALER-QLNETD-->：`network.wan.proto='ql_datacall'` 的 proto 脚本在包里声明了但**从未落地**。原厂真拨号链 = mobilenetwork(libqlnet) → ubus ql-netd → ql_netd → MIPC TLV → modem。netifd 仅在 proto=mipc/ql_mipc 分支有效。
+3. **拨号执行者不是 netifd** <!--CLM:CLM-DIALER-QLNETD-->：`network.wan.proto='ql_datacall'` 的 proto 脚本在包里声明了但**从未落地**。原厂真拨号链 = mobilenetwork(libqlnet) → ubus ql-netd → ql_netd → MIPC TLV → modem。netifd 仅在 proto=mipc/ql_mipc 分支有效。**2026-10-05 闸门 A 定案**：mobilenetwork 是 PDN 生命周期持有者 —— 杀掉后 ccmni IP ≤10s 消失（RF 注册仍正常）；裸重启不够，需完整环境(PATH+LD_LIBRARY_PATH)重拉或重跑 rc_netfh；ql_netd 独立维持不了拨号。**裁撤 mobilenetwork 前必须先建自研拨号（ROADMAP P2）**。
 4. **AT 命令的最终通道是 MIPC**：`mipc_wan_cli --at_cmd` → libql_at(ql_atcid_sender) → atcid（unix socket /dev/atci-service）→ libmipc_msg → /dev/ttyCMIPC0..14 → ccci → modem 的 ssds_atp 任务（5mipc_inject_string_hdlr 端点）。atcid 是 AT 通道本体，atci_service 是系统级伴生。
 5. **锁频段无 AT 面** <!--CLM:CLM-BANDLOCK-LIBQLRIL-->：mobilenetwork 的 fh_process_lock_band 线程调用 **libqlril.so 的 `ql_nw_set_band_mode`**（lte/nr/umts_band_mode 三个 32 位位图），经 ubus ril → ql_ril_service → MIPC。锁小区才有 AT 面（AT+EMMCHLCK）。
 6. **fhdrv_* 内核驱动族（19 个 .ko）在裁剪后的设备上从未加载** <!--CLM:CLM-FHDRV-UNLOADED--> —— 此前 quecadp 引擎 ioctl ENOTTY 之谜的真正根因是整条加载链（fhdrv_common_init → pon → net）没有执行，而非加载顺序问题。

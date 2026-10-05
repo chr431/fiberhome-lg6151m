@@ -1,8 +1,10 @@
 #!/bin/sh
-# watchdog.sh v1.1 -- on-device continuous invariant monitor.
+# watchdog.sh v1.2 -- on-device continuous invariant monitor.
 # L13: "feature silently broken until manual inspection" countermeasure.
 # Runs every 30s; failures log + WAN LED flash; recovers silently.
 # Started by rc19.sh (pgrep guard); single instance.
+# v1.2 (L14): +cellular control plane -- atcid 自愈, AT 通道(CFUN/CSQ),
+#       模组注册态。第一阶段裁剪曾杀 atcid 而 3 天无人知晓 (数据面测试全绿)。
 
 LOG=/tmp/watchdog.log
 STATE=/tmp/watchdog_state
@@ -60,6 +62,40 @@ run_cycle() {
     check boot      "[ -f /tmp/boot.done ]"          "boot chain complete"
     check lan_ip    "ip -4 addr show br-lan | grep -q inet"  "LAN IP present"
 
+    # ---- cellular control plane (L14) ----
+    # atcid: AT 通道本体; 死则拉起 (替代厂商 procd respawn)
+    if pidof atcid >/dev/null 2>&1; then
+        set_state atcid 0 "atcid daemon"
+    else
+        set_state atcid 1 "atcid daemon"
+        FAILS=$((FAILS+1))
+        /usr/bin/atcid >/var/atcid.log 2>&1 &
+    fi
+    # CFUN 探测同时充当通道活性探针; airplane(CFUN:4)时跳过注册态断言
+    CFUNR=$(mipc_wan_cli --at_cmd 'AT+CFUN?' 2>/dev/null)
+    case "$CFUNR" in
+    *"CFUN: 4"*)
+        set_state at_chan 0 "AT channel (airplane, probe-only)"
+        set_state modem_reg 0 "modem registered (airplane, skipped)"
+        ;;
+    *"CFUN: "*)
+        set_state at_chan 0 "AT channel (CFUN responds)"
+        # 注册态: +COPS: <mode>,<fmt>,"<numeric>"  -- 含引号即已注册
+        COPSR=$(mipc_wan_cli --at_cmd 'AT+COPS?' 2>/dev/null)
+        case "$COPSR" in
+        *'"'*) set_state modem_reg 0 "modem registered" ;;
+        *)     set_state modem_reg 1 "modem NOT registered"
+               FAILS=$((FAILS+1)) ;;
+        esac
+        ;;
+    *)  # 连 CFUN 都不回 = 通道死
+        set_state at_chan 1 "AT channel DEAD (no CFUN response)"
+        FAILS=$((FAILS+1))
+        set_state modem_reg 1 "modem state unknown (AT dead)"
+        FAILS=$((FAILS+1))
+        ;;
+    esac
+
     # ---- incremental events ----
     BCN=$(dmesg | grep -cE 'AP: Beacon OFF|Beacon lost - Error|Beacon interval is illegal')
     BCN_PREV=$(grep '^beacon=' $STATE 2>/dev/null | tail -1 | cut -d= -f2)
@@ -87,7 +123,7 @@ run_cycle() {
 
 # ---- main ----
 touch $LOG $STATE
-log "===== watchdog v1.1 start ====="
+log "===== watchdog v1.2 start ====="
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

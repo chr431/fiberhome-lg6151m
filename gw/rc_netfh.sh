@@ -1,5 +1,5 @@
 #!/bin/sh
-# rc_netfh.sh v1.4 -- route A: FH modem-stack environment (minimal army).
+# rc_netfh.sh v1.7 -- route A: FH modem-stack environment (minimal army).
 # Mission: give the 5G dialer its full stock environment so the modem builds
 # the IA bearer, WITHOUT the daemons that fight our v3 flight layer.
 # KEEP   (process_start_list order): cfgmgr, logmgr, mobilenetwork
@@ -15,7 +15,7 @@ glog() { echo "$(date -u +%FT%TZ) $*" >> $LOG; }
 # v1.1: FH binaries+libs live outside the default PATH/loader path
 export PATH=$PATH:/fhrom/bin:/fhrom/fhshell
 export LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib
-glog "===== rc_netfh v1.6 start ====="
+glog "===== rc_netfh v1.7 start ====="
 
 # 1. config base (mobilenetwork's declared deps)
 # v1.8: cfg_tool 先建 16MB cfgmgr shm(webs/树/信号上报的根, key=0x7539);
@@ -34,6 +34,12 @@ glog "cfgmgr=$(pidof cfgmgr) logmgr=$(pidof logmgr)"
 
 # 2. net plumbing, fresh MIPC sessions, stock order
 [ "$(cat /sys/kernel/ccci/boot 2>/dev/null | head -c 5)" = "md1:4" ] || glog "WARN cci=$(cat /sys/kernel/ccci/boot 2>/dev/null)"
+# v1.7 (L14): atci 对复活 -- 第一阶段裁剪误伤 S96atci_service/S96atcid 后
+#       mipc_wan_cli --at_cmd 全灭 (SMS读/CSQ/锁下发通道), 数据面正常故
+#       selftest 3 天未察觉。atcid 是 AT 通道本体, atci_service 为厂商伴生
+#       (一并拉起保持原厂形态)。必须在 mobilenetwork 前就绪。
+pidof atcid >/dev/null || { /usr/bin/atci_service >/dev/null 2>&1 & sleep 1; /usr/bin/atcid >/var/atcid.log 2>&1 & sleep 1; }
+glog "atcid=$(pidof atcid) at_ch=$(mipc_wan_cli --at_cmd 'AT+CSQ' 2>/dev/null | grep -c '+CSQ:')"
 kill $(pidof mtk_netagent ql_netd ql_ril_service mipc_submonitor) 2>/dev/null
 sleep 2
 /usr/bin/mtk_netagent >/dev/null 2>&1 &

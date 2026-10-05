@@ -11,6 +11,13 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
+v1.1 (L14, 2026-10-05): phase-1 strip killed atcid -> AT channel (SMS/CSQ/
+lock dispatch) died silently for 3 days while every data-plane test stayed
+green. Coverage now spans EVERY consumer surface: all 18 GET endpoints
+(per-endpoint shape+key assertions), AT/mipc control plane, SIM/registration
+state, lock consistency across conf/tree/modem, watchdog health, clock,
+temperature, vendor attack-surface closure.
+
 Usage:
   python tools/selftest.py               # run all tests
   python tools/selftest.py wifi agg      # run specific category
@@ -74,12 +81,12 @@ def dev(cmd, timeout=15):
     return lgssh.run(_c, cmd)
 
 
-def api(endpoint, token=None):
+def api(endpoint, token=None, timeout=10):
     """Call gateway API endpoint, return parsed JSON."""
     url = f"http://{lgssh.HOST}/api/{endpoint}"
     if token:
         url += f"?token={token}"
-    r = urllib.request.urlopen(url, timeout=10)
+    r = urllib.request.urlopen(url, timeout=timeout)
     return json.loads(r.read())
 
 
@@ -104,6 +111,33 @@ def get_token(password):
     r = urllib.request.urlopen(req, timeout=10)
     j = json.loads(r.read())
     return j.get("token")
+
+
+_TOKEN = ["<unset>"]
+
+
+def _token():
+    """Cached GUI token, or None when no password is configured.
+
+    Mirrors lgssh's secrets resolution (LG_GUI_PASS env or device_local.py).
+    """
+    if _TOKEN[0] != "<unset>":
+        return _TOKEN[0]
+    pw = os.environ.get("LG_GUI_PASS")
+    if not pw:
+        try:
+            import device_local
+            pw = getattr(device_local, "GUI_PASS", "")
+        except ImportError:
+            pw = ""
+    tok = get_token(pw) if pw else None
+    _TOKEN[0] = tok
+    return tok
+
+
+def at(cmd, timeout=15):
+    """Send AT command via mipc_wan_cli on device, return response text."""
+    return dev(f"mipc_wan_cli --at_cmd '{cmd}'", timeout=timeout)
 
 
 def iface_delta(iface, fn):
@@ -204,8 +238,13 @@ def t_gui_plugin():
 
 @test("API login + token 生命周期")
 def t_gui_login():
-    pw = os.environ.get("LG_GUI_PASS") or getattr(
-        __import__("device_local"), "GUI_PASS", "")
+    pw = os.environ.get("LG_GUI_PASS")
+    if not pw:
+        try:
+            import device_local
+            pw = getattr(device_local, "GUI_PASS", "")
+        except ImportError:
+            pw = ""
     if not pw:
         record(t_gui_login._test_name, "gui", True, "skip (no GUI_PASS)")
         return
@@ -213,6 +252,67 @@ def t_gui_login():
     ok = tok is not None and len(tok) > 8
     record(t_gui_login._test_name, "gui", ok,
            "token ok" if ok else "login failed")
+
+
+@test("全 GET 端点扫描 (形状+关键字段)")
+def t_gui_endpoints():
+    # L14: 单个端点死后其余仍绿 -- 每个端点必须单独过一遍。
+    # slow 端点 (wifiscan ~10s) 也覆盖: 射频扫描路径同样会静默死亡。
+    req_keys = {
+        "status": ("uptime", "mem"),
+        "agg": ("enable", "engine"),
+        "cellular": ("operator", "serving", "cells"),
+        "sim": ("imei",),
+        "sms": ("count",),
+        "traffic": ("rx", "tx"),
+        "netmode": ("mode",),
+        "ntp": ("date",),
+        "fan": ("mode",),
+        "led": ("night",),
+        "uplink": ("form", "ttl_rule"),
+        "wifi_adv": ("ch2g", "ch5g"),
+        "logs": ("wan_agg",),
+        "dhcp_static": ("entries",),
+        "dhcp": ("r1", "lease"),
+        "fw": ("forwards", "dmz", "blocked"),
+        "clients": ("clients", "stations"),
+    }
+    tok = _token()
+    if tok is None:
+        record(t_gui_endpoints._test_name, "gui", True, "skip (no GUI_PASS)")
+        return
+    bad = []
+    for ep, keys in req_keys.items():
+        try:
+            j = api(ep, tok)
+        except Exception as e:
+            bad.append(f"{ep}:{type(e).__name__}")
+            continue
+        if "error" in j:
+            bad.append(f"{ep}:err={j['error']}")
+            continue
+        for k in keys:
+            if k not in j:
+                bad.append(f"{ep}:no-{k}")
+    try:
+        j = api("wifiscan", tok, timeout=30)
+        if "error" in j:
+            bad.append(f"wifiscan:err={j['error']}")
+    except Exception as e:
+        bad.append(f"wifiscan:{type(e).__name__}")
+    ok = not bad
+    record(t_gui_endpoints._test_name, "gui", ok,
+           "18 endpoints ok" if ok else "; ".join(bad)[:120])
+
+
+@test("坏 token 被拒 (认证强制)")
+def t_gui_badtoken():
+    try:
+        j = api("status", "deadbeefdeadbeefdeadbeefdeadbeef")
+        ok = j.get("error") == "need_login"
+    except Exception:
+        ok = False
+    record(t_gui_badtoken._test_name, "gui", ok)
 
 
 # =================================================================
@@ -315,6 +415,9 @@ def t_net_e2e():
 # =================================================================
 category("cellular")
 # =================================================================
+# L14 (2026-10-05): 第一阶段裁剪误杀 atcid → AT 通道(SMS/CSQ/锁下发)死亡
+# 3 天无人察觉 -- 数据面测试全绿。本类别自此同时覆盖:
+#   数据面 (ccmni/DNS) + 控制面 (AT/mipc) + 翻译层 (树/自管conf) + GUI 层
 
 @test("ccmni 接口有 IPv4")
 def t_cel_iface():
@@ -330,6 +433,142 @@ def t_cel_dns():
                        errors="replace", timeout=10)
     ok = "Address" in (r.stdout or "") and "baidu" in (r.stdout or "").lower()
     record(t_cel_dns._test_name, "cellular", ok)
+
+
+@test("AT 通道活着 (+CSQ 应答)")
+def t_cel_at():
+    # L14 回归本体: atcid 死时 mipc_wan_cli 不报错只输出 "Failed to execute"
+    out = at("AT+CSQ")
+    ok = "+CSQ:" in out
+    record(t_cel_at._test_name, "cellular", ok,
+           out.strip().replace("\n", " ")[:40] if not ok else "CSQ ok")
+
+
+@test("atcid 守护存活")
+def t_cel_atcid():
+    out = dev("pidof atcid")
+    ok = bool(out.strip())
+    record(t_cel_atcid._test_name, "cellular", ok, f"pid={out.strip()}")
+
+
+@test("SIM 就绪 (CPIN)")
+def t_cel_sim():
+    out = at("AT+CPIN?")
+    ok = "READY" in out
+    record(t_cel_sim._test_name, "cellular", ok,
+           out.strip().replace("\n", " ")[:40])
+
+
+@test("模组已注册 (COPS)")
+def t_cel_reg():
+    # +COPS: 0,2,"46015",11 -- 含引号=已注册; airplane(CFUN:4)时跳过
+    cfun = at("AT+CFUN?")
+    if "CFUN: 4" in cfun:
+        record(t_cel_reg._test_name, "cellular", True, "airplane, skip")
+        return
+    out = at("AT+COPS?")
+    ok = '"' in out and "COPS" in out
+    record(t_cel_reg._test_name, "cellular", ok,
+           out.strip().replace("\n", " ")[:50])
+
+
+@test("IMEI 可读 (15 位)")
+def t_cel_imei():
+    out = at("AT+CGSN")
+    m = re.search(r"\b(\d{15})\b", out)
+    record(t_cel_imei._test_name, "cellular", bool(m),
+           m.group(1) if m else out.strip()[:40])
+
+
+@test("MIPC 原生信号查询 (RSRP)")
+def t_cel_mipcsig():
+    out = dev("mipc_wan_cli --nw_get_signal")
+    ok = re.search(r"RSRP\s*=\s*-?\d+", out) is not None
+    record(t_cel_mipcsig._test_name, "cellular", ok,
+           out.strip().replace("\n", " ")[:40])
+
+
+@test("MIPC 原生制式查询 (RAT)")
+def t_cel_mipcrat():
+    out = dev("mipc_wan_cli --nw_get_rat")
+    ok = "RAT Mode Value" in out
+    record(t_cel_mipcrat._test_name, "cellular", ok,
+           out.strip().replace("\n", " ")[:50])
+
+
+@test("cfg 树信号上报活着 (过渡期)")
+def t_cel_tree():
+    # mobilenetwork→cfgmgr→RadioSignalParameter 链路任一死亡即空值。
+    # 第二阶段裁撤 cfgmgr 后本测试翻转为自研引擎断言。
+    out = dev("LD_LIBRARY_PATH=/fhrom/lib /fhrom/bin/cfg_cmd get "
+              "InternetGatewayDevice.X_FH_MobileNetwork.RadioSignalParameter.BAND_NBR "
+              "2>/dev/null | tail -1")
+    ok = "value=" in out and len(out.strip()) > len("get success!value=")
+    record(t_cel_tree._test_name, "cellular", ok, out.strip()[:40])
+
+
+@test("锁定状态跨层一致 (conf=树=模组)")
+def t_cel_lockcons():
+    # 自管 conf ↔ cfg 树 ↔ 模组 EMMCHLCK 三层必须一致
+    conf = dev("cat /data/gw/cellular.conf 2>/dev/null")
+    if not conf.strip():
+        record(t_cel_lockcons._test_name, "cellular", True, "no lock conf")
+        return
+    want_band = re.search(r"BAND_EN=(\d)", conf)
+    want_cell = re.search(r"CELL_EN=(\d)", conf)
+    tree = dev(
+        "LD_LIBRARY_PATH=/fhrom/lib /fhrom/bin/cfg_cmd get "
+        "InternetGatewayDevice.X_FH_MobileNetwork.NetworkSettings.LockBandEnable "
+        "2>/dev/null | tail -1; "
+        "LD_LIBRARY_PATH=/fhrom/lib /fhrom/bin/cfg_cmd get "
+        "InternetGatewayDevice.X_FH_MobileNetwork.LockCellList.LockEnable "
+        "2>/dev/null | tail -1")
+    tband = re.search(r"value=(\d)", tree.split("\n")[0] or "")
+    tcell = re.search(r"value=(\d)", tree.split("\n")[-1] or "")
+    mism = []
+    if want_band and tband and want_band.group(1) != tband.group(1):
+        mism.append(f"band conf={want_band.group(1)} tree={tband.group(1)}")
+    if want_cell and tcell and want_cell.group(1) != tcell.group(1):
+        mism.append(f"cell conf={want_cell.group(1)} tree={tcell.group(1)}")
+    # 模组层: 小区锁开则 EMMCHLCK 非 0, 关则必须为 0
+    emm = at("AT+EMMCHLCK?")
+    m = re.search(r"EMMCHLCK:\s*(\d+)", emm)
+    if want_cell and m:
+        w = want_cell.group(1)
+        g = m.group(1)
+        if w == "1" and g == "0":
+            mism.append("celllock conf=1 modem=0")
+        if w == "0" and g != "0":
+            mism.append(f"celllock conf=0 modem={g}")
+    ok = not mism
+    record(t_cel_lockcons._test_name, "cellular", ok,
+           "3-layer consistent" if ok else "; ".join(mism)[:100])
+
+
+@test("GUI sim 端点与 AT 实测一致 (IMEI)")
+def t_cel_apisim():
+    tok = _token()
+    if tok is None:
+        record(t_cel_apisim._test_name, "cellular", True, "skip (no GUI_PASS)")
+        return
+    j = api("sim", tok)
+    imei_api = str(j.get("imei", ""))
+    imei_at = re.search(r"\b(\d{15})\b", at("AT+CGSN"))
+    ok = bool(imei_at) and imei_api == imei_at.group(1)
+    record(t_cel_apisim._test_name, "cellular", ok,
+           f"api={imei_api[:6]}.. at={imei_at.group(1)[:6] if imei_at else '?'}..")
+
+
+@test("GUI sms 端点 JSON 有效")
+def t_cel_apisms():
+    tok = _token()
+    if tok is None:
+        record(t_cel_apisms._test_name, "cellular", True, "skip (no GUI_PASS)")
+        return
+    j = api("sms", tok, timeout=20)
+    ok = isinstance(j.get("count"), int) and "msgs" in j
+    record(t_cel_apisms._test_name, "cellular", ok,
+           f"count={j.get('count')}")
 
 
 # =================================================================
@@ -365,6 +604,21 @@ def t_sec_paths():
     ok = not out.strip()
     record(t_sec_paths._test_name, "security", ok,
            f"残留: {out.strip()[:50]}" if not ok else "clean")
+
+
+@test("telnet 口关闭")
+def t_sec_telnet():
+    out = dev("netstat -tln 2>/dev/null | grep -c ':23.*LISTEN'")
+    ok = out.strip() == "0"
+    record(t_sec_telnet._test_name, "security", ok)
+
+
+@test("厂商 Web/App 后端未复活 (8080/8840/1899x)")
+def t_sec_vendorweb():
+    out = dev("netstat -tln 2>/dev/null | grep -cE ':(8080|8840|1899[5-8]) .*LISTEN'")
+    ok = out.strip() == "0"
+    record(t_sec_vendorweb._test_name, "security", ok,
+           "closed" if ok else f"listeners={out.strip()}")
 
 
 # =================================================================
@@ -406,6 +660,36 @@ def t_sys_kernel():
     #FORENSIC D 行有 hang_detect 关键字不等于内核 OOPS; 容忍 forensic 行
     record(t_sys_kernel._test_name, "system", n <= 7,
            f"events={n} (含 FORENSIC 噪声)")
+
+
+@test("不变量看门狗活着且无未恢复故障")
+def t_sys_wd2():
+    # watchdog.sh (L13) 必须在跑, 且 /tmp/watchdog_state 无 key=1 残留
+    alive = dev("pgrep -f watchdog.sh | head -1").strip()
+    state = dev("grep '=1$' /tmp/watchdog_state 2>/dev/null")
+    ok = bool(alive) and not state.strip()
+    det = f"pid={alive}" + (f" FAILing={state.strip().splitlines()[0]}" if state.strip() else "")
+    record(t_sys_wd2._test_name, "system", ok, det)
+
+
+@test("SoC 温度在合理区间")
+def t_sys_temp():
+    out = dev("for zd in /sys/class/thermal/thermal_zone*; do "
+              "[ \"$(cat $zd/type 2>/dev/null)\" = soc_max ] && cat $zd/temp; done")
+    m = re.search(r"\d+", out)
+    # 单位 milli-°C: 20000..100000 = 20..100°C
+    ok = m is not None and 20000 <= int(m.group()) <= 100000
+    record(t_sys_temp._test_name, "system", ok,
+           f"{int(m.group())/1000:.0f}C" if m else out.strip()[:30])
+
+
+@test("系统时钟 sane (年份)")
+def t_sys_clock():
+    # L10 教训类: ntpd 静默失败曾致时钟漂 3 天
+    y = time.localtime().tm_year
+    out = dev("date +%Y").strip()
+    ok = out.isdigit() and abs(int(out) - y) <= 1
+    record(t_sys_clock._test_name, "system", ok, f"dev={out} pc={y}")
 
 
 # =================================================================

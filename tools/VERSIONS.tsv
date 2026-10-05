@@ -12,7 +12,7 @@ gw/wifi_guard.sh	1.0	manifest	/data/gw/wifi_guard.sh	BA/TX 停滞自动恢复守
 gw/mipc_dial_trace.sh	1.0	manifest	/data/gw/mipc_dial_trace.sh	5G 拨号取证(xtrace 抓真参)
 gw/dial_5g.sh	1.2	manifest	/data/gw/dial_5g.sh	生产 5G 拨号器(check_ia+netagent补丁)
 gw/consfeed.sh	1.0	manifest	/data/gw/consfeed.sh	v2 控制台喂食器(无setsid,v2_access拉起)
-gw/rc_netfh.sh	2.0	manifest	/data/gw/rc_netfh.sh	路线A: FH modem栈环境(最小army, MODE.fh门控; v1.4=ULA+NAT66+radvd)
+gw/rc_netfh.sh	2.1	manifest	/data/gw/rc_netfh.sh	路线A: FH modem栈环境(最小army, MODE.fh门控; v2.1=atci对复活修L14回归)
 gw/radvd.conf	1.0	manifest	/data/gw/radvd.conf	IPv6 SLAAC+RDNSS通告(br-lan, ULA fd42:9ac1:7e50::/64)
 gw/capture_ubus.sh	1.1	manifest	/data/gw/capture_ubus.sh	stock拨号一次性捕获(ubus monitor+ccmni采样)
 gw/dial_variant.sh	1.1	manifest	/data/gw/dial_variant.sh	5G 拨号参数变体实验器(iptype/apn/plmn/roam)
@@ -74,5 +74,5 @@ gw/src/fhstub.c	1.0	src	gw/bin/fhstub.so	FH符号桩库源码
 gw/defaults.conf	1.0	manifest	/data/gw/defaults.conf	统一配置只读出厂基线(444); 消费方source叠加settings.conf稀疏覆盖
 tools/leak_check.py	1.1	tool	-	敏感词+设备MAC零命中门禁(工作树+可选全历史; 建议pre-push)
 docs/ARCHITECTURE.md	1.0	doc	-	架构+版本总表(本表生成)
-gw/watchdog.sh	1.0	manifest	/data/gw/watchdog.sh	持续不变量看门狗(L13: 进程/规则/端口/信标/探活 15项, 30s周期, 状态转移日志+WAN LED闪烁告警)
-tools/selftest.py	1.0	tool	-	断言式全功能测试(L13: 控制面+数据面+跨层一致性, 7类33项; deploy.py push 后自动跑)
+gw/watchdog.sh	1.1	manifest	/data/gw/watchdog.sh	持续不变量看门狗(L13: 17项不变量; v1.2/L14: +蜂窝控制面 atcid自愈+CFUN探针+注册态, airplane容忍)
+tools/selftest.py	1.1	tool	-	断言式全功能测试(L13+L14: 7类~48项; v1.1: 全18 GET端点扫全+AT面+SIM/注册+锁三层一致性+看门狗/时钟/温度+厂商面封闭)

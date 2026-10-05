@@ -23,7 +23,7 @@ gw/bin/v3_steth.ko	1.0	manifest	/data/gw/v3_steth.ko	hook槽位听诊器(bias/in
 gw/src/healthdog.c	1.0	src	gw/bin/healthdog.ko	看门狗模块源码(版本随产物)
 gw/src/v3_fix.c	1.1	src	gw/bin/v3_fix.ko	TTL/解绑模块源码(版本随产物)
 gw/src/v3_steth.c	1.0	src	gw/bin/v3_steth.ko	听诊器模块源码(版本随产物)
-tools/deploy.py	2.7	tool	-	MANIFEST部署/漂移检查(版本注入+预检); v2.7: push后自动跑selftest(L13制度化对策); v2.6: EXTRA_KEEP补dropbear_keys; v2.5: push建父目录+空md5防御; v2.4: push names参数修复; v2.3: 基座/data/gw迁移+凭证外置secrets; v2.1 put原子推送
+tools/deploy.py	2.8	tool	-	MANIFEST部署/漂移检查(版本注入+预检); v2.7: push后自动跑selftest(L13制度化对策); v2.6: EXTRA_KEEP补dropbear_keys; v2.5: push建父目录+空md5防御; v2.4: push names参数修复; v2.3: 基座/data/gw迁移+凭证外置secrets; v2.1 put原子推送
 tools/serial_server.py	1.7	tool	-	常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets)
 tools/serial_cmd.py	1.3	tool	-	串口命令瘦客户端(marker输出捕获; v1.3示例路径更新)
 tools/lk_flip2.py	1.1	tool	-	LK 一键翻槽(a|b, misc[2060]字节)
@@ -74,5 +74,6 @@ gw/src/fhstub.c	1.0	src	gw/bin/fhstub.so	FH符号桩库源码
 gw/defaults.conf	1.0	manifest	/data/gw/defaults.conf	统一配置只读出厂基线(444); 消费方source叠加settings.conf稀疏覆盖
 tools/leak_check.py	1.1	tool	-	敏感词+设备MAC零命中门禁(工作树+可选全历史; 建议pre-push)
 docs/ARCHITECTURE.md	1.0	doc	-	架构+版本总表(本表生成)
-gw/watchdog.sh	1.1	manifest	/data/gw/watchdog.sh	持续不变量看门狗(L13: 17项不变量; v1.2/L14: +蜂窝控制面 atcid自愈+CFUN探针+注册态, airplane容忍)
+gw/watchdog.sh	1.2	manifest	/data/gw/watchdog.sh	持续不变量看门狗(L13: 17项不变量; v1.2/L14: +蜂窝控制面 atcid自愈+CFUN探针+注册态, airplane容忍)
 tools/selftest.py	1.3	tool	-	断言式全功能测试(L13-L15: 7类51项; v1.3: +5G带宽跨层一致性(settings BW5G vs iw宽度, 守dat双字段链); v1.2: 设备侧强制ccmni探测+坏口令断言)
+tools/doc_audit.py	1.0	tool	-	文档结论台账审计(L16: 结论与代码版本绑定+漂移检测; 双向CLM标记+CODE-REGRESSED/STALE-CODE/TEST-MISSING/未登记断言扫描+ARCHITECTURE结论表渲染; deploy push前置fail-closed)

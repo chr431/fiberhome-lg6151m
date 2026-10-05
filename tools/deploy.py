@@ -422,6 +422,11 @@ if __name__ == "__main__":
     # 版本注册表预检: 注册表/MANIFEST/磁盘/架构图任何不一致 -> 拒绝一切操作
     if not vercheck.check():
         sys.exit("!! 版本注册表不一致, 先修复再操作")
+    # 文档结论审计 (L16): 结论/代码版本绑定漂移 -> 拒绝 push (防"修了代码忘了翻案")
+    import doc_audit
+    if cmd in ("push", "put", "snapshot") and not doc_audit.audit(verbose=True):
+        sys.exit("!! 文档结论台账有违规(STALE-CODE/未登记断言), 复审后 "
+                 "`doc_audit.py refresh <id>` 或修正文档")
     if cmd == "push" and "--serial" in sys.argv:
         sys.argv.remove("--serial")
         names = [a for a in sys.argv[2:] if not a.startswith("-")]

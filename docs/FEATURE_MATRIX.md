@@ -107,15 +107,15 @@
 | Mesh/EasyMesh | map_master/slave 1905 全栈 | ✗ 单机模式 | `✗` |
 | 访客网络 | wifiguest.sh 隔离 | 访客 BSS+隔离 | `=` |
 | WiFi 分析 | — | 信道图/评级/AP 列表/时间图 canvas | `▲` |
-| 160MHz | 可用（同款 dat 链）| **可用**（EHT_ApBw/VHT_BW 双字段齐设后实测 2402/2882 Mbps PHY）| `=` 早期"驱动钳制"结论是 dat 语义错位误诊，2026-10-05 翻案 |
+| 160MHz | 可用（同款 dat 链）| **可用**（EHT_ApBw/VHT_BW 双字段齐设后实测 2402/2882 Mbps PHY） <!--CLM:CLM-160-FM-->| `=` 早期"驱动钳制"结论是 dat 语义错位误诊，2026-10-05 翻案 |
 | 漫游加速 | roaming_accel.ko(ARP 注入) | ✗ | `✗` 单 AP 无漫游场景 |
 
 ### 2.5 系统治理（差距最大的一域）
 
 | 功能 | 原厂 | 自研 | 评 |
 |---|---|---|---|
-| 看门狗 | process_check 13s+sysmgr 300s（曾出现 respawn 混乱）| watchdog v1.2：17 不量+atcid 自愈+LED 告警+状态转移日志 | `▲` |
-| 自动化测试 | 无（产测残留不算）| selftest 50 断言×7 类+数据面探测+破坏性验证流程 | `▲` |
+| 看门狗 | process_check 13s+sysmgr 300s（曾出现 respawn 混乱）| watchdog v1.2：17 不量+atcid 自愈+LED 告警+状态转移日志 | `▲` | <!--CLM:CLM-WATCHDOG-17-->
+| 自动化测试 | 无（产测残留不算）| selftest 50 断言×7 类+数据面探测+破坏性验证流程 | `▲` | <!--CLM:CLM-SELFTEST-51-->
 | 部署管控 | FOTA 云推（可被覆盖，见 §8 FINDINGS）| deploy.py 版本登记/md5 预检/漂移 doctor/push 后自动 selftest | `▲` |
 | 刷机安全 | /lib/upgrade 无签名校验（gzip 魔数+md5）| 硬门控 flash.sh+bootctrl A/B+TOOR_PASS 构建时注入 | `▲` |
 | 版本可追溯 | SoftwareVersionTable | VERSIONS.tsv+git 全历史 | `▲` |
@@ -138,7 +138,7 @@
 
 | 面 | 原厂 | 自研 |
 |---|---|---|
-| 监听端口 | 80/443/23(按需)/53/18996/18998/30005/1900/5683+8840/8841 内环 | **80/22/53 三个** |
+| 监听端口 | 80/443/23(按需)/53/18996/18998/30005/1900/5683+8840/8841 内环 | **80/22/53 三个** | <!--CLM:CLM-ATTACK-SURFACE-->
 | 常驻凭据面 | superadmin 常量口令/telnet 沙箱口令规则/RSA 私钥内置/沙箱白名单逃逸史 | 单口令 sha256+token；无内置凭据 |
 | 已利用过的洞 | send_msg 反引号注入 uid=0、AT 注入、沙箱 strings 任意读、LK 串口链 | 同硬件层（LK 链不可消除，靠口令/物理接触缓解）|
 | 云端覆盖 | Kaa+TR-069 可远程改配置/推固件 | 无云端 |

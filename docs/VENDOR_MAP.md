@@ -9,14 +9,14 @@
 
 ## 0. 十条关键结论（含对既有认知的修正）
 
-1. **PID1 是 procd，但 `/etc/init.d/rcS` 并非 sysinit 入口**：procd 内建 rcS 扫描器拦截 inittab 的 `::sysinit:` 行，串行 glob 执行 `/etc/rc.d/S*`（56 个）。FH 定制的 rcS（烽火层）真正调用者是 **S99zmtk_boot_done 的末行** —— 烽火驱动/服务层在 rc.d 链最末端才启动。
+1. **PID1 是 procd，但 `/etc/init.d/rcS` 并非 sysinit 入口** <!--CLM:CLM-PROCD-INTERCEPT-->：procd 内建 rcS 扫描器拦截 inittab 的 `::sysinit:` 行，串行 glob 执行 `/etc/rc.d/S*`（56 个）。FH 定制的 rcS（烽火层）真正调用者是 **S99zmtk_boot_done 的末行** —— 烽火驱动/服务层在 rc.d 链最末端才启动。
 2. **应用层编排不在 procd 而在自研 sysmgr**：`process_start_list`（26 项，依赖 DAG + 两优先级）+ process_monitor（300s）+ process_check.sh（13s）构成三层看护。原厂已禁用 14 个标准 OpenWrt 服务（dnsmasq/dropbear/firewall/uhttpd/odhcpd/telnetd 等），FH 应用完全绕开标准网络栈。
-3. **拨号执行者不是 netifd**：`network.wan.proto='ql_datacall'` 的 proto 脚本在包里声明了但**从未落地**。原厂真拨号链 = mobilenetwork(libqlnet) → ubus ql-netd → ql_netd → MIPC TLV → modem。netifd 仅在 proto=mipc/ql_mipc 分支有效。
+3. **拨号执行者不是 netifd** <!--CLM:CLM-DIALER-QLNETD-->：`network.wan.proto='ql_datacall'` 的 proto 脚本在包里声明了但**从未落地**。原厂真拨号链 = mobilenetwork(libqlnet) → ubus ql-netd → ql_netd → MIPC TLV → modem。netifd 仅在 proto=mipc/ql_mipc 分支有效。
 4. **AT 命令的最终通道是 MIPC**：`mipc_wan_cli --at_cmd` → libql_at(ql_atcid_sender) → atcid（unix socket /dev/atci-service）→ libmipc_msg → /dev/ttyCMIPC0..14 → ccci → modem 的 ssds_atp 任务（5mipc_inject_string_hdlr 端点）。atcid 是 AT 通道本体，atci_service 是系统级伴生。
-5. **锁频段无 AT 面**：mobilenetwork 的 fh_process_lock_band 线程调用 **libqlril.so 的 `ql_nw_set_band_mode`**（lte/nr/umts_band_mode 三个 32 位位图），经 ubus ril → ql_ril_service → MIPC。锁小区才有 AT 面（AT+EMMCHLCK）。
-6. **fhdrv_* 内核驱动族（19 个 .ko）在裁剪后的设备上从未加载** —— 此前 quecadp 引擎 ioctl ENOTTY 之谜的真正根因是整条加载链（fhdrv_common_init → pon → net）没有执行，而非加载顺序问题。
+5. **锁频段无 AT 面** <!--CLM:CLM-BANDLOCK-LIBQLRIL-->：mobilenetwork 的 fh_process_lock_band 线程调用 **libqlril.so 的 `ql_nw_set_band_mode`**（lte/nr/umts_band_mode 三个 32 位位图），经 ubus ril → ql_ril_service → MIPC。锁小区才有 AT 面（AT+EMMCHLCK）。
+6. **fhdrv_* 内核驱动族（19 个 .ko）在裁剪后的设备上从未加载** <!--CLM:CLM-FHDRV-UNLOADED--> —— 此前 quecadp 引擎 ioctl ENOTTY 之谜的真正根因是整条加载链（fhdrv_common_init → pon → net）没有执行，而非加载顺序问题。
 7. **双 TLS 栈并存**（OpenSSL 1.1 + wolfSSL 35.3.0）：HTTP 面走 OpenSSL，cfg/通用层走 wolfSSL。双 dnsmasq 思路同理 —— FH 对 dnsmasq 打了私有补丁（按端口绑定转发）。
-8. **原厂 Web 前端是 nginx(80/443, Lua WAF) → FastCGI(127.0.0.1:8840) → webs**。（FINDINGS 早期记录的 ":8080" 实为 v4 复活层自足 conf 的监听，非原厂。）WAF 是三层权限模型：Lua 请求规则 + 文件级（运营商×区域×用户级）+ 数据级（xmlnode 白名单：未登录仅 1 节点可读，超管 371 节点可写）。
+8. **原厂 Web 前端是 nginx(80/443, Lua WAF) → FastCGI(127.0.0.1:8840) → webs** <!--CLM:CLM-NGINX-PORTS-->。（FINDINGS 早期记录的 ":8080" 实为 v4 复活层自足 conf 的监听，非原厂。）WAF 是三层权限模型：Lua 请求规则 + 文件级（运营商×区域×用户级）+ 数据级（xmlnode 白名单：未登录仅 1 节点可读，超管 371 节点可写）。
 9. **云通道实锤**：iotagtd 内嵌 Kaa SDK，bootstrap 硬编码厂商内网地址；App 本地协议 NDMP（明文 :18998 / TLS 双向 :18996）。TR-069 CWMP 使能（连接请求口 30005，ACS URL 空）。
 10. **模式门 7 项**：META（atag bootmode=0001）、工厂模式（/fhdata/factorymodeflag → fac_process_start_list 15 项）、串口门（/fhconf/uart_conf）、WiFi TestMode（e2p 0x1af bit0）、测试卡（PLMN 1001）、ADB-AT（AdbAtEnable）、printk 门。GAINftp 在本固件不存在。
 

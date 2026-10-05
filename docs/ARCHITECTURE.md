@@ -69,7 +69,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/v3_babysit_v2.sh` | **v2.0** | manifest | `/data/gw/babysit_v2.sh` | 启动保姆(T1杀rcS/T2核爆回B) |
 | `gw/v3_rc10.extend.sh` | **v2.19** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2(br-lan+wifi+wan+DNS; v2.5网口对调; v2.6/2.7 eth1 MAC钉死+归因修正) |
 | `gw/wan_agg.sh` | **v2.18** | manifest | `/data/gw/wan_agg.sh` | 双上行聚合主管(v2.17: v4免插件配方(statistic插件缺libxtables.so.12/mac插件不存在——v4分流自精简启动以来从未生效): 源端口区间分流(v6同款)+钉死改源IP(邻居解析+漂移重建); v2.15: 聚合总开关ENABLE=0旁路/1参战, 热切+GUI agg_mode; 照抄原厂quecadp内核分流+fwmark路由; v1.7 to-LAN护盾规则自愈(全灭黑洞终根因) |
-| `gw/watchdog.sh` | **v1.1** | manifest | `/data/gw/watchdog.sh` | 持续不变量看门狗(L13: 17项不变量; v1.2/L14: +蜂窝控制面 atcid自愈+CFUN探针+注册态, airplane容忍) |
+| `gw/watchdog.sh` | **v1.2** | manifest | `/data/gw/watchdog.sh` | 持续不变量看门狗(L13: 17项不变量; v1.2/L14: +蜂窝控制面 atcid自愈+CFUN探针+注册态, airplane容忍) |
 | `gw/webs_revive.sh` | **v1.3** | manifest | `/data/gw/webs_revive.sh` | 原厂GUI复活器(自足nginx conf; 手动拉起) |
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
@@ -91,8 +91,9 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/build_healthdog.sh` | **v1.0** | tool | `-` | healthdog.ko内核模块构建(内核树) |
 | `tools/build_steth.sh` | **v1.0** | tool | `-` | v3_steth.ko构建 |
 | `tools/build_v3fix.sh` | **v1.0** | tool | `-` | v3_fix.ko构建 |
-| `tools/deploy.py` | **v2.7** | tool | `-` | MANIFEST部署/漂移检查(版本注入+预检); v2.7: push后自动跑selftest(L13制度化对策); v2.6: EXTRA_KEEP补dropbear_keys; v2.5: push建父目录+空md5防御; v2.4: push names参数修复; v2.3: 基座/data/gw迁移+凭证外置secrets; v2.1 put原子推送 |
+| `tools/deploy.py` | **v2.8** | tool | `-` | MANIFEST部署/漂移检查(版本注入+预检); v2.7: push后自动跑selftest(L13制度化对策); v2.6: EXTRA_KEEP补dropbear_keys; v2.5: push建父目录+空md5防御; v2.4: push names参数修复; v2.3: 基座/data/gw迁移+凭证外置secrets; v2.1 put原子推送 |
 | `tools/device_local.py.example` | **v1.0** | tool | `-` | 凭证模板(真件gitignored) |
+| `tools/doc_audit.py` | **v1.0** | tool | `-` | 文档结论台账审计(L16: 结论与代码版本绑定+漂移检测; 双向CLM标记+CODE-REGRESSED/STALE-CODE/TEST-MISSING/未登记断言扫描+ARCHITECTURE结论表渲染; deploy push前置fail-closed) |
 | `tools/gen_kernel_inc.py` | **v1.0** | tool | `-` | kernel头生成(构建辅助) |
 | `tools/health_check.py` | **v1.1** | tool | `-` | v4全系统体检器(SSH 18项; v1.1 fw_ver读/data/gw/VERSIONS: 身份/槽位/bootctrl/服务/WiFi/5G/外网/资源/温度/存储/数据/日志) |
 | `tools/identify2.py` | **v1.0** | tool | `-` | 残留终验取证器(user_data清单/p26纯净性挂载验证/proc-net快照) |
@@ -113,3 +114,27 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/verify_v4_services.py` | **v1.0** | tool | `-` | v4服务巡检器(监听端口/GUI/WiFi双频/5G WAN实网ping) |
 | `tools/wait_ready.py` | **v1.1** | tool | `-` | 轮询等待器(tcp/串口marker, 代替长sleep) |
 <!--VERCHECK:END-->
+
+## 结论台账 (审计生成, 勿手改)
+
+
+<!--CLMAUDIT:BEGIN (generated from docs/CONCLUSIONS.tsv; `doc_audit.py render`)-->
+
+| 结论 | 状态 | 代码证据 | 测试护栏 | 验证锚点 | 说明 |
+|---|---|---|---|---|---|
+| `CLM-160MHZ`@FINDINGS.md | ✅实证 | `gw/wifi_up.sh>=1.10` | 5G 带宽配置与射频实际一致 (跨层) | e76abba@2026-10-05 | 160MHz可用;旧"驱动钳制"系dat双字段语义错位误诊 |
+| `CLM-160-FM`@FEATURE_MATRIX.md | ✅实证 | `gw/wifi_up.sh>=1.10` | 5G 带宽配置与射频实际一致 (跨层) | e76abba@2026-10-05 | 同上,对比表行 |
+| `CLM-BOOTCTRL-2060`@FINDINGS.md | ✅实证 | `tools/lk_flash_v4.py>=1.1` | TRY_A 已自清 | e76abba@2026-10-05 | misc偏移2060 magic BCAB |
+| `CLM-ZMTK-CLONE`@FINDINGS.md | ✅实证 | `gw/zz_data_hook>=1.1` | boot.done 存在 (启动链完整) | e76abba@2026-10-05 | 首启克隆槽必须在自定义链中禁用 |
+| `CLM-PMK-ONLY`@FINDINGS.md | ✅实证 | `gw/wifi_up.sh>=1.10` | 三 BSS 接口存在且为 AP 模式 | e76abba@2026-10-05 | hostapd只吃原始PMK(wpa_passphrase被libfhcrypto拦截) |
+| `CLM-MARK-OR`@FINDINGS.md | ✅实证 | `gw/wan_agg.sh>=2.15` | 分流规则已安装 (sport + mark),钉死规则与配置表一致 | e76abba@2026-10-05 | iptables MARK覆盖非OR;mark==0守卫 |
+| `CLM-PROCD-INTERCEPT`@VENDOR_MAP.md | ✅实证 | `—` | — | 54e89f0@2026-10-05 | RE静态+设备佐证: procd拦截sysinit,FH层由S99末行触发 |
+| `CLM-DIALER-QLNETD`@VENDOR_MAP.md | ⚠️推断 | `gw/rc_netfh.sh>=2.1` | — | 54e89f0@2026-10-05 | 拨号者=ql_netd+mobilenetwork(proto脚本未落地);阶段2裁撤mobilenetwork前必须做kill存活实验 |
+| `CLM-BANDLOCK-LIBQLRIL`@VENDOR_MAP.md | ✅实证 | `—` | — | 54e89f0@2026-10-05 | RE实证: ql_nw_set_band_mode(readelf UND),无AT面 |
+| `CLM-FHDRV-UNLOADED`@VENDOR_MAP.md | ✅实证 | `—` | — | 54e89f0@2026-10-05 | fhdrv链自定义启动下未载=ENOTTY真因;复活需完整加载链 |
+| `CLM-NGINX-PORTS`@VENDOR_MAP.md | ✅实证 | `—` | — | 54e89f0@2026-10-05 | 原厂nginx=80/443;8080是v4复活层 |
+| `CLM-ATTACK-SURFACE`@FEATURE_MATRIX.md | ✅实证 | `gw/v3_rc10.extend.sh>=2.19` | telnet 口关闭,厂商 Web/App 后端未复活 (8080/8840/1899x),SSH 可达 (dropbear 单监听) | e76abba@2026-10-05 | 自研监听面=80/22/53 |
+| `CLM-WATCHDOG-17`@FEATURE_MATRIX.md | ✅实证 | `gw/watchdog.sh>=1.2` | 不变量看门狗活着且无未恢复故障 | e76abba@2026-10-05 | 17项不变量+atcid自愈+LED告警 |
+| `CLM-SELFTEST-51`@FEATURE_MATRIX.md | ✅实证 | `tools/selftest.py>=1.3` | — | e76abba@2026-10-05 | 51断言7类+数据面+破坏性验证流程 |
+
+<!--CLMAUDIT:END-->

@@ -70,6 +70,8 @@ EasyMesh/VPN 三族/UPnP/DDNS/VoIP/fhdrv_net_forward 端口隔离（FEATURE_MATR
 > 裸重启不够（缺完整 PATH/LD_LIBRARY_PATH 时启动即退）；恢复 = 全环境重拉。
 > **P2 由条件项转为必做**。详见 VENDOR_MAP §0.3 与台账 CLM-DIALER-QLNETD。
 - `mipc_bandlock`：zig cc 动态 musl 二进制，set/get 双模式，绑 selftest。
+  - **v0.1 已落地（2026-10-05）**：`mipc_cellular` getbands 实证 ret=0（自研进程→libqlril→ubus ril→MIPC→modem 全链），
+    setbands 已达 modem 栈（参数域拒绝=零位图非法，零服务影响）；168B 结构语义映射 = P1 续。 <!--CLM:CLM-MIPCTOOL-->
 - api.sh 蜂窝域重写：`engine=tree|mipc` 特性开关平滑迁移（GUI 无感）。
 - cellular_replay v2：ql_ril_service 就绪门控 + 新引擎重放。
 - selftest 翻转：锁一致性断言从 conf=树=模组 改 conf=模组（双层）。

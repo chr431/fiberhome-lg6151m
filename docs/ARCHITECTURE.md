@@ -132,13 +132,14 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `CLM-PMK-ONLY`@FINDINGS.md | ✅实证 | `gw/wifi_up.sh>=1.10` | 三 BSS 接口存在且为 AP 模式 | e76abba@2026-10-05 | hostapd只吃原始PMK(wpa_passphrase被libfhcrypto拦截) |
 | `CLM-MARK-OR`@FINDINGS.md | ✅实证 | `gw/wan_agg.sh>=2.15` | 分流规则已安装 (sport + mark),钉死规则与配置表一致 | e76abba@2026-10-05 | iptables MARK覆盖非OR;mark==0守卫 |
 | `CLM-PROCD-INTERCEPT`@VENDOR_MAP.md | ✅实证 | `—` | — | 54e89f0@2026-10-05 | RE静态+设备佐证: procd拦截sysinit,FH层由S99末行触发 |
-| `CLM-DIALER-QLNETD`@VENDOR_MAP.md | ⚠️推断 | `gw/rc_netfh.sh>=2.1` | — | 54e89f0@2026-10-05 | 拨号者=ql_netd+mobilenetwork(proto脚本未落地);阶段2裁撤mobilenetwork前必须做kill存活实验 |
+| `CLM-DIALER-QLNETD`@VENDOR_MAP.md | ⚠️推断 | `gw/rc_netfh.sh>=2.1` | — | e2fe2e3@2026-10-05 | 拨号者=ql_netd+mobilenetwork(proto脚本未落地);阶段2裁撤mobilenetwork前必须做kill存活实验 |
 | `CLM-BANDLOCK-LIBQLRIL`@VENDOR_MAP.md | ✅实证 | `—` | — | 54e89f0@2026-10-05 | RE实证: ql_nw_set_band_mode(readelf UND),无AT面 |
 | `CLM-FHDRV-UNLOADED`@VENDOR_MAP.md | ✅实证 | `—` | — | 54e89f0@2026-10-05 | fhdrv链自定义启动下未载=ENOTTY真因;复活需完整加载链 |
 | `CLM-NGINX-PORTS`@VENDOR_MAP.md | ✅实证 | `—` | — | 54e89f0@2026-10-05 | 原厂nginx=80/443;8080是v4复活层 |
 | `CLM-ATTACK-SURFACE`@FEATURE_MATRIX.md | ✅实证 | `gw/v3_rc10.extend.sh>=2.19` | telnet 口关闭,厂商 Web/App 后端未复活 (8080/8840/1899x),SSH 可达 (dropbear 单监听) | e76abba@2026-10-05 | 自研监听面=80/22/53 |
 | `CLM-WATCHDOG-17`@FEATURE_MATRIX.md | ✅实证 | `gw/watchdog.sh>=1.2` | 不变量看门狗活着且无未恢复故障 | 2ea76ed@2026-10-05 | 17项不变量+atcid自愈+LED告警 |
-| `CLM-SELFTEST-51`@FEATURE_MATRIX.md | ✅实证 | `tools/selftest.py>=1.4` | WAN 面纵深封禁链在位 (P0) | e76abba@2026-10-05 | 52断言7类+数据面+破坏性验证+文档漂移审计链 |
+| `CLM-SELFTEST-51`@FEATURE_MATRIX.md | ✅实证 | `tools/selftest.py>=1.4` | WAN 面纵深封禁链在位 (P0) | e2fe2e3@2026-10-05 | 52断言7类+数据面+破坏性验证+文档漂移审计链 |
 | `CLM-LOGMGR-DEAD`@ROADMAP.md | ✅实证 | `—` | — | e76abba@2026-10-05 | logmgr已死多周系统正常(rc_netfh拉起后自灭,无消费者);下架无风险 |
+| `CLM-MIPCTOOL`@ROADMAP.md | ✅实证 | `gw/src/mipc_cellular.c>=0.1` | — | e2fe2e3@2026-10-05 | mipc_cellular getbands实证ret=0(自研进程→libqlril→ubus ril→MIPC→modem);setbands达modem栈;168B结构语义=P1续 |
 
 <!--CLMAUDIT:END-->

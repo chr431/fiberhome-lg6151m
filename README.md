@@ -8,7 +8,8 @@
 > [docs/FINDINGS.md](docs/FINDINGS.md)（逆向发现总集）·
 > [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)（架构 + 版本总表）。
 > 深挖参考：[docs/VENDOR_MAP.md](docs/VENDOR_MAP.md)（原厂 RP0103 全量逆向地图）·
-> [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md)（原厂 vs 自研功能对比）。
+> [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md)（原厂 vs 自研功能对比）·
+> [docs/ROADMAP.md](docs/ROADMAP.md)（替换路线图 v2）。
 
 > **免责声明**：全部研究在本人自有设备上进行。请勿对不属于自己的设备使用文中任何方法。
 > 刷机有变砖风险，操作前务必全盘备份。

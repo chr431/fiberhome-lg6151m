@@ -328,22 +328,11 @@ apply_airplane() {
     ok_json
 }
 net_plmn_scan() {
-    # v2.24 (P4.1): AT+COPS=? 直扫(原 ubus mobile_network 属 mobilenetwork 过渡层)。
-    # 扫描阻塞 10-40s; 结果 +COPS: (...)
-    OUT=$(mipc_wan_cli --at_cmd "AT+COPS=?" 2>/dev/null | tr -d '')
-    LIST=$(printf '%s' "$OUT" | awk '
-        /\+COPS: ?\(/ {
-            line=$0
-            while (match(line, /\([0-9]+,"[^"]*","[0-9]*",[0-9]+\)/)) {
-                rec=substr(line, RSTART, RLENGTH); line=substr(line, RSTART+RLENGTH)
-                split(rec, a, ",")
-                long=a[2]; gsub(/"/, "", long)
-                numeric=a[3]; gsub(/"/, "", numeric)
-                act=a[4]; gsub(/[()]/, "", act)
-                printf "{\"name\":\"%s\",\"plmn\":\"%s\",\"act\":\"%s\"},", long, numeric, act
-            }
-        }' | sed 's/,$//')
-    printf '{"networks":[%s],"ts":%d}' "${LIST:-}" "$(date +%s)"
+    # P4.1 尝试记录(2026-10-06): AT+COPS=? 直扫不可行 — 长响应撑爆 mipc_wan_cli
+    # 固定缓冲(段错误, 同 AT+CLAC); 结果直读需 mipc_cellular ql_nw_network_scan
+    # 逆向(下轮)或树结果节点定位。暂用 mobilenetwork ubus 通道(过渡层仍在)。
+    ubus call mobile_network start_search_network "{}" >/dev/null 2>&1
+    ok_json ',"note":"scanning(ubus); 结果展示待P4.1续"'
 }
 
 # -- 风扇/LED --

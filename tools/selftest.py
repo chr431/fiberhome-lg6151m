@@ -547,7 +547,9 @@ def t_cel_lockcons():
     # engine=tree: 自管 conf ↔ cfg 树 ↔ 模组 EMMCHLCK 三层一致
     # engine=mipc (P1): 锁不经树 -- conf 状态合法 + 引擎二进制就位 + 互斥约束
     conf = dev("cat /data/gw/cellular.conf 2>/dev/null")
-    eng = dev("sh -c '. /data/gw/cellular_engine.conf 2>/dev/null; echo ${BAND_ENGINE:-mipc}'").strip()
+    # busybox ash: . 缺失文件=致命退出, 必须先 [ -r ] 守卫 (api.sh 同款教训)
+    eng = dev("sh -c '[ -r /data/gw/cellular_engine.conf ] && . /data/gw/cellular_engine.conf; "
+              "echo ${BAND_ENGINE:-mipc}'").strip()
     mism = []
     if eng == "mipc":
         out = dev("ls -la /data/gw/mipc_cellular 2>/dev/null | grep -c '^-rwx'")
@@ -713,11 +715,12 @@ def t_sys_disk():
 
 @test("无内核 OOPS/PANIC")
 def t_sys_kernel():
-    out = dev("dmesg | grep -ciE 'Oops:|BUG:|panic|Kernel panic' 2>/dev/null")
+    # aee_aed ipanic 探测行(开机 expdb MTD 探测噪声)与 kernel_panic_sysfs_init
+    # (函数名含 panic 的正常 initcall)排除; 真 Oops/BUG/panic 必须为 0
+    out = dev("dmesg | grep -iE 'Oops:|BUG:|panic' | grep -vcE 'aee_aed|_panic_' 2>/dev/null")
     n = int((out.strip() or "0").split("\n")[-1])
-    #FORENSIC D 行有 hang_detect 关键字不等于内核 OOPS; 容忍 forensic 行
-    record(t_sys_kernel._test_name, "system", n <= 7,
-           f"events={n} (含 FORENSIC 噪声)")
+    record(t_sys_kernel._test_name, "system", n == 0,
+           f"events={n} (噪声已滤)")
 
 
 @test("不变量看门狗活着且无未恢复故障")

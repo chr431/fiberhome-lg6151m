@@ -22,7 +22,7 @@ echo "user_data RW ok" >> $L
 
 dd if=$IMG of=/dev/mmcblk0p26 bs=4M >> $L 2>&1
 sync
-mount -t squashfs /dev/mmcblk0p26 /tmp/mnt_chk || { echo "GATE: p26 mount" >> $L; exit 1; }
+mount -t squashfs -o ro /dev/mmcblk0p26 /tmp/mnt_chk || { echo "GATE: p26 mount" >> $L; exit 1; }
 [ "$(grep -c 'v3:' /tmp/mnt_chk/etc/init.d/rcS)" -ge 2 ] || { echo "GATE: p26 rcS anchors" >> $L; exit 1; }
 grep -q '^toor:' /tmp/mnt_chk/etc/passwd || { echo "GATE: p26 toor" >> $L; exit 1; }
 ls /tmp/mnt_chk/etc/rc.d/S98zz_data_hook >> $L 2>&1 || { echo "GATE: p26 S98" >> $L; exit 1; }

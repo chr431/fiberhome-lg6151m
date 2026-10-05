@@ -145,5 +145,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `CLM-BANDLOCK-STRUCT`@VENDOR_MAP.md | ✅实证 | `gw/src/mipc_cellular.c>=0.2` | 锁定状态跨层一致 (conf=树=模组 / mipc 引擎就位) | 1448d9e@2026-10-05 | 168B全破译: mode3@0/umts@4/LTE@8+@C/NR@28+@2C+@30(段n-1/n-33/n-65);锁N41+N79实弹验证+解锁恢复 |
 | `CLM-FIRSTBOOT-AUTH`@ROADMAP.md | ✅实证 | `gw/www/api.sh>=2.23` | 首刷口令自举就位 (不运行在默认口令) | a7648e3@2026-10-06 | 纯原厂直刷首启: login以文档化默认口令lg6151m建档+default标记; GUI强制改密弹窗; SSH(22)入WANGUARD |
 | `CLM-DIALKEEPER`@ROADMAP.md | ✅实证 | `gw/dial_keeper.sh>=1.0` | 拨号兜底守护存活 (P2) | 7814905@2026-10-06 | P2验收全过: 冷拨35s接管/净8min稳定/飞行循环自愈(FAIL退避恢复)/mobilenetwork死后PDN独立;呼叫所有权随deact/act转移(厂商TERM清理只及自身呼叫) |
+| `CLM-P3LITE`@ROADMAP.md | ✅实证 | `gw/rc_netfh.sh>=3.0` | 拨号兜底守护存活 (P2) | a3dbf44@2026-10-06 | P3-lite: cfgmgr+logmgr守护下架; 3次冷启动54/54全绿; 守护0在位树通 |
+| `CLM-TREE-DAEMONLESS`@VENDOR_MAP.md | ✅实证 | `gw/rc_netfh.sh>=3.0` | cfg 树信号上报活着 (过渡期) | a3dbf44@2026-10-06 | 树不依赖cfgmgr守护(shm由cfg_tool建,cfg_cmd直操作); kill实证get/set全通 |
 
 <!--CLMAUDIT:END-->

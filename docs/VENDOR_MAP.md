@@ -207,6 +207,7 @@ cfg 树一级 24 分支（活树实查）：DeviceInfo/ManagementServer(Time/TR0
 | netifd ql_datacall proto 负责拨号 | proto 脚本未落地；真拨号者=ql_netd+mobilenetwork |
 | 原厂启动走 OpenWrt procd rcS | procd 只管 56 个 rc.d；FH 层由 S99zmtk 末行触发自研 rcS+sysmgr |
 | 锁频段可能存在 AT 面 | 无；唯一路 = libqlril ql_nw_set_band_mode (MIPC) |
+| cfgmgr 守护 = 树的必要条件 | 否：shm 由 cfg_tool 建立，cfg_cmd/libfhcfg 直操作共享内存，守护可裁（P3-lite 实证） <!--CLM:CLM-TREE-DAEMONLESS--> |
 
 ## 9. 原始报告索引
 

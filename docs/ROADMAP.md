@@ -91,12 +91,28 @@ EasyMesh/VPN 三族/UPnP/DDNS/VoIP/fhdrv_net_forward 端口隔离（FEATURE_MATR
 自研 dial keeper：`mipc_wan_cli --data_call_act`（APN 来自 `--apn_provision_by_sim`）+
 watchdog 集成（ccmni 无 IP→重拨）。出口：拔 SIM 重插自恢复 + 10 分钟流量观测。
 
-### P3 下架与开机链简化（rc_netfh v3）
+### P3 下架（**2026-10-06 以 P3-lite 形态完成**） <!--CLM:CLM-P3LITE-->
+
+> 实证简化：树操作不依赖 cfgmgr 守护（kill 后 get/set 全通，shm 由 cfg_tool
+> 建立）→ 低风险先裁守护。rc_netfh v3.0：cfgmgr+logmgr 不再拉起，cfg_tool 的
+> shm 构建/快照恢复保留，mobilenetwork（树翻译层）保留。三次冷启动回归全绿
+> （54/54 ×3，守护 0 在位，树通，PDN/keeper/mobilenetwork 齐）。
+> 信号面同步去树化优先（api.sh v2.24+：mipc RSRP + AT PLMN/RAT 直读，树回退
+> —— 顺带修正了树里陈旧的 PLMN 显示）。
+> **P3.5（完整下架 mobilenetwork，待日间）**：netmode 的 mode→erat 映射表
+> （mobilenetwork 内逆向，错值会切 RAT 有服务风险）、小区锁 AT 直发
+> （EMMCHLCK 语法已明，风险可控但今夜预算已用）、PIN AT 面。
 - 裁去 cfg_tool/cfgmgr/logmgr/mobilenetwork + shmsnap 恢复段；MODE.fh 语义收窄为"modem 最小军"。
 - selftest：删 t_cel_tree，增引擎模式断言；watchdog 不变量复核。
 - **出口判据**：全量回归绿 + 开机时序对比记录（before/after）+ 冷启动三次稳定。
 
-### P4 功能补全（价值项，顺序自由）
+### P4 功能补全（**部分完成 2026-10-06**）
+
+> - PLMN 扫描直读：**受阻** — AT+COPS=? 长响应撑爆 mipc_wan_cli 固定缓冲
+>   （段错误，与 AT+CLAC 同类）；正确路径 = mipc_cellular 逆向
+>   ql_nw_network_scan。已回退 ubus 过渡实现。
+> - SMS 发送：**签名已定**（ql_sms_send_msg 单结构体指针，NULL 检查在
+>   0x146d0），字段映射留待专攻轮（错结构有真实发信风险，不无人值守赌）。
 - **SMS 发送**：ubus `mobile_network add_send_sms`（若 mobilenetwork 还活着）或 ql_sms 原生
   —— MIPC 通道非 AT CMGS，**无承载毒性**，旧禁令仅针对 AT 面。
 - 信号推送：订阅 `ril.unsol.nw.signal`，状态页从轮询升级实时。

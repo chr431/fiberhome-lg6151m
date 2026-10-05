@@ -707,4 +707,143 @@ window.trSave = async () => {
     j.ok ? toast("限额已保存") : toast("失败: " + j.error, 1);
 };
 
-/* ================ 上行认证 ================ */
+/* ================ 插件页(可选) ================
+ * /plugins.js 由设备侧可选提供(v3httpd 静态服务): 存在时其中代码调用
+ * LG_plugin({id,title,page}) 动态注册页面并注入导航; 文件不存在则静默跳过。
+ * 页面对象结构与内置页一致: {html, tick()}; 动作函数挂 window。 */
+window.LG_plugin = (p) => {
+    if (!p || !p.id || !p.page || PAGES[p.id]) return;
+    PAGES[p.id] = p.page;
+    const a = document.createElement("a");
+    a.href = "#/" + p.id; a.dataset.p = p.id; a.textContent = p.title || p.id;
+    const nav = document.getElementById("nav");
+    nav.insertBefore(a, nav.querySelector('a[data-p="sys"]') || null);
+    route();
+};
+(function () {
+    const s = document.createElement("script");
+    s.src = "/plugins.js?t=" + Date.now();
+    s.onerror = () => {};   // 无插件文件: 静默
+    document.head.appendChild(s);
+})();
+//
+
+//
+/* ================ 系统 ================ */
+PAGES.sys = {
+    html: `<div>
+      ${card("系统", kv("运行", "sy-up") + kv("固件", "sy-fw") + kv("内核", "sy-kern"))}
+      ${card("散热风扇", kv("模式", "fan-mode") + kv("转速", "fan-rpm") + kv("SoC 温度", "fan-temp") +
+        `<button class="ghost" id="fan-btn" onclick="fanTgl()">切换模式</button>`)}
+      ${card("指示灯", kv("夜间模式", "led-night") +
+        `<button class="ghost" id="led-btn" onclick="ledTgl()">切换</button>
+         <span class="hint">夜间模式 = 除电源外全灭</span>`)}
+      ${card("时间与 NTP", kv("当前时间", "ntp-date") + kv("时区", "ntp-tz") + kv("NTP 服务器", "ntp-srv") + `
+        <div class="row3" style="margin-top:8px">
+          <div class="frm"><label>时区</label><select id="nt-tz"><option value="CST-8">CST-8 (北京)</option><option value="UTC">UTC</option></select></div>
+          <div class="frm"><label>NTP 服务器</label><input id="nt-srv" class="mono"></div>
+        </div>
+        <button class="ghost" onclick="ntSync()">保存并立即对时</button>`)}
+      ${card("管理密码", `
+        <div class="row3">
+          <div class="frm"><label>当前密码</label><input id="pw-old" type="password"></div>
+          <div class="frm"><label>新密码 (8-63位)</label><input id="pw-new" type="password"></div>
+        </div>
+        <button class="pri" onclick="pwDo()">修改密码</button>
+        <span class="hint">修改后需重新登录</span>`)}
+      ${card("维护动作", `
+        <button class="ghost" onclick="syReboot()">重启网关</button>
+        <button class="ghost" onclick="logout()">退出登录</button>
+        <span class="hint">重启约 3 分钟; 全部服务自动恢复</span>`)}
+      ${card("wan_agg 日志", '<pre class="log" id="log-agg"></pre>', 1)}
+      ${card("wifi 日志", '<pre class="log" id="log-wifi"></pre>', 1)}
+    </div>`,
+    async tick() {
+        const s = await api("sys").catch(() => ({ uptime: 0 }));
+        T("sy-up", s.uptime ? Math.floor(s.uptime / 86400) + " 天 " + Math.floor(s.uptime % 86400 / 3600) + " 时" : "--");
+        T("sy-fw", "v4 slot-A RP0103 (lg6151m)"); T("sy-kern", "5.15.134 MT6990");
+        const fan = await api("fan");
+        T("fan-mode", fan.mode === "silent" ? "静音 (+6°C)" : "性能");
+        T("fan-rpm", `${fan.rpm} rpm`);
+        T("fan-temp", (fan.soc_temp > 0 ? (fan.soc_temp / 1000).toFixed(1) : "--") + " °C");
+        T("fan-btn", fan.mode === "silent" ? "切性能模式" : "切静音模式");
+        const led = await api("led");
+        T("led-night", led.night === "1" ? "已开启(全灭)" : "关闭");
+        T("led-btn", led.night === "1" ? "恢复正常指示" : "进入夜间模式");
+        const ntp = await api("ntp");
+        T("ntp-date", ntp.date); T("ntp-tz", ntp.tz); T("ntp-srv", ntp.ntp_server);
+        F("nt-srv", ntp.ntp_server);
+        const l = await api("logs");
+        H("log-agg", esc((l.wan_agg || "").replace(/\\n/g, "\n")));
+        H("log-wifi", esc((l.wifi || "").replace(/\\n/g, "\n")));
+    }
+};
+window.fanTgl = async () => {
+    const f = await api("fan");
+    const j = await api("fan_set", `mode=${f.mode === "silent" ? "performance" : "silent"}`).catch(e => ({ error: e.message }));
+    if (j.ok) { toast("已切换"); PAGES.sys.tick(); } else toast("失败: " + j.error, 1);
+};
+window.ledTgl = async () => {
+    const l = await api("led");
+    const j = await api("led_set", `night=${l.night === "1" ? 0 : 1}`).catch(e => ({ error: e.message }));
+    if (j.ok) { toast("已切换 (10s 内生效)"); PAGES.sys.tick(); } else toast("失败: " + j.error, 1);
+};
+window.ntSync = async () => {
+    const j = await api("ntp_set", `tz=${$("nt-tz").value}&server=${encodeURIComponent($("nt-srv").value)}`).catch(e => ({ error: e.message }));
+    j.ok ? toast("已保存并触发对时") : toast("失败: " + j.error, 1);
+};
+window.pwDo = async () => {
+    if (!confirm("确认修改管理密码?")) return;
+    const j = await api("pass_set", `old=${encodeURIComponent($("pw-old").value)}&new=${encodeURIComponent($("pw-new").value)}`).catch(e => ({ error: e.message }));
+    if (j.ok) { setLogin(false); toast("已修改, 请重新登录"); }
+    else toast(j.error === "bad_old" ? "当前密码错误" : "失败: " + j.error, 1);
+};
+window.syReboot = () => {
+    modal("确认重启", `<p>确定要重启网关吗? 约 3 分钟恢复。</p><div class="row3"><button class="pri" onclick="syRebootGo()">确认重启</button><button class="ghost" onclick="modalClose()">取消</button></div>`);
+};
+window.syRebootGo = async () => {
+    modalClose();
+    await api("sys_reboot").catch(() => {});
+    toast("重启中… 约 3 分钟");
+};
+
+/* ---------- router (骨架一次成型, 轮询仅 tick 更新槽位) ---------- */
+function showLoginWall() {
+    if (timer) clearInterval(timer);
+    const main = document.getElementById("main");
+    main.innerHTML = `<div style="display:flex;justify-content:center;align-items:center;min-height:70vh">
+      <div class="card" style="width:min(92vw,360px)">
+        <h3>LG6151M 网关登录</h3>
+        <div class="frm"><label>管理密码</label><input type="password" id="wall-pass" autofocus></div>
+        <button class="pri" id="wall-go" style="width:100%">登 录</button>
+        <span class="hint">未登录不可查看任何信息 (与原厂行为一致)</span>
+      </div></div>`;
+    const go = async () => {
+        const j = await api("login", "pass=" + encodeURIComponent($("wall-pass").value)).catch(() => ({ error: "x" }));
+        if (j.token) { TOKEN = j.token; sessionStorage.setItem("gw_token", TOKEN); setLogin(true); toast("登录成功"); route(); }
+        else { toast("密码错误", 1); $("wall-pass").value = ""; $("wall-pass").focus(); }
+    };
+    $("wall-go").onclick = go;
+    $("wall-pass").addEventListener("keydown", e => { if (e.key === "Enter") go(); });
+    setTimeout(() => $("wall-pass") && $("wall-pass").focus(), 50);
+}
+function route() {
+    DIRTY.clear();   // 换页重建骨架, 脏标随之失效
+    if (window.waStop) window.waStop();   // 分析仪自动扫描定时器不跨页存活
+    if (!TOKEN) { showLoginWall(); return; }
+    const h = (location.hash || "#/status").slice(2).split("?")[0];
+    const p = PAGES[h] ? h : "status";
+    document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("act", a.dataset.p === p));
+    const main = document.getElementById("main");
+    main.innerHTML = PAGES[p].html;   // 仅切换页面时建骨架
+    window.scrollTo(0, 0);            // 换页才回顶
+    if (timer) clearInterval(timer);
+    const run = () => PAGES[p].tick().catch(e => {
+        if (e.message !== "need_login") main.innerHTML = `<div class="card">加载失败: ${esc(e.message)} <button class="ghost" onclick="route()">重试</button></div>`;
+    });
+    run();
+    timer = setInterval(run, p === "status" ? 3000 : 8000);
+}
+window.route = route;
+window.addEventListener("hashchange", route);
+route();

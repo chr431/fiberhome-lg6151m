@@ -687,6 +687,89 @@ get_fw() {
 
 get_wifi() { printf '{%s,"stations":[' "$(wifi_state)"; wifi_stations | sed 's/,$//'; printf '],"ts":%d}' "$(date +%s)"; }
 
+# ---------- 可插拔上行认证 (uplink) ----------
+# 固件只提供"插座": 配置持久化 + AUTHD_CMD 拉起/杀停 + eth0 档案切换 + MAC/TTL
+# 伪装。具体认证程序(任意 802.1X/Portal 客户端)由用户自行部署到 AUTHD_CMD 路径。
+# uplink.conf 键: ENABLE/AUTH_USER/AUTH_PASS/AUTH_IP/AUTH_MASK/AUTH_GW/PROBE_GW/
+# AUTHD_CMD/MAC_SPOOF/SPOOF_MAC/TTL_SPOOF/TTL_VALUE/FORM(home|static)
+apply_uplink() {
+    U=$(form_kv user); PW=$(form_kv pass); IP=$(form_kv ip); MASK=$(form_kv mask); GW=$(form_kv gw)
+    echo "$U$PW" | grep -qE '[^A-Za-z0-9@_.\-]' && jerr bad_chars
+    echo "$IP$MASK$GW" | grep -qE '[^0-9.]' && jerr bad_ip
+    [ "$(form_kv enable)" = 1 ] && EN=1 || EN=0
+    MSP=$(form_kv mac_spoof); SMA=$(form_kv spoof_mac | tr 'A-F' 'a-f')
+    TSP=$(form_kv ttl_spoof); TVA=$(form_kv ttl_value)
+    [ "$MSP" = 1 ] || MSP=0
+    [ "$TSP" = 1 ] || TSP=0
+    if [ "$MSP" = 1 ]; then
+        echo "$SMA" | grep -qE '^[0-9a-f:]{17}$' || jerr bad_mac
+    fi
+    case "$TVA" in 64|65|128) ;; *) TVA=64 ;; esac
+    # AUTHD_CMD 表单不传则保留 conf 现值; PROBE_GW 供 wan_agg 探活(与认证程序解耦)
+    OLD=""; [ -r $GWDATA/uplink.conf ] && OLD=$(grep '^FORM=' $GWDATA/uplink.conf)
+    OAC=""; [ -r $GWDATA/uplink.conf ] && OAC=$(grep -m1 '^AUTHD_CMD=' $GWDATA/uplink.conf | cut -d= -f2-)
+    AC=$(form_kv authd_cmd)
+    [ -z "$AC" ] && AC="${OAC:-/data/gw/authd eth0}"
+    echo "$AC" | grep -qE '[^A-Za-z0-9_ ./-]' && jerr bad_cmd
+    printf 'ENABLE=%s\nAUTH_USER=%s\nAUTH_PASS=%s\nAUTH_IP=%s\nAUTH_MASK=%s\nAUTH_GW=%s\nPROBE_GW=%s\nAUTHD_CMD=%s\nMAC_SPOOF=%s\nSPOOF_MAC=%s\nTTL_SPOOF=%s\nTTL_VALUE=%s\n%s\n' \
+        "$EN" "$U" "$PW" "$IP" "$MASK" "$GW" "$GW" "$AC" "$MSP" "$SMA" "$TSP" "$TVA" "${OLD:-FORM=home}" > $GWDATA/uplink.conf
+    chmod 600 $GWDATA/uplink.conf
+    ok_json
+}
+
+apply_uplink_form() {  # 档案切换: home(DHCP) <-> static(静态IP; 认证由 AUTHD_CMD 程序补)
+    F=$(form_kv form)
+    [ "$F" = home ] || [ "$F" = static ] || jerr bad_form
+    [ -r $GWDATA/uplink.conf ] && . $GWDATA/uplink.conf
+    if [ "$F" = static ]; then
+        [ -n "$AUTH_IP" ] && [ -n "$AUTH_GW" ] || jerr uplink_no_conf
+        ip addr flush dev eth0 2>/dev/null
+        # MAC 伪装需先 ifdown 才能改 MAC(内核限制), 改完与 IP 一起 up
+        if [ "${MAC_SPOOF:-0}" = 1 ] && [ -n "$SPOOF_MAC" ]; then
+            ip link set eth0 down 2>/dev/null
+            ip link set eth0 address "$SPOOF_MAC" 2>/dev/null || jerr mac_fail
+        fi
+        ip addr add "$AUTH_IP/${AUTH_MASK:-255.255.255.128}" dev eth0 2>/dev/null || jerr addr_fail
+        ip link set eth0 up
+        ip route replace default via "$AUTH_GW" dev eth0 metric 200 2>/dev/null
+        # 认证守护: 杀旧拉新, 命令来自 AUTHD_CMD(任意可执行认证程序)
+        pkill -f "[a]uthd" 2>/dev/null
+        [ -n "${AUTHD_CMD:-}" ] && pkill -f "$AUTHD_CMD" 2>/dev/null
+        sleep 1
+        [ "$(grep -c "^ENABLE=1" $GWDATA/uplink.conf 2>/dev/null)" = 1 ] && \
+            nohup ${AUTHD_CMD:-/data/gw/authd eth0} >/dev/null 2>&1 &
+    else
+        ip addr flush dev eth0 2>/dev/null
+        # 还原原生MAC(伪装只在 static 档案下生效; 内核改MAC需 ifdown)
+        # 原生值 = 出厂brmac计算(wifi_up同款算法, 排除伪装态误存)
+        NATIVE=$(cat /sys/class/net/eth0/address 2>/dev/null)
+        if [ "${MAC_SPOOF:-0}" = 1 ] && [ -n "$SPOOF_MAC" ] && [ "$NATIVE" = "$SPOOF_MAC" ]; then
+            BM=$(uci get /fhdata/factory_conf.brmac.value 2>/dev/null || echo 02:03:7F:00:00:00)
+            b2=$(printf %d 0x$(echo $BM | cut -d: -f2)); b2=$(( (b2+1) % 256 )); b2=$(printf %02X $b2)
+            ORIG="$(echo $BM | cut -d: -f1):$b2:$(echo $BM | cut -d: -f3-)"
+            ip link set eth0 down 2>/dev/null
+            ip link set eth0 address "$(echo $ORIG | tr 'A-F' 'a-f')" 2>/dev/null
+        fi
+        ip link set eth0 up
+        pkill -f "[a]uthd" 2>/dev/null
+        # wan_agg ensure_lease 下一周期自动 udhcpc 重取租约
+    fi
+    spoof_ttl_apply "$F"
+    sed -i "s/^FORM=.*/FORM=$F/" $GWDATA/uplink.conf
+    ok_json '"form":"'$F'"'
+}
+
+get_uplink() {
+    [ -r $GWDATA/uplink.conf ] && . $GWDATA/uplink.conf
+    D=$(ps | grep -c "[a]uthd")
+    EM=$(cat /sys/class/net/eth0/address 2>/dev/null)
+    TR="无"
+    nft list ruleset 2>/dev/null | grep -q "ttl set" && TR="已生效"
+    printf '{"enable":"%s","user":"%s","ip":"%s","gw":"%s","form":"%s","daemon":"%s","mac_spoof":"%s","spoof_mac":"%s","ttl_spoof":"%s","ttl_value":"%s","eth0_mac":"%s","ttl_rule":"%s","ts":%d}' \
+        "${ENABLE:-0}" "${AUTH_USER:-}" "${AUTH_IP:-}" "${AUTH_GW:-}" "${FORM:-home}" "$D" \
+        "${MAC_SPOOF:-0}" "${SPOOF_MAC:-}" "${TTL_SPOOF:-0}" "${TTL_VALUE:-64}" "$EM" "$TR" "$(date +%s)"
+}
+
 
 get_sys() {
     I=$(ubus call system info 2>/dev/null)
@@ -712,6 +795,7 @@ case "$EP" in
     status)   need_tok; get_status ;;
     clients)  need_tok; get_clients ;;
     wifi)     need_tok; get_wifi ;;
+    uplink)   need_tok; get_uplink ;;
     agg)      need_tok; get_agg ;;
     fw)       need_tok; get_fw ;;
     sys)      need_tok; get_sys ;;
@@ -746,6 +830,8 @@ case "$EP" in
     dmz_set)      need_tok; apply_dmz ;;
     block_set)    need_tok; apply_block ;;
     agg_weights)  need_tok; apply_agg_weights ;;
+    uplink_set)   need_tok; apply_uplink ;;
+    uplink_form)  need_tok; apply_uplink_form ;;
     agg_pin)      need_tok; apply_agg_pin ;;
     cell_bandlock) need_tok; apply_bandlock ;;
     cell_lock)     need_tok; apply_celllock ;;

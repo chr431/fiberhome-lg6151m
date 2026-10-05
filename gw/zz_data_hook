@@ -1,6 +1,5 @@
-#!/bin/sh /etc/rc.common
-# LG6151M custom firmware v2: /data persistence hook
-START=99
-start() {
-	[ -f /data/rc.extend.sh ] && sh /data/rc.extend.sh > /tmp/rc.extend.log 2>&1 &
-}
+#!/bin/sh
+# LG6151M custom firmware: /data persistence hook (S98)
+# 注: 原厂镜像无 /etc/rc.common, 本脚本必须是可独立执行的 plain sh
+[ -f /data/rc.extend.sh ] && sh /data/rc.extend.sh > /tmp/rc.extend.log 2>&1 &
+touch /tmp/boot.done

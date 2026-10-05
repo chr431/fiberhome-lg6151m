@@ -34,6 +34,13 @@ def main():
     manifest = "\n".join(lines) + "\n"
     open(os.path.join(HERE, "MANIFEST.md5"), "w", newline="\n").write(manifest)
 
+    # 行尾归一化: 打包时强制 LF(防 Windows 检出 CRLF 破坏设备侧 ash 解析)
+    for name in members:
+        fp = os.path.join(HERE, name)
+        if name.endswith('.sh'):
+            d = open(fp, 'rb').read().replace(bytes([13, 10]), bytes([10]))
+            open(fp, 'wb').write(d)
+
     with tarfile.open(kit, "w:gz") as tf:
         for name in members:
             tf.add(os.path.join(HERE, name), arcname=name)

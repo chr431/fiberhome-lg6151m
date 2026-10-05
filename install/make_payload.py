@@ -29,15 +29,33 @@ def parse_manifest():
     return rows + EXTRA
 
 
+TEXT_NAMES = ("zz_data_hook", "defaults.conf")
+
+
+def is_text_member(local):
+    return (local.endswith((".sh", ".conf", ".script"))
+            or os.path.basename(local) in TEXT_NAMES)
+
+
 def main():
     out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "payload.tar.gz")
     rows = parse_manifest()
+    CRLF, LF = bytes([13, 10]), bytes([10])
     with tarfile.open(out, "w:gz") as tf:
         for local, remote in rows:
             lp = os.path.join(REPO, local)
             if not os.path.isfile(lp):
                 sys.exit("!! 缺文件: %s" % local)
-            tf.add(lp, arcname=remote.lstrip("/"))
+            data = open(lp, "rb").read()
+            # 行尾归一化: 设备目标脚本必须 LF(防 Windows 检出 CRLF 破坏 ash 解析)
+            if is_text_member(local) and CRLF in data:
+                data = data.replace(CRLF, LF)
+            ti = tarfile.TarInfo(remote.lstrip("/"))
+            ti.size = len(data)
+            ti.mode = 0o755 if local.endswith((".sh", ".script")) or os.path.basename(local) == "zz_data_hook" else 0o644
+            ti.mtime = int(os.path.getmtime(lp))
+            import io
+            tf.addfile(ti, io.BytesIO(data))
     md5 = hashlib.md5(open(out, "rb").read()).hexdigest()
     print("payload: %s (%d entries, %d bytes, md5 %s)"
           % (out, len(rows), os.path.getsize(out), md5))

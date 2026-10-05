@@ -45,8 +45,8 @@ def md5f(p):
 
 def detect_pc_ip():
     try:
-        out = subprocess.run(["ipconfig"], capture_output=True, text=True,
-                             timeout=10).stdout
+        out = subprocess.run(["ipconfig"], capture_output=True,
+                             encoding="gbk", errors="replace", timeout=10).stdout
         m = re.findall(r"IPv4[^:]*:\s*(169\.254\.\d+\.\d+)", out)
         if m:
             return m[0]
@@ -151,8 +151,18 @@ def main():
         sys.exit(2)
 
     paced("export LD_LIBRARY_PATH=/fhrom/lib:/fhrom/usr/lib", 4)
-    r = paced("curl -s --connect-timeout 8 --max-time 300 -o /tmp/kit.tgz "
+    # 静音 loglevel 刷屏 + 设备侧链路本地地址(线缆通常接 eth1; eth0 备用)
+    paced("mount -t proc proc /proc; echo 0 > /proc/sysrq-trigger", 4)
+    paced("mount -t tmpfs tmpfs /dev; mknod /dev/null c 1 3; mknod /dev/urandom c 1 9", 4)
+    paced("mount -t tmpfs tmpfs /tmp", 4)
+    paced("ifconfig eth0 down; ifconfig eth1 up; ifconfig eth1 169.254.77.1 netmask 255.255.0.0", 6)
+    r = paced("/fhrom/bin/curl -s --connect-timeout 8 --max-time 300 -o /tmp/kit.tgz "
               "http://%s:8931/kit.tar.gz; md5sum /tmp/kit.tgz" % PC_IP, 30)
+    if want not in r:
+        log("eth1 拉取失败, 换 eth0 重试")
+        paced("ifconfig eth1 0.0.0.0; ifconfig eth1 down; ifconfig eth0 169.254.77.1 netmask 255.255.0.0", 6)
+        r = paced("/fhrom/bin/curl -s --connect-timeout 8 --max-time 300 -o /tmp/kit.tgz "
+                  "http://%s:8931/kit.tar.gz; md5sum /tmp/kit.tgz" % PC_IP, 30)
     log("fetch kit: %s" % " ".join(r.split()[:4]))
     if want not in r:
         log("KIT MD5 MISMATCH -- 不启动。中止。")
@@ -177,6 +187,10 @@ def main():
             break
         if "GATE" in r:
             failed = True
+            break
+        if not tail and i > 4 and not ping("169.254.77.1"):
+            log("deploy.log 消失且 raw-shell IP 已下线 -> 判定重启(成功路径)")
+            ok = True
             break
 
     if failed:

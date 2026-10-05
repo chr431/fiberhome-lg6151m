@@ -14,7 +14,7 @@ case "$TOOR_PASS" in *"'"*) echo "FAIL: 口令含单引号"; exit 1;; esac
 
 echo "== 1. copy stock tree from slot B"
 mkdir -p /mnt/rp103
-grep -q ' /mnt/rp103 ' /proc/mounts || mount -t squashfs -o loop,ro /dev/mmcblk0p39 /mnt/rp103
+grep -q ' /mnt/rp103 ' /proc/mounts || mount -t squashfs -o ro /dev/mmcblk0p39 /mnt/rp103
 rm -rf $R
 cp -a /mnt/rp103 $R
 echo "tree: $(find $R -type f | wc -l) files"
@@ -87,15 +87,8 @@ cd $B
 LD_LIBRARY_PATH=$LIBS $SQ rootfs_v41 rootfs_v41.squashfs -comp xz -b 262144 -no-xattrs -noappend -all-root > /tmp/mksq41.log 2>&1 || { tail -5 /tmp/mksq41.log; exit 1; }
 SZ=$(wc -c < rootfs_v41.squashfs); echo "image: $SZ bytes"
 
-echo "== 10. image verify (loop mount)"
-mkdir -p /mnt/v41chk
-mount -t squashfs -o loop,ro rootfs_v41.squashfs /mnt/v41chk
-grep -c 'v3:' /mnt/v41chk/etc/init.d/rcS
-grep -c '^toor:' /mnt/v41chk/etc/passwd
-grep -c babysit /mnt/v41chk/etc/preinit
-ls /mnt/v41chk/etc/rc.d/S98zz_data_hook
-[ ! -e /mnt/v41chk/etc/rc.d/S99zmtk_boot_done ] && echo "zmtk: ABSENT (good)"
-cat /mnt/v41chk/etc/release
-umount /mnt/v41chk
+echo "== 10. image summary (挂载级验证由 flash.sh 的 p26 门禁完成)"
 md5sum $B/rootfs_v41.squashfs
+SZ=$(wc -c < $B/rootfs_v41.squashfs); echo "image bytes: $SZ"
+[ "$SZ" -gt 20000000 ] || { echo "FAIL: image too small"; exit 1; }
 echo "== image READY (not flashed)"

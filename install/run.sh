@@ -2,20 +2,34 @@
 # run.sh -- 设备端套件编排器（raw shell 内运行, 建议后台化）。
 # 流程: /dev 修复 -> ipk 解包 -> 载荷还原 -> 镜像构建 -> 刷入(含门禁)。
 # 用法: (sh /tmp/kit/run.sh '<TOOR_PASS>' >/tmp/kit.console 2>&1 &)
-L=/tmp/deploy.log
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/fhrom/bin
 export LD_LIBRARY_PATH=/fhrom/lib:/fhrom/usr/lib
+
+# ---- raw shell 环境修复(必须先于一切重定向/日志: 根fs只读) ----
+grep -q ' /proc ' /proc/mounts || mount -t proc proc /proc
+mount -t tmpfs tmpfs /dev
+mknod /dev/null c 1 3
+mknod /dev/urandom c 1 9
+grep -q ' /tmp ' /proc/mounts || mount -t tmpfs tmpfs /tmp
+grep -q ' /mnt ' /proc/mounts || mount -t tmpfs tmpfs /mnt
+mknod /dev/mmcblk0p39 b 259 7 2>/dev/null   # 内核实测: B槽rootfs=259:7
+mknod /dev/loop-control c 10 237 2>/dev/null
+mknod /dev/loop0 b 7 0 2>/dev/null
+mknod /dev/loop1 b 7 1 2>/dev/null
+mknod /dev/mmcblk0p46 b 259 14 2>/dev/null
+mknod /dev/mmcblk0p26 b 179 26 2>/dev/null
+mknod /dev/mmcblk0p1  b 179 1  2>/dev/null
+mkdir -p /data
+grep -q ' /data ' /proc/mounts || mount -t ext4 /dev/mmcblk0p46 /data
+
+L=/tmp/deploy.log
 echo "=== run start uptime=$(cat /proc/uptime) ===" >> $L
 
 TOOR_PASS="$1"
 [ -n "$TOOR_PASS" ] || { echo "GATE: TOOR_PASS 未传" >> $L; exit 1; }
 export TOOR_PASS
-
-# raw shell 环境修复（无 /dev/null 则一切后台重定向失败）
-[ -e /dev/null ] || { mount -t tmpfs tmpfs /dev 2>/dev/null; mknod /dev/null c 1 3 2>/dev/null; }
-[ -e /dev/urandom ] || mknod /dev/urandom c 1 9 2>/dev/null
-grep -q ' /proc ' /proc/mounts || mount -t proc proc /proc 2>/dev/null
-[ -e /dev/mmcblk0p39 ] || mknod /dev/mmcblk0p39 b 179 39 2>/dev/null
+[ -d /data/gw ] || { :; }   # /data 挂载由下方 tar 校验兜底
+echo "env: /dev/null=$(ls /dev/null) /tmp=$(mount | grep -c ' /tmp ') /data=$(mount | grep -c ' /data ')" >> $L
 
 echo "== ipk 解包" >> $L
 for p in /tmp/kit/ipk/*.ipk; do

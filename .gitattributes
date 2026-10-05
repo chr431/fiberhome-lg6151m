@@ -1,0 +1,7 @@
+# 行尾纪律: 设备目标脚本必须 LF(Windows autocrlf 检出会 CRLF 化, 破坏 busybox ash)
+* text=auto eol=lf
+*.ipk binary
+*.ko binary
+*.so binary
+*.png binary
+*.jpg binary

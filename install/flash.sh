@@ -15,9 +15,9 @@ mkdir -p /tmp/mnt_data /tmp/mnt_chk /tmp/xt
 IMG=/data/build/rootfs_v41.squashfs
 [ -s "$IMG" ] || { echo "GATE: image missing" >> $L; exit 1; }
 
-grep -q " /tmp/mnt_data " /proc/mounts || mount -t ext4 /dev/mmcblk0p46 /tmp/mnt_data || mount /dev/mmcblk0p46 /tmp/mnt_data || { echo "GATE: user_data mount" >> $L; exit 1; }
-echo ok > /tmp/mnt_data/.wtest || { echo "GATE: user_data RO" >> $L; exit 1; }
-rm -f /tmp/mnt_data/.wtest /tmp/mnt_data/.probe
+grep -q ' /data ' /proc/mounts || { echo "GATE: /data not mounted (run.sh 应已挂载)" >> $L; exit 1; }
+echo ok > /data/.wtest || { echo "GATE: /data RO" >> $L; exit 1; }
+rm -f /data/.wtest
 echo "user_data RW ok" >> $L
 
 dd if=$IMG of=/dev/mmcblk0p26 bs=4M >> $L 2>&1
@@ -32,7 +32,7 @@ echo "p26 verify OK" >> $L
 
 # /data 载荷幂等还原（run.sh 已先还原一次；此处保证重跑安全）
 tar -xzf /tmp/kit/payload.tar.gz -C / || { echo "GATE: payload extract" >> $L; exit 1; }
-ls /tmp/mnt_data/gw >> $L 2>&1 || { echo "GATE: data restore" >> $L; exit 1; }
+ls /data/gw >> $L 2>&1 || { echo "GATE: data restore" >> $L; exit 1; }
 echo "data OK" >> $L
 
 printf '\017\003\000\000\000\016\000\001\002\000' > /tmp/bc

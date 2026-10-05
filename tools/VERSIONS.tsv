@@ -57,7 +57,7 @@ tools/verify_v4_services.py	1.0	tool	-	v4服务巡检器(监听端口/GUI/WiFi�
 tools/health_check.py	1.1	tool	-	v4全系统体检器(SSH 18项; v1.1 fw_ver读/data/gw/VERSIONS: 身份/槽位/bootctrl/服务/WiFi/5G/外网/资源/温度/存储/数据/日志)
 gw/udhcpc_eth1.script	1.0	manifest	/data/gw/udhcpc_eth1.script	eth1口 udhcpc 事件钩子(补登记)
 gw/wedge_watch.sh	1.0	manifest	/data/gw/wedge_watch.sh	串口wedged值守望器(补登记)
-gw/zz_data_hook	1.0	manifest	/data/build/rootfs/etc/init.d/zz_data_hook	S98数据钩子(v4镜像内嵌源件; 补登记)
+gw/zz_data_hook	1.1	manifest	/data/build/rootfs/etc/init.d/zz_data_hook	S98数据钩子(v1.1: plain sh——原厂无/etc/rc.common, rc.common式shebang致开机栈全灭; 回归实测发现)
 tools/device_local.py.example	1.0	tool	-	凭证模板(真件gitignored)
 tools/lk_eth1_resume.py	1.1	tool	-	eth1续链器(LK控制台接管: kcmdline已注入态恢复; 含misc回退现场抓取; 补登记)
 tools/lgssh.py	1.2	tool	-	SSH助手(env/_local/secrets凭证; run()命令通道; v1.2凭证目录解析LG_SECRETS_DIR)

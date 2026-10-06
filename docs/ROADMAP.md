@@ -99,7 +99,15 @@ watchdog 集成（ccmni 无 IP→重拨）。出口：拔 SIM 重插自恢复 + 
 > （54/54 ×3，守护 0 在位，树通，PDN/keeper/mobilenetwork 齐）。
 > 信号面同步去树化优先（api.sh v2.24+：mipc RSRP + AT PLMN/RAT 直读，树回退
 > —— 顺带修正了树里陈旧的 PLMN 显示）。
-> > **2026-10-06 下午更新：控制面 P3.5 三项已全部完成** —— erat 映射（A 组
+> > **2026-10-06 晚更新：mobilenetwork 已无强制消费者** —— PLMN 扫描（ql_nw_network_scan
+> 原生集成，GUI 实测 8 网络真名渲染）✅ · PIN 管理 AT 引擎 ✅ · get_sim AT 直读 ✅ ·
+> get_traffic sysfs 直读 ✅。**下架仅剩一项前置**：CA 小区列表展示（树的
+> RadioSignalParameter 由 mobilenetwork 回填；替代 = ql_nw_get_band_info 响应
+> 逆向 —— 复合结构，需一轮专注解析），之后 kill 实验 + rc_netfh v3.1 + 重启回归。
+> 信号推送评估：真推送需 v3httpd 增加 SSE 端点（C 二进制改动），暂缓。
+> <!--CLM:CLM-PLMN-SCAN--> <!--CLM:CLM-PIN-SIM-AT-->
+>
+> **2026-10-06 下午更新：控制面 P3.5 三项已全部完成** —— erat 映射（A 组
 > 指令级实证五项表）✅ · 小区锁 AT 直发（EMMCHLCK，锁/解实弹）✅ · SMS 发送
 > （B 组结构逆向 + 实弹 ret=0）✅。mobilenetwork 现仅剩：PLMN 扫描触发（ubus，
 > 待 C 组 ql_nw_network_scan）、PIN 管理（ubus）、树信号回填（展示回退）。

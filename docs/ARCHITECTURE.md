@@ -150,5 +150,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `CLM-ERAT-MAP`@ROADMAP.md | ✅实证 | `gw/www/api.sh>=2.30` | SIM 就绪 (CPIN) | 22dd503@2026-10-06 | A组指令级实证: mode0→erat3/1,3→19,0/2→15/4→1; 飞行=deact+cfun0/cfun1; 实弹模式切换+飞行循环含keeper重拨 |
 | `CLM-SMS-SEND`@ROADMAP.md | ✅实证 | `gw/src/mipc_cellular.c>=0.3` | SMS 引擎二进制冒烟 (P4) | 22dd503@2026-10-06 | B组逆向ql_sms_send_msg结构1704B(fmt/addr[252]/len/content[1440])+同步ret=0即成; 实弹到机主手机成功; 无CMGS毒性 |
 | `CLM-CELLLOCK-AT`@ROADMAP.md | ✅实证 | `gw/www/api.sh>=2.28` | 锁定状态跨层一致 (conf=树=模组 / mipc 引擎就位) | 22dd503@2026-10-06 | EMMCHLCK AT直发(lte7/nr11); 锁服务小区零扰动+真解锁cells:0 |
+| `CLM-PLMN-SCAN`@ROADMAP.md | ✅实证 | `gw/src/mipc_cellular.c>=0.4` | SIM 就绪 (CPIN) | f48b803@2026-10-06 | C组逆向集成: ql_nw_network_scan异步回调+0x1288结构; 首发实弹8网络(真EONS名+status/RAT); GUI按钮实测渲染 |
+| `CLM-PIN-SIM-AT`@ROADMAP.md | ✅实证 | `gw/www/api.sh>=2.33` | API login + token 生命周期 | f48b803@2026-10-06 | PIN管理AT直发引擎(厂商序列clck/cpwd/cpin; enable/disable未实弹-有锁卡风险) + get_sim AT直读优先(CPIN/CIMI/CCID/CGSN/COPS实测全对) |
 
 <!--CLMAUDIT:END-->

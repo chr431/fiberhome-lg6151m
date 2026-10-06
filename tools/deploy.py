@@ -99,6 +99,7 @@ EXTRA_KEEP = ["DEPLOY_MANIFEST", "ppe_reg",
               "udhcpc_eth1.script", "portal_auth", "restore_wan.sh",
               "agg_pins.conf",   # 含用户MAC的钉死表: 设备侧自管(模板见 agg_pins.conf.example)
               "dropbear_keys",   # rc.extend v1.8 唯一属主启动的宿主密钥目录(设备侧生成)
+              "shadow.override", # rc.extend v1.9 bind 的 shadow 覆盖(rotate_toor 生成的运行态)
               "DO_UBUS_CAP", "MODE.fh"]  # rc.extend.sh 运行时模式标记(dispatcher引用, 非脚本)
 MD5_LINE = re.compile(r"^([0-9a-f]{32})  (.*)$", re.M)
 

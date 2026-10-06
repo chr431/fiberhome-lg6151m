@@ -102,7 +102,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/build_steth.sh` | **v1.0** | tool | `-` | v3_steth.ko构建 |
 | `tools/build_v3fix.sh` | **v1.0** | tool | `-` | v3_fix.ko构建 |
 | `tools/build_v3httpd.sh` | **v1.0** | tool | `-` | v3httpd构建(zig cc aarch64-linux-musl全静态, 同mipc_cellular链) |
-| `tools/deploy.py` | **v2.11** | tool | `-` | MANIFEST部署/漂移检查(版本注入+预检); v2.11: connect指纹钉死复用lgssh.PinPolicy; v2.10: connect凭证链env覆盖(LG_HOST/LG_TOOR_USER/LG_TOOR_PASS优先, 与lgssh对齐)——轮换窗口期rotate_toor注入旧口令的依赖; 历史版本见git |
+| `tools/deploy.py` | **v2.12** | tool | `-` | MANIFEST部署/漂移检查(版本注入+预检); v2.12: doctor白名单+shadow.override(rc.extend v1.9运行态); v2.11: connect指纹钉死复用lgssh.PinPolicy; v2.10: connect凭证链env覆盖(LG_HOST/LG_TOOR_USER/LG_TOOR_PASS优先, 与lgssh对齐)——轮换窗口期rotate_toor注入旧口令的依赖; 历史版本见git |
 | `tools/device_local.py.example` | **v1.0** | tool | `-` | 凭证模板(真件gitignored) |
 | `tools/doc_audit.py` | **v1.1** | tool | `-` | 台账↔文档内联标记双向审计(v1.1: 标记扫描纳入台账引用的docs/外文档如install/README.md; v1.0: 版本绑定+TEST-MISSING/STALE-CODE/UNREGISTERED-CLAIM) |
 | `tools/gen_kernel_inc.py` | **v1.0** | tool | `-` | kernel头生成(构建辅助) |

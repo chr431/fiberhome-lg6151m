@@ -76,7 +76,7 @@ tools/leak_check.py	1.1	tool	-	敏感词+设备MAC零命中门禁(工作树+可�
 docs/ARCHITECTURE.md	1.0	doc	-	架构+版本总表(本表生成)
 gw/watchdog.sh	1.3	manifest	/data/gw/watchdog.sh	持续不变量看门狗(L13: 17项不变量; v1.2/L14: +蜂窝控制面 atcid自愈+CFUN探针+注册态, airplane容忍)
 tools/selftest.py	2.7	tool	-	断言式全功能测试(v2.5: 访客桥成员断言; v2.4: MLO断言—dat组表与MLD建立日志一致+全零表护栏; v2.3: 隔离链DHCP/DNS白名单; 57项)
-tools/doc_audit.py	1.0	tool	-	文档结论台账审计(L16: 结论与代码版本绑定+漂移检测; 双向CLM标记+CODE-REGRESSED/STALE-CODE/TEST-MISSING/未登记断言扫描+ARCHITECTURE结论表渲染; deploy push前置fail-closed)
+tools/doc_audit.py	1.1	tool	-	台账↔文档内联标记双向审计(v1.1: 标记扫描纳入台账引用的docs/外文档如install/README.md; v1.0: 版本绑定+TEST-MISSING/STALE-CODE/UNREGISTERED-CLAIM)
 gw/src/mipc_cellular.c	0.5	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源(P1): dlopen闭包预载+ql_nw_init; v0.2: 168B结构全破译(setlock lte/nr=列表 解锁=全1; NR三段位图1-32/34-64/65-96)
 gw/bin/mipc_cellular	0.5	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI(getbands/setlock/unlock; 锁NR41+79实弹验证零扰动)
 tools/build_mipc_cellular.sh	1.0	tool	-	mipc_cellular构建(zig cc aarch64-musl动态)

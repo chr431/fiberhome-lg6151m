@@ -99,7 +99,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/build_v3fix.sh` | **v1.0** | tool | `-` | v3_fix.ko构建 |
 | `tools/deploy.py` | **v2.9** | tool | `-` | MANIFEST部署/漂移检查(版本注入+预检); v2.9: +guest_fw.sh; v2.8; v2.7: push后自动跑selftest(L13) |
 | `tools/device_local.py.example` | **v1.0** | tool | `-` | 凭证模板(真件gitignored) |
-| `tools/doc_audit.py` | **v1.0** | tool | `-` | 文档结论台账审计(L16: 结论与代码版本绑定+漂移检测; 双向CLM标记+CODE-REGRESSED/STALE-CODE/TEST-MISSING/未登记断言扫描+ARCHITECTURE结论表渲染; deploy push前置fail-closed) |
+| `tools/doc_audit.py` | **v1.1** | tool | `-` | 台账↔文档内联标记双向审计(v1.1: 标记扫描纳入台账引用的docs/外文档如install/README.md; v1.0: 版本绑定+TEST-MISSING/STALE-CODE/UNREGISTERED-CLAIM) |
 | `tools/gen_kernel_inc.py` | **v1.0** | tool | `-` | kernel头生成(构建辅助) |
 | `tools/health_check.py` | **v1.1** | tool | `-` | v4全系统体检器(SSH 18项; v1.1 fw_ver读/data/gw/VERSIONS: 身份/槽位/bootctrl/服务/WiFi/5G/外网/资源/温度/存储/数据/日志) |
 | `tools/identify2.py` | **v1.0** | tool | `-` | 残留终验取证器(user_data清单/p26纯净性挂载验证/proc-net快照) |

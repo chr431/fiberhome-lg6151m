@@ -72,16 +72,23 @@ def load_ledger():
     return rows
 
 
-def doc_markers():
-    """-> {doc: [(lineno, id)]}; 扫描 docs/*.md 全部内联标记."""
+def doc_markers(extra_docs=()):
+    """-> {doc: [(lineno, id)]}; 扫描 docs/*.md + 台账引用的其他文档(如 install/README.md)."""
     out = {}
+    rels = []
     ddir = os.path.join(REPO, "docs")
     for fn in sorted(os.listdir(ddir)):
-        if not fn.endswith(".md"):
+        if fn.endswith(".md"):
+            rels.append("docs/" + fn)
+    for rel in extra_docs:            # v1.1: 台账 doc 字段可指向 docs/ 之外
+        if rel not in rels:
+            rels.append(rel)
+    for rel in rels:
+        path = os.path.join(REPO, rel)
+        if not os.path.isfile(path):
             continue
-        rel = "docs/" + fn
         hits = []
-        for i, line in enumerate(open(os.path.join(ddir, fn), encoding="utf-8"), 1):
+        for i, line in enumerate(open(path, encoding="utf-8"), 1):
             for m in CLM_RE.finditer(line):
                 hits.append((i, m.group(1)))
         if hits:
@@ -117,7 +124,7 @@ def head_short():
 def audit(verbose=True):
     errs, infos = [], []
     rows = load_ledger()
-    marks = doc_markers()
+    marks = doc_markers(extra_docs={r['doc'] for r in rows})
     tests = selftest_tests()
     reg = {r[0]: r[1] for r in vercheck.load_registry()}
 

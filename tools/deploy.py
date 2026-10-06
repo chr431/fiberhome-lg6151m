@@ -49,6 +49,7 @@ MANIFEST = [
     ("gw/rc.extend.sh", "/data/rc.extend.sh"),         # slot dispatcher (boot entry)
     ("gw/v3_rc10.extend.sh", "/data/gw/rc19.sh"),         # rc19v2: br-lan+wifi+wan stack
     ("gw/wifi_up.sh", "/data/gw/wifi_up.sh"),      # AP bring-up (factory recipe)
+    ("gw/guest_fw.sh", "/data/gw/guest_fw.sh"),    # guest-net L2/L3 isolation (vendor wifiguest.sh recipe)
     ("gw/wan_agg.sh", "/data/gw/wan_agg.sh"),       # dual-uplink aggregation supervisor (v2.8+, supersedes wan_policy2)
     ("gw/bin/multiwan_ctl", "/data/gw/multiwan_ctl"),     # vendor multiwan ioctl control (zig, links libfhdrv_net_api)
     ("gw/bin/fhstub.so", "/data/gw/fhstub.so"),        # FH symbol stubs: load libfhdrv_net_api standalone

@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.0 -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.37 (访客独立化: wifi_adv 名称/频段/密码独立+need_guest_pass校验) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -71,6 +71,15 @@ gw_set() {  # gw_set <key> <value> — upsert settings.conf
     grep -v "^$K=" "$F" 2>/dev/null > "$F.new"
     echo "$K=$V" >> "$F.new"
     mv "$F.new" "$F"
+}
+gw_del() {  # v2.37: gw_del <key> — 从 settings.conf 删除键(回退派生值语义)
+    K=$1; F=$GWDATA/settings.conf
+    grep -v "^$K=" "$F" 2>/dev/null > "$F.new"
+    mv "$F.new" "$F"
+}
+form_has() {  # v2.37: form_has <key> — 键是否出现在POST body(区分"未提交"与"空值")
+    [ -n "$V3_BODY" ] || return 1
+    printf '%s' "$V3_BODY" | tr '&' '\n' | grep -q "^$1="
 }
 
 # ---------- wifi ----------
@@ -568,26 +577,32 @@ $R2"
     printf '{"aps":[%s],"ts":%d}' "$L" "$(date +%s)"
 }
 
-# -- WiFi 高级 (信道/带宽/功率/隐藏) + 访客 + 双频合一 --
+# -- WiFi 高级 (信道/带宽/功率/隐藏) + 访客(独立名称/频段/密码) + 双频合一 --
 get_wifi_adv() {
     cfg_load
     H2=$(grep -m1 "^HideSSID" /var/wlan/apcfg 2>/dev/null | cut -d= -f2 | cut -d\; -f1)
     RCH2G=""; RCH5G=""
     [ -r /tmp/wifi_autoch ] && . /tmp/wifi_autoch   # wifi_up 自动选道落点(信道=0时)
-    printf '{"ssid_base":"%s","ch2g":"%s","ch5g":"%s","bw2g":"%s","bw5g":"%s","power":"%s","hidden2g":"%s","hidden5g":"%s","guest":"%s","guest_pass":"%s","inone":"%s","res2g":"%s","res5g":"%s","ts":%d}' \
+    GS_RAW="${GUEST_SSID:-}"
+    GS_EFF="${GUEST_SSID:-${SSID_BASE:-}-Guest}"
+    printf '{"ssid_base":"%s","ch2g":"%s","ch5g":"%s","bw2g":"%s","bw5g":"%s","power":"%s","hidden2g":"%s","hidden5g":"%s","guest":"%s","guest_ssid":"%s","guest_ssid_eff":"%s","guest_band":"%s","guest_pass":"%s","inone":"%s","res2g":"%s","res5g":"%s","ts":%d}' \
         "${SSID_BASE:-}" "${CH2G:-6}" "${CH5G:-149}" "${BW2G:-20}" "${BW5G:-80}" "${POWER:-100}" \
-        "${H2:-0}" "0" "${GUEST:-0}" "${GUEST_PASS:+1}" "${INONE:-0}" "${RCH2G:-}" "${RCH5G:-}" "$(date +%s)"
+        "${H2:-0}" "0" "${GUEST:-0}" "$GS_RAW" "$GS_EFF" "${GUEST_BAND:-5g}" "${GUEST_PASS:+1}" "${INONE:-0}" "${RCH2G:-}" "${RCH5G:-}" "$(date +%s)"
 }
 apply_wifi_adv() {
     # v1.2: 先源旧conf(保留SSID/密码等非本表单字段), 再读表单值覆盖同名项
     # — 曾因source放在form_kv之后, INONE/GUEST被旧值覆盖致"选项弹回"(用户实弹)
-    [ -r $GWDATA/wifi.conf ] && . $GWDATA/wifi.conf
+    # v2.37: 换 cfg_load(默认+settings全叠加), 访客独立项存 settings.conf 也可见
+    cfg_load
     # v1.6: 统一名称 — 表单传 ssid_base
     SB=$(form_kv ssid_base); [ -z "$SB" ] && SB="${SSID_BASE:-LG6151M}"
     echo "$SB" | grep -qE '[^A-Za-z0-9_. -]' && jerr bad_chars
     CH2=$(form_kv ch2); CH5=$(form_kv ch5); BW2=$(form_kv bw2); BW5=$(form_kv bw5)
     PW=$(form_kv power); HID=$(form_kv hidden); GUEST=$(form_kv guest)
     GSTP=$(form_kv guest_pass); INONE=$(form_kv inone)
+    # v2.37: 访客独立项 — 名称(present但可空=回退派生)/频段(2g|5g|both)
+    GSS=""; form_has guest_ssid && GSS=$(form_kv guest_ssid)
+    GBAND=$(form_kv guest_band)
     echo "$CH2$CH5$BW2$BW5$PW" | grep -qE '[^0-9]' && jerr bad_num
     # 信道: 0=自动(wifi_up启动扫描选道); 2.4G 1-13(CN), 5G限定8个非DFS道
     { [ "$CH2" -eq 0 ] || { [ "$CH2" -ge 1 ] && [ "$CH2" -le 13 ]; } } 2>/dev/null || jerr bad_ch
@@ -598,13 +613,26 @@ apply_wifi_adv() {
     [ "$HID" = 0 ] || [ "$HID" = 1 ] || jerr bad_flag
     [ "$GUEST" = 0 ] || [ "$GUEST" = 1 ] || jerr bad_flag
     [ "$INONE" = 0 ] || [ "$INONE" = 1 ] || jerr bad_flag
+    # 访客名称: 与主名称同字符集(防注入 settings.conf 被 source), ≤32字节(802.11上限)
+    if [ -n "$GSS" ]; then
+        echo "$GSS" | grep -qE '[^A-Za-z0-9_. -]' && jerr bad_chars
+        [ "${#GSS}" -gt 32 ] && jerr bad_len
+    fi
+    case "$GBAND" in ""|2g|5g|both) ;; *) jerr bad_band ;; esac
+    [ -z "$GBAND" ] && GBAND=5g
     if [ -n "$GSTP" ]; then
         printf '%s' "$GSTP" | grep -qE '^[A-Za-z0-9-]{8,63}$' || jerr bad_pass
+    fi
+    # v2.37: 开访客必须存在密码(旧存或本次提交), 杜绝"静默无访客"困惑
+    if [ "$GUEST" = 1 ] && [ -z "$GSTP" ] && [ -z "$GUEST_PASS" ]; then
+        jerr need_guest_pass
     fi
     # v1.2: source已提前到函数头, 此处不再重复(旧位置曾覆盖INONE/GUEST表单值)
     gw_set SSID_BASE "$SB"
     gw_set CH2G "$CH2"; gw_set CH5G "$CH5"; gw_set BW2G "$BW2"; gw_set BW5G "$BW5"
     gw_set POWER "$PW"; gw_set HIDDEN "$HID"; gw_set GUEST "$GUEST"; gw_set INONE "$INONE"
+    gw_set GUEST_BAND "$GBAND"
+    if [ -n "$GSS" ]; then gw_set GUEST_SSID "$GSS"; elif form_has guest_ssid; then gw_del GUEST_SSID; fi
     if [ -n "$GSTP" ]; then gw_set GUEST_PASS "$GSTP"; fi
     sh $GWDATA/wifi_up.sh >/tmp/wifi_up.log 2>&1 &
     ok_json

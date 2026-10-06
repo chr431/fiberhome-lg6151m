@@ -1,5 +1,7 @@
 #!/bin/sh
-# wifi_up.sh — v3 WiFi bring-up (v1.16: F3单进程hostapd根治信标竞态+F2重装订+PMF显式关; v1.10: 自动信道扫描选道), replicating FH fac_start_wifi_BE5000.sh (mt7992 path)
+# wifi_up.sh — v3 WiFi bring-up (v1.18: 访客独立配置—名称/频段(2g|5g|both)/密码/BSSID派生
+#   +失败链泛化+隔离防火墙联动; v1.16: F3单进程hostapd根治信标竞态+F2重装订+PMF显式关; v1.10: 自动信道扫描选道),
+# replicating FH fac_start_wifi_BE5000.sh (mt7992 path)
 # without FH userspace. Driver = MTK hwifi softap: profile /var/wlan/apcfg{,_5} +
 # `ifconfig raX up` is the whole activation (ap_inf_open is ndo_open; apcfg is read
 # at interface-open, MACs come from profile MacAddress=).
@@ -38,14 +40,22 @@ rai0_mac6="0x${mac6}"; rai0_mac6=$(printf %d ${rai0_mac6}); rai0_mac6=$((rai0_ma
 rai0_mac6=$(printf %02X ${rai0_mac6})
 ra0_mac="${mac1}:${mac2}:${mac3}:${mac4}:${mac5}:${mac6}"
 rai0_mac="${mac1}:${mac2}:${mac3}:${mac4}:${mac5}:${rai0_mac6}"
-echo "brmac=$brmac ra0=$ra0_mac rai0=$rai0_mac"
+# v1.18: 访客 BSSID 按厂测 mbss 规则从各自射频基址 +1 派生 (逐机唯一, 替换 v1.4 的全机型固定样例MAC)
+g6="0x${mac6}";    g6=$(printf %d $g6);    g6=$(( (g6+1)%256 ));    g6=$(printf %02X $g6)
+gi6="0x${rai0_mac6}"; gi6=$(printf %d $gi6); gi6=$(( (gi6+1)%256 )); gi6=$(printf %02X $gi6)
+ra1_mac="${mac1}:${mac2}:${mac3}:${mac4}:${mac5}:${g6}"
+rai1_mac="${mac1}:${mac2}:${mac3}:${mac4}:${mac5}:${gi6}"
+echo "brmac=$brmac ra0=$ra0_mac rai0=$rai0_mac ra1=$ra1_mac rai1=$rai1_mac"
 
 BSSIDNUM=8
 SN=4           # mt7992 stream num
 # v1.6: SSID 体系 — conf 只存 SSID_BASE=<统一名称>, 派生规则:
 #   独立双频: <名>-2.4G / <名>-5G
 #   双频合一: <名> (两频同名)
-#   访客:    <名>-Guest
+#   访客:    独立名 GUEST_SSID, 未设则派生 <名>-Guest (v1.18 前的唯一行为)
+# v1.18: 访客独立化 — GUEST_SSID(名称)/GUEST_BAND(频段 2g|5g|both)/GUEST_PASS(密码)三项独立;
+#   both=双频同名双BSS(与主WiFi"双频合一"同语义的漫游)。真MLO(dat键 MldGroup/MldAddr/
+#   ApcliMloDisable)为 v1.15 实证雷区——驱动开机锁存后 rai0 信标永久错乱、剥离不回退, 勿再写。
 # v1.13: 配置统一 — defaults(只读出厂) + settings(用户稀疏覆盖) source叠加;
 #   过渡期回退旧 wifi.conf(迁移脚本生成 settings.conf 后不再命中)
 CFG_D=$B/defaults.conf; CFG_S=$B/settings.conf; WIFI_CONF=$B/wifi.conf
@@ -70,7 +80,9 @@ if [ "$INONE" = 1 ]; then
 else
     SSID2="${SSID_BASE}-2.4G"; SSID5="${SSID_BASE}-5G"
 fi
-GUEST_SSID="${SSID_BASE}-Guest"
+GUEST_SSID="${GUEST_SSID:-${SSID_BASE}-Guest}"
+GUEST_BAND="${GUEST_BAND:-5g}"
+case "$GUEST_BAND" in 2g|5g|both) ;; *) GUEST_BAND=5g ;; esac
 HT2=""
 [ "$BW2G" = 40 ] && HT2="[HT40+]"
 # v1.7: 自动信道 (CH2G/CH5G=0) — 上层显式扫描选道。
@@ -493,11 +505,21 @@ country_code=CN
 he_oper_chwidth=2
 he_oper_centr_freq_seg0_idx=50
 HDFS
-        # v1.4: 访客网络 — hostapd 第二BSS(rai1, 自动创建), 独立密码+隔离
+        # v1.18: 访客网络 — 独立名称/频段/密码; hostapd 第二BSS(动态创建), 客户端隔离。
+        # 频段: 2g->ra1(2.4G) / 5g->rai1(5G, v1.4默认) / both->双频同名双BSS(漫游)。
+        # 隔离的强制面(hostapd ap_isolate + guest_fw.sh ebtables)在 hostapd 拉起后统一施加。
+        GB2=0; GB5=0
         if [ "$GUEST" = 1 ] && [ -n "$GUEST_PASS" ]; then
-            cat >> /var/wlan/hap_5g.conf <<HGUEST
-bss=rai1
-bssid=02:03:7f:12:34:57
+            case "$GUEST_BAND" in
+                2g)   GB2=1 ;;
+                5g)   GB5=1 ;;
+                both) GB2=1; GB5=1 ;;
+            esac
+        fi
+        guest_bss() {  # guest_bss <conf> <ifname> <bssid> — 追加访客BSS段(须在各hap conf写完后)
+            cat >> "$1" <<HGUEST
+bss=$2
+bssid=$3
 ssid=${GUEST_SSID}
 wpa=2
 wpa_psk=$($B/wpapmk "${GUEST_SSID}" "$GUEST_PASS")
@@ -506,20 +528,28 @@ rsn_pairwise=CCMP
 ieee80211w=0
 ap_isolate=1
 HGUEST
-        fi
+        }
+        [ "$GB2" = 1 ] && guest_bss /var/wlan/hap_2g.conf ra1  "$ra1_mac"
+        [ "$GB5" = 1 ] && guest_bss /var/wlan/hap_5g.conf rai1 "$rai1_mac"
         ifconfig ra0 down; ifconfig rai0 down; sleep 1
         # ---- v1.16 F3: 单进程多配置(stock同款拓扑) ----
         # RE实证根因: 双 hostapd -B 的 START_AP 重叠落入 bss_mngr_con_dev_reg
         # 无锁窗口, bss_idx<->FW 映射错乱致 rai0 信标槽被 rai1 内容占用。
         # 单进程单事件循环 => BeaconAdd/Set 天然串行, 竞态窗口用户态不可达。
-        # 失败链: 摘guest重试单进程 -> 回退F4双实例(v1.14串行等待)。
+        # 失败链: 摘guest(两频各自)重试单进程 -> 回退F4双实例(v1.14串行等待)。
         # (v1.15教训: apcfg MldGroup/ApcliMloDisable键被驱动开机锁存后
         #  rai0信标永久重定向进Multiple-BSSID模式, 剥离文件不回退——勿再写)
+        strip_guest() {  # v1.18: 泛化 — 从两个 hap conf 摘除访客BSS段(bss=起至EOF)
+            for f in /var/wlan/hap_2g.conf /var/wlan/hap_5g.conf; do
+                [ -r "$f" ] && grep -q "^bss=" "$f" && sed -i "/^bss=/,\$d" "$f"
+            done
+        }
+        has_guest() { grep -q "^bss=" /var/wlan/hap_2g.conf 2>/dev/null || grep -q "^bss=" /var/wlan/hap_5g.conf 2>/dev/null; }
         HSTART=0
         LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib hostapd -B /var/wlan/hap_2g.conf /var/wlan/hap_5g.conf && HSTART=1
-        if [ "$HSTART" = 0 ] && grep -q "^bss=rai1" /var/wlan/hap_5g.conf; then
+        if [ "$HSTART" = 0 ] && has_guest; then
             echo "== F3 failed, retry single-process without guest =="
-            sed -i "/^bss=rai1/,\$d" /var/wlan/hap_5g.conf
+            strip_guest
             LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib hostapd -B /var/wlan/hap_2g.conf /var/wlan/hap_5g.conf && HSTART=1
         fi
         if [ "$HSTART" = 0 ]; then
@@ -532,9 +562,9 @@ HGUEST
                 sleep 0.5; _sw=$((_sw+1))
             done
             if ! LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib hostapd -B -i rai0 /var/wlan/hap_5g.conf; then
-                if grep -q "^bss=rai1" /var/wlan/hap_5g.conf; then
+                if has_guest; then
                     echo "== guest bss failed, retry without guest =="
-                    sed -i "/^bss=rai1/,\$d" /var/wlan/hap_5g.conf
+                    strip_guest
                     LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib hostapd -B -i rai0 /var/wlan/hap_5g.conf || WIFI_ERR=1
                 else
                     WIFI_ERR=1
@@ -546,11 +576,14 @@ HGUEST
         # RE实证: 双hostapd -B的START_AP重叠落入 bss_mngr_con_dev_reg 无锁窗口,
         # 固件按错映射装订信标槽(rai0槽被rai1内容占用)。mwctl no_bcn 0 =
         # BcnStopHandle->UpdateBeaconHandler(reason5+6) 全量重装信标模板,
-        # 与固件超时自愈同族原语, 幂等。等5s让rai1动态创建先完成。
+        # 与固件超时自愈同族原语, 幂等。等5s让动态BSS(ra1/rai1)创建先完成。
         sleep 5
-        for vif in ra0 rai0 rai1; do
+        for vif in $(iw dev 2>/dev/null | awk '/Interface/{print $2}' | grep -E '^ra'); do
             mwctl dev $vif set no_bcn 0 >/dev/null 2>&1
         done
+        # ---- v1.18: 访客隔离防火墙(原厂 wifiguest.sh 配方复刻) 幂等同步 ----
+        # 检测现存访客iface(ra1/rai1)施加ebtables/iptables隔离; 访客关闭则清链
+        [ -x $B/guest_fw.sh ] && $B/guest_fw.sh sync
     fi
     if [ $WIFI_ERR -ne 0 ]; then
         echo "== FATAL: hostapd WPA setup failed — radios DOWN (no open fallback)"

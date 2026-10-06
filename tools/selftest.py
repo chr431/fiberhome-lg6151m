@@ -153,13 +153,45 @@ def iface_delta(iface, fn):
 category("wifi")
 # =================================================================
 
-@test("三 BSS 接口存在且为 AP 模式")
+@test("BSS 接口集合与访客配置一致 (v1.17 配置感知)")
 def t_wifi_bss():
-    out = dev("for i in ra0 rai0 rai1; do iw dev $i info 2>/dev/null | grep -c 'type AP'; done")
-    counts = out.split()
-    ok = len(counts) == 3 and all(c.strip() == "1" for c in counts)
+    # v2.2: 访客可开在 ra1(2g)/rai1(5g)/双频(both)或关闭 — 期望集合由 settings 推出,
+    # 并断言"该在的在、不该在的不在"(防残留 iface 与漏建)
+    conf = dev("cat /data/gw/settings.conf /data/gw/defaults.conf 2>/dev/null | "
+               "grep -E '^(GUEST|GUEST_BAND|GUEST_PASS)=' | sort -u")
+    guest = re.search(r"^GUEST=1$", conf, re.M)
+    gband = (re.search(r"^GUEST_BAND=(\w+)", conf, re.M) or [None, "5g"])[1]
+    has_pass = bool(re.search(r"^GUEST_PASS=..+", conf, re.M))
+    want = {"ra0", "rai0"}
+    if guest and has_pass:
+        if gband in ("2g", "both"):
+            want.add("ra1")
+        if gband in ("5g", "both"):
+            want.add("rai1")
+    out = dev("iw dev 2>/dev/null | awk '/Interface/{print $2}' | grep -E '^ra' | sort | tr '\\n' ' '")
+    have = set(out.split())
+    ok = have == want
     record(t_wifi_bss._test_name, "wifi", ok,
-           f"ra0={counts[0]} rai0={counts[1]} rai1={counts[2]}" if len(counts) == 3 else out[:60])
+           f"want={sorted(want)} have={sorted(have)}" if not ok else
+           f"ifaces={sorted(have)} guest={bool(guest and has_pass)} band={gband}")
+
+
+@test("访客 BSS 配置/隔离防火墙一致 (guest_fw)")
+def t_wifi_guest():
+    conf = dev("cat /data/gw/settings.conf /data/gw/defaults.conf 2>/dev/null | "
+               "grep -E '^(GUEST|GUEST_BAND|GUEST_SSID)=' | sort -u")
+    guest = re.search(r"^GUEST=1$", conf, re.M)
+    hap2 = dev("grep -c '^bss=' /var/wlan/hap_2g.conf 2>/dev/null").strip() or "0"
+    hap5 = dev("grep -c '^bss=' /var/wlan/hap_5g.conf 2>/dev/null").strip() or "0"
+    fw = dev("ebtables -t broute -L 2>/dev/null | grep -c 'Bridge chain: WIFI_GUEST_'").strip()
+    ssid_lines = dev("iw dev 2>/dev/null | grep -c ssid").strip()
+    notes = f"hap2_bss={hap2} hap5_bss={hap5} guest_chains={fw} ssid_lines={ssid_lines}"
+    if guest:
+        # 访客开: hap conf 里的 bss 段与 iface 实况都要对上, 且隔离链已施加
+        ok = fw in ("1", "2") and int(hap2) + int(hap5) >= 1
+    else:
+        ok = hap2 == "0" and hap5 == "0" and fw == "0"
+    record(t_wifi_guest._test_name, "wifi", ok, notes)
 
 
 @test("hostapd 单进程多配置 (F3)")
@@ -179,13 +211,20 @@ def t_wifi_beacon():
 
 @test("API 报告的 BSS 数与内核一致")
 def t_wifi_cross():
-    # kernel truth
     kern = dev("iw dev 2>/dev/null | grep -c 'type AP'").strip()
-    # API truth (need token or use indirect check via process)
+    # v2.2: 期望数配置感知 (主双BSS + 访客按频段开关)
+    conf = dev("cat /data/gw/settings.conf /data/gw/defaults.conf 2>/dev/null | "
+               "grep -E '^(GUEST|GUEST_BAND|GUEST_PASS)=' | sort -u")
+    guest = re.search(r"^GUEST=1$", conf, re.M)
+    gband = (re.search(r"^GUEST_BAND=(\w+)", conf, re.M) or [None, "5g"])[1]
+    has_pass = bool(re.search(r"^GUEST_PASS=..+", conf, re.M))
+    want = 2
+    if guest and has_pass:
+        want += 2 if gband == "both" else 1
     hap = dev("ps | grep -c '[h]ostapd -B'").strip()
-    ok = kern == "3" and hap == "1"
+    ok = kern == str(want) and hap == "1"
     record(t_wifi_cross._test_name, "wifi", ok,
-           f"kernel={kern} hostapd_procs={hap}")
+           f"kernel={kern} want={want} hostapd_procs={hap}")
 
 
 @test("5G 带宽配置与射频实际一致 (跨层)")

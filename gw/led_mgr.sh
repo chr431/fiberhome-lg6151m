@@ -73,10 +73,13 @@ while :; do
         ST=$NS
     fi
     # v1.6: 信标看门狗 — 驱动固件权威事件增量触发 no_bcn 重装(与wifi_up F2同原语)
+    # v1.7: vif枚举动态化(访客可开在 ra1/rai1 任一/双频, 不再硬编码)
     BCN_NOW=$(dmesg 2>/dev/null | grep -cE 'AP: Beacon OFF|Beacon lost - Error|Beacon interval is illegal')
     if [ -n "$BCN_LAST" ] && [ "$BCN_NOW" -gt "$BCN_LAST" ]; then
         llog "beacon-loss event ($BCN_LAST->$BCN_NOW) — re-arming beacons"
-        for vif in ra0 rai0 rai1; do mwctl dev $vif set no_bcn 0 >/dev/null 2>&1; done
+        for vif in $(iw dev 2>/dev/null | awk '/Interface/{print $2}' | grep -E '^ra'); do
+            mwctl dev $vif set no_bcn 0 >/dev/null 2>&1
+        done
     fi
     BCN_LAST=$BCN_NOW
     sleep 10

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""rotate_toor v1.0 -- 设备 toor 口令轮换 (只读 rootfs 下的 /etc/shadow 覆盖通道)
+"""rotate_toor v1.3 -- 设备 toor 口令轮换 (只读 rootfs 下的 /etc/shadow 覆盖通道)
 
 背景: rootfs(squashfs) 只读, /etc/shadow 无法直接编辑; rc.extend v1.9 起在开机时
 把 /data/gw/shadow.override bind 到 /etc/shadow (本工具亦即时 bind, 不等重启)。
@@ -36,6 +36,7 @@ except ImportError:
     D = None
 
 import paramiko  # noqa: E402
+import lgssh     # noqa: E402 (v1.3: 主机密钥指纹钉死复用)
 
 
 def load_new_pass(prompt_mode):
@@ -65,7 +66,8 @@ def gen_hash(password):
 
 def ssh_client(host, user, pw):
     c = paramiko.SSHClient()
-    c.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # 与 lgssh 同基线; pinning 属后续独立项
+    # v1.3: 指纹钉死(lgssh.PinPolicy); 未配置 HOST_KEY_FP 时兼容旧行为
+    c.set_missing_host_key_policy(lgssh.PinPolicy() if lgssh.PIN else paramiko.AutoAddPolicy())
     c.connect(host, port=22, username=user, password=pw, timeout=10,
               allow_agent=False, look_for_keys=False)
     return c

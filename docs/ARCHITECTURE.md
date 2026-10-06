@@ -102,7 +102,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/build_steth.sh` | **v1.0** | tool | `-` | v3_steth.ko构建 |
 | `tools/build_v3fix.sh` | **v1.0** | tool | `-` | v3_fix.ko构建 |
 | `tools/build_v3httpd.sh` | **v1.0** | tool | `-` | v3httpd构建(zig cc aarch64-linux-musl全静态, 同mipc_cellular链) |
-| `tools/deploy.py` | **v2.10** | tool | `-` | MANIFEST部署/漂移检查(版本注入+预检); v2.10: connect凭证链env覆盖(LG_HOST/LG_TOOR_USER/LG_TOOR_PASS优先, 与lgssh对齐)——轮换窗口期rotate_toor注入旧口令的依赖; 历史版本见git |
+| `tools/deploy.py` | **v2.11** | tool | `-` | MANIFEST部署/漂移检查(版本注入+预检); v2.11: connect指纹钉死复用lgssh.PinPolicy; v2.10: connect凭证链env覆盖(LG_HOST/LG_TOOR_USER/LG_TOOR_PASS优先, 与lgssh对齐)——轮换窗口期rotate_toor注入旧口令的依赖; 历史版本见git |
 | `tools/device_local.py.example` | **v1.0** | tool | `-` | 凭证模板(真件gitignored) |
 | `tools/doc_audit.py` | **v1.1** | tool | `-` | 台账↔文档内联标记双向审计(v1.1: 标记扫描纳入台账引用的docs/外文档如install/README.md; v1.0: 版本绑定+TEST-MISSING/STALE-CODE/UNREGISTERED-CLAIM) |
 | `tools/gen_kernel_inc.py` | **v1.0** | tool | `-` | kernel头生成(构建辅助) |
@@ -110,13 +110,13 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/identify2.py` | **v1.0** | tool | `-` | 残留终验取证器(user_data清单/p26纯净性挂载验证/proc-net快照) |
 | `tools/identify_fw.py` | **v1.0** | tool | `-` | 只读固件身份取证器(release/cmdline/v4标记/挂载表; 前置空格防tty首字符丢失) |
 | `tools/leak_check.py` | **v1.1** | tool | `-` | 敏感词+设备MAC零命中门禁(工作树+可选全历史; 建议pre-push) |
-| `tools/lgssh.py` | **v1.2** | tool | `-` | SSH助手(env/_local/secrets凭证; run()命令通道; v1.2凭证目录解析LG_SECRETS_DIR) |
+| `tools/lgssh.py` | **v1.3** | tool | `-` | SSH助手(env/_local/secrets凭证; run()命令通道); v1.3: 主机密钥指纹钉死PinPolicy(HOST_KEY_FP/LG_HOST_KEY_FP, 认证前校验, 审计P0-5) |
 | `tools/lk_eth1_resume.py` | **v1.1** | tool | `-` | eth1续链器(LK控制台接管: kcmdline已注入态恢复; 含misc回退现场抓取; 补登记) |
 | `tools/lk_flash_v4.py` | **v1.1** | tool | `-` | v1.1路径随项目根迁移; 终版刷入器(LK陷阱→raw shell→/dev/null修复→curl送deploy2.sh→后台自驱+轮询deploy.log→重启监测; 修三雷: uclient罢工/&需/dev/null/串口前台等待吃首字符) |
 | `tools/lk_flash_v4_eth1.py` | **v1.1** | tool | `-` | v1.1路径随项目根迁移; eth1刷入实证器(全链条: 陷阱→raw shell→eth1起链[历史疑点:PHY仅ifup后attach]→curl传输→deploy2自驱→重启回v4.1) |
 | `tools/lk_flip2.py` | **v1.1** | tool | `-` | LK 一键翻槽(a|b, misc[2060]字节) |
 | `tools/lk_write.py` | **v1.6** | tool | `-` | LK raw-shell 文件写入(回显校验+tmpfs挂载+cmdlist巡检, 取代lk_fix_access) |
-| `tools/rotate_toor.py` | **v1.2** | tool | `-` | toor口令轮换器(只读rootfs shadow覆盖通道); v1.2: 投递改本会话直投(deploy.put同款协议; 子进程方式在轮换窗口期不可靠)+去掉%TEMP%残件; v1.1: md5独立校验 |
+| `tools/rotate_toor.py` | **v1.3** | tool | `-` | toor口令轮换器(只读rootfs shadow覆盖通道); v1.2: 投递改本会话直投(deploy.put同款协议; 子进程方式在轮换窗口期不可靠)+去掉%TEMP%残件; v1.1: md5独立校验; v1.3: 会话同样走指纹钉死 |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
 | `tools/selftest.py` | **v2.11** | tool | `-` | 断言式全功能测试(v2.11: 访客隔离断言改无条件—开关已删; 历史版本见git) |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |

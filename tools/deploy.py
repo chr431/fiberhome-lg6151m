@@ -40,6 +40,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import device_local as D  # noqa: E402  (from _local/secrets/)
 import paramiko           # noqa: E402
 import vercheck           # noqa: E402  (pure-stdlib; registry single source)
+import lgssh              # noqa: E402  (v2.11: PinPolicy 主机密钥指纹钉死复用)
 
 MGMT_CANDIDATES = ["192.168.9.1", "192.168.1.1", "192.168.8.1", "192.168.3.75"]
 # 9.1 = v3 br-lan (current), 1.1 = v2 factory LAN, 8.1/3.75 = legacy fallbacks
@@ -118,7 +119,9 @@ def connect(tries=2):
         for ip in hosts:
             try:
                 c = paramiko.SSHClient()
-                c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                # v2.11: 指纹钉死(lgssh.PinPolicy, 见 lgssh v1.3); 未配置指纹时兼容旧行为
+                c.set_missing_host_key_policy(
+                    lgssh.PinPolicy() if lgssh.PIN else paramiko.AutoAddPolicy())
                 c.connect(ip, port=22, username=user, password=pw,
                           timeout=10, allow_agent=False, look_for_keys=False,
                           banner_timeout=20)

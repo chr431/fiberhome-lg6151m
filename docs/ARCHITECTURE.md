@@ -76,7 +76,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/webs_revive.sh` | **v1.3** | manifest | `/data/gw/webs_revive.sh` | 原厂GUI复活器(自足nginx conf; 手动拉起) |
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
-| `gw/wifi_up.sh` | **v1.21** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.21: MLO访客静态单链路组17/18(E1/E2实证动态创建扰动主组,E3实证无访客纯净); v1.20: MLO单次AP启动(E1实证双次启动致rai0落临时组18); v1.19: MLO真双链路—MldGroup=1;0;x6写两带dat(RE实证stock同款,1基组号; 全零表=v1.15事故形态禁写; MldAddr/ApcliMloDisable勿写; 生效需冷启动); v1.18: 访客独立化) |
+| `gw/wifi_up.sh` | **v1.22** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.22: 访客iface显式入桥(动态BSS不自动加bridge→帧死无IP接口→dnsmasq盲,tcpdump实证); v1.21: MLO访客静态单链路组17/18(E1/E2实证动态创建扰动主组,E3实证无访客纯净); v1.20: MLO单次AP启动(E1实证双次启动致rai0落临时组18); v1.19: MLO真双链路—MldGroup=1;0;x6写两带dat(RE实证stock同款,1基组号; 全零表=v1.15事故形态禁写; MldAddr/ApcliMloDisable勿写; 生效需冷启动); v1.18: 访客独立化) |
 | `gw/www/api.sh` | **v2.39** | manifest | `/data/gw/www/api.sh` | GUI JSON端点(v2.39: mlo字段+强制双频同名+mlo_changed重启提示; v2.38: 主WiFi密码/加密并入; v2.37访客独立化) |
 | `gw/www/app.js` | **v3.23** | manifest | `/data/gw/www/app.js` | 控制台SPA(v3.23: 双频合一+MLO真双链路选项(值2映射mlo=1)+切换重启提示; v3.22: WiFi页重构) |
 | `gw/www/index.html` | **v2.14** | manifest | `/data/gw/www/index.html` | v3控制台页面 |
@@ -111,7 +111,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/lk_flip2.py` | **v1.1** | tool | `-` | LK 一键翻槽(a|b, misc[2060]字节) |
 | `tools/lk_write.py` | **v1.6** | tool | `-` | LK raw-shell 文件写入(回显校验+tmpfs挂载+cmdlist巡检, 取代lk_fix_access) |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
-| `tools/selftest.py` | **v2.4** | tool | `-` | 断言式全功能测试(v2.4: MLO断言—dat组表与MLD建立日志一致+全零表护栏; v2.3: 隔离链DHCP/DNS白名单; 57项) |
+| `tools/selftest.py` | **v2.5** | tool | `-` | 断言式全功能测试(v2.5: 访客桥成员断言; v2.4: MLO断言—dat组表与MLD建立日志一致+全零表护栏; v2.3: 隔离链DHCP/DNS白名单; 57项) |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |
 | `tools/serial_server.py` | **v1.7** | tool | `-` | 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets) |
 | `tools/vercheck.py` | **v1.5** | tool | `-` | 版本注册表校验/渲染/设备比对(v1.3: device()随deploy基座迁/data/gw; v1.2性质分区双向强制+全跟踪文件可归类; v1.1 image类md5钉死) |

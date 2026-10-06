@@ -1,5 +1,5 @@
 #!/bin/sh
-# wifi_up.sh — v3 WiFi bring-up (v1.21: MLO访客静态单链路组17/18; v1.20: MLO单次AP启动; v1.19: MLO真双链路 — 两带 dat 各写 MldGroup=1;0;x6
+# wifi_up.sh — v3 WiFi bring-up (v1.22: 访客iface显式入桥(动态BSS不自动加bridge,dnsmasq盲根因); v1.21: MLO访客静态单链路组17/18; v1.20: MLO单次AP启动; v1.19: MLO真双链路 — 两带 dat 各写 MldGroup=1;0;x6
 #   (RE实证: stock be_init_wlan_apcfg_file 同款形态, 1基组号配对成MLD; 全零表=v1.15
 #   事故形态禁写; MldAddr/ApcliMloDisable 勿写; MLD生效需冷启动(FW锁存); 纯MLO不需wapp);
 #   v1.18: 访客独立配置; v1.16: F3单进程hostapd; v1.10: 自动信道扫描选道),
@@ -614,6 +614,13 @@ HGUEST
         sleep 5
         for vif in $(iw dev 2>/dev/null | awk '/Interface/{print $2}' | grep -E '^ra'); do
             mwctl dev $vif set no_bcn 0 >/dev/null 2>&1
+        done
+        # ---- v1.22: 访客iface显式入桥 ----
+        # 实证: hostapd 创建的动态BSS(ra1/rai1)不会自动加入 br-lan(brctl show 缺席),
+        # 其帧以 indev=无IP接口 被本地收包后丢弃, dnsmasq 收不到 DISCOVER, 手机卡
+        # "获取IP"(tcpdump: 全网只有入向DISCOVER无OFFER)。MLO 与否同样缺失。幂等。
+        for gif in ra1 rai1; do
+            [ -d /sys/class/net/$gif ] && brctl addif br-lan $gif 2>/dev/null
         done
         # ---- v1.18: 访客隔离防火墙(原厂 wifiguest.sh 配方复刻) 幂等同步 ----
         # 检测现存访客iface(ra1/rai1)施加ebtables/iptables隔离; 访客关闭则清链

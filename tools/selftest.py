@@ -189,6 +189,19 @@ def t_wifi_guest():
     if guest:
         # 访客开: hap conf 里的 bss 段与 iface 实况都要对上, 且隔离链已施加
         ok = fw in ("1", "2") and int(hap2) + int(hap5) >= 1
+        # v2.5: 访客iface必须在br-lan里(hostapd动态BSS不自动入桥 — 不入桥则帧死在
+        # 无IP接口, dnsmasq收不到DISCOVER, 手机卡获取IP; v1.22起wifi_up显式入桥)
+        brports = dev("brctl show br-lan 2>/dev/null | awk '{print $NF}' | grep -E '^ra' | sort | tr '\\n' ' '")
+        conf2 = dev("cat /data/gw/settings.conf /data/gw/defaults.conf 2>/dev/null | grep '^GUEST_BAND=' | tail -1 | cut -d= -f2").strip() or "5g"
+        want_ports = set(["ra0", "rai0"])
+        if conf2 in ("2g", "both"):
+            want_ports.add("ra1")
+        if conf2 in ("5g", "both"):
+            want_ports.add("rai1")
+        have_ports = set(brports.split())
+        if have_ports != want_ports:
+            ok = False
+            notes += f" bridge_want={sorted(want_ports)} have={sorted(have_ports)}"
         # L14实弹教训(v1.1): bridge-nf=1 下桥接 DHCP 广播本地投递走 iptables
         # INPUT(physdev-in=访客口) — 隔离链必须白名单 DHCP/DNS, 否则手机卡"获取IP"
         for gif in ("ra1", "rai1"):

@@ -2,7 +2,7 @@
 #VER-REGISTRY
 gw/rc.extend.sh	1.7	manifest	/data/rc.extend.sh	槽位调度器(v1.7: A槽TRY_A自清+hnat_qos恢复[S99误伤根治]+dropbear唯一属主; b=纯访问层,a=全栈; 设备gw路径正本回采)
 gw/v3_rc10.extend.sh	2.19	manifest	/data/gw/rc19.sh	v3 启动编排 rc19v2(br-lan+wifi+wan+DNS; v2.5网口对调; v2.6/2.7 eth1 MAC钉死+归因修正)
-gw/wifi_up.sh	1.21	manifest	/data/gw/wifi_up.sh	mt7992 AP 工厂配方(v1.21: MLO访客静态单链路组17/18(E1/E2实证动态创建扰动主组,E3实证无访客纯净); v1.20: MLO单次AP启动(E1实证双次启动致rai0落临时组18); v1.19: MLO真双链路—MldGroup=1;0;x6写两带dat(RE实证stock同款,1基组号; 全零表=v1.15事故形态禁写; MldAddr/ApcliMloDisable勿写; 生效需冷启动); v1.18: 访客独立化)
+gw/wifi_up.sh	1.22	manifest	/data/gw/wifi_up.sh	mt7992 AP 工厂配方(v1.22: 访客iface显式入桥(动态BSS不自动加bridge→帧死无IP接口→dnsmasq盲,tcpdump实证); v1.21: MLO访客静态单链路组17/18(E1/E2实证动态创建扰动主组,E3实证无访客纯净); v1.20: MLO单次AP启动(E1实证双次启动致rai0落临时组18); v1.19: MLO真双链路—MldGroup=1;0;x6写两带dat(RE实证stock同款,1基组号; 全零表=v1.15事故形态禁写; MldAddr/ApcliMloDisable勿写; 生效需冷启动); v1.18: 访客独立化)
 gw/wan_agg.sh	2.18	manifest	/data/gw/wan_agg.sh	双上行聚合主管(v2.17: v4免插件配方(statistic插件缺libxtables.so.12/mac插件不存在——v4分流自精简启动以来从未生效): 源端口区间分流(v6同款)+钉死改源IP(邻居解析+漂移重建); v2.15: 聚合总开关ENABLE=0旁路/1参战, 热切+GUI agg_mode; 照抄原厂quecadp内核分流+fwmark路由; v1.7 to-LAN护盾规则自愈(全灭黑洞终根因)
 gw/udhcpc_wan.script	1.0	manifest	/data/gw/udhcpc_wan.script	WAN口 udhcpc 事件钩子(接口无关化)
 gw/healthdog.sh	1.1	manifest	/data/gw/healthdog.sh	看门狗用户态心跳
@@ -75,7 +75,7 @@ gw/defaults.conf	1.1	manifest	/data/gw/defaults.conf	统一配置只读出厂基
 tools/leak_check.py	1.1	tool	-	敏感词+设备MAC零命中门禁(工作树+可选全历史; 建议pre-push)
 docs/ARCHITECTURE.md	1.0	doc	-	架构+版本总表(本表生成)
 gw/watchdog.sh	1.3	manifest	/data/gw/watchdog.sh	持续不变量看门狗(L13: 17项不变量; v1.2/L14: +蜂窝控制面 atcid自愈+CFUN探针+注册态, airplane容忍)
-tools/selftest.py	2.4	tool	-	断言式全功能测试(v2.4: MLO断言—dat组表与MLD建立日志一致+全零表护栏; v2.3: 隔离链DHCP/DNS白名单; 57项)
+tools/selftest.py	2.5	tool	-	断言式全功能测试(v2.5: 访客桥成员断言; v2.4: MLO断言—dat组表与MLD建立日志一致+全零表护栏; v2.3: 隔离链DHCP/DNS白名单; 57项)
 tools/doc_audit.py	1.0	tool	-	文档结论台账审计(L16: 结论与代码版本绑定+漂移检测; 双向CLM标记+CODE-REGRESSED/STALE-CODE/TEST-MISSING/未登记断言扫描+ARCHITECTURE结论表渲染; deploy push前置fail-closed)
 gw/src/mipc_cellular.c	0.5	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源(P1): dlopen闭包预载+ql_nw_init; v0.2: 168B结构全破译(setlock lte/nr=列表 解锁=全1; NR三段位图1-32/34-64/65-96)
 gw/bin/mipc_cellular	0.5	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI(getbands/setlock/unlock; 锁NR41+79实弹验证零扰动)

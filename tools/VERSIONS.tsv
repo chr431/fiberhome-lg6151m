@@ -81,4 +81,4 @@ gw/src/mipc_cellular.c	0.5	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源(P1): 
 gw/bin/mipc_cellular	0.5	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI(getbands/setlock/unlock; 锁NR41+79实弹验证零扰动)
 tools/build_mipc_cellular.sh	1.0	tool	-	mipc_cellular构建(zig cc aarch64-musl动态)
 gw/dial_keeper.sh	1.0	manifest	/data/gw/dial_keeper.sh	拨号自持兜底守护(P2): ccmni无IP超35s→MIPC直连重拨(deact_apn+act_type配方实测result:0);退避15-300s;不经mobilenetwork
-gw/guest_fw.sh	1.1	manifest	/data/gw/guest_fw.sh	访客隔离防火墙(v1.1: iptables链白名单DHCP67:68/DNS53 — br_netfilter=1下桥接广播本地投递走INPUT, v1.0全DROP杀DHCP致手机卡获取IP(实弹10包实证))
+gw/guest_fw.sh	1.2	manifest	/data/gw/guest_fw.sh	访客隔离防火墙v1.2架构重设计(broute DROP强制L3路由在本内核+多WAN mark管线pre-conntrack蒸发→访客无网; 改纯桥接路径+ebtables双向L2+iptables L3, 与主WiFi同数据面; v1.1: iptables链白名单DHCP67:68/DNS53 — br_netfilter=1下桥接广播本地投递走INPUT, v1.0全DROP杀DHCP致手机卡获取IP(实弹10包实证))

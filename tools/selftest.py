@@ -183,7 +183,7 @@ def t_wifi_guest():
     guest = re.search(r"^GUEST=1$", conf, re.M)
     hap2 = dev("grep -c '^bss=' /var/wlan/hap_2g.conf 2>/dev/null").strip() or "0"
     hap5 = dev("grep -c '^bss=' /var/wlan/hap_5g.conf 2>/dev/null").strip() or "0"
-    fw = dev("ebtables -t broute -L 2>/dev/null | grep -c 'Bridge chain: WIFI_GUEST_'").strip()
+    fw = dev("ebtables -L 2>/dev/null | grep -c 'Bridge chain: WIFI_GUEST_'").strip()  # v1.2: filter表(不再用broute)
     ssid_lines = dev("iw dev 2>/dev/null | grep -c ssid").strip()
     notes = f"hap2_bss={hap2} hap5_bss={hap5} guest_chains={fw} ssid_lines={ssid_lines}"
     if guest:

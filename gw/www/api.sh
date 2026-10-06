@@ -266,9 +266,13 @@ get_sms() {
 
 # -- 流量统计 (ubus 活方法; 限额自管) --
 get_traffic() {
-    T=$(ubus call mobile_network traffic_statistics "{\"tx\":\"0\",\"rx\":\"0\"}" 2>/dev/null)
-    RX=$(printf '%s' "$T" | grep -oE '"rx": *"[0-9]+"' | grep -oE '[0-9]+')
-    TX=$(printf '%s' "$T" | grep -oE '"tx": *"[0-9]+"' | grep -oE '[0-9]+')
+    # v2.34: /proc/net/dev 直读(与 mobilenetwork 同源做法) — 蜂窝口字节数
+    IF=$(ip -o -4 addr show 2>/dev/null | grep -m1 'ccmni.*inet' | awk '{print $2}')
+    RX=0; TX=0
+    if [ -n "$IF" ]; then
+        RX=$(cat /sys/class/net/$IF/statistics/rx_bytes 2>/dev/null)
+        TX=$(cat /sys/class/net/$IF/statistics/tx_bytes 2>/dev/null)
+    fi
     [ -r $GWDATA/traffic.conf ] && . $GWDATA/traffic.conf
     printf '{"rx":"%s","tx":"%s","day_limit_mb":"%s","month_limit_mb":"%s","ts":%d}' \
         "${RX:-0}" "${TX:-0}" "${DAY_LIMIT_MB:-0}" "${MONTH_LIMIT_MB:-0}" "$(date +%s)"

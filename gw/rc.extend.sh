@@ -1,5 +1,6 @@
 #!/bin/sh
-# rc.extend.sh v1.7 -- slot-aware dispatcher (shared /data between v2/v3)
+# rc.extend.sh v1.9 -- slot-aware dispatcher (shared /data between v2/v3)
+# v1.9: /etc/shadow bind 覆盖钩子(审计P0-5 凭据轮换前置; 见文件内注释)
 # v1.6: route A -- FH modem-stack environment (MODE.fh gate)
 # v1.8 = v1.7 + 启动行去&(同步启动); v1.7: A槽保活 + dropbear唯一属主
 #   - bootslot=a 时清 misc TRY_A(offset 2061)=厂商S99语义(v4.1删S99致LK回退B的
@@ -13,6 +14,17 @@
 # v1.5: flag-gated one-shot capture launch (capture_ubus.sh) BEFORE slot case
 #   -- must precede FH's mobilenetwork dial to record the stock datacall blob.
 grep -q healthdog /proc/modules 2>/dev/null || true
+
+# --- v1.9 (审计P0-5): /etc/shadow 覆盖 -- rootfs squashfs 只读, 凭据轮换经
+# /data/gw/shadow.override bind 到 /etc/shadow (dropbear/getty 每次认证时读取,
+# bind 后 passwd 写入会穿透到 override 文件 = 后续轮换可直接 passwd)。
+# 生成方: PC 侧轮换流程(全量拷贝现 shadow 仅改目标行, 600 权限); 无文件=零变化。
+if [ -f /data/gw/shadow.override ] && ! grep -q ' /etc/shadow ' /proc/mounts; then
+    chmod 600 /data/gw/shadow.override 2>/dev/null
+    mount --bind /data/gw/shadow.override /etc/shadow 2>/dev/null \
+        && logger -t rc.extend "shadow.override bind OK" \
+        || logger -t rc.extend "shadow.override bind FAILED"
+fi
 
 # --- v1.7: dropbear single-owner (race-proof; downstream pgrep guards short-circuit)
 mkdir -p /data/gw/dropbear_keys

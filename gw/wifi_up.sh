@@ -16,6 +16,7 @@ B=$(cd "$(dirname "$0")" && pwd)   # v1.12: /data/gw 与 /data/gw 皆可
 LOG=/tmp/wifi_up.log
 exec >"$LOG" 2>&1
 echo "== wifi_up start $(date)"
+WU_UPT=$(cut -d. -f1 /proc/uptime)   # v1.24: MLD快照的dmesg时间起点
 
 mkdir -p /var/wlan /var/ctcwifi
 echo -n /etc/wireless > /sys/module/firmware_class/parameters/path 2>/dev/null
@@ -635,7 +636,9 @@ HGUEST
         [ -x $B/guest_fw.sh ] && $B/guest_fw.sh sync
         # v1.22: MLD 建立证据快照 — ccmni 每秒多条日志会把 boot 期 MLD 行挤出
         # 内核环形缓冲区, selftest 改读此快照(dmesg 作回退)
-        dmesg | grep -E 'Create AP MLD|join mld_grp|already affiliated' > /tmp/mld_boot.log 2>/dev/null
+        # v1.24: 只留本次运行起的行(uptime 起点过滤) — 此前全量 dmesg 会把本boot
+        # 更早失败轮的 grp(0) 带进快照, 污染 selftest 断言(第二次撞上)
+        dmesg | awk -v t=$WU_UPT '$1=="\[" && $2+0>=t' | grep -E 'Create AP MLD|join mld_grp|already affiliated' > /tmp/mld_boot.log 2>/dev/null
     fi
     if [ $WIFI_ERR -ne 0 ]; then
         echo "== FATAL: hostapd WPA setup failed — radios DOWN (no open fallback)"

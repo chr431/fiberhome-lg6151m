@@ -76,7 +76,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/webs_revive.sh` | **v1.3** | manifest | `/data/gw/webs_revive.sh` | 原厂GUI复活器(自足nginx conf; 手动拉起) |
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
-| `gw/wifi_up.sh` | **v1.23** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.23: MLO在线重应用先下电回冷启动等价态(T1-T5矩阵:-B后台化在接口UP+MLD武装态必死,下电即愈;撤销v2.41重启纪律); v1.22: 访客iface显式入桥(动态BSS不自动加bridge→帧死无IP接口→dnsmasq盲,tcpdump实证); v1.21: MLO访客静态单链路组17/18(E1/E2实证动态创建扰动主组,E3实证无访客纯净); v1.20: MLO单次AP启动(E1实证双次启动致rai0落临时组18); v1.19: MLO真双链路—MldGroup=1;0;x6写两带dat(RE实证stock同款,1基组号; 全零表=v1.15事故形态禁写; MldAddr/ApcliMloDisable勿写; 生效需冷启动); v1.18: 访客独立化) |
+| `gw/wifi_up.sh` | **v1.24** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.24: MLD快照按本次运行uptime过滤(历史失败轮grp(0)污染断言,二犯); v1.23: MLO在线重应用先下电回冷启动等价态(T1-T5矩阵:-B后台化在接口UP+MLD武装态必死,下电即愈;撤销v2.41重启纪律); v1.22: 访客iface显式入桥(动态BSS不自动加bridge→帧死无IP接口→dnsmasq盲,tcpdump实证); v1.21: MLO访客静态单链路组17/18(E1/E2实证动态创建扰动主组,E3实证无访客纯净); v1.20: MLO单次AP启动(E1实证双次启动致rai0落临时组18); v1.19: MLO真双链路—MldGroup=1;0;x6写两带dat(RE实证stock同款,1基组号; 全零表=v1.15事故形态禁写; MldAddr/ApcliMloDisable勿写; 生效需冷启动); v1.18: 访客独立化) |
 | `gw/www/api.sh` | **v2.43** | manifest | `/data/gw/www/api.sh` | GUI JSON端点(v2.39: mlo字段+强制双频同名+mlo_changed重启提示; v2.38: 主WiFi密码/加密并入; v2.37访客独立化) |
 | `gw/www/app.js` | **v3.26** | manifest | `/data/gw/www/app.js` | 控制台SPA(v3.23: 双频合一+MLO真双链路选项(值2映射mlo=1)+切换重启提示; v3.22: WiFi页重构) |
 | `gw/www/index.html` | **v2.14** | manifest | `/data/gw/www/index.html` | v3控制台页面 |

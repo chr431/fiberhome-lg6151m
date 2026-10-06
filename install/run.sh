@@ -12,13 +12,21 @@ mknod /dev/null c 1 3
 mknod /dev/urandom c 1 9
 grep -q ' /tmp ' /proc/mounts || mount -t tmpfs tmpfs /tmp
 grep -q ' /mnt ' /proc/mounts || mount -t tmpfs tmpfs /mnt
-mknod /dev/mmcblk0p39 b 259 7 2>/dev/null   # 内核实测: B槽rootfs=259:7
 mknod /dev/loop-control c 10 237 2>/dev/null
 mknod /dev/loop0 b 7 0 2>/dev/null
 mknod /dev/loop1 b 7 1 2>/dev/null
-mknod /dev/mmcblk0p46 b 259 14 2>/dev/null
-mknod /dev/mmcblk0p26 b 179 26 2>/dev/null
-mknod /dev/mmcblk0p1  b 179 1  2>/dev/null
+# v1.1: 分区节点次设备号从 /proc/partitions 动态解析 — 替代硬编码 259:7 等
+# (RP102/RP103 兼容性侦测结论: 分区 minor 号属"同SDK强推断"而非实证; 动态解析
+# 同时构成分区布局门禁: 缺任一关键分区即安全退出, 不写任何东西)
+for _pn in mmcblk0p39 mmcblk0p46 mmcblk0p26 mmcblk0p1; do
+    [ -e /dev/$_pn ] && continue
+    _mm=$(awk -v n="$_pn" '$4==n{print $1" "$2}' /proc/partitions | head -1)
+    if [ -z "$_mm" ]; then
+        echo "GATE: partition $_pn not found - layout mismatch, abort" > /tmp/gate.log
+        exit 1
+    fi
+    mknod /dev/$_pn b $_mm 2>/dev/null
+done
 mkdir -p /data
 grep -q ' /data ' /proc/mounts || mount -t ext4 /dev/mmcblk0p46 /data
 

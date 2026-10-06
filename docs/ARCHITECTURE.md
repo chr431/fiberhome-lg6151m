@@ -134,7 +134,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `CLM-BOOTCTRL-2060`@FINDINGS.md | ✅实证 | `tools/lk_flash_v4.py>=1.1` | TRY_A 已自清 | e76abba@2026-10-05 | misc偏移2060 magic BCAB |
 | `CLM-ZMTK-CLONE`@FINDINGS.md | ✅实证 | `gw/zz_data_hook>=1.1` | boot.done 存在 (启动链完整) | e76abba@2026-10-05 | 首启克隆槽必须在自定义链中禁用 |
 | `CLM-PMK-ONLY`@FINDINGS.md | ✅实证 | `gw/wifi_up.sh>=1.18` | BSS 接口集合与访客配置一致 (v1.17 配置感知) | c39b0d4@2026-10-06 | hostapd只吃原始PMK(wpa_passphrase被libfhcrypto拦截); v1.18访客多BSS下断言改配置感知 |
-| `CLM-MARK-OR`@FINDINGS.md | ✅实证 | `gw/wan_agg.sh>=2.15` | 分流规则已安装 (sport + mark),钉死规则与配置表一致 | e76abba@2026-10-05 | iptables MARK覆盖非OR;mark==0守卫 |
+| `CLM-MARK-OR`@FINDINGS.md | ✅实证 | `gw/wan_agg.sh>=2.15` | 分流规则已安装 (模式感知) | 6398974@2026-10-06 | iptables MARK覆盖非OR;mark==0守卫 |
 | `CLM-PROCD-INTERCEPT`@VENDOR_MAP.md | ✅实证 | `—` | — | 54e89f0@2026-10-05 | RE静态+设备佐证: procd拦截sysinit,FH层由S99末行触发 |
 | `CLM-DIALER-QLNETD`@VENDOR_MAP.md | ✅实证 | `gw/rc_netfh.sh>=2.2` | 拨号兜底守护存活 (P2) | 89dad51@2026-10-06 | 闸门A定案:mobilenetwork=PDN生命周期持有者(杀后ccmni≤10s掉IP,裸重启不够);P2 dial_keeper兜底接管,裁撤前置条件已备 |
 | `CLM-BANDLOCK-LIBQLRIL`@VENDOR_MAP.md | ✅实证 | `—` | — | 54e89f0@2026-10-05 | RE实证: ql_nw_set_band_mode(readelf UND),无AT面 |

@@ -197,7 +197,12 @@ def t_wifi_guest():
             ok = ok and ipt_chains == "0"
             notes += f" isolate=off ipt_chains={ipt_chains}"
         else:
-            ok = fw in ("1", "2") and hap_sum >= 1
+            # v1.4: 每访客iface两条链(FORWARD+INPUT) — both/5g=2 iface=4, 单频=2
+            ok = fw in ("2", "4") and hap_sum >= 1
+            eb_in = dev("ebtables -L INPUT 2>/dev/null | grep -c 'WIFI_GUEST_'").strip()
+            if eb_in == "0":
+                ok = False
+                notes += " NO_EBT_INPUT_CHAIN"
         # v2.5: 访客iface必须在br-lan里(hostapd动态BSS不自动入桥 — 不入桥则帧死在
         # 无IP接口, dnsmasq收不到DISCOVER, 手机卡获取IP; v1.22起wifi_up显式入桥)
         brports = dev("brctl show br-lan 2>/dev/null | awk '{print $NF}' | grep -E '^ra' | sort | tr '\\n' ' '")

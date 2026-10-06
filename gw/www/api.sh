@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.41 (v2.40隔离开关; MLO=1时改动一律保存+重启生效, 禁在线wifi_up — 实证驱动MLD存活时hostapd重启即死) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.42 (v2.41 MLO保存+重启纪律; w1pct三级回退链修GUI滑块不同步) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -956,7 +956,12 @@ get_status() {
     ETH_V6=$(ip -o -6 addr show eth0 2>/dev/null | grep -m1 global | awk '{print $4}' | cut -d/ -f1)
     ETH_C=$(cat /sys/class/net/eth0/carrier 2>/dev/null); ETH_C=${ETH_C:-0}
     AGG_M=$(grep -m1 "Current mode" /proc/multi_wan/mode 2>/dev/null | grep -oE "[0-9]+$")
-    AGG_W=$(grep "WAN1 weight" /proc/multi_wan/weight 2>/dev/null | grep -oE "[0-9]+" | tail -1)
+    # v2.42: w1pct 三级回退 — iptables 引擎态 /proc/multi_wan/* 不存在(quecadp 专属),
+    # 旧读法永远"?"致 GUI 滑块停在中间不与实配同步。顺序: agg.conf(权威,即写即读)
+    # → proc(quecadp 态) → wan_agg 日志 pct=(引擎实跑值)
+    AGG_W=$(grep -m1 '^W1_PCT=' $GWDATA/agg.conf 2>/dev/null | cut -d= -f2)
+    [ -z "$AGG_W" ] && AGG_W=$(grep "WAN1 weight" /proc/multi_wan/weight 2>/dev/null | grep -oE "[0-9]+" | tail -1)
+    [ -z "$AGG_W" ] && AGG_W=$(tail -1 /tmp/wan_agg.log 2>/dev/null | grep -oE 'pct=[0-9]+' | head -1 | cut -d= -f2)
     WAN_MODE=$(cat /tmp/wan_mode 2>/dev/null)
     TEMPS=""
     for z in soc_max cpu_little0 cpu_big0 md1 nrpa_ntc ltepa_ntc; do

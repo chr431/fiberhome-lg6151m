@@ -1,4 +1,4 @@
-/* app.js v3.25 (访客隔离开关 + MLO模式下改动提示重启生效) -- v3 gateway console SPA
+/* app.js v3.26 (聚合滑块应用后回读同步) -- v3 gateway console SPA
  * v3.4: WiFi 分析仪(信道图/信道评级/AP列表/时间图 canvas多视图) + 信道下拉统一(2.4G补select, 双频加"自动"档)
  * 刷新机制彻底重做: 页面骨架只建一次(进入时), 轮询仅更新文本槽/小表格
  *   T(id,v) 文本槽(带变化检测)  H(id,v) 局部HTML(tbody级,带变化检测)
@@ -625,7 +625,8 @@ window.agEn = async () => {
 };
 window.agW = async () => {
     const j = await api("agg_weights", `w1=${$("ag-w").value}`).catch(e => ({ error: e.message }));
-    j.ok ? toast("权重已下发") : toast("失败: " + j.error, 1);
+    if (j.ok) { toast("权重已下发"); setTimeout(() => PAGES.agg.tick(), 900); }   // v3.26: 应用后回读同步滑块/比例
+    else toast("失败: " + (j.error || ""), 1);
 };
 window.agPinAdd = async () => {
     const j = await api("agg_pin", `mac=${$("ap-mac").value}&op=${$("ap-op").value}`).catch(e => ({ error: e.message }));

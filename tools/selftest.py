@@ -535,7 +535,7 @@ def t_cel_mipcrat():
 def t_cel_tree():
     # v1.10 起: cfg 树已整体退役(rc_netfh v3.1) — 断言翻转为自研引擎:
     # mipc_cellular cells 返回服务小区(N41 带号) + 邻区列表。
-    out = dev("/data/gw/mipc_cellular cells 2>/dev/null | head -c 120")
+    out = dev("/data/gw/mipc_cellular cells 2>/dev/null | head -c 400")
     ok = '"band":"N' in out and '"cells":[' in out
     record(t_cel_tree._test_name, "cellular", ok,
            out.strip()[:60] if not ok else "engine ok")

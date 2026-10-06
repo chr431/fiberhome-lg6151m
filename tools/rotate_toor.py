@@ -9,8 +9,8 @@
      (或 --prompt-new 改为交互输入, 但须与 device_local 最终一致, 否则工具链断)。
   2. 本工具交互询问【旧口令】(getpass, 不进 argv/命令行历史/本脚本日志)。
   3. 取回当前 /etc/shadow -> 仅替换 toor 行哈希(SHA-512, $6$) -> (可选 --lock-root
-     同时锁死厂商 root 口令行) -> 本地校验(行数/字段数不变) -> deploy.py put 送达
-     (md5 双校验+原子mv; LG_TOOR_PASS=旧口令 仅注入子进程 env) -> 即时 bind。
+     同时锁死厂商 root 口令行) -> 本地校验(行数/字段数不变) -> 经同一 SSH 会话直投
+     (deploy.put 同款协议: rm tmp -> cat -> md5 门禁 -> 原子 mv -> 复核, 3 重试) -> 即时 bind。
   4. 验证: 新口令可登录, 旧口令被拒; 已有会话不受影响。
 
 用法:
@@ -25,7 +25,6 @@ import re
 import sys
 import getpass
 import subprocess
-import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -117,34 +116,40 @@ def main():
             sys.exit("FAIL: 行数变化, 拒绝写入")
 
         payload = ("\n".join(out_lines) + "\n").encode()
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".shadow") as tf:
-            tf.write(payload)
-            local = tf.name
         print(f"override 构造完成: {len(out_lines)} 行 (toor 哈希已换"
               + (", root 已锁死" if lock_root else "") + ")")
 
-        # 3) deploy.py put 送达 (md5 双校验+原子mv; 旧口令经 env 注入 — 依赖
-        #    deploy v2.10+ 的 LG_TOOR_PASS 覆盖支持)。成功判定=本会话独立 md5
-        #    比对(不依赖子进程输出文案), 不一致整体重试(put 内部另有 3 重试)。
+        # 3) 送达 — deploy.put 同款协议, 经本会话直投 (v1.2: 子进程 deploy 方式在
+        #    轮换窗口期不可靠 — deploy 的 device_local 凭证链指向新口令而设备仍
+        #    旧口令; 本会话已实证可连(取回 shadow), 直投协议不变:
+        #    rm tmp -> cat > tmp -> md5 门禁 -> 原子 mv -> 复核, 3 次重试)
         import hashlib
-        local_md5 = hashlib.md5(payload).hexdigest()
-        run(c, "rm -f /data/gw/shadow.override.putting")   # 清上次可能的残件
-        env = dict(os.environ, LG_TOOR_PASS=old_pass, LG_HOST=host, LG_TOOR_USER=user)
+        want = hashlib.md5(payload).hexdigest()
+        remote = "/data/gw/shadow.override"
+        tmp = remote + ".putting"
         delivered = False
         for attempt in (1, 2, 3):
-            r = subprocess.run(
-                [sys.executable, os.path.join(HERE, "deploy.py"), "put",
-                 local, "/data/gw/shadow.override"],
-                env=env, capture_output=True, text=True)
-            dev_md5 = run(c, "md5sum /data/gw/shadow.override 2>/dev/null").split()[:1]
-            dev_md5 = dev_md5[0] if dev_md5 else ""
-            if dev_md5 == local_md5:
-                delivered = True
-                break
-            print(f"put 第{attempt}次后 md5 不一致 (设备={dev_md5 or '无文件'}), 重试...")
+            run(c, "rm -f %s" % tmp)
+            try:
+                si, so, se = c.exec_command("cat > %s" % tmp, timeout=60)
+                si.write(payload); si.flush(); si.channel.shutdown_write()
+                rc = so.channel.recv_exit_status()
+                if rc != 0:
+                    print(f"  第{attempt}次: cat rc={rc}"); continue
+                got = run(c, "md5sum %s" % tmp).split()
+                if not got or got[0] != want:
+                    print(f"  第{attempt}次: md5 不一致 ({got[0] if got else '空'})"); continue
+                run(c, "chmod 600 %s && mv -f %s %s" % (tmp, tmp, remote))
+                ok2 = run(c, "md5sum %s" % remote).split()
+                if ok2 and ok2[0] == want:
+                    delivered = True
+                    break
+                print(f"  第{attempt}次: mv 后复核失败")
+            except Exception as e:
+                print(f"  第{attempt}次: 通道异常 {e!r}")
+        run(c, "rm -f %s" % tmp)
         if not delivered:
-            sys.exit("FAIL: 3 次投递后 md5 仍不一致 — 设备 shadow 未被触碰, "
-                     "可用旧口令 SSH 检查 /data/gw/shadow.override.putting")
+            sys.exit("FAIL: 3 次投递失败 — 设备 shadow 未被触碰, 旧口令会话仍可用")
 
         # 4) 即时 bind (不等重启; 与 rc.extend v1.9 幂等守卫一致)
         print(run(c, "chmod 600 /data/gw/shadow.override; "

@@ -60,7 +60,7 @@ gw/wedge_watch.sh	1.0	manifest	/data/gw/wedge_watch.sh	串口wedged值守望器(
 gw/zz_data_hook	1.1	manifest	/data/build/rootfs/etc/init.d/zz_data_hook	S98数据钩子(v1.1: plain sh——原厂无/etc/rc.common, rc.common式shebang致开机栈全灭; 回归实测发现)
 tools/device_local.py.example	1.0	tool	-	凭证模板(真件gitignored)
 tools/lk_eth1_resume.py	1.1	tool	-	eth1续链器(LK控制台接管: kcmdline已注入态恢复; 含misc回退现场抓取; 补登记)
-tools/rotate_toor.py	1.1	tool	-	toor口令轮换器(只读rootfs shadow覆盖通道); v1.1: put成功判定改独立md5比对(3次整体重试)+清.putting残件; 依赖deploy v2.10 env覆盖
+tools/rotate_toor.py	1.2	tool	-	toor口令轮换器(只读rootfs shadow覆盖通道); v1.2: 投递改本会话直投(deploy.put同款协议; 子进程方式在轮换窗口期不可靠)+去掉%TEMP%残件; v1.1: md5独立校验
 tools/lgssh.py	1.2	tool	-	SSH助手(env/_local/secrets凭证; run()命令通道; v1.2凭证目录解析LG_SECRETS_DIR)
 tools/run_serial_server.sh	1.0	tool	-	串口控制台守护拉起器
 tools/build_healthdog.sh	1.0	tool	-	healthdog.ko内核模块构建(内核树)

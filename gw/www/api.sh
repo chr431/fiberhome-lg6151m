@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.37 (访客独立化: wifi_adv 名称/频段/密码独立+need_guest_pass校验) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.38 (v2.37访客独立化+DHCP隔离修复配套: 主WiFi密码/加密并入wifi_adv_set; 无线设置卡移除) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -585,9 +585,9 @@ get_wifi_adv() {
     [ -r /tmp/wifi_autoch ] && . /tmp/wifi_autoch   # wifi_up 自动选道落点(信道=0时)
     GS_RAW="${GUEST_SSID:-}"
     GS_EFF="${GUEST_SSID:-${SSID_BASE:-}-Guest}"
-    printf '{"ssid_base":"%s","ch2g":"%s","ch5g":"%s","bw2g":"%s","bw5g":"%s","power":"%s","hidden2g":"%s","hidden5g":"%s","guest":"%s","guest_ssid":"%s","guest_ssid_eff":"%s","guest_band":"%s","guest_pass":"%s","inone":"%s","res2g":"%s","res5g":"%s","ts":%d}' \
+    printf '{"ssid_base":"%s","ch2g":"%s","ch5g":"%s","bw2g":"%s","bw5g":"%s","power":"%s","hidden2g":"%s","hidden5g":"%s","auth":"%s","guest":"%s","guest_ssid":"%s","guest_ssid_eff":"%s","guest_band":"%s","guest_pass":"%s","inone":"%s","res2g":"%s","res5g":"%s","ts":%d}' \
         "${SSID_BASE:-}" "${CH2G:-6}" "${CH5G:-149}" "${BW2G:-20}" "${BW5G:-80}" "${POWER:-100}" \
-        "${H2:-0}" "0" "${GUEST:-0}" "$GS_RAW" "$GS_EFF" "${GUEST_BAND:-5g}" "${GUEST_PASS:+1}" "${INONE:-0}" "${RCH2G:-}" "${RCH5G:-}" "$(date +%s)"
+        "${H2:-0}" "0" "${AUTH:-WPA2PSK}" "${GUEST:-0}" "$GS_RAW" "$GS_EFF" "${GUEST_BAND:-5g}" "${GUEST_PASS:+1}" "${INONE:-0}" "${RCH2G:-}" "${RCH5G:-}" "$(date +%s)"
 }
 apply_wifi_adv() {
     # v1.2: 先源旧conf(保留SSID/密码等非本表单字段), 再读表单值覆盖同名项
@@ -623,6 +623,13 @@ apply_wifi_adv() {
     if [ -n "$GSTP" ]; then
         printf '%s' "$GSTP" | grep -qE '^[A-Za-z0-9-]{8,63}$' || jerr bad_pass
     fi
+    # v2.38: 主WiFi密码/加密并入(原"无线设置"卡移除, 主WiFi卡一站式); 留空=不修改
+    MPW=""; form_has pass && MPW=$(form_kv pass)
+    AUTHV=$(form_kv auth)
+    if [ -n "$MPW" ]; then
+        printf '%s' "$MPW" | grep -qE '^[A-Za-z0-9-]{8,63}$' || jerr bad_pass
+    fi
+    case "$AUTHV" in ""|WPA2PSK|WPA2PSKWPA3PSK) ;; *) jerr bad_auth ;; esac
     # v2.37: 开访客必须存在密码(旧存或本次提交), 杜绝"静默无访客"困惑
     if [ "$GUEST" = 1 ] && [ -z "$GSTP" ] && [ -z "$GUEST_PASS" ]; then
         jerr need_guest_pass
@@ -634,6 +641,8 @@ apply_wifi_adv() {
     gw_set GUEST_BAND "$GBAND"
     if [ -n "$GSS" ]; then gw_set GUEST_SSID "$GSS"; elif form_has guest_ssid; then gw_del GUEST_SSID; fi
     if [ -n "$GSTP" ]; then gw_set GUEST_PASS "$GSTP"; fi
+    [ -n "$MPW" ] && gw_set WPAPSK "$MPW"
+    [ -n "$AUTHV" ] && gw_set AUTH "$AUTHV"
     sh $GWDATA/wifi_up.sh >/tmp/wifi_up.log 2>&1 &
     ok_json
 }

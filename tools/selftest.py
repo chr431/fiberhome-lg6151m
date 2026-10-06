@@ -189,6 +189,15 @@ def t_wifi_guest():
     if guest:
         # 访客开: hap conf 里的 bss 段与 iface 实况都要对上, 且隔离链已施加
         ok = fw in ("1", "2") and int(hap2) + int(hap5) >= 1
+        # L14实弹教训(v1.1): bridge-nf=1 下桥接 DHCP 广播本地投递走 iptables
+        # INPUT(physdev-in=访客口) — 隔离链必须白名单 DHCP/DNS, 否则手机卡"获取IP"
+        for gif in ("ra1", "rai1"):
+            chain = dev(f"iptables -S WIFI_GUEST_{gif} 2>/dev/null")
+            if chain:
+                if "--dport 67:68 -j ACCEPT" not in chain or "--dport 53 -j ACCEPT" not in chain:
+                    ok = False
+                    notes += f" {gif}:NO_DHCP_DNS_WHITELIST"
+                break
     else:
         ok = hap2 == "0" and hap5 == "0" and fw == "0"
     record(t_wifi_guest._test_name, "wifi", ok, notes)

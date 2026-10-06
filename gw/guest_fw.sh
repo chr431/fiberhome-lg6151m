@@ -1,5 +1,8 @@
 #!/bin/sh
-# guest_fw.sh v1.0 — 访客网络隔离 (原厂 wifiguest.sh type=2 配方复刻改造, RP103实证)
+# guest_fw.sh v1.1 — 访客网络隔离 (原厂 wifiguest.sh type=2 配方复刻改造, RP103实证)
+# v1.1 修复: bridge-nf-call-iptables=1 下桥接 DHCP 广播的本地投递走 iptables
+#   INPUT(physdev-in=访客口), 原 INPUT 链只放 ICMP 致 DHCP DISCOVER 被杀(实弹:
+#   手机卡"获取IP"超时, DROP计数10包实证) — 现放行 67:68/53/ICMP。
 #
 # 核心原语: ebtables broute DROP = 帧不桥接、改送本机 L3 路由。访客流量因此
 # 全部经网关 NAT 出网, 不再二层直达 LAN。放行仅 DHCP(桥接 udhcpd) 与 DNS(53)。
@@ -60,8 +63,13 @@ apply_iface() {  # 为一个现存访客 iface 施加隔离
     ebtables -A $_ch -p 0x86DD -j DROP
     ebtables -A $_ch -j RETURN
     # --- iptables: broute DROP 上送的 L3 流量 ---
-    # INPUT: 网关本机只留 ICMP(诊断); DNS/DHCP 不经此路径(已桥接ACCEPT)
+    # INPUT: DHCP/DNS/ICMP 放行, 其余拒绝。DHCP 放行是 v1.1 修的实弹bug:
+    #   bridge-nf-call-iptables=1 时, 桥接广播(DHCP DISCOVER)本地投递也走
+    #   iptables INPUT(physdev-in=访客口), 全 DROP 把 DHCP 杀死 -> 手机卡"获取IP"。
     iptables -N $_ch 2>/dev/null; iptables -F $_ch
+    iptables -A $_ch -p udp --dport 67:68 -j ACCEPT
+    iptables -A $_ch -p udp --dport 53 -j ACCEPT
+    iptables -A $_ch -p tcp --dport 53 -j ACCEPT
     iptables -A $_ch -p icmp -j ACCEPT
     iptables -A $_ch -j DROP
     iptables -I INPUT 1 -i $_if -j $_ch
@@ -75,10 +83,13 @@ apply_iface() {  # 为一个现存访客 iface 施加隔离
         iptables -I INPUT 2 -m physdev --physdev-in $_if -j $_ch 2>/dev/null
     iptables -C FORWARD -m physdev --physdev-in $_if -j ${_ch}_F 2>/dev/null || \
         iptables -I FORWARD 2 -m physdev --physdev-in $_if -j ${_ch}_F 2>/dev/null
-    # --- ip6tables: v6 INPUT 拒绝(访客无RA入向已被filter链封, 此为兜底) ---
+    # --- ip6tables: v6 INPUT 同语义(DHCPv6/DNS/ICMPv6 放行后拒绝; 访客RA已被filter链封) ---
     if ip6tables -L >/dev/null 2>&1; then
         ip6tables -N $_ch 2>/dev/null; ip6tables -F $_ch
-        ip6tables -A $_ch -p icmpv6 -j ACCEPT
+        ip6tables -A $_ch -p udp --dport 546:547 -j ACCEPT
+        ip6tables -A $_ch -p udp --dport 53 -j ACCEPT
+        ip6tables -A $_ch -p tcp --dport 53 -j ACCEPT
+        ip6tables -A $_ch -p ipv6-icmp -j ACCEPT
         ip6tables -A $_ch -j DROP
         ip6tables -I INPUT 1 -i $_if -j $_ch
     fi

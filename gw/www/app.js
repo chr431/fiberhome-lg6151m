@@ -1,4 +1,4 @@
-/* app.js v3.21 (访客独立化: 独立名称/频段/密码表单) -- v3 gateway console SPA
+/* app.js v3.22 (WiFi页重构: 主WiFi卡含密码/加密 + 独立访客网络卡) -- v3 gateway console SPA
  * v3.4: WiFi 分析仪(信道图/信道评级/AP列表/时间图 canvas多视图) + 信道下拉统一(2.4G补select, 双频加"自动"档)
  * 刷新机制彻底重做: 页面骨架只建一次(进入时), 轮询仅更新文本槽/小表格
  *   T(id,v) 文本槽(带变化检测)  H(id,v) 局部HTML(tbody级,带变化检测)
@@ -181,31 +181,32 @@ window.dsDel = async (m) => {
 /* ================ WiFi ================ */
 PAGES.wifi = {
     html: `<div>
-      ${card("无线设置", `
-        <div class="frm"><label>WiFi 名称 (统一名称, 自动加频段后缀)</label><input id="wf-base"></div>
-        <div class="frm"><label>密码 (8-63 字符)</label><input id="wf-pw" type="password" placeholder="留空=不修改"></div>
-        <div class="frm"><label>加密</label><select id="wf-auth"><option>WPA2PSK</option><option>WPA2PSKWPA3PSK</option></select></div>
-        <button class="pri" onclick="wfSave()">保存并应用</button>
-        <span class="hint">应用会重启无线 (已连设备需重连)</span>`)}
       ${card("状态 " + tag("tg-wfst", "正常", "异常"),
         kv("2.4G", "wfs-2g") + kv("5G", "wfs-5g") + kv("加密", "wfs-sec") + kv("hostapd", "wfs-hap"))}
-      ${card("高级设置", `
+      ${card("主 WiFi 设置", `
         <div class="row3">
-          <div class="frm"><label>WiFi 名称</label><input id="wa-base"></div>
+          <div class="frm"><label>WiFi 名称 (统一名称, 自动加频段后缀)</label><input id="wa-base"></div>
+          <div class="frm"><label>密码 (8-63 字符)</label><input id="wa-pass" type="password" placeholder="留空=不修改"></div>
+          <div class="frm"><label>加密</label><select id="wa-auth"><option value="WPA2PSK">WPA2PSK</option><option value="WPA2PSKWPA3PSK">WPA2+WPA3</option></select></div>
           <div class="frm"><label>2.4G 信道</label><select id="wa-ch2"><option value="0">自动 (启动时扫描选道)</option>${Array.from({length:13},(_,i)=>i+1).map(c=>`<option value="${c}">${c}</option>`).join("")}</select></div>
           <div class="frm"><label>2.4G 带宽 MHz</label><select id="wa-bw2"><option value="20">20</option><option value="40">40</option></select></div>
           <div class="frm"><label>5G 信道</label><select id="wa-ch5"><option value="0">自动 (启动时扫描选道)</option>${[36,40,44,48,149,153,157,161].map(c=>`<option value="${c}">${c}</option>`).join("")}</select></div>
           <div class="frm"><label>5G 带宽 MHz</label><select id="wa-bw5"><option value="20">20</option><option value="40">40</option><option value="80">80</option><option value="160">160 (含雷达信道, 启动需CAC约1分钟)</option></select></div>
           <div class="frm"><label>发射功率 %</label><select id="wa-pw">${[25,50,75,100].map(p => `<option value="${p}">${p}</option>`).join("")}</select></div>
           <div class="frm"><label>隐藏 SSID</label><select id="wa-hid"><option value="0">关闭</option><option value="1">隐藏</option></select></div>
+          <div class="frm"><label>双频合一</label><select id="wa-inone"><option value="0">独立双频</option><option value="1">同名单频(漫游)</option></select></div>
+        </div>
+        <button class="pri" onclick="waSave()">应用主 WiFi 设置</button>
+        <span class="hint">应用会重启无线 (已连设备需重连); 信道选「自动」时每次启动多约10s扫描选道</span>`)}
+      ${card("访客网络", `
+        <div class="row3">
           <div class="frm"><label>访客网络</label><select id="wa-guest"><option value="0">关闭</option><option value="1">开启 (仅出网)</option></select></div>
           <div class="frm"><label>访客名称</label><input id="wa-gssid" placeholder="空 = 主名-Guest"></div>
           <div class="frm"><label>访客频段</label><select id="wa-gband"><option value="5g">5GHz</option><option value="2g">2.4GHz</option><option value="both">双频 (同名漫游)</option></select></div>
           <div class="frm"><label>访客密码</label><input id="wa-gpass" type="password" placeholder="8-63位, 开启时必填"></div>
-          <div class="frm"><label>双频合一</label><select id="wa-inone"><option value="0">独立双频</option><option value="1">同名单频(漫游)</option></select></div>
         </div>
-        <button class="pri" onclick="waSave()">应用高级设置</button>
-        <span class="hint">应用会重启无线; 访客独立名称/频段/密码, 隔离=仅出网(不可达网关与内网); 信道选「自动」时每次启动多约10s扫描选道</span>`)}
+        <button class="pri" onclick="waSave()">应用访客设置</button>
+        <span class="hint">独立名称/频段/密码, 与主 WiFi 完全解耦; 隔离=仅出网: 可上网, 不可达网关管理页与内网设备</span>`)}
       ${card("已连接终端", '<table><thead><tr><th>接口</th><th>MAC</th><th>信号</th><th>↓</th><th>↑</th></tr></thead><tbody id="wfs-tb"></tbody></table>')}
       ${card("WiFi 分析仪 (邻居网络)", `
         <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px">
@@ -246,21 +247,19 @@ PAGES.wifi = {
         F("wa-bw5", adv.bw5g); F("wa-pw", adv.power); F("wa-hid", adv.hidden2g);
         F("wa-guest", adv.guest); F("wa-inone", adv.inone);
         F("wa-gband", adv.guest_band || "5g"); F("wa-gssid", adv.guest_ssid || "");
+        F("wa-auth", adv.auth || "WPA2PSK");
         $("wa-gssid").placeholder = `空 = ${adv.guest_ssid_eff || "主名-Guest"}`;
     }
 };
-window.wfSave = async () => {
-    const body = `ssid_base=${encodeURIComponent($("wf-base").value)}&auth=${$("wf-auth").value}` +
-        ($("wf-pw").value ? `&pass=${encodeURIComponent($("wf-pw").value)}` : "");
-    const j = await api("wifi_set", body).catch(e => ({ error: e.message }));
-    if (j.ok) { toast("已应用, 无线重启中"); setTimeout(() => PAGES.wifi.tick(), 4000); }
-    else toast("失败: " + (j.error || ""), 1);
-};
+/* v3.22: 主WiFi卡与访客卡共用一个原子提交(端点要求全字段);
+ * 密码类字段仅在非空时上送(留空=不修改) */
 window.waSave = async () => {
-    const body = `ch2=${$("wa-ch2").value}&ch5=${$("wa-ch5").value}&bw2=${$("wa-bw2").value}&bw5=${$("wa-bw5").value}&power=${$("wa-pw").value}&hidden=${$("wa-hid").value}&guest=${$("wa-guest").value}&inone=${$("wa-inone").value}&guest_ssid=${encodeURIComponent($("wa-gssid").value)}&guest_band=${$("wa-gband").value}&ssid_base=${encodeURIComponent($("wa-base").value)}&pass=` +
+    const body = `ch2=${$("wa-ch2").value}&ch5=${$("wa-ch5").value}&bw2=${$("wa-bw2").value}&bw5=${$("wa-bw5").value}&power=${$("wa-pw").value}&hidden=${$("wa-hid").value}&guest=${$("wa-guest").value}&inone=${$("wa-inone").value}&guest_ssid=${encodeURIComponent($("wa-gssid").value)}&guest_band=${$("wa-gband").value}&ssid_base=${encodeURIComponent($("wa-base").value)}&auth=${$("wa-auth").value}` +
+        ($("wa-pass").value ? `&pass=${encodeURIComponent($("wa-pass").value)}` : "") +
         ($("wa-gpass").value ? `&guest_pass=${encodeURIComponent($("wa-gpass").value)}` : "");
     const j = await api("wifi_adv_set", body).catch(e => ({ error: e.message }));
-    j.ok ? toast("已应用, 无线重启中") : toast("失败: " + (j.error || ""), 1);
+    if (j.ok) { toast("已应用, 无线重启中"); $("wa-pass").value = ""; $("wa-gpass").value = ""; setTimeout(() => PAGES.wifi.tick(), 4000); }
+    else toast("失败: " + (j.error || ""), 1);
 };
 /* ---------- WiFi 分析仪 (仿 WiFi Analyzer: 信道图/信道评级/AP列表/时间图) ----------
  * 数据只来自 wifiscan 端点; 画布一次建骨架, 扫描后重绘; 时间图靠「自动」积累历史 */

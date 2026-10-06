@@ -32,16 +32,30 @@ fi
 
 # 小区锁
 if [ "${CELL_EN:-0}" = 1 ]; then
-    i=1
-    while [ $i -le 20 ]; do
-        eval "E=\${CELL_$i:-}"
-        [ -z "$E" ] && break
-        ACT=${E%%:*}; REST=${E#*:}; ARF=${REST%%:*}; PC=${REST##*:}
-        $C set $CL.LockCell.$i.act "$ACT" >/dev/null 2>&1
-        $C set $CL.LockCell.$i.arfcn "$ARF" >/dev/null 2>&1
-        $C set $CL.LockCell.$i.pci "$PC" >/dev/null 2>&1
-        i=$((i+1))
-    done
-    $C set $CL.LockEnable 1 >/dev/null 2>&1
-    echo "cellular_replay: celllock 1 entries=$((i-1))" >> /tmp/rc_netfh.log
+    if [ "$BAND_ENGINE" = mipc ] && [ -x /data/gw/mipc_cellular ]; then
+        i=1; N=0
+        while [ $i -le 20 ]; do
+            eval "E=\${CELL_$i:-}"
+            [ -z "$E" ] && break
+            ACT=${E%%:*}; REST=${E#*:}; ARF=${REST%%:*}; PC=${REST##*:}
+            case "$ACT" in lte) R=7 ;; nr) R=11 ;; *) R=11 ;; esac
+            mipc_wan_cli --at_cmd "AT+EMMCHLCK=1,$R,0,$ARF,$PC,0" >/dev/null 2>&1
+            N=$((N+1)); i=$((i+1))
+        done
+        [ $N -eq 0 ] && mipc_wan_cli --at_cmd "AT+EMMCHLCK=0" >/dev/null 2>&1
+        echo "cellular_replay: celllock(mipc) 1 entries=$N" >> /tmp/rc_netfh.log
+    else
+        i=1
+        while [ $i -le 20 ]; do
+            eval "E=\${CELL_$i:-}"
+            [ -z "$E" ] && break
+            ACT=${E%%:*}; REST=${E#*:}; ARF=${REST%%:*}; PC=${REST##*:}
+            $C set $CL.LockCell.$i.act "$ACT" >/dev/null 2>&1
+            $C set $CL.LockCell.$i.arfcn "$ARF" >/dev/null 2>&1
+            $C set $CL.LockCell.$i.pci "$PC" >/dev/null 2>&1
+            i=$((i+1))
+        done
+        $C set $CL.LockEnable 1 >/dev/null 2>&1
+        echo "cellular_replay: celllock(tree) 1 entries=$((i-1))" >> /tmp/rc_netfh.log
+    fi
 fi

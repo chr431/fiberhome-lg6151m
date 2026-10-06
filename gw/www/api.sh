@@ -525,15 +525,30 @@ get_cellular() {
     PLMN=$(cfgget $R.PLMN)
     BANDS=$(cfgget $R.BAND_NBR); ARFCN=$(cfgget $R.EARFCN_NBR)
     PCI=$(cfgget $R.PCI_NBR); RSRP=$(cfgget $R.RSRP_NBR); SINR=$(cfgget $R.SINR_NBR)
-    NS=$FH_TREE.NetworkSettings
-    BAND_EN=$(cfgget $NS.LockBandEnable); LTE_M=$(cfgget $NS.LTELockBAND); NR_M=$(cfgget $NS.NRLockBAND)
-    CELL_EN=$(cfgget $FH_TREE.LockCellList.LockEnable)
+    # v2.26: 锁状态读自管 conf(mipc 引擎; 树为陈旧快照) -- BAND_EN/CELL_EN/CELL_i
+    CELL_ENGINE=mipc
+    [ -r $GWDATA/cellular_engine.conf ] && . $GWDATA/cellular_engine.conf
+    [ -r $GWDATA/cellular.conf ] && . $GWDATA/cellular.conf
+    if [ "$CELL_ENGINE" = mipc ]; then
+        BAND_EN=${BAND_EN:-0}; LTE_M=${LTE_MASK:-}; NR_M=${NR_MASK:-}
+        CELL_EN=${CELL_EN:-0}
+    else
+        NS=$FH_TREE.NetworkSettings
+        BAND_EN=$(cfgget $NS.LockBandEnable); LTE_M=$(cfgget $NS.LTELockBAND); NR_M=$(cfgget $NS.NRLockBAND)
+        CELL_EN=$(cfgget $FH_TREE.LockCellList.LockEnable)
+    fi
     ENTRIES=""
     i=1
     while [ $i -le 20 ]; do
-        A=$(cfgget $FH_TREE.LockCellList.LockCell.$i.arfcn)
-        [ -z "$A" ] && break
-        AC=$(cfgget $FH_TREE.LockCellList.LockCell.$i.act); PC=$(cfgget $FH_TREE.LockCellList.LockCell.$i.pci)
+        if [ "$CELL_ENGINE" = mipc ]; then
+            eval "E=\${CELL_$i:-}"
+            [ -z "$E" ] && break
+            AC=${E%%:*}; REST=${E#*:}; A=${REST%%:*}; PC=${REST##*:}
+        else
+            A=$(cfgget $FH_TREE.LockCellList.LockCell.$i.arfcn)
+            [ -z "$A" ] && break
+            AC=$(cfgget $FH_TREE.LockCellList.LockCell.$i.act); PC=$(cfgget $FH_TREE.LockCellList.LockCell.$i.pci)
+        fi
         ENTRIES="$ENTRIES{\"idx\":$i,\"act\":\"$AC\",\"arfcn\":\"$A\",\"pci\":\"$PC\"},"
         i=$((i+1))
     done
@@ -603,9 +618,84 @@ apply_bandlock() {
     ok_json '"engine":"tree"'
 }
 
+# v2.26 (P3.5): 小区锁 AT 直发引擎 -- EMMCHLCK=1,<AcT>,0,<arfcn>,<pci>,0
+#   (AcT: lte=7, nr=11, 3GPP TS 27.007 语义; =? 实测参数域 {0,2,7,11})
+#   与频段锁互斥(原厂同款); 空表=EMMCHLCK=0 解锁。CELL_ENGINE 切换同
+#   cellular_engine.conf, 缺省 mipc, 树路径保留为回退。
+celllock_send_all() {  # 从 cellular.conf 的 CELL_i 全量下发
+    N=0; FIRST=1
+    i=1
+    while [ $i -le 20 ]; do
+        eval "E=\${CELL_$i:-}"
+        [ -z "$E" ] && break
+        ACT=${E%%:*}; REST=${E#*:}; ARF=${REST%%:*}; PC=${REST##*:}
+        case "$ACT" in lte) R=7 ;; nr) R=11 ;; *) R=11 ;; esac
+        mipc_wan_cli --at_cmd "AT+EMMCHLCK=1,$R,0,$ARF,$PC,0" >/dev/null 2>&1
+        N=$((N+1)); i=$((i+1))
+    done
+    [ $N -eq 0 ] && mipc_wan_cli --at_cmd "AT+EMMCHLCK=0" >/dev/null 2>&1
+    echo $N
+}
+
 apply_celllock() {
     OP=$(form_kv op)
     CL=$FH_TREE.LockCellList
+    CELL_ENGINE=mipc
+    [ -r $GWDATA/cellular_engine.conf ] && . $GWDATA/cellular_engine.conf
+    if [ "$CELL_ENGINE" = mipc ]; then
+        CONF=$GWDATA/cellular.conf
+        [ -r "$CONF" ] && . "$CONF"
+        case "$OP" in
+        add)
+            ACT=$(form_kv act); ARF=$(form_kv arfcn); PC=$(form_kv pci)
+            [ "$ACT" = lte ] || [ "$ACT" = nr ] || jerr bad_act
+            echo "$ARF$PC" | grep -qE '[^0-9]' && jerr bad_num
+            [ "$ARF" -ge 0 ] 2>/dev/null && [ "$ARF" -le 875000 ] 2>/dev/null || jerr bad_arfcn
+            [ "$PC" -ge 0 ] 2>/dev/null && [ "$PC" -le 2000 ] 2>/dev/null || jerr bad_pci
+            # 找空位(重号拒绝)
+            i=1; while [ $i -le 20 ]; do
+                eval "E=\${CELL_$i:-}"
+                [ -z "$E" ] && break
+                [ "$E" = "$ACT:$ARF:$PC" ] && jerr dup_cell
+                i=$((i+1))
+            done
+            [ $i -gt 20 ] && jerr list_full
+            grep -v "^CELL_$i=" "$CONF" 2>/dev/null > /tmp/cl.$$; echo "CELL_$i=$ACT:$ARF:$PC" >> /tmp/cl.$$
+            mv /tmp/cl.$$ "$CONF"
+            ;;
+        del)
+            IDX=$(form_kv idx); echo "$IDX" | grep -qE '^[0-9]+$' || jerr bad_idx
+            [ "$IDX" -ge 1 ] && [ "$IDX" -le 20 ] || jerr bad_idx
+            grep -v "^CELL_$IDX=" "$CONF" 2>/dev/null > /tmp/cl.$$ && mv /tmp/cl.$$ "$CONF"
+            # 压实槽位(防空洞)
+            awk -F= '/^CELL_[0-9]+=/{print} /^(BAND_EN|LTE_MASK|NR_MASK|CELL_EN)=/{print}' "$CONF" > /tmp/cl2.$$
+            n=1; grep -oE '^CELL_[0-9]+=[^[:space:]]+' "$CONF" | cut -d= -f2- | while read -r e; do
+                [ -n "$e" ] && { echo "CELL_$n=$e" >> /tmp/cl2.$$; n=$((n+1)); }
+            done
+            mv /tmp/cl2.$$ "$CONF"
+            ;;
+        clear)
+            : > "$CONF"
+            ;;
+        *) jerr bad_op ;;
+        esac
+        . "$CONF"
+        if [ "${CELL_EN:-0}" = 1 ] || [ "$OP" = add ]; then
+            :  # add 默认即锁
+        fi
+        # 全量下发 + 互斥(开小区锁时解锁频段)
+        if [ "$OP" = add ]; then
+            [ "${BAND_EN:-0}" = 1 ] && { /data/gw/mipc_cellular unlock >/dev/null 2>&1; sed -i 's/^BAND_EN=1/BAND_EN=0/' "$CONF"; }
+            sed -i 's/^CELL_EN=.*/CELL_EN=1/' "$CONF" 2>/dev/null || echo "CELL_EN=1" >> "$CONF"
+        elif [ "$OP" = clear ]; then
+            echo "CELL_EN=0" >> "$CONF"
+            [ "${BAND_EN:-0}" = 1 ] && /data/gw/mipc_cellular setlock lte="${LTE_MASK:-all}" nr="${NR_MASK:-all}" >/dev/null 2>&1
+        fi
+        . "$CONF"
+        N=$(celllock_send_all)
+        ok_json ',"engine":"mipc","cells":'$N',"note":"modem重扫约20-60s"'
+        return
+    fi
     case "$OP" in
     add)
         ACT=$(form_kv act); ARF=$(form_kv arfcn); PC=$(form_kv pci)

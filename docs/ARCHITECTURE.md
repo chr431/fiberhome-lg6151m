@@ -48,7 +48,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/bin/v3httpd` | **v2.2** | manifest | `/data/gw/v3httpd` | 网关GUI HTTP服务(:80, 静态+JSON API) |
 | `gw/bin/wpapmk` | **v1.0** | manifest | `/data/gw/wpapmk` | WPA口令转PMK(纯C PBKDF2-SHA1; fh魔改hostapd只吃wpa_psk) |
 | `gw/capture_ubus.sh` | **v1.1** | manifest | `/data/gw/capture_ubus.sh` | stock拨号一次性捕获(ubus monitor+ccmni采样) |
-| `gw/cellular_replay.sh` | **v2.0** | manifest | `/data/gw/cellular_replay.sh` | 蜂窝锁定开机重放(频段/小区锁到cfgmgr树, 树每次开机由出厂档案重建) |
+| `gw/cellular_replay.sh` | **v2.1** | manifest | `/data/gw/cellular_replay.sh` | 蜂窝锁定开机重放(频段/小区锁到cfgmgr树, 树每次开机由出厂档案重建) |
 | `gw/consfeed.sh` | **v1.0** | manifest | `/data/gw/consfeed.sh` | v2 控制台喂食器(无setsid,v2_access拉起) |
 | `gw/defaults.conf` | **v1.1** | manifest | `/data/gw/defaults.conf` | 统一配置只读出厂基线(444); 消费方source叠加settings.conf稀疏覆盖 |
 | `gw/dial_5g.sh` | **v1.2** | manifest | `/data/gw/dial_5g.sh` | 生产 5G 拨号器(check_ia+netagent补丁) |
@@ -76,7 +76,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
 | `gw/wifi_up.sh` | **v1.17** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.17: 出厂brmac兜底去设备化(eth0反推+合成末级; 原硬编码本机MAC洗出)) |
-| `gw/www/api.sh` | **v2.25** | manifest | `/data/gw/www/api.sh` | GUI JSON端点(v2.15: hostapd探测改iw AP-type(拓扑形态无关); v2.14: 配置统一cfg_load/gw_set读写defaults+settings overlay, 旧散落conf写路径全撤; v2.13端口强校验; v2.12: get_sys嵌套花括号默认值触发busybox ash展开bug多印1字节破坏JSON, 改-n分支; get_logs补\t\r反斜杠转义使严格JSON.parse通过; 状态聚合) |
+| `gw/www/api.sh` | **v2.26** | manifest | `/data/gw/www/api.sh` | GUI JSON端点(v2.15: hostapd探测改iw AP-type(拓扑形态无关); v2.14: 配置统一cfg_load/gw_set读写defaults+settings overlay, 旧散落conf写路径全撤; v2.13端口强校验; v2.12: get_sys嵌套花括号默认值触发busybox ash展开bug多印1字节破坏JSON, 改-n分支; get_logs补\t\r反斜杠转义使严格JSON.parse通过; 状态聚合) |
 | `gw/www/app.js` | **v3.15** | manifest | `/data/gw/www/app.js` | 控制台轮询逻辑 |
 | `gw/www/index.html` | **v2.9** | manifest | `/data/gw/www/index.html` | v3控制台页面 |
 | `gw/www/style.css` | **v2.1** | manifest | `/data/gw/www/style.css` | 控制台主题 |

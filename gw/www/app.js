@@ -198,7 +198,7 @@ PAGES.wifi = {
           <div class="frm"><label>5G 带宽 MHz</label><select id="wa-bw5"><option value="20">20</option><option value="40">40</option><option value="80">80</option><option value="160">160 (含雷达信道, 启动需CAC约1分钟)</option></select></div>
           <div class="frm"><label>发射功率 %</label><select id="wa-pw">${[25,50,75,100].map(p => `<option value="${p}">${p}</option>`).join("")}</select></div>
           <div class="frm"><label>隐藏 SSID</label><select id="wa-hid"><option value="0">关闭</option><option value="1">隐藏</option></select></div>
-          <div class="frm"><label>访客网络</label><select id="wa-guest"><option value="0">关闭</option><option value="1">开启 (独立配置, 仅出网)</option></select></div>
+          <div class="frm"><label>访客网络</label><select id="wa-guest"><option value="0">关闭</option><option value="1">开启 (仅出网)</option></select></div>
           <div class="frm"><label>访客名称</label><input id="wa-gssid" placeholder="空 = 主名-Guest"></div>
           <div class="frm"><label>访客频段</label><select id="wa-gband"><option value="5g">5GHz</option><option value="2g">2.4GHz</option><option value="both">双频 (同名漫游)</option></select></div>
           <div class="frm"><label>访客密码</label><input id="wa-gpass" type="password" placeholder="8-63位, 开启时必填"></div>

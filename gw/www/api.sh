@@ -309,21 +309,70 @@ apply_pin() {
 }
 
 # -- 网络制式/飞行模式/手动选网 --
+# v2.30 (P3.5): 制式/飞行 AT 直发 -- A 组逆向(指令级实证)的官方映射:
+#   mode 0→AT+erat=3(LTE only) 1→AT+erat=19,0(LTE+NR) 2→AT+erat=15(5G only)
+#        3→AT+erat=19,0         4→AT+erat=1(2G only)
+#   飞行 ON: 停拨号 + AT+cfun=0 (厂商用 0 非 4, 小写); OFF: AT+cfun=1
+#   (dial_keeper 在 OFF 后自动重拨)。状态存自管 cellular.conf。
+erat_of() {
+    case "$1" in
+        0) echo "3" ;;
+        1|3) echo "19,0" ;;
+        2) echo "15" ;;
+        4) echo "1" ;;
+        *) return 1 ;;
+    esac
+}
 get_netmode() {
-    NS=$MN_TREE.NetworkSettings
-    printf '{"mode":"%s","airplane":"%s","sms_disable":"%s","plmn_scan":"0","ts":%d}' \
-        "$(cfgget $NS.NetworkMode)" "$(cfgget $NS.AirplaneEnable)" \
-        "$(cfgget $NS.sms_disable)" "$(date +%s)"
+    CELL_ENGINE=mipc
+    [ -r $GWDATA/cellular_engine.conf ] && . $GWDATA/cellular_engine.conf
+    [ -r $GWDATA/cellular.conf ] && . $GWDATA/cellular.conf
+    if [ "$CELL_ENGINE" = mipc ]; then
+        CF=$(mipc_wan_cli --at_cmd "AT+CFUN?" 2>/dev/null | grep -oE 'CFUN: [0-9]' | grep -oE '[0-9]')
+        AP=0; [ "$CF" = 0 ] && AP=1
+        printf '{"mode":"%s","airplane":"%s","engine":"mipc","ts":%d}' \
+            "${NM_MODE:-1}" "$AP" "$(date +%s)"
+    else
+        NS=$MN_TREE.NetworkSettings
+        printf '{"mode":"%s","airplane":"%s","sms_disable":"%s","plmn_scan":"0","ts":%d}' \
+            "$(cfgget $NS.NetworkMode)" "$(cfgget $NS.AirplaneEnable)" \
+            "$(cfgget $NS.sms_disable)" "$(date +%s)"
+    fi
 }
 apply_netmode() {
     M=$(form_kv mode)
     echo "$M" | grep -qE '^[0-4]$' || jerr bad_mode
+    CELL_ENGINE=mipc
+    [ -r $GWDATA/cellular_engine.conf ] && . $GWDATA/cellular_engine.conf
+    if [ "$CELL_ENGINE" = mipc ]; then
+        E=$(erat_of "$M") || jerr bad_mode
+        R=$(mipc_wan_cli --at_cmd "AT+erat=$E" 2>/dev/null | grep -c OK)
+        [ "$R" -ge 1 ] || jerr at_fail
+        sed -i '/^NM_MODE=/d' $GWDATA/cellular.conf 2>/dev/null
+        echo "NM_MODE=$M" >> $GWDATA/cellular.conf
+        ok_json '"engine":"mipc","erat":"'"$E"'"'
+        return
+    fi
     cfgset_ok $MN_TREE.NetworkSettings.NetworkMode "$M" || jerr tree_fail
     ok_json
 }
 apply_airplane() {
     V=$(form_kv on)
     [ "$V" = 0 ] || [ "$V" = 1 ] || jerr bad_flag
+    CELL_ENGINE=mipc
+    [ -r $GWDATA/cellular_engine.conf ] && . $GWDATA/cellular_engine.conf
+    if [ "$CELL_ENGINE" = mipc ]; then
+        if [ "$V" = 1 ]; then
+            APN=$(mipc_wan_cli --apn_provision_by_sim 2>/dev/null | grep -oE '"apn": *"[^"]+"' | cut -d'"' -f4)
+            [ -n "$APN" ] && mipc_wan_cli --data_call_deact_apn "$APN" >/dev/null 2>&1
+            R=$(mipc_wan_cli --at_cmd "AT+cfun=0" 2>/dev/null | grep -c OK)
+        else
+            R=$(mipc_wan_cli --at_cmd "AT+cfun=1" 2>/dev/null | grep -c OK)
+        fi
+        [ "$R" -ge 1 ] || jerr at_fail
+        ok_json '"engine":"mipc","note":"OFF后dial_keeper约40s自动重拨"'
+        return
+    fi
     cfgset_ok $MN_TREE.NetworkSettings.AirplaneEnable "$V" || jerr tree_fail
     ok_json
 }

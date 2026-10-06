@@ -31,6 +31,8 @@
 static int (*p_get_band_info)(void *);
 static int (*p_set_band_mode)(const void *);
 static int (*p_nw_init)(int);
+static int (*p_sms_init)(int);
+static int (*p_sms_send_msg)(const void *);
 
 static int load_lib(const char *path)
 {
@@ -59,7 +61,10 @@ static int load_lib(const char *path)
     p_get_band_info = (int (*)(void *))dlsym(h, "ql_nw_get_band_info");
     p_set_band_mode = (int (*)(const void *))dlsym(h, "ql_nw_set_band_mode");
     p_nw_init = (int (*)(int))dlsym(h, "ql_nw_init");
-    if (!p_get_band_info || !p_set_band_mode || !p_nw_init) {
+    p_sms_init = (int (*)(int))dlsym(h, "ql_sms_init");
+    p_sms_send_msg = (int (*)(const void *))dlsym(h, "ql_sms_send_msg");
+    if (!p_get_band_info || !p_set_band_mode || !p_nw_init ||
+        !p_sms_init || !p_sms_send_msg) {
         fprintf(stderr, "dlsym: %s\n", dlerror());
         return -1;
     }
@@ -136,6 +141,43 @@ static void build_and_send(const char *lte, const char *nr, const char *umts)
     if (r) printf("NOTE: modem 重扫约 20-60s, PDN 由上层重拨\n");
 }
 
+/* ql_sms_send_msg 结构 (B 组逆向 2026-10-06, 构包侧交叉证实):
+ *   u32  @0x000 format: 0=GSM7文本 1=binary 2=UCS2(BE字节)
+ *   char @0x004 addr[0xFC]  目的号码 NUL 结尾
+ *   u32  @0x104 content_len (<=0x5A0)
+ *   u8   @0x108 content[0x5A0]
+ * ql_sms_init(0) 必须先调; 同步语义: 返回 0 即发送成功。 */
+struct sms_msg {
+    uint32_t format;
+    char addr[0xFC];
+    uint32_t pad;
+    uint32_t content_len;
+    unsigned char content[0x5A0];
+};
+
+static int do_send(int format, const char *num, const char *payload, int payload_is_hex)
+{
+    struct sms_msg m;
+    memset(&m, 0, sizeof m);
+    m.format = (uint32_t)format;
+    snprintf(m.addr, sizeof m.addr, "%s", num);
+    if (payload_is_hex) {
+        int n = hex2bin(payload, m.content, sizeof m.content);
+        if (n < 0) { puts("bad hex"); return 1; }
+        m.content_len = (uint32_t)n;
+    } else {
+        int n = (int)strlen(payload);
+        if (n > (int)sizeof m.content) n = (int)sizeof m.content;
+        memcpy(m.content, payload, n);
+        m.content_len = (uint32_t)n;
+    }
+    int ir = p_sms_init(0);
+    if (ir) fprintf(stderr, "ql_sms_init(0)=%d (0x%x)\\n", ir, ir);
+    int r = p_sms_send_msg(&m);
+    printf("ret=%d (0x%x)\\n", r, r);
+    return r ? 3 : 0;
+}
+
 int main(int argc, char **argv)
 {
     const char *lib = getenv("QLRIL_SO");
@@ -176,8 +218,13 @@ int main(int argc, char **argv)
         printf("ret=%d (0x%x)\n", r, r);
         return 0;
     }
+    if (argc >= 4 && !strcmp(argv[1], "sendsms"))        /* ASCII/GSM7 */
+        return do_send(0, argv[2], argv[3], 0);
+    if (argc >= 4 && !strcmp(argv[1], "senducs2"))       /* 中文: UCS2-BE hex */
+        return do_send(2, argv[2], argv[3], 1);
     puts("usage: mipc_cellular getbands | unlock\n"
          "                setlock lte=<list|all> nr=<list|all> [umts=<list|all>]\n"
-         "                setbands <hexblob>");
+         "                setbands <hexblob>\n"
+         "                sendsms <num> <ascii-text> | senducs2 <num> <ucs2-be-hex>");
     return 1;
 }

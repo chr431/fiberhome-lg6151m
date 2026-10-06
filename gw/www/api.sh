@@ -757,6 +757,26 @@ cell_persist() {
     /data/gw/shmsnap save /tmp/cfgtree.snap >/dev/null 2>&1 &&         gzip -c /tmp/cfgtree.snap > /data/gw/cfgtree.snap.gz 2>/dev/null &&         rm -f /tmp/cfgtree.snap
 }
 
+# v2.29 (P4): SMS 发送 -- mipc_cellular ql_sms_send_msg 直发(同步, ret=0 即成功),
+# 无 AT CMGS 交互毒性; 中文需 UCS2-BE hex(text 以 ucs2: 前缀传 hex)。
+apply_sms_send() {
+    NUM=$(form_kv num); TXT=$(form_kv text)
+    printf '%s' "$NUM" | grep -qE '^\+?[0-9]{5,20}$' || jerr bad_num
+    [ -n "$TXT" ] || jerr empty_text
+    case "$TXT" in
+      ucs2:*)
+        H=${TXT#ucs2:}
+        echo "$H" | grep -qE '^[0-9a-fA-F]{4,560}$' || jerr bad_ucs2
+        R=$(/data/gw/mipc_cellular senducs2 "$NUM" "$H" 2>&1) ;;
+      *)
+        printf '%s' "$TXT" | grep -qE '[-ÿ]' && jerr need_ucs2
+        [ ${#TXT} -gt 480 ] && jerr too_long
+        R=$(/data/gw/mipc_cellular sendsms "$NUM" "$TXT" 2>&1) ;;
+    esac
+    printf '%s' "$R" | grep -q 'ret=0' || jerr send_fail
+    ok_json
+}
+
 # ---------- GET handlers ----------
 get_status() {
     exec 2>/dev/null
@@ -950,6 +970,7 @@ case "$EP" in
     dhcp)     need_tok; get_dhcp ;;
     cellular) need_tok; get_cellular ;;
     sms)       need_tok; get_sms ;;
+    sms_send)  need_tok; apply_sms_send ;;
     traffic)   need_tok; get_traffic ;;
     sim)       need_tok; get_sim ;;
     netmode)   need_tok; get_netmode ;;

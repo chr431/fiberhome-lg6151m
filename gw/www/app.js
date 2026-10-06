@@ -606,7 +606,7 @@ PAGES.sms = {
         </div>
         <div class="frm"><label>内容</label><textarea id="sm-txt" rows="3" style="width:100%;background:var(--input);border:1px solid var(--line);color:var(--tx);border-radius:7px;padding:8px;font-size:13px"></textarea></div>
         <button class="pri" onclick="smSend()">发送</button>
-        <span class="hint">发送通道暂缓: CMGS 交互式与 ril 不兼容, 待树条目通道补齐</span>`)}
+        <span class="hint">MIPC 直发通道 (ql_sms_send_msg, 同步确认); 中文请用英文或后续 UCS2 支持</span>`)}
     </div>`,
     async tick() {
         const j = await api("sms");
@@ -615,7 +615,11 @@ PAGES.sms = {
             `<tr><td colspan="3" class="hint">暂无短信</td></tr>`);
     }
 };
-window.smSend = () => toast("发送通道建设中", 1);
+window.smSend = async () => {
+    const j = await api("sms_send", `num=${encodeURIComponent($("sm-to").value.trim())}&text=${encodeURIComponent($("sm-txt").value)}`).catch(e => ({ error: e.message }));
+    if (j.ok) { toast("已发送 (modem 确认)"); $("sm-txt").value = ""; }
+    else toast("发送失败: " + (j.error || "?"), 1);
+};
 
 /* ================ 蜂窝 ================ */
 PAGES.cellular = {

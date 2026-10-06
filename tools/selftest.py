@@ -233,10 +233,14 @@ def t_wifi_mlo():
         ok = re.fullmatch(r"1;(17|0);0;0;0;0;0;0", t2) is not None and \
              re.fullmatch(r"1;(18|0);0;0;0;0;0;0", t5) is not None
         if ok:
-            mld = dev("dmesg | grep -cE 'Create AP MLD|join MLD|Alloc ML Group|hostapd_event_bss_mlo_info'")
+            # v2.5: 优先读 wifi_up 落的快照(ccmni 刷屏会把 MLD 行挤出环形缓冲)
+            mld = dev("cat /tmp/mld_boot.log 2>/dev/null | wc -l").strip()
+            if int(mld or 0) == 0:
+                mld = dev("dmesg | grep -cE 'Create AP MLD|join MLD|Alloc ML Group|hostapd_event_bss_mlo_info'").strip()
             bad = dev("dmesg | grep -c 'Create AP MLD, grp(0)'").strip()
-            notes += f" mld_logs={mld.strip()} rai0_grp0_creates={bad}"
-            ok = int(mld.strip() or 0) >= 1 and bad == "0"
+            snap_bad = dev("grep -c 'Create AP MLD, grp(0)' /tmp/mld_boot.log 2>/dev/null").strip() or "0"
+            notes += f" mld_logs={mld} grp0={bad}/{snap_bad}"
+            ok = int(mld.strip() or 0) >= 1 and bad == "0" and snap_bad == "0"
     else:
         ok = g2 == "" and g5 == ""
     record(t_wifi_mlo._test_name, "wifi", ok, notes)

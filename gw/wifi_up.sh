@@ -625,6 +625,9 @@ HGUEST
         # ---- v1.18: 访客隔离防火墙(原厂 wifiguest.sh 配方复刻) 幂等同步 ----
         # 检测现存访客iface(ra1/rai1)施加ebtables/iptables隔离; 访客关闭则清链
         [ -x $B/guest_fw.sh ] && $B/guest_fw.sh sync
+        # v1.22: MLD 建立证据快照 — ccmni 每秒多条日志会把 boot 期 MLD 行挤出
+        # 内核环形缓冲区, selftest 改读此快照(dmesg 作回退)
+        dmesg | grep -E 'Create AP MLD|join mld_grp|already affiliated' > /tmp/mld_boot.log 2>/dev/null
     fi
     if [ $WIFI_ERR -ne 0 ]; then
         echo "== FATAL: hostapd WPA setup failed — radios DOWN (no open fallback)"

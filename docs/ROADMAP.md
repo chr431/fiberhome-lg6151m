@@ -99,9 +99,11 @@ watchdog 集成（ccmni 无 IP→重拨）。出口：拔 SIM 重插自恢复 + 
 > （54/54 ×3，守护 0 在位，树通，PDN/keeper/mobilenetwork 齐）。
 > 信号面同步去树化优先（api.sh v2.24+：mipc RSRP + AT PLMN/RAT 直读，树回退
 > —— 顺带修正了树里陈旧的 PLMN 显示）。
-> **P3.5（完整下架 mobilenetwork，待日间）**：netmode 的 mode→erat 映射表
-> （mobilenetwork 内逆向，错值会切 RAT 有服务风险）、小区锁 AT 直发
-> （EMMCHLCK 语法已明，风险可控但今夜预算已用）、PIN AT 面。
+> > **2026-10-06 下午更新：控制面 P3.5 三项已全部完成** —— erat 映射（A 组
+> 指令级实证五项表）✅ · 小区锁 AT 直发（EMMCHLCK，锁/解实弹）✅ · SMS 发送
+> （B 组结构逆向 + 实弹 ret=0）✅。mobilenetwork 现仅剩：PLMN 扫描触发（ubus，
+> 待 C 组 ql_nw_network_scan）、PIN 管理（ubus）、树信号回填（展示回退）。
+> 下架它只差这三个替代面。 <!--CLM:CLM-ERAT-MAP--> <!--CLM:CLM-SMS-SEND--> <!--CLM:CLM-CELLLOCK-AT-->
 - 裁去 cfg_tool/cfgmgr/logmgr/mobilenetwork + shmsnap 恢复段；MODE.fh 语义收窄为"modem 最小军"。
 - selftest：删 t_cel_tree，增引擎模式断言；watchdog 不变量复核。
 - **出口判据**：全量回归绿 + 开机时序对比记录（before/after）+ 冷启动三次稳定。

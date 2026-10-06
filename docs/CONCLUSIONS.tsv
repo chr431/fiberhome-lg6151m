@@ -27,3 +27,6 @@ CLM-FIRSTBOOT-AUTH	docs/ROADMAP.md	verified	gw/www/api.sh>=2.23	首刷口令自�
 CLM-DIALKEEPER	docs/ROADMAP.md	verified	gw/dial_keeper.sh>=1.0	拨号兜底守护存活 (P2)	7814905	2026-10-06	P2验收全过: 冷拨35s接管/净8min稳定/飞行循环自愈(FAIL退避恢复)/mobilenetwork死后PDN独立;呼叫所有权随deact/act转移(厂商TERM清理只及自身呼叫)
 CLM-P3LITE	docs/ROADMAP.md	verified	gw/rc_netfh.sh>=3.0	拨号兜底守护存活 (P2)	a3dbf44	2026-10-06	P3-lite: cfgmgr+logmgr守护下架; 3次冷启动54/54全绿; 守护0在位树通
 CLM-TREE-DAEMONLESS	docs/VENDOR_MAP.md	verified	gw/rc_netfh.sh>=3.0	cfg 树信号上报活着 (过渡期)	a3dbf44	2026-10-06	树不依赖cfgmgr守护(shm由cfg_tool建,cfg_cmd直操作); kill实证get/set全通
+CLM-ERAT-MAP	docs/ROADMAP.md	verified	gw/www/api.sh>=2.30	SIM 就绪 (CPIN)	22dd503	2026-10-06	A组指令级实证: mode0→erat3/1,3→19,0/2→15/4→1; 飞行=deact+cfun0/cfun1; 实弹模式切换+飞行循环含keeper重拨
+CLM-SMS-SEND	docs/ROADMAP.md	verified	gw/src/mipc_cellular.c>=0.3	SMS 引擎二进制冒烟 (P4)	22dd503	2026-10-06	B组逆向ql_sms_send_msg结构1704B(fmt/addr[252]/len/content[1440])+同步ret=0即成; 实弹到机主手机成功; 无CMGS毒性
+CLM-CELLLOCK-AT	docs/ROADMAP.md	verified	gw/www/api.sh>=2.28	锁定状态跨层一致 (conf=树=模组 / mipc 引擎就位)	22dd503	2026-10-06	EMMCHLCK AT直发(lte7/nr11); 锁服务小区零扰动+真解锁cells:0

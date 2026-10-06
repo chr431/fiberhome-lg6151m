@@ -123,15 +123,28 @@ def main():
         print(f"override 构造完成: {len(out_lines)} 行 (toor 哈希已换"
               + (", root 已锁死" if lock_root else "") + ")")
 
-        # 3) deploy.py put 送达 (md5 双校验+原子mv; 旧口令仅注入子进程 env)
+        # 3) deploy.py put 送达 (md5 双校验+原子mv; 旧口令经 env 注入 — 依赖
+        #    deploy v2.10+ 的 LG_TOOR_PASS 覆盖支持)。成功判定=本会话独立 md5
+        #    比对(不依赖子进程输出文案), 不一致整体重试(put 内部另有 3 重试)。
+        import hashlib
+        local_md5 = hashlib.md5(payload).hexdigest()
+        run(c, "rm -f /data/gw/shadow.override.putting")   # 清上次可能的残件
         env = dict(os.environ, LG_TOOR_PASS=old_pass, LG_HOST=host, LG_TOOR_USER=user)
-        r = subprocess.run(
-            [sys.executable, os.path.join(HERE, "deploy.py"), "put",
-             local, "/data/gw/shadow.override"],
-            env=env, capture_output=True, text=True)
-        print(r.stdout.strip() or r.stderr.strip())
-        if r.returncode != 0 or "OK" not in (r.stdout + r.stderr):
-            sys.exit("FAIL: deploy put 未确认成功, 设备保持原状(仅多了可能的 .putting 残件)")
+        delivered = False
+        for attempt in (1, 2, 3):
+            r = subprocess.run(
+                [sys.executable, os.path.join(HERE, "deploy.py"), "put",
+                 local, "/data/gw/shadow.override"],
+                env=env, capture_output=True, text=True)
+            dev_md5 = run(c, "md5sum /data/gw/shadow.override 2>/dev/null").split()[:1]
+            dev_md5 = dev_md5[0] if dev_md5 else ""
+            if dev_md5 == local_md5:
+                delivered = True
+                break
+            print(f"put 第{attempt}次后 md5 不一致 (设备={dev_md5 or '无文件'}), 重试...")
+        if not delivered:
+            sys.exit("FAIL: 3 次投递后 md5 仍不一致 — 设备 shadow 未被触碰, "
+                     "可用旧口令 SSH 检查 /data/gw/shadow.override.putting")
 
         # 4) 即时 bind (不等重启; 与 rc.extend v1.9 幂等守卫一致)
         print(run(c, "chmod 600 /data/gw/shadow.override; "

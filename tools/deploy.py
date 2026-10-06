@@ -109,19 +109,24 @@ def sh(cmd, timeout=30):
 
 def connect(tries=2):
     import time
+    # v2.10: env 覆盖支持(与 lgssh 凭证链对齐) — 轮换窗口期 device_local 已是新
+    # 口令而设备仍是旧口令, rotate_toor 经 LG_TOOR_PASS 注入旧口令调用本工具
+    hosts = [os.environ["LG_HOST"]] if os.environ.get("LG_HOST") else MGMT_CANDIDATES
+    user = os.environ.get("LG_TOOR_USER") or D.TOOR_USER
+    pw = os.environ.get("LG_TOOR_PASS") or D.TOOR_PASS
     for _ in range(tries):
-        for ip in MGMT_CANDIDATES:
+        for ip in hosts:
             try:
                 c = paramiko.SSHClient()
                 c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                c.connect(ip, port=22, username=D.TOOR_USER, password=D.TOOR_PASS,
+                c.connect(ip, port=22, username=user, password=pw,
                           timeout=10, allow_agent=False, look_for_keys=False,
                           banner_timeout=20)
                 return c, ip
             except Exception:
                 continue
         time.sleep(2)
-    sys.exit("!! no mgmt path to CPE (tried %s)" % MGMT_CANDIDATES)
+    sys.exit("!! no mgmt path to CPE (tried %s)" % hosts)
 
 
 def ssh_cmd(c, cmd, timeout=25, stdin_data=None):

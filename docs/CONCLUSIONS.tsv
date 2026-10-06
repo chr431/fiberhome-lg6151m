@@ -38,3 +38,4 @@ CLM-MLO	docs/FEATURE_MATRIX.md	verified	gw/wifi_up.sh>=1.23	MLO 状态与 dat �
 CLM-RP102-COMPAT	install/README.md	verified	install/run.sh>=1.1	API login + token 生命周期	a808fe0	2026-10-06	RP102前向兼容: kit现场构建路径全兼容(底座自适应); 预构建RP103镜像禁入RP102(MDDB P56/P40+18个.ko+fhrom漂移三处错配); LK代码级相同仅签名槽差异; run.sh分区号动态解析成门禁
 CLM-P4-SSE	docs/ROADMAP.md	verified	gw/bin/v3httpd>=2.4	SSE 信号事件流 (v3httpd v2.4 + api.sh sse)	ecb2e20	2026-10-06	SSE信号推送落地: 流式CGI通道+3s事件+EventSource前端, curl/selftest双验证; P4全数完成
 CLM-P5-CLOSED	docs/ROADMAP.md	verified	tools/selftest.py>=2.9	SSE 信号事件流 (v3httpd v2.4 + api.sh sse)	ecb2e20	2026-10-06	P5关闭: 实测传输期CPU空转,瓶颈在上游非引擎; quecadp复活=高风险零收益; 重开条件=>500Mbps上游+softirq饱和
+CLM-AGG-MODES	docs/ROADMAP.md	verified	gw/wan_agg.sh>=2.18	聚合模式配置合法且一致 (v2.18 五模式)	3aaf20b	2026-10-06	聚合五模式(对齐原厂): weight/cell_prio/eth_prio/cell_only/eth_only; 仅模式=E1/E2强制注入(无failover); MODE热载+旧格式迁移(100/0映射优先模式); 滑块5-95钳制(极端值语义归显式模式); GUI权重卡条件显示; 五模式API实弹循环切换全过

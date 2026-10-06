@@ -116,6 +116,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/lk_flash_v4_eth1.py` | **v1.1** | tool | `-` | v1.1路径随项目根迁移; eth1刷入实证器(全链条: 陷阱→raw shell→eth1起链[历史疑点:PHY仅ifup后attach]→curl传输→deploy2自驱→重启回v4.1) |
 | `tools/lk_flip2.py` | **v1.1** | tool | `-` | LK 一键翻槽(a|b, misc[2060]字节) |
 | `tools/lk_write.py` | **v1.6** | tool | `-` | LK raw-shell 文件写入(回显校验+tmpfs挂载+cmdlist巡检, 取代lk_fix_access) |
+| `tools/rotate_toor.py` | **v1.0** | tool | `-` | toor口令轮换器(只读rootfs shadow覆盖通道: 取回shadow→PC侧SHA-512哈希→deploy put→即时bind→新旧口令双向验证; --lock-root顺带锁死厂商root; 依赖rc.extend v1.9开机bind) |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
 | `tools/selftest.py` | **v2.11** | tool | `-` | 断言式全功能测试(v2.11: 访客隔离断言改无条件—开关已删; 历史版本见git) |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |

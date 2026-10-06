@@ -1,21 +1,26 @@
 #!/bin/sh
-# guest_fw.sh v1.2 — 访客网络隔离 (原厂 wifiguest.sh 语义, 桥接路径实现)
+# guest_fw.sh v1.3 — 访客网络隔离 (原厂 wifiguest.sh 语义, 桥接路径实现; 可开关)
 #
-# v1.2 架构重设计: v1.0 照抄原厂的 ebtables broute DROP(强制L3路由)在本内核+
-# 多WAN mark 管线上不可用 — 出网包有 ebtables DROP 计数却零 conntrack 条目/零
-# iptables FORWARD 命中/零 IP 层丢弃计数(pre-conntrack 蒸发), 访客"连上无网"。
-# 改为与主 WiFi 客户端同路径: 全桥接->网关MAC本地交付->路由出网。隔离三层:
+# v1.3: 隔离开关 GUEST_ISOLATE(默认1) — settings.conf 可关(=0): 访客作为普通
+#   内网 SSID(用户场景: 给不支持 MLO 的设备一个兼容 SSID), 仅保留入桥(wifi_up
+#   负责 DHCP 可用), 不施加任何隔离规则。关->开/开->关 都幂等。
+# v1.2 架构: broute DROP 强制L3路由在本内核+多WAN mark管线 pre-conntrack 蒸发,
+#   改与主WiFi同路径(全桥接->网关MAC本地交付->路由出网)。隔离三层:
 #   ebtables filter FORWARD 双向 DROP (L2: 访客帧不达任何其他桥口)
 #   iptables INPUT  -i <if> (网关管理面只留 DHCP/DNS/ICMP)
 #   iptables FORWARD -i <if> (路由面: ->LAN网段拒, ->WAN 放行同主WiFi)
-# 语义保持"仅出网": 可 DHCP/DNS/上网, 不可达网关管理页与内网设备。访客纯v4
-# (RA 被 ebtables -o DROP 封, 与原厂一致)。
+#   开启时语义"仅出网"; IPv6 RA 被 ebtables -o DROP 封(访客纯v4)。
 #
-# 用法: guest_fw.sh sync   (幂等: 重建全部规则; 访客 iface 消失则清理)
+# 用法: guest_fw.sh sync   (幂等: 按设置重建/清除规则; 访客 iface 消失则清理)
 # 状态: /tmp/guest_fw.state 与内核规则同生命周期(重启均清零, 天然一致)
 
 PRE=WIFI_GUEST
 STATE=/tmp/guest_fw.state
+GWDATA=$(cd "$(dirname "$0")" && pwd)
+GUEST_ISOLATE=1
+[ -r "$GWDATA/defaults.conf" ] && . "$GWDATA/defaults.conf"
+[ -r "$GWDATA/settings.conf" ] && . "$GWDATA/settings.conf"
+case "$GUEST_ISOLATE" in 0|1) ;; *) GUEST_ISOLATE=1 ;; esac
 LAN_NET=$(ip route show dev br-lan 2>/dev/null | awk 'NR==1{print $1}')
 [ -z "$LAN_NET" ] && LAN_NET=192.168.9.0/24
 
@@ -92,6 +97,12 @@ sync)
             _if=${_ch#$PRE_}; [ -d /sys/class/net/$_if ] || clean_iface $_if
         done
     done
+    # v1.3: 隔离关闭 = 清完即止(访客=普通内网SSID, 仅保留wifi_up的入桥/DHCP)
+    if [ "$GUEST_ISOLATE" != 1 ]; then
+        : > $STATE
+        log "isolation OFF (GUEST_ISOLATE=0) — guest rides plain LAN"
+        exit 0
+    fi
     : > $STATE.new
     for _if in ra1 rai1; do
         [ -d /sys/class/net/$_if ] || continue

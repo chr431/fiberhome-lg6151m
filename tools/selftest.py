@@ -184,11 +184,19 @@ def t_wifi_guest():
     hap2 = dev("grep -c '^bss=' /var/wlan/hap_2g.conf 2>/dev/null").strip() or "0"
     hap5 = dev("grep -c '^bss=' /var/wlan/hap_5g.conf 2>/dev/null").strip() or "0"
     fw = dev("ebtables -L 2>/dev/null | grep -c 'Bridge chain: WIFI_GUEST_'").strip()  # v1.2: filter表(不再用broute)
+    isolate = dev("cat /data/gw/settings.conf /data/gw/defaults.conf 2>/dev/null | grep -E '^GUEST_ISOLATE=' | tail -1 | cut -d= -f2").strip() or "1"
     ssid_lines = dev("iw dev 2>/dev/null | grep -c ssid").strip()
     notes = f"hap2_bss={hap2} hap5_bss={hap5} guest_chains={fw} ssid_lines={ssid_lines}"
     if guest:
-        # 访客开: hap conf 里的 bss 段与 iface 实况都要对上, 且隔离链已施加
-        ok = fw in ("1", "2") and int(hap2) + int(hap5) >= 1
+        # v2.6: 隔离感知 — isolate=1 链必须在+DHCP白名单; isolate=0 链必须全无(兼容机模式)
+        hap_sum = int(hap2) + int(hap5)
+        if isolate == "0":
+            ok = fw == "0"
+            ipt_chains = dev("iptables -S | grep -c 'WIFI_GUEST_']").strip()
+            ok = ok and ipt_chains == "0"
+            notes += f" isolate=off ipt_chains={ipt_chains}"
+        else:
+            ok = fw in ("1", "2") and hap_sum >= 1
         # v2.5: 访客iface必须在br-lan里(hostapd动态BSS不自动入桥 — 不入桥则帧死在
         # 无IP接口, dnsmasq收不到DISCOVER, 手机卡获取IP; v1.22起wifi_up显式入桥)
         brports = dev("brctl show br-lan 2>/dev/null | awk '{print $NF}' | grep -E '^ra' | sort | tr '\\n' ' '")

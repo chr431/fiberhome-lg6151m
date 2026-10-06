@@ -585,9 +585,9 @@ get_wifi_adv() {
     [ -r /tmp/wifi_autoch ] && . /tmp/wifi_autoch   # wifi_up 自动选道落点(信道=0时)
     GS_RAW="${GUEST_SSID:-}"
     GS_EFF="${GUEST_SSID:-${SSID_BASE:-}-Guest}"
-    printf '{"ssid_base":"%s","ch2g":"%s","ch5g":"%s","bw2g":"%s","bw5g":"%s","power":"%s","hidden2g":"%s","hidden5g":"%s","auth":"%s","guest":"%s","guest_ssid":"%s","guest_ssid_eff":"%s","guest_band":"%s","guest_pass":"%s","inone":"%s","mlo":"%s","res2g":"%s","res5g":"%s","ts":%d}' \
+    printf '{"ssid_base":"%s","ch2g":"%s","ch5g":"%s","bw2g":"%s","bw5g":"%s","power":"%s","hidden2g":"%s","hidden5g":"%s","auth":"%s","guest":"%s","guest_ssid":"%s","guest_ssid_eff":"%s","guest_band":"%s","guest_isolate":"%s","guest_pass":"%s","inone":"%s","mlo":"%s","res2g":"%s","res5g":"%s","ts":%d}' \
         "${SSID_BASE:-}" "${CH2G:-6}" "${CH5G:-149}" "${BW2G:-20}" "${BW5G:-80}" "${POWER:-100}" \
-        "${H2:-0}" "0" "${AUTH:-WPA2PSK}" "${GUEST:-0}" "$GS_RAW" "$GS_EFF" "${GUEST_BAND:-5g}" "${GUEST_PASS:+1}" "${INONE:-0}" "${MLO:-0}" "${RCH2G:-}" "${RCH5G:-}" "$(date +%s)"
+        "${H2:-0}" "0" "${AUTH:-WPA2PSK}" "${GUEST:-0}" "$GS_RAW" "$GS_EFF" "${GUEST_BAND:-5g}" "${GUEST_ISOLATE:-1}" "${GUEST_PASS:+1}" "${INONE:-0}" "${MLO:-0}" "${RCH2G:-}" "${RCH5G:-}" "$(date +%s)"
 }
 apply_wifi_adv() {
     # v1.2: 先源旧conf(保留SSID/密码等非本表单字段), 再读表单值覆盖同名项
@@ -603,6 +603,9 @@ apply_wifi_adv() {
     # v2.37: 访客独立项 — 名称(present但可空=回退派生)/频段(2g|5g|both)
     GSS=""; form_has guest_ssid && GSS=$(form_kv guest_ssid)
     GBAND=$(form_kv guest_band)
+    # v2.40: 访客隔离开关(默认1=仅出网; 0=普通内网SSID, 兼容机场景)
+    GISOL=$(form_kv guest_isolate)
+    [ "$GISOL" = 0 ] || [ "$GISOL" = 1 ] || GISOL=1
     echo "$CH2$CH5$BW2$BW5$PW" | grep -qE '[^0-9]' && jerr bad_num
     # 信道: 0=自动(wifi_up启动扫描选道); 2.4G 1-13(CN), 5G限定8个非DFS道
     { [ "$CH2" -eq 0 ] || { [ "$CH2" -ge 1 ] && [ "$CH2" -le 13 ]; } } 2>/dev/null || jerr bad_ch
@@ -643,6 +646,7 @@ apply_wifi_adv() {
     gw_set POWER "$PW"; gw_set HIDDEN "$HID"; gw_set GUEST "$GUEST"; gw_set INONE "$INONE"
     gw_set MLO "$MLOV"
     gw_set GUEST_BAND "$GBAND"
+    gw_set GUEST_ISOLATE "$GISOL"
     if [ -n "$GSS" ]; then gw_set GUEST_SSID "$GSS"; elif form_has guest_ssid; then gw_del GUEST_SSID; fi
     if [ -n "$GSTP" ]; then gw_set GUEST_PASS "$GSTP"; fi
     [ -n "$MPW" ] && gw_set WPAPSK "$MPW"

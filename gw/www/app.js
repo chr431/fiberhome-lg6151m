@@ -1,4 +1,4 @@
-/* app.js v3.23 (双频合一+MLO真双链路选项, 切换提示重启) -- v3 gateway console SPA
+/* app.js v3.24 (访客隔离开关) -- v3 gateway console SPA
  * v3.4: WiFi 分析仪(信道图/信道评级/AP列表/时间图 canvas多视图) + 信道下拉统一(2.4G补select, 双频加"自动"档)
  * 刷新机制彻底重做: 页面骨架只建一次(进入时), 轮询仅更新文本槽/小表格
  *   T(id,v) 文本槽(带变化检测)  H(id,v) 局部HTML(tbody级,带变化检测)
@@ -200,13 +200,14 @@ PAGES.wifi = {
         <span class="hint">应用会重启无线 (已连设备需重连); 信道选「自动」时每次启动多约10s扫描选道</span>`)}
       ${card("访客网络", `
         <div class="row3">
-          <div class="frm"><label>访客网络</label><select id="wa-guest"><option value="0">关闭</option><option value="1">开启 (仅出网)</option></select></div>
+          <div class="frm"><label>访客网络</label><select id="wa-guest"><option value="0">关闭</option><option value="1">开启</option></select></div>
           <div class="frm"><label>访客名称</label><input id="wa-gssid" placeholder="空 = 主名-Guest"></div>
           <div class="frm"><label>访客频段</label><select id="wa-gband"><option value="5g">5GHz</option><option value="2g">2.4GHz</option><option value="both">双频 (同名漫游)</option></select></div>
           <div class="frm"><label>访客密码</label><input id="wa-gpass" type="password" placeholder="8-63位, 开启时必填"></div>
+          <div class="frm"><label>隔离</label><select id="wa-giso"><option value="1">开启 (仅出网)</option><option value="0">关闭 (可访内网, 兼容机模式)</option></select></div>
         </div>
         <button class="pri" onclick="waSave()">应用访客设置</button>
-        <span class="hint">独立名称/频段/密码, 与主 WiFi 完全解耦; 隔离=仅出网: 可上网, 不可达网关管理页与内网设备</span>`)}
+        <span class="hint">独立名称/频段/密码, 与主 WiFi 完全解耦; 隔离开启=仅出网(不可达网关管理页与内网设备), 关闭=普通内网 SSID(适合不支持 MLO 的设备)</span>`)}
       ${card("已连接终端", '<table><thead><tr><th>接口</th><th>MAC</th><th>信号</th><th>↓</th><th>↑</th></tr></thead><tbody id="wfs-tb"></tbody></table>')}
       ${card("WiFi 分析仪 (邻居网络)", `
         <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px">
@@ -246,6 +247,7 @@ PAGES.wifi = {
         F("wa-ch2", adv.ch2g); F("wa-bw2", adv.bw2g); F("wa-ch5", adv.ch5g);
         F("wa-bw5", adv.bw5g); F("wa-pw", adv.power); F("wa-hid", adv.hidden2g);
         F("wa-guest", adv.guest); F("wa-inone", adv.mlo == 1 ? "2" : adv.inone);
+        F("wa-giso", adv.guest_isolate == null ? "1" : String(adv.guest_isolate));
         F("wa-gband", adv.guest_band || "5g"); F("wa-gssid", adv.guest_ssid || "");
         F("wa-auth", adv.auth || "WPA2PSK");
         $("wa-gssid").placeholder = `空 = ${adv.guest_ssid_eff || "主名-Guest"}`;
@@ -256,7 +258,7 @@ PAGES.wifi = {
  * v3.23: 双频合一 select 第3值=MLO真双链路(映射 mlo=1&inone=1, 其余映射 mlo=0) */
 window.waSave = async () => {
     const io = $("wa-inone").value;
-    const body = `ch2=${$("wa-ch2").value}&ch5=${$("wa-ch5").value}&bw2=${$("wa-bw2").value}&bw5=${$("wa-bw5").value}&power=${$("wa-pw").value}&hidden=${$("wa-hid").value}&guest=${$("wa-guest").value}&inone=${io === "2" ? 1 : io}&mlo=${io === "2" ? 1 : 0}&guest_ssid=${encodeURIComponent($("wa-gssid").value)}&guest_band=${$("wa-gband").value}&ssid_base=${encodeURIComponent($("wa-base").value)}&auth=${$("wa-auth").value}` +
+    const body = `ch2=${$("wa-ch2").value}&ch5=${$("wa-ch5").value}&bw2=${$("wa-bw2").value}&bw5=${$("wa-bw5").value}&power=${$("wa-pw").value}&hidden=${$("wa-hid").value}&guest=${$("wa-guest").value}&inone=${io === "2" ? 1 : io}&mlo=${io === "2" ? 1 : 0}&guest_ssid=${encodeURIComponent($("wa-gssid").value)}&guest_band=${$("wa-gband").value}&guest_isolate=${$("wa-giso").value}&ssid_base=${encodeURIComponent($("wa-base").value)}&auth=${$("wa-auth").value}` +
         ($("wa-pass").value ? `&pass=${encodeURIComponent($("wa-pass").value)}` : "") +
         ($("wa-gpass").value ? `&guest_pass=${encodeURIComponent($("wa-gpass").value)}` : "");
     const j = await api("wifi_adv_set", body).catch(e => ({ error: e.message }));

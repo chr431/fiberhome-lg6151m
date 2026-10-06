@@ -57,7 +57,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/fan_mgr.sh` | **v1.3** | manifest | `/data/gw/fan_mgr.sh` | 原厂梯度温控风扇(v1.3: 配置统一overlay+修复v1.2双/data/gw路径bug——GUI静音切换从未生效的根因) |
 | `gw/fan_mode.conf` | **v1.0** | manifest | `/data/gw/fan_mode.conf` | 风扇模式:performance|silent(静音+6°C偏移) |
 | `gw/fw_apply.sh` | **v1.3** | manifest | `/data/gw/fw_apply.sh` | 端口映射/DMZ/禁网安装器(rc_netfh开机+api共用); v1.2/P0: +V3WANGUARD WAN面纵深封禁(23/5683/30005/1899x, 双WAN面) |
-| `gw/guest_fw.sh` | **v1.2** | manifest | `/data/gw/guest_fw.sh` | 访客隔离防火墙v1.2架构重设计(broute DROP强制L3路由在本内核+多WAN mark管线pre-conntrack蒸发→访客无网; 改纯桥接路径+ebtables双向L2+iptables L3, 与主WiFi同数据面; v1.1: iptables链白名单DHCP67:68/DNS53 — br_netfilter=1下桥接广播本地投递走INPUT, v1.0全DROP杀DHCP致手机卡获取IP(实弹10包实证)) |
+| `gw/guest_fw.sh` | **v1.3** | manifest | `/data/gw/guest_fw.sh` | 访客隔离防火墙v1.3(隔离开关GUEST_ISOLATE默认1,0=普通内网SSID兼容机模式); v1.2架构重设计(broute DROP强制L3路由在本内核+多WAN mark管线pre-conntrack蒸发→访客无网; 改纯桥接路径+ebtables双向L2+iptables L3, 与主WiFi同数据面; v1.1: iptables链白名单DHCP67:68/DNS53 — br_netfilter=1下桥接广播本地投递走INPUT, v1.0全DROP杀DHCP致手机卡获取IP(实弹10包实证)) |
 | `gw/healthdog.sh` | **v1.1** | manifest | `/data/gw/healthdog.sh` | 看门狗用户态心跳 |
 | `gw/led_mgr.sh` | **v1.7** | manifest | `/data/gw/led_mgr.sh` | 原厂风格LED守护(v1.7: 信标看门狗vif枚举动态化适配访客双频; v1.4传输层改sysfs gpio; v1.6 配置统一overlay+信标看门狗) |
 | `gw/mipc_dial_trace.sh` | **v1.0** | manifest | `/data/gw/mipc_dial_trace.sh` | 5G 拨号取证(xtrace 抓真参) |
@@ -77,8 +77,8 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
 | `gw/wifi_up.sh` | **v1.22** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.22: 访客iface显式入桥(动态BSS不自动加bridge→帧死无IP接口→dnsmasq盲,tcpdump实证); v1.21: MLO访客静态单链路组17/18(E1/E2实证动态创建扰动主组,E3实证无访客纯净); v1.20: MLO单次AP启动(E1实证双次启动致rai0落临时组18); v1.19: MLO真双链路—MldGroup=1;0;x6写两带dat(RE实证stock同款,1基组号; 全零表=v1.15事故形态禁写; MldAddr/ApcliMloDisable勿写; 生效需冷启动); v1.18: 访客独立化) |
-| `gw/www/api.sh` | **v2.39** | manifest | `/data/gw/www/api.sh` | GUI JSON端点(v2.39: mlo字段+强制双频同名+mlo_changed重启提示; v2.38: 主WiFi密码/加密并入; v2.37访客独立化) |
-| `gw/www/app.js` | **v3.23** | manifest | `/data/gw/www/app.js` | 控制台SPA(v3.23: 双频合一+MLO真双链路选项(值2映射mlo=1)+切换重启提示; v3.22: WiFi页重构) |
+| `gw/www/api.sh` | **v2.40** | manifest | `/data/gw/www/api.sh` | GUI JSON端点(v2.39: mlo字段+强制双频同名+mlo_changed重启提示; v2.38: 主WiFi密码/加密并入; v2.37访客独立化) |
+| `gw/www/app.js` | **v3.24** | manifest | `/data/gw/www/app.js` | 控制台SPA(v3.23: 双频合一+MLO真双链路选项(值2映射mlo=1)+切换重启提示; v3.22: WiFi页重构) |
 | `gw/www/index.html` | **v2.14** | manifest | `/data/gw/www/index.html` | v3控制台页面 |
 | `gw/www/style.css` | **v2.1** | manifest | `/data/gw/www/style.css` | 控制台主题 |
 | `gw/zz_data_hook` | **v1.1** | manifest | `/data/build/rootfs/etc/init.d/zz_data_hook` | S98数据钩子(v1.1: plain sh——原厂无/etc/rc.common, rc.common式shebang致开机栈全灭; 回归实测发现) |
@@ -111,7 +111,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/lk_flip2.py` | **v1.1** | tool | `-` | LK 一键翻槽(a|b, misc[2060]字节) |
 | `tools/lk_write.py` | **v1.6** | tool | `-` | LK raw-shell 文件写入(回显校验+tmpfs挂载+cmdlist巡检, 取代lk_fix_access) |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
-| `tools/selftest.py` | **v2.5** | tool | `-` | 断言式全功能测试(v2.5: 访客桥成员断言; v2.4: MLO断言—dat组表与MLD建立日志一致+全零表护栏; v2.3: 隔离链DHCP/DNS白名单; 57项) |
+| `tools/selftest.py` | **v2.6** | tool | `-` | 断言式全功能测试(v2.5: 访客桥成员断言; v2.4: MLO断言—dat组表与MLD建立日志一致+全零表护栏; v2.3: 隔离链DHCP/DNS白名单; 57项) |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |
 | `tools/serial_server.py` | **v1.7** | tool | `-` | 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets) |
 | `tools/vercheck.py` | **v1.5** | tool | `-` | 版本注册表校验/渲染/设备比对(v1.3: device()随deploy基座迁/data/gw; v1.2性质分区双向强制+全跟踪文件可归类; v1.1 image类md5钉死) |

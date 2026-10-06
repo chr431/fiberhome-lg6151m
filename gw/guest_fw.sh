@@ -1,5 +1,5 @@
 #!/bin/sh
-# guest_fw.sh v1.4 — 访客网络隔离 (v1.4: +ebtables INPUT本机交付链, 修访客可达192.168.9.1)
+# guest_fw.sh v1.5 — 访客网络隔离 (v1.5: INPUT链限定--ip-dst=网关, 修v1.4误杀路由流量致断网)
 #
 # v1.3: 隔离开关 GUEST_ISOLATE(默认1) — settings.conf 可关(=0): 访客作为普通
 #   内网 SSID(用户场景: 给不支持 MLO 的设备一个兼容 SSID), 仅保留入桥(wifi_up
@@ -23,6 +23,8 @@ GUEST_ISOLATE=1
 case "$GUEST_ISOLATE" in 0|1) ;; *) GUEST_ISOLATE=1 ;; esac
 LAN_NET=$(ip route show dev br-lan 2>/dev/null | awk 'NR==1{print $1}')
 [ -z "$LAN_NET" ] && LAN_NET=192.168.9.0/24
+GW_IP=$(ip -o -4 addr show br-lan 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)   # v1.5: INPUT链--ip-dst锚点
+[ -z "$GW_IP" ] && GW_IP=192.168.9.1
 
 log() { echo "guest_fw: $*"; }
 
@@ -66,14 +68,17 @@ apply_iface() {  # 为一个现存访客 iface 施加隔离 (v1.2 架构: 纯桥
     ebtables -I FORWARD 2 -o $_if -j $_ch
     ebtables -A $_ch -j DROP
     # --- ebtables filter INPUT: 网关本机交付面(桥口精确匹配, 不依赖br_netfilter) ---
-    # 白名单 DHCP/DNS/ICMP 后拒 IPv4/IPv6; ARP 不设规则(放行=网关MAC解析必需)
+    # v1.5: 只约束 目标IP=网关自身 的流量(--ip-dst 匹配后白名单/拒绝)。
+    # v1.4 实弹教训: 访客出网帧的下一跳=网关MAC, 同样走本地交付进 INPUT 链 —
+    # 无差别 DROP 把待路由转发的流量一起杀了(guest 全断网)。非网关目标的 IPv4
+    # 不设规则(RETURN→放行, 交给 iptables FORWARD 管 LAN 网段)。ARP 放行。
     ebtables -N ${_ch}_I 2>/dev/null; ebtables -F ${_ch}_I
     ebtables -I INPUT 1 -i $_if -j ${_ch}_I
-    ebtables -A ${_ch}_I -p 0x0800 --ip-proto 17 --ip-dport 67:68 -j ACCEPT
-    ebtables -A ${_ch}_I -p 0x0800 --ip-proto 17 --ip-dport 53 -j ACCEPT
-    ebtables -A ${_ch}_I -p 0x0800 --ip-proto 6  --ip-dport 53 -j ACCEPT
-    ebtables -A ${_ch}_I -p 0x0800 --ip-proto 1 -j ACCEPT
-    ebtables -A ${_ch}_I -p 0x0800 -j DROP
+    ebtables -A ${_ch}_I -p 0x0800 --ip-dst $GW_IP --ip-proto 17 --ip-dport 67:68 -j ACCEPT
+    ebtables -A ${_ch}_I -p 0x0800 --ip-dst $GW_IP --ip-proto 17 --ip-dport 53 -j ACCEPT
+    ebtables -A ${_ch}_I -p 0x0800 --ip-dst $GW_IP --ip-proto 6  --ip-dport 53 -j ACCEPT
+    ebtables -A ${_ch}_I -p 0x0800 --ip-dst $GW_IP --ip-proto 1 -j ACCEPT
+    ebtables -A ${_ch}_I -p 0x0800 --ip-dst $GW_IP -j DROP
     ebtables -A ${_ch}_I -p 0x86DD -j DROP
     # --- iptables INPUT: 同语义兜底(indev=访客口形态时生效) ---
     iptables -N $_ch 2>/dev/null; iptables -F $_ch

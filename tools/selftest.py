@@ -179,8 +179,9 @@ def t_wifi_bss():
 @test("访客 BSS 配置/隔离防火墙一致 (guest_fw)")
 def t_wifi_guest():
     conf = dev("cat /data/gw/settings.conf /data/gw/defaults.conf 2>/dev/null | "
-               "grep -E '^(GUEST|GUEST_BAND|GUEST_SSID)=' | sort -u")
-    guest = re.search(r"^GUEST=1$", conf, re.M)
+               "grep -E '^(GUEST|GUEST_BAND|GUEST_SSID|GUEST_PASS)=' | sort -u")
+    # v2.8: guest 有效 = GUEST=1 且有密码(无密码时 wifi_up 不建访客BSS — 首刷默认态即此)
+    guest = bool(re.search(r"^GUEST=1$", conf, re.M)) and bool(re.search(r"^GUEST_PASS=..+", conf, re.M))
     hap2 = dev("grep -c '^bss=' /var/wlan/hap_2g.conf 2>/dev/null").strip() or "0"
     hap5 = dev("grep -c '^bss=' /var/wlan/hap_5g.conf 2>/dev/null").strip() or "0"
     fw = dev("ebtables -L 2>/dev/null | grep -c 'Bridge chain: WIFI_GUEST_'").strip()  # v1.2: filter表(不再用broute)
@@ -347,13 +348,20 @@ def t_gui_appjs():
 
 @test("plugins.js 可达 (认证插件页)")
 def t_gui_plugin():
+    # v2.8: 公开套件默认无插件 — 404 视为"未部署, 跳过"(记 pass, 注明); 有则校验内容
     try:
         r = urllib.request.urlopen(f"http://{lgssh.HOST}/plugins.js", timeout=5)
         body = r.read().decode()
         ok = "LG_plugin" in body
+        note = "plugin present"
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            record(t_gui_plugin._test_name, "gui", True, "no plugin deployed (public kit)")
+            return
+        ok = False; note = f"HTTP {e.code}"
     except Exception:
-        ok = False
-    record(t_gui_plugin._test_name, "gui", ok)
+        ok = False; note = "unreachable"
+    record(t_gui_plugin._test_name, "gui", ok, note)
 
 
 @test("API login + token 生命周期")
@@ -657,7 +665,11 @@ def t_cel_lockcons():
         ce = re.search(r"CELL_EN=(\d)", conf)
         if be and ce and be.group(1) == "1" and ce.group(1) == "1":
             mism.append("频段锁与小区锁互斥违反")
+        # v2.8: 首刷态 cellular.conf 尚未生成 = 从未设锁 = 一致(与 tree 分支同语义)
         if not be:
+            if not conf.strip():
+                record(t_cel_lockcons._test_name, "cellular", True, "no lock conf (virgin)")
+                return
             mism.append("cellular.conf 无 BAND_EN")
     else:
         if not conf.strip():

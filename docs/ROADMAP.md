@@ -91,7 +91,17 @@ EasyMesh/VPN 三族/UPnP/DDNS/VoIP/fhdrv_net_forward 端口隔离（FEATURE_MATR
 自研 dial keeper：`mipc_wan_cli --data_call_act`（APN 来自 `--apn_provision_by_sim`）+
 watchdog 集成（ccmni 无 IP→重拨）。出口：拔 SIM 重插自恢复 + 10 分钟流量观测。
 
-### P3 下架（**2026-10-06 以 P3-lite 形态完成**） <!--CLM:CLM-P3LITE-->
+### P3 下架（**2026-10-06 完整收官** — P3-lite → 终章） <!--CLM:CLM-P3-FINALE-->
+
+> **终章（同日）**：CA 小区列表替代落地 —— D 组逆向 + cellraw 实测修正（16 小区真源
+> = ql_nw_get_cell_info，cells@0x520 stride 0x30，arfcn+0/rsrp+8/sinr+0xC/pci+0x2C；
+> D 组的 0x528 差 8B 由原始 dump 对树值定案），mipc_cellular v0.5 `cells` 实弹全对
+> （服务 N41/504990/341 + 16 邻区与树 PCI 序一致、RSRP/SINR 实时）。rc_netfh v3.1
+> 上机：cfg_tool/shmsnap/mobilenetwork 全退役（KEEP_TREE=1 回滚门控），两次冷启动
+> 回归 55/55（守护 0、16MB shm 0、keeper 开机 35s 拨号）。**原厂应用层彻底清零**：
+> 存活的 FH 组件只剩二进制库（hostapd/dnsmasq/radvd）与 modem 底座军。
+
+### P3-lite（中间形态，2026-10-06 晨） <!--CLM:CLM-P3LITE-->
 
 > 实证简化：树操作不依赖 cfgmgr 守护（kill 后 get/set 全通，shm 由 cfg_tool
 > 建立）→ 低风险先裁守护。rc_netfh v3.0：cfgmgr+logmgr 不再拉起，cfg_tool 的

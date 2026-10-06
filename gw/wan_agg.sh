@@ -346,6 +346,17 @@ ENABLE=1
 fi
 if [ -r /data/gw/agg.conf ]; then
     . /data/gw/agg.conf
+    # v2.18: 旧格式迁移(无 MODE 键) — 100/0 语义映射优先模式, 其余 weight(钳5..95)
+    if ! grep -q '^MODE=' /data/gw/agg.conf; then
+        case "$W1_PCT" in 100) MODE=cell_prio ;; 0) MODE=eth_prio ;; *) MODE=weight ;; esac
+        [ "$MODE" = weight ] || W1_PCT=30
+        printf 'MODE=%s
+W1_PCT=%s
+W2_PCT=%s
+ENABLE=1
+' "$MODE" "$W1_PCT" "$((100-W1_PCT))" > /data/gw/agg.conf
+        log "agg.conf migrated to v2.18 format: MODE=$MODE W1=$W1_PCT"
+    fi
     case "$MODE" in weight|cell_prio|eth_prio|cell_only|eth_only) ;; *) MODE=weight ;; esac
     case "$W1_PCT" in ''|*[!0-9]*) W1_PCT=30 ;; esac
     [ "$W1_PCT" -ge 5 ] && [ "$W1_PCT" -le 95 ] || W1_PCT=30

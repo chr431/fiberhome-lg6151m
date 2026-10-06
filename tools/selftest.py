@@ -215,11 +215,13 @@ def t_wifi_mlo():
     notes = f"mlo={int(mlo)} apcfg='{g2}' apcfg_5='{g5}'"
     if mlo:
         # v1.21: 访客BSS静态单链路组(2.4G访客token=17, 5G=18), 主BSS恒为组1
-        ok = re.fullmatch(r"MldGroup=1;(17|0);0;0;0;0;0;0", g2.removeprefix("MldGroup=")) is not None if g2 else False
-        ok = ok and (re.fullmatch(r"MldGroup=1;(18|0);0;0;0;0;0;0", g5.removeprefix("MldGroup=")) is not None if g5 else False)
+        t2 = g2.removeprefix("MldGroup=")
+        t5 = g5.removeprefix("MldGroup=")
+        ok = re.fullmatch(r"1;(17|0);0;0;0;0;0;0", t2) is not None and \
+             re.fullmatch(r"1;(18|0);0;0;0;0;0;0", t5) is not None
         if ok:
             mld = dev("dmesg | grep -cE 'Create AP MLD|join MLD|Alloc ML Group|hostapd_event_bss_mlo_info'")
-            bad = dev("dmesg | grep -c 'rai0.*Create AP MLD, grp(0)'").strip()
+            bad = dev("dmesg | grep -c 'Create AP MLD, grp(0)'").strip()
             notes += f" mld_logs={mld.strip()} rai0_grp0_creates={bad}"
             ok = int(mld.strip() or 0) >= 1 and bad == "0"
     else:
@@ -818,8 +820,9 @@ def t_sys_disk():
 @test("无内核 OOPS/PANIC")
 def t_sys_kernel():
     # aee_aed ipanic 探测行(开机 expdb MTD 探测噪声)与 kernel_panic_sysfs_init
-    # (函数名含 panic 的正常 initcall)排除; 真 Oops/BUG/panic 必须为 0
-    out = dev("dmesg | grep -iE 'Oops:|BUG:|panic' | grep -vcE 'aee_aed|_panic_' 2>/dev/null")
+    # (函数名含 panic 的正常 initcall)排除; ramoops 初始化行(含 oops 子串)排除;
+    # 真 Oops/BUG/panic 必须为 0
+    out = dev("dmesg | grep -iE 'Oops:|BUG:|panic' | grep -vcE 'aee_aed|_panic_|ramoops' 2>/dev/null")
     n = int((out.strip() or "0").split("\n")[-1])
     record(t_sys_kernel._test_name, "system", n == 0,
            f"events={n} (噪声已滤)")

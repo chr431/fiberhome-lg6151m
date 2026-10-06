@@ -105,7 +105,8 @@
 | 射频管理 | wifimgr(452KB)+hwifi dat | wifi_up.sh 工厂配方+自动选道评分 | `=` |
 | 安全层 | 驱动内部 WPA（MLD 组网不发 EAPOL M1=缺陷）| hostapd F3 单进程 3 BSS（PMK 直喂）| `▲` 修好了原厂缺陷 |
 | Mesh/EasyMesh | map_master/slave 1905 全栈 | ✗ 单机模式 | `✗` |
-| 访客网络 | wifiguest.sh 隔离(type1/2) | 独立名称/频段(2G/5G/双频)/密码 + guest_fw.sh 原厂同款 ebtables 隔离(仅出网) <!--CLM:CLM-GUEST-INDEP--> | `=` 真 MLO 为 dat 雷区(v1.15 锁存)不实现, 双频=同名双 BSS 漫游 |
+| 访客网络 | wifiguest.sh 隔离(type1/2) | 独立名称/频段(2G/5G/双频)/密码 + guest_fw.sh 原厂同款 ebtables 隔离(仅出网) <!--CLM:CLM-GUEST-INDEP--> | `=` 双频=同名双 BSS 漫游 |
+| MLO 多链路 | 可用(wifimgr+libwifiadapter 写 MldGroup) | **可用**(两带 dat 各写 MldGroup=1;…; 访客静态组17/18; hostapd vendor-subcmd248 同步链全通, E1-E4 实证) <!--CLM:CLM-MLO--> | `=` 纯 MLO 不需 wapp; v1.15"雷区"实为全零表+缺拓扑误判; 切换需重启(FW 锁存) |
 | WiFi 分析 | — | 信道图/评级/AP 列表/时间图 canvas | `▲` |
 | 160MHz | 可用（同款 dat 链）| **可用**（EHT_ApBw/VHT_BW 双字段齐设后实测 2402/2882 Mbps PHY） <!--CLM:CLM-160-FM-->| `=` 早期"驱动钳制"结论是 dat 语义错位误诊，2026-10-05 翻案 |
 | 漫游加速 | roaming_accel.ko(ARP 注入) | ✗ | `✗` 单 AP 无漫游场景 |

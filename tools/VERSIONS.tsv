@@ -36,9 +36,9 @@ gw/bin/fhstub.so	1.0	manifest	/data/gw/fhstub.so	FH符号桩库(顶掉vendor api
 gw/led_mgr.sh	1.6	manifest	/data/gw/led_mgr.sh	原厂风格LED守护(v1.4传输层改sysfs gpio; v1.6 配置统一overlay+信标看门狗(dmesg固件权威事件→no_bcn重装); v1.5 WAN走leds类节点5g_evb_voice=gpio292被leds-gpio占用, debugfs实证)
 gw/bin/v3httpd	2.2	manifest	/data/gw/v3httpd	网关GUI HTTP服务(:80, 静态+JSON API)
 gw/www/api.sh	2.31	manifest	/data/gw/www/api.sh	GUI JSON端点(v2.15: hostapd探测改iw AP-type(拓扑形态无关); v2.14: 配置统一cfg_load/gw_set读写defaults+settings overlay, 旧散落conf写路径全撤; v2.13端口强校验; v2.12: get_sys嵌套花括号默认值触发busybox ash展开bug多印1字节破坏JSON, 改-n分支; get_logs补\t\r反斜杠转义使严格JSON.parse通过; 状态聚合)
-gw/www/index.html	2.12	manifest	/data/gw/www/index.html	v3控制台页面
+gw/www/index.html	2.13	manifest	/data/gw/www/index.html	v3控制台页面
 gw/www/style.css	2.1	manifest	/data/gw/www/style.css	控制台主题
-gw/www/app.js	3.18	manifest	/data/gw/www/app.js	控制台轮询逻辑
+gw/www/app.js	3.19	manifest	/data/gw/www/app.js	控制台轮询逻辑
 tools/agg_pins.conf.example	1.1	tool	-	MAC钉死表模板(真实表设备侧自管, 含个人MAC不入库)
 gw/fan_mgr.sh	1.3	manifest	/data/gw/fan_mgr.sh	原厂梯度温控风扇(v1.3: 配置统一overlay+修复v1.2双/data/gw路径bug——GUI静音切换从未生效的根因)
 gw/fan_mode.conf	1.0	manifest	/data/gw/fan_mode.conf	风扇模式:performance|silent(静音+6°C偏移)

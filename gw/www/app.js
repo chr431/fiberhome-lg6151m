@@ -361,7 +361,10 @@ function waDrawChGraph() {
     for (let i = 0; i < n; i += step) x.fillText(String(chs[i]), xOfI(i), H - 8);
     const base = H - padB;
     const cl = v => Math.max(-100, Math.min(-30, v));
-    const chPx = (xOfI(1) - xOfI(0)) || 20;   // v3.17: 单信道像素宽 — 矩形按真实频宽
+    /* v3.19: CH5_LIST 相邻索引隔 4 信道(80MHz) — "信道像素"须除以索引步。
+       v3.17 的 4 倍过宽 bug 即源于把索引步当信道(视觉回归实测抓出)。 */
+    const chStep = (chs[1] - chs[0]) || 1;
+    const chPx = ((xOfI(1) - xOfI(0)) || 20) / chStep;   // 单信道(20MHz)像素宽
     for (const a of aps) {
         let i = chs.indexOf(a.ch); if (i < 0) continue;
         const col = waColor(a.mac);
@@ -370,7 +373,7 @@ function waDrawChGraph() {
         if (WA.band === 5) {
             /* 5G: 精确频宽块。中心 = 主信道 + (ctr-主)/20 信道浮点偏移
                (ctr=42 等中心信道号不在 CH5_LIST, indexOf 必失败, 用线性内插) */
-            const c = i + (+a.ctr ? ((+a.ctr) - a.ch) / 20 : 0);
+            const c = i + (+a.ctr ? ((+a.ctr) - a.ch) / chStep : 0);
             x0 = xOfI(c) - (k * chPx) / 2 - chPx * 0.25;
             x1 = xOfI(c) + (k * chPx) / 2 + chPx * 0.25;
         } else {

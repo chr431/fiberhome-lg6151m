@@ -377,11 +377,13 @@ apply_airplane() {
     ok_json
 }
 net_plmn_scan() {
-    # P4.1 尝试记录(2026-10-06): AT+COPS=? 直扫不可行 — 长响应撑爆 mipc_wan_cli
-    # 固定缓冲(段错误, 同 AT+CLAC); 结果直读需 mipc_cellular ql_nw_network_scan
-    # 逆向(下轮)或树结果节点定位。暂用 mobilenetwork ubus 通道(过渡层仍在)。
-    ubus call mobile_network start_search_network "{}" >/dev/null 2>&1
-    ok_json '"note":"scanning(ubus); 结果展示待P4.1续"'
+    # v2.32 (P4.1 完成): ql_nw_network_scan 原生扫描(C 组逆向, 异步回调+0x1288
+    # 结构), mipc_cellular v0.4 封装为同步 JSON 输出。扫描 10-60s。
+    R=$(/data/gw/mipc_cellular scan 60 2>/dev/null | head -1)
+    case "$R" in
+        '"count"'*|'{"count"'*) printf '%s' "$R" ;;
+        *) printf '{"error":"scan_failed","detail":"%s"}' "${R:-tool_missing}" ;;
+    esac
 }
 
 # -- 风扇/LED --

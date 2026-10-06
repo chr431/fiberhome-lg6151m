@@ -27,12 +27,17 @@
 #include <string.h>
 #include <stdint.h>
 #include <dlfcn.h>
+#include <time.h>
+
+static int usleep(unsigned int);   /* musl 提供; C99 严格模式需自声明 */
 
 static int (*p_get_band_info)(void *);
 static int (*p_set_band_mode)(const void *);
 static int (*p_nw_init)(int);
 static int (*p_sms_init)(int);
 static int (*p_sms_send_msg)(const void *);
+static int (*p_nw_scan)(void *, void (*)(int, void *));
+static int (*p_scan_busy)(void);
 
 static int load_lib(const char *path)
 {
@@ -63,8 +68,10 @@ static int load_lib(const char *path)
     p_nw_init = (int (*)(int))dlsym(h, "ql_nw_init");
     p_sms_init = (int (*)(int))dlsym(h, "ql_sms_init");
     p_sms_send_msg = (int (*)(const void *))dlsym(h, "ql_sms_send_msg");
+    p_nw_scan = (int (*)(void *, void (*)(int, void *)))dlsym(h, "ql_nw_network_scan");
+    p_scan_busy = (int (*)(void))dlsym(h, "ql_nw_net_scan_async_f");
     if (!p_get_band_info || !p_set_band_mode || !p_nw_init ||
-        !p_sms_init || !p_sms_send_msg) {
+        !p_sms_init || !p_sms_send_msg || !p_nw_scan) {
         fprintf(stderr, "dlsym: %s\n", dlerror());
         return -1;
     }
@@ -155,6 +162,57 @@ struct sms_msg {
     unsigned char content[0x5A0];
 };
 
+/* ql_nw_network_scan 响应结构 (C 组逆向 2026-10-06, 三方互证):
+ *   int32 err; int32 count; plmn[32] stride 0x94:
+ *     long_name[65]@0 / short_name[65]@0x41 / mcc[4]@0x82 / mnc[4]@0x86
+ *     / status@0x8c / rat@0x90 (2=GSM 4=LTE 15=UMTS 18=NR5G)
+ * 异步: cb(err, resp) 于 libql_uinf 后台线程触发, resp 仅在 cb 内有效(memcpy!)
+ * 失败路径不调 cb -> 必须超时轮询; 库内零超时。mnc 服务端只拷 2 字节。 */
+struct scan_resp {
+    int32_t err;
+    int32_t count;
+    unsigned char plmn[32][0x94];
+};
+
+static volatile int g_scan_done;
+static struct scan_resp g_scan_buf;
+
+static void scan_cb(int err, void *resp)
+{
+    if (err == 0 && resp) memcpy(&g_scan_buf, resp, sizeof g_scan_buf);
+    g_scan_done = err == 0 ? 1 : 2;
+}
+
+static const char *rat_name(int r)
+{
+    switch (r) {
+    case 2: return "GSM"; case 4: return "LTE"; case 15: return "UMTS";
+    case 18: return "NR5G"; default: return "?";
+    }
+}
+
+static int do_scan(int timeout_s)
+{
+    int r = p_nw_scan(NULL, scan_cb);
+    if (r) { printf("{\"error\":\"scan_start_0x%x\"}\n", r); return 3; }
+    for (int i = 0; i < timeout_s * 2 && !g_scan_done; i++) usleep(500 * 1000);
+    if (!g_scan_done) { printf("{\"error\":\"timeout_%ds\"}\n", timeout_s); return 4; }
+    if (g_scan_done == 2) { printf("{\"error\":\"scan_failed\"}\n"); return 5; }
+    printf("{\"count\":%d,\"networks\":[", g_scan_buf.count);
+    for (int i = 0; i < g_scan_buf.count && i < 32; i++) {
+        const unsigned char *e = g_scan_buf.plmn[i];
+        const char *ln = (const char *)e;            /* long_name[65] */
+        const char *mcc = (const char *)e + 0x82;    /* mcc[4]  */
+        const char *mnc = (const char *)e + 0x86;    /* mnc[4](第3位可能未拷) */
+        int status = *(int32_t *)(e + 0x8c);
+        int rat = *(int32_t *)(e + 0x90);
+        printf("%s{\"name\":\"%s\",\"mcc\":\"%.3s\",\"mnc\":\"%.2s\",\"status\":%d,\"rat\":\"%s\"}",
+               i ? "," : "", ln, mcc, mnc, status, rat_name(rat));
+    }
+    printf("]}\n");
+    return 0;
+}
+
 static int do_send(int format, const char *num, const char *payload, int payload_is_hex)
 {
     struct sms_msg m;
@@ -218,6 +276,8 @@ int main(int argc, char **argv)
         printf("ret=%d (0x%x)\n", r, r);
         return 0;
     }
+    if (argc >= 2 && !strcmp(argv[1], "scan"))           /* PLMN 扫描(10-60s) */
+        return do_scan(argc >= 3 ? atoi(argv[2]) : 60);
     if (argc >= 4 && !strcmp(argv[1], "sendsms"))        /* ASCII/GSM7 */
         return do_send(0, argv[2], argv[3], 0);
     if (argc >= 4 && !strcmp(argv[1], "senducs2"))       /* 中文: UCS2-BE hex */
@@ -225,6 +285,7 @@ int main(int argc, char **argv)
     puts("usage: mipc_cellular getbands | unlock\n"
          "                setlock lte=<list|all> nr=<list|all> [umts=<list|all>]\n"
          "                setbands <hexblob>\n"
-         "                sendsms <num> <ascii-text> | senducs2 <num> <ucs2-be-hex>");
+         "                sendsms <num> <ascii-text> | senducs2 <num> <ucs2-be-hex>\n"
+         "                scan [timeout_s]");
     return 1;
 }

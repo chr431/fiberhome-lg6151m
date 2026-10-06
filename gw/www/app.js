@@ -677,7 +677,9 @@ PAGES.cellular = {
           <div class="frm"><label>飞行模式</label><select id="nm-air"><option value="0">关闭</option><option value="1">开启(断网!)</option></select></div>
         </div>
         <button class="pri" onclick="nmSave()">应用制式</button>
-        <button class="ghost" onclick="nmAir()">应用飞行模式</button>`)}
+        <button class="ghost" onclick="nmAir()">应用飞行模式</button>
+        <button class="ghost" onclick="plmnScan()">扫描可用网络 (10-60s)</button>
+        <div id="plmn-out" class="hint" style="margin-top:8px"></div>`)}
       ${card("SIM 卡", kv("IMSI", "sim-imsi", 1) + kv("ICCID", "sim-iccid", 1) + kv("运营商", "sim-carrier") +
         kv("本机号码", "sim-phone", 1) + kv("IMEI", "sim-imei", 1) + `
         <div style="margin-top:10px"></div>
@@ -740,6 +742,17 @@ window.nmSave = async () => {
     const j = await api("netmode_set", `mode=${$("nm-mode").value}`).catch(e => ({ error: e.message }));
     j.ok ? toast("制式已应用") : toast("失败: " + j.error, 1);
 };
+window.plmnScan = async () => {
+    const el = document.getElementById("plmn-out");
+    if (el) el.textContent = "扫描中... (10-60s)";
+    const j = await api("plmn_scan").catch(e => ({ error: e.message }));
+    if (!el) return;
+    if (j.error) { el.textContent = "扫描失败: " + j.error; return; }
+    const rows = (j.networks || []).map(n =>
+        `${n.name || n.mcc + n.mnc} [${n.rat}]${n.status === 1 ? " ←当前" : n.status === 4 ? " 可用" : ""}`);
+    el.innerHTML = rows.length ? rows.join(" · ") : "无结果";
+};
+
 window.nmAir = async () => {
     if ($("nm-air").value === "1" && !confirm("开启飞行模式将断开蜂窝网络, 确认?")) return;
     const j = await api("airplane_set", `on=${$("nm-air").value}`).catch(e => ({ error: e.message }));

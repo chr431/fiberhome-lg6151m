@@ -57,7 +57,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/fan_mgr.sh` | **v1.3** | manifest | `/data/gw/fan_mgr.sh` | 原厂梯度温控风扇(v1.3: 配置统一overlay+修复v1.2双/data/gw路径bug——GUI静音切换从未生效的根因) |
 | `gw/fan_mode.conf` | **v1.0** | manifest | `/data/gw/fan_mode.conf` | 风扇模式:performance|silent(静音+6°C偏移) |
 | `gw/fw_apply.sh` | **v1.3** | manifest | `/data/gw/fw_apply.sh` | 端口映射/DMZ/禁网安装器(rc_netfh开机+api共用); v1.2/P0: +V3WANGUARD WAN面纵深封禁(23/5683/30005/1899x, 双WAN面) |
-| `gw/guest_fw.sh` | **v1.3** | manifest | `/data/gw/guest_fw.sh` | 访客隔离防火墙v1.3(隔离开关GUEST_ISOLATE默认1,0=普通内网SSID兼容机模式); v1.2架构重设计(broute DROP强制L3路由在本内核+多WAN mark管线pre-conntrack蒸发→访客无网; 改纯桥接路径+ebtables双向L2+iptables L3, 与主WiFi同数据面; v1.1: iptables链白名单DHCP67:68/DNS53 — br_netfilter=1下桥接广播本地投递走INPUT, v1.0全DROP杀DHCP致手机卡获取IP(实弹10包实证)) |
+| `gw/guest_fw.sh` | **v1.4** | manifest | `/data/gw/guest_fw.sh` | 访客隔离防火墙v1.4(ebtables INPUT本机交付链修访客可达管理面—桥接本地交付indev=br-lan致iptables -i<if>永不命中,ebtables按桥口匹配; v1.3(隔离开关GUEST_ISOLATE默认1,0=普通内网SSID兼容机模式); v1.2架构重设计(broute DROP强制L3路由在本内核+多WAN mark管线pre-conntrack蒸发→访客无网; 改纯桥接路径+ebtables双向L2+iptables L3, 与主WiFi同数据面; v1.1: iptables链白名单DHCP67:68/DNS53 — br_netfilter=1下桥接广播本地投递走INPUT, v1.0全DROP杀DHCP致手机卡获取IP(实弹10包实证)) |
 | `gw/healthdog.sh` | **v1.1** | manifest | `/data/gw/healthdog.sh` | 看门狗用户态心跳 |
 | `gw/led_mgr.sh` | **v1.7** | manifest | `/data/gw/led_mgr.sh` | 原厂风格LED守护(v1.7: 信标看门狗vif枚举动态化适配访客双频; v1.4传输层改sysfs gpio; v1.6 配置统一overlay+信标看门狗) |
 | `gw/mipc_dial_trace.sh` | **v1.0** | manifest | `/data/gw/mipc_dial_trace.sh` | 5G 拨号取证(xtrace 抓真参) |

@@ -1,5 +1,5 @@
 #!/bin/sh
-# guest_fw.sh v1.3 — 访客网络隔离 (原厂 wifiguest.sh 语义, 桥接路径实现; 可开关)
+# guest_fw.sh v1.4 — 访客网络隔离 (v1.4: +ebtables INPUT本机交付链, 修访客可达192.168.9.1)
 #
 # v1.3: 隔离开关 GUEST_ISOLATE(默认1) — settings.conf 可关(=0): 访客作为普通
 #   内网 SSID(用户场景: 给不支持 MLO 的设备一个兼容 SSID), 仅保留入桥(wifi_up
@@ -26,13 +26,15 @@ LAN_NET=$(ip route show dev br-lan 2>/dev/null | awk 'NR==1{print $1}')
 
 log() { echo "guest_fw: $*"; }
 
-clean_iface() {  # 摘除一个 iface 的全部隔离规则(含 v1.0/v1.1 broute 时代遗留)
+clean_iface() {  # 摘除一个 iface 的全部隔离规则(含 v1.0-v1.3 时代遗留)
     _if=$1; _ch=${PRE}_${_if}
     ebtables -t broute -D BROUTING -i $_if -j $_ch 2>/dev/null
     ebtables -t broute -F $_ch 2>/dev/null
     ebtables -t broute -X $_ch 2>/dev/null
     ebtables -D FORWARD -o $_if -j $_ch 2>/dev/null
     ebtables -D FORWARD -i $_if -j $_ch 2>/dev/null
+    ebtables -D INPUT -i $_if -j ${_ch}_I 2>/dev/null      # v1.4 本机交付链
+    ebtables -F ${_ch}_I 2>/dev/null; ebtables -X ${_ch}_I 2>/dev/null
     ebtables -F $_ch 2>/dev/null
     ebtables -X $_ch 2>/dev/null
     # iptables: 跳转规则摘除(规则文本精确匹配); F链一并清
@@ -52,17 +54,28 @@ apply_iface() {  # 为一个现存访客 iface 施加隔离 (v1.2 架构: 纯桥
     # 管线下 pre-conntrack 蒸发(出网SYN有ebtables计数但零conntrack条目/零iptables
     # FORWARD命中/零IP层丢弃计数), 访客因此"连上无网"。改走与主WiFi客户端完全相同
     # 的路径: 全桥接 -> 网关MAC本地交付 -> 路由出网(主WiFi已实证可用)。
-    # 隔离三件套:
-    #   1) ebtables filter FORWARD 双向 DROP = L2 隔离(访客帧只能本地交付, 不达其他端口;
-    #      网关自身回包走 OUTPUT 链不受影响)
-    #   2) iptables INPUT -i <if> = 网关管理面只留 DHCP/DNS/ICMP
-    #   3) iptables FORWARD -i <if> = 路由面拒绝访客->LAN网段, 出网放行(同主WiFi NAT/mark)
+    # 隔离四层:
+    #   1) ebtables filter FORWARD 双向 DROP = L2 隔离(访客帧只能本地交付, 不达其他端口)
+    #   2) ebtables filter INPUT  = 网关本机交付面只留 DHCP/DNS/ICMP(v1.4 — 实弹:
+    #      桥接本地交付进 iptables INPUT 时 indev=br-lan, v1.2 的 -i <if> 跳转永不
+    #      命中, 访客能开 192.168.9.1; ebtables INPUT 按桥口匹配, 是正确层次)
+    #   3) iptables INPUT -i <if> = 同语义兜底(万一 indev 形态变化)
+    #   4) iptables FORWARD -i <if> = 路由面拒绝访客->LAN网段, 出网放行(同主WiFi)
     ebtables -N $_ch 2>/dev/null; ebtables -F $_ch
     ebtables -I FORWARD 1 -i $_if -j $_ch
     ebtables -I FORWARD 2 -o $_if -j $_ch
     ebtables -A $_ch -j DROP
-    # --- iptables INPUT: 网关本机服务面(DHCP/DNS/ICMP 放行, 拒管理面) ---
-    # (br_netfilter=1 下桥接帧的本地投递以此链匹配 indev=访客口 — DHCP 计数实证)
+    # --- ebtables filter INPUT: 网关本机交付面(桥口精确匹配, 不依赖br_netfilter) ---
+    # 白名单 DHCP/DNS/ICMP 后拒 IPv4/IPv6; ARP 不设规则(放行=网关MAC解析必需)
+    ebtables -N ${_ch}_I 2>/dev/null; ebtables -F ${_ch}_I
+    ebtables -I INPUT 1 -i $_if -j ${_ch}_I
+    ebtables -A ${_ch}_I -p 0x0800 --ip-proto 17 --ip-dport 67:68 -j ACCEPT
+    ebtables -A ${_ch}_I -p 0x0800 --ip-proto 17 --ip-dport 53 -j ACCEPT
+    ebtables -A ${_ch}_I -p 0x0800 --ip-proto 6  --ip-dport 53 -j ACCEPT
+    ebtables -A ${_ch}_I -p 0x0800 --ip-proto 1 -j ACCEPT
+    ebtables -A ${_ch}_I -p 0x0800 -j DROP
+    ebtables -A ${_ch}_I -p 0x86DD -j DROP
+    # --- iptables INPUT: 同语义兜底(indev=访客口形态时生效) ---
     iptables -N $_ch 2>/dev/null; iptables -F $_ch
     iptables -A $_ch -p udp --dport 67:68 -j ACCEPT
     iptables -A $_ch -p udp --dport 53 -j ACCEPT
@@ -94,7 +107,8 @@ sync)
     for _if in $(cat $STATE 2>/dev/null); do clean_iface $_if; done
     for _t in broute filter; do
         for _ch in $(ebtables -t $_t -L 2>/dev/null | awk -v p="^$PRE" '/^Bridge chain:/{gsub(/,/,"",$3); if ($3 ~ p) print $3}'); do
-            _if=${_ch#$PRE_}; [ -d /sys/class/net/$_if ] || clean_iface $_if
+            _if=${_ch#$PRE_}; _if=${_if%_I}   # v1.4: 剥本机交付链后缀再探测
+            [ -d /sys/class/net/$_if ] || clean_iface $_if
         done
     done
     # v1.3: 隔离关闭 = 清完即止(访客=普通内网SSID, 仅保留wifi_up的入桥/DHCP)

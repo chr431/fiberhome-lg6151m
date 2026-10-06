@@ -91,6 +91,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/src/v3_steth.c` | **v1.0** | src | `gw/bin/v3_steth.ko` | 听诊器模块源码(版本随产物) |
 | `gw/src/v3httpd.c` | **v2.2** | src | `gw/bin/v3httpd` | GUI HTTP服务源码(公开版经zig重编译) |
 | `gw/src/wpapmk.c` | **v1.0** | src | `gw/bin/wpapmk` | WPA PMK转换源码(纯C PBKDF2) |
+| `install/run.sh` | **v1.1** | tool | `-` | raw shell自驱脚本(v1.1: 分区次设备号从/proc/partitions动态解析成布局门禁, RP102/RP103通用; v1.0硬编码259:7等) |
 | `tools/agg_pins.conf.example` | **v1.1** | tool | `-` | MAC钉死表模板(真实表设备侧自管, 含个人MAC不入库) |
 | `tools/build_healthdog.sh` | **v1.0** | tool | `-` | healthdog.ko内核模块构建(内核树) |
 | `tools/build_mipc_cellular.sh` | **v1.0** | tool | `-` | mipc_cellular构建(zig cc aarch64-musl动态) |
@@ -156,5 +157,6 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `CLM-P3-FINALE`@ROADMAP.md | ✅实证 | `gw/rc_netfh.sh>=3.1` | 蜂窝引擎小区列表活着 (P3 终章) | ba9bb1d@2026-10-06 | P3完整收官: cfgmgr+logmgr+mobilenetwork+cfg_tool+shmsnap全部下架; 2次冷启动(守护0/shm0/keeper拨号35s)+55/55×2+全端点引擎化; KEEP_TREE=1一键回滚 |
 | `CLM-GUEST-INDEP`@FEATURE_MATRIX.md | ✅实证 | `gw/wifi_up.sh>=1.22` | 访客 BSS 配置/隔离防火墙一致 (guest_fw) | 87bebe7@2026-10-06 | 访客独立名称/频段(2g/5g/both)/密码; 隔离=原厂wifiguest.sh配方(仅出网); v1.22: 动态BSS必须显式入桥(hostapd不自动加, 帧死无IP接口致dnsmasq盲=tcpdump实证真根因); 真MLO见CLM-MLO |
 | `CLM-MLO`@FEATURE_MATRIX.md | ✅实证 | `gw/wifi_up.sh>=1.23` | MLO 状态与 dat 键一致 (v1.19) | 2a6b1c5@2026-10-06 | MLO真双链路可用+在线即时生效(v1.23拆链修复): -B在线重应用死亡机制已完全闭环(旧实例TERM不注销驱动MLD(设计行为), rai0 sync调和残留态发ML REMOVE(ra0)拆组退出,尾部日志被stdio缓冲吞; 下电清bss_mngr链路态即愈, T1-T7实证); 原厂=global守护永不重启+逐BSS REMOVE/ADD热重载; MLO开关双向在线切换验证; 全零表=v1.15事故形态禁写 |
+| `CLM-RP102-COMPAT`@install/README.md | ✅实证 | `install/run.sh>=1.1` | API login + token 生命周期 | fa2a1d6@2026-10-06 | RP102前向兼容: kit现场构建路径全兼容(底座自适应); 预构建RP103镜像禁入RP102(MDDB P56/P40+18个.ko+fhrom漂移三处错配); LK代码级相同仅签名槽差异; run.sh分区号动态解析成门禁 |
 
 <!--CLMAUDIT:END-->

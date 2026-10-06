@@ -8,7 +8,7 @@ A 槽。B 槽全程不动，随时可切回原厂。
 > **RP0102 设备同样适用**（本套件现场从设备自己的 B 槽构建底座，内核/模块/
 > modem 配置天然自洽；2026-10 双版本对比侦测结论：两版同 SDK 同内核 5.15.134，
 > WiFi 运行时逐字节相同，LK 命令面相同）。**但严禁把预构建的 RP0103 底座镜像
-> 直接刷入 RP0102**（modem 配置 P56 vs P40 错配等三处风险）——RP0102 必须走
+> 直接刷入 RP0102**（modem 配置 P56 vs P40 错配等三处风险）<!--CLM:CLM-RP102-COMPAT-->——RP0102 必须走
 > 本套件的现场构建流程。不确定设备版本时，在 raw shell 里：
 > `mknod /tmp/p39 b 259 7; mkdir -p /tmp/b; mount -t squashfs -o ro /tmp/p39 /tmp/b`
 > 后查 `grep BUILDNUM /tmp/b/etc/release`（476=RP0102，92249=RP0103）。

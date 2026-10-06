@@ -147,6 +147,12 @@ watchdog 集成（ccmni 无 IP→重拨）。出口：拔 SIM 重插自恢复 + 
 
 ### P5 深水区（**关闭 2026-10-06** — 无需启动） <!--CLM:CLM-P5-CLOSED-->
 
+### 聚合模式去歧义（**2026-10-06 深夜完成**） <!--CLM:CLM-AGG-MODES-->
+
+> 五模式对齐原厂: 按权重分流/以太优先/蜂窝优先/仅以太/仅蜂窝(wan_agg v2.18 MODE
+> 语义+仅模式E1/E2强制注入无failover+旧格式迁移; api v2.45 mode= 与滑块5-95钳制;
+> GUI v3.28 权重卡条件显示)。五模式API实弹循环切换全过, 59/59。
+
 > 关闭判定（实测）：并发多流传输期间设备 CPU 基本空转(top 实证) — 瓶颈在上游链路
 > 本身（当晚双上行均 <1Mbps, 传输中 CPU<2%），iptables mark+NAT 引擎开销远低于
 > 平台转发能力余量；quecadp 复活需完整 fhdrv 加载链(net_quecadp+ioctl 库+multiwan

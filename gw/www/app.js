@@ -1,4 +1,4 @@
-/* app.js v3.24 (访客隔离开关) -- v3 gateway console SPA
+/* app.js v3.25 (访客隔离开关 + MLO模式下改动提示重启生效) -- v3 gateway console SPA
  * v3.4: WiFi 分析仪(信道图/信道评级/AP列表/时间图 canvas多视图) + 信道下拉统一(2.4G补select, 双频加"自动"档)
  * 刷新机制彻底重做: 页面骨架只建一次(进入时), 轮询仅更新文本槽/小表格
  *   T(id,v) 文本槽(带变化检测)  H(id,v) 局部HTML(tbody级,带变化检测)
@@ -263,9 +263,9 @@ window.waSave = async () => {
         ($("wa-gpass").value ? `&guest_pass=${encodeURIComponent($("wa-gpass").value)}` : "");
     const j = await api("wifi_adv_set", body).catch(e => ({ error: e.message }));
     if (j.ok) {
-        toast(j.mlo_changed ? "已应用 — MLO 开关已变化, 需重启网关生效" : "已应用, 无线重启中");
+        toast(j.mlo_reboot ? "已保存 — MLO 模式下需重启网关生效" : (j.mlo_changed ? "已应用 — MLO 开关已变化, 需重启网关生效" : "已应用, 无线重启中"));
         $("wa-pass").value = ""; $("wa-gpass").value = "";
-        setTimeout(() => PAGES.wifi.tick(), 4000);
+        setTimeout(() => PAGES.wifi.tick(), j.mlo_reboot ? 1500 : 4000);
     } else toast("失败: " + (j.error || ""), 1);
 };
 /* ---------- WiFi 分析仪 (仿 WiFi Analyzer: 信道图/信道评级/AP列表/时间图) ----------

@@ -35,10 +35,10 @@ gw/bin/multiwan_ctl	1.1	manifest	/data/gw/multiwan_ctl	原厂multiwan引擎ioctl
 gw/bin/fhstub.so	1.0	manifest	/data/gw/fhstub.so	FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径)
 gw/led_mgr.sh	1.7	manifest	/data/gw/led_mgr.sh	原厂风格LED守护(v1.7: 信标看门狗vif枚举动态化适配访客双频; v1.4传输层改sysfs gpio; v1.6 配置统一overlay+信标看门狗)
 gw/bin/v3httpd	2.2	manifest	/data/gw/v3httpd	网关GUI HTTP服务(:80, 静态+JSON API)
-gw/www/api.sh	2.40	manifest	/data/gw/www/api.sh	GUI JSON端点(v2.39: mlo字段+强制双频同名+mlo_changed重启提示; v2.38: 主WiFi密码/加密并入; v2.37访客独立化)
+gw/www/api.sh	2.41	manifest	/data/gw/www/api.sh	GUI JSON端点(v2.39: mlo字段+强制双频同名+mlo_changed重启提示; v2.38: 主WiFi密码/加密并入; v2.37访客独立化)
 gw/www/index.html	2.14	manifest	/data/gw/www/index.html	v3控制台页面
 gw/www/style.css	2.1	manifest	/data/gw/www/style.css	控制台主题
-gw/www/app.js	3.24	manifest	/data/gw/www/app.js	控制台SPA(v3.23: 双频合一+MLO真双链路选项(值2映射mlo=1)+切换重启提示; v3.22: WiFi页重构)
+gw/www/app.js	3.25	manifest	/data/gw/www/app.js	控制台SPA(v3.23: 双频合一+MLO真双链路选项(值2映射mlo=1)+切换重启提示; v3.22: WiFi页重构)
 tools/agg_pins.conf.example	1.1	tool	-	MAC钉死表模板(真实表设备侧自管, 含个人MAC不入库)
 gw/fan_mgr.sh	1.3	manifest	/data/gw/fan_mgr.sh	原厂梯度温控风扇(v1.3: 配置统一overlay+修复v1.2双/data/gw路径bug——GUI静音切换从未生效的根因)
 gw/fan_mode.conf	1.0	manifest	/data/gw/fan_mode.conf	风扇模式:performance|silent(静音+6°C偏移)

@@ -1,9 +1,10 @@
 #!/bin/sh
-# guest_fw.sh v1.5 — 访客网络隔离 (v1.5: INPUT链限定--ip-dst=网关, 修v1.4误杀路由流量致断网)
+# guest_fw.sh v1.6 — 访客网络隔离 (强制开启, 无开关)
 #
-# v1.3: 隔离开关 GUEST_ISOLATE(默认1) — settings.conf 可关(=0): 访客作为普通
-#   内网 SSID(用户场景: 给不支持 MLO 的设备一个兼容 SSID), 仅保留入桥(wifi_up
-#   负责 DHCP 可用), 不施加任何隔离规则。关->开/开->关 都幂等。
+# v1.6 (审计P0): 删除 GUEST_ISOLATE 开关 — 访客可达管理面/内网曾是开关关闭态,
+#   属实弹高危面(访客口令一旦泄露=内网全权)。兼容需求(不支持MLO的设备等)改由
+#   主 WiFi "终端频段锁定"(band_pins.conf) 承接, 访客一律仅出网。
+# v1.3(历史): 曾有 GUEST_ISOLATE=0 普通内网SSID兼容模式, 已移除。
 # v1.2 架构: broute DROP 强制L3路由在本内核+多WAN mark管线 pre-conntrack 蒸发,
 #   改与主WiFi同路径(全桥接->网关MAC本地交付->路由出网)。隔离三层:
 #   ebtables filter FORWARD 双向 DROP (L2: 访客帧不达任何其他桥口)
@@ -16,11 +17,6 @@
 
 PRE=WIFI_GUEST
 STATE=/tmp/guest_fw.state
-GWDATA=$(cd "$(dirname "$0")" && pwd)
-GUEST_ISOLATE=1
-[ -r "$GWDATA/defaults.conf" ] && . "$GWDATA/defaults.conf"
-[ -r "$GWDATA/settings.conf" ] && . "$GWDATA/settings.conf"
-case "$GUEST_ISOLATE" in 0|1) ;; *) GUEST_ISOLATE=1 ;; esac
 LAN_NET=$(ip route show dev br-lan 2>/dev/null | awk 'NR==1{print $1}')
 [ -z "$LAN_NET" ] && LAN_NET=192.168.9.0/24
 GW_IP=$(ip -o -4 addr show br-lan 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)   # v1.5: INPUT链--ip-dst锚点
@@ -116,12 +112,7 @@ sync)
             [ -d /sys/class/net/$_if ] || clean_iface $_if
         done
     done
-    # v1.3: 隔离关闭 = 清完即止(访客=普通内网SSID, 仅保留wifi_up的入桥/DHCP)
-    if [ "$GUEST_ISOLATE" != 1 ]; then
-        : > $STATE
-        log "isolation OFF (GUEST_ISOLATE=0) — guest rides plain LAN"
-        exit 0
-    fi
+    # v1.6: 隔离无条件启用(开关已删) — settings.conf 残留 GUEST_ISOLATE 键被忽略
     : > $STATE.new
     for _if in ra1 rai1; do
         [ -d /sys/class/net/$_if ] || continue

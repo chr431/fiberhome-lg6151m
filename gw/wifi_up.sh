@@ -1,5 +1,5 @@
 #!/bin/sh
-# wifi_up.sh — v3 WiFi bring-up (v1.25: v1.19 块过期 reboot 注释修正(v1.23 已撤销); v1.24: MLD快照按uptime过滤; v1.23: MLO在线重应用先下电回冷启动等价态, 撤销需重启纪律; v1.22: 访客iface显式入桥; v1.20: MLO单次AP启动; v1.19: MLO真双链路 — 两带 dat 各写 MldGroup=1;0;x6
+# wifi_up.sh — v3 WiFi bring-up (v1.26: 终端频段锁定 band_pins.conf→对侧频段deny ACL; v1.25: v1.19 块过期 reboot 注释修正(v1.23 已撤销); v1.24: MLD快照按uptime过滤; v1.23: MLO在线重应用先下电回冷启动等价态, 撤销需重启纪律; v1.22: 访客iface显式入桥; v1.20: MLO单次AP启动; v1.19: MLO真双链路 — 两带 dat 各写 MldGroup=1;0;x6
 #   (RE实证: stock be_init_wlan_apcfg_file 同款形态, 1基组号配对成MLD; 全零表=v1.15
 #   事故形态禁写; MldAddr/ApcliMloDisable 勿写; MLD生效需冷启动(FW锁存); 纯MLO不需wapp);
 #   v1.18: 访客独立配置; v1.16: F3单进程hostapd; v1.10: 自动信道扫描选道),
@@ -552,6 +552,24 @@ country_code=CN
 he_oper_chwidth=2
 he_oper_centr_freq_seg0_idx=50
 HDFS
+        # v1.26: 终端频段锁定 — band_pins.conf(<mac>|2g|5g) 在对侧频段 main BSS 挂
+        # deny ACL(hostapd macaddr_acl=0+deny_mac_file, 二进制已实证含该指令)。
+        # 锁 2.4G => 5G 拒之, 反之亦然; MLO 开启时该终端回落单链路(预期语义)。
+        # 必须在 guest_bss 追加(bss=段)之前写入 = 归属 main BSS; strip_guest 只摘
+        # bss= 起至 EOF, 本段指令不受影响。无 pin 时零输出(conf 与旧版逐字节一致)。
+        BPF=$B/band_pins.conf
+        if [ -r "$BPF" ]; then
+            : > /var/wlan/deny_2g.txt; : > /var/wlan/deny_5g.txt
+            grep -v '^#' "$BPF" | while IFS='|' read _pm _pb; do
+                [ -n "$_pm" ] || continue
+                case "$_pb" in
+                    2g) echo "$_pm" >> /var/wlan/deny_5g.txt ;;
+                    5g) echo "$_pm" >> /var/wlan/deny_2g.txt ;;
+                esac
+            done
+            [ -s /var/wlan/deny_2g.txt ] && printf 'macaddr_acl=0\ndeny_mac_file=/var/wlan/deny_2g.txt\n' >> /var/wlan/hap_2g.conf
+            [ -s /var/wlan/deny_5g.txt ] && printf 'macaddr_acl=0\ndeny_mac_file=/var/wlan/deny_5g.txt\n' >> /var/wlan/hap_5g.conf
+        fi
         # v1.18: 访客网络 — 独立名称/频段/密码; hostapd 第二BSS(动态创建), 客户端隔离。
         # 频段: 2g->ra1(2.4G) / 5g->rai1(5G, v1.4默认) / both->双频同名双BSS(漫游)。
         # 隔离的强制面(hostapd ap_isolate + guest_fw.sh ebtables)在 hostapd 拉起后统一施加。

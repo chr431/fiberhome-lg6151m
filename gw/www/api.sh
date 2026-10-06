@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.46 (get_cellular mipc 分支修复: bandlock/celllock 经 %s 展开(原单引号串把 ${BAND_EN:-0} 字面量发给 GUI)+回读 CELL_i 锁定表; v2.45: 聚合五模式mode=weight|cell_prio|eth_prio|cell_only|eth_only; 权重滑块5-95钳制; v2.44 sse端点) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.47 (审计P0: login失败锁定10次/15分钟; wifi_set auth补白名单(堵settings.conf注入); gw_set拒控制字符; 访客隔离强制开启删开关; +终端频段锁定band_pin*) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -68,6 +68,9 @@ cfg_load() {
 }
 gw_set() {  # gw_set <key> <value> — upsert settings.conf
     K=$1; V=$2; F=$GWDATA/settings.conf
+    # v2.47 (审计P0): settings.conf 会被 root 身份 source — 换行/控制字符可注入
+    # 整行(含裸命令), 一票否决; 各端点的值域白名单仍为第一道防线(纵深第二道)。
+    printf '%s' "$V" | LC_ALL=C grep -q '[^ -~]' && jerr bad_chars
     grep -v "^$K=" "$F" 2>/dev/null > "$F.new"
     echo "$K=$V" >> "$F.new"
     mv "$F.new" "$F"
@@ -126,6 +129,9 @@ apply_wifi() {
     SB=$(form_kv ssid_base); WPAPSK=$(form_kv pass); AUTH=$(form_kv auth)
     [ -z "$SB" ] && SB="${SSID_BASE:-LG6151M}"
     echo "$SB$WPAPSK" | grep -qE '[^A-Za-z0-9_. -]' && jerr bad_chars
+    # v2.47 (审计P0): auth 补白名单 — 原样落盘 settings.conf 会被 root source,
+    # `x$(cmd)` 类值即命令注入(与 apply_wifi_adv :AUTHV 同范式)
+    case "$AUTH" in ""|WPA2PSK|WPA2PSKWPA3PSK) ;; *) jerr bad_auth ;; esac
     if [ -n "$WPAPSK" ]; then
         echo "$WPAPSK" | grep -qE '^[A-Za-z0-9-]{8,63}$' || jerr bad_pass
     fi
@@ -615,9 +621,9 @@ get_wifi_adv() {
     [ -r /tmp/wifi_autoch ] && . /tmp/wifi_autoch   # wifi_up 自动选道落点(信道=0时)
     GS_RAW="${GUEST_SSID:-}"
     GS_EFF="${GUEST_SSID:-${SSID_BASE:-}-Guest}"
-    printf '{"ssid_base":"%s","ch2g":"%s","ch5g":"%s","bw2g":"%s","bw5g":"%s","power":"%s","hidden2g":"%s","hidden5g":"%s","auth":"%s","guest":"%s","guest_ssid":"%s","guest_ssid_eff":"%s","guest_band":"%s","guest_isolate":"%s","guest_pass":"%s","inone":"%s","mlo":"%s","res2g":"%s","res5g":"%s","ts":%d}' \
+    printf '{"ssid_base":"%s","ch2g":"%s","ch5g":"%s","bw2g":"%s","bw5g":"%s","power":"%s","hidden2g":"%s","hidden5g":"%s","auth":"%s","guest":"%s","guest_ssid":"%s","guest_ssid_eff":"%s","guest_band":"%s","guest_pass":"%s","inone":"%s","mlo":"%s","res2g":"%s","res5g":"%s","ts":%d}' \
         "${SSID_BASE:-}" "${CH2G:-6}" "${CH5G:-149}" "${BW2G:-20}" "${BW5G:-80}" "${POWER:-100}" \
-        "${H2:-0}" "0" "${AUTH:-WPA2PSK}" "${GUEST:-0}" "$GS_RAW" "$GS_EFF" "${GUEST_BAND:-5g}" "${GUEST_ISOLATE:-1}" "${GUEST_PASS:+1}" "${INONE:-0}" "${MLO:-0}" "${RCH2G:-}" "${RCH5G:-}" "$(date +%s)"
+        "${H2:-0}" "0" "${AUTH:-WPA2PSK}" "${GUEST:-0}" "$GS_RAW" "$GS_EFF" "${GUEST_BAND:-5g}" "${GUEST_PASS:+1}" "${INONE:-0}" "${MLO:-0}" "${RCH2G:-}" "${RCH5G:-}" "$(date +%s)"
 }
 apply_wifi_adv() {
     # v1.2: 先源旧conf(保留SSID/密码等非本表单字段), 再读表单值覆盖同名项
@@ -633,9 +639,6 @@ apply_wifi_adv() {
     # v2.37: 访客独立项 — 名称(present但可空=回退派生)/频段(2g|5g|both)
     GSS=""; form_has guest_ssid && GSS=$(form_kv guest_ssid)
     GBAND=$(form_kv guest_band)
-    # v2.40: 访客隔离开关(默认1=仅出网; 0=普通内网SSID, 兼容机场景)
-    GISOL=$(form_kv guest_isolate)
-    [ "$GISOL" = 0 ] || [ "$GISOL" = 1 ] || GISOL=1
     echo "$CH2$CH5$BW2$BW5$PW" | grep -qE '[^0-9]' && jerr bad_num
     # 信道: 0=自动(wifi_up启动扫描选道); 2.4G 1-13(CN), 5G限定8个非DFS道
     { [ "$CH2" -eq 0 ] || { [ "$CH2" -ge 1 ] && [ "$CH2" -le 13 ]; } } 2>/dev/null || jerr bad_ch
@@ -676,7 +679,7 @@ apply_wifi_adv() {
     gw_set POWER "$PW"; gw_set HIDDEN "$HID"; gw_set GUEST "$GUEST"; gw_set INONE "$INONE"
     gw_set MLO "$MLOV"
     gw_set GUEST_BAND "$GBAND"
-    gw_set GUEST_ISOLATE "$GISOL"
+    gw_del GUEST_ISOLATE   # v2.47: 访客隔离强制开启(开关已删), 清残留键
     if [ -n "$GSS" ]; then gw_set GUEST_SSID "$GSS"; elif form_has guest_ssid; then gw_del GUEST_SSID; fi
     if [ -n "$GSTP" ]; then gw_set GUEST_PASS "$GSTP"; fi
     [ -n "$MPW" ] && gw_set WPAPSK "$MPW"
@@ -689,6 +692,33 @@ apply_wifi_adv() {
     [ "$MLOV" != "${MLO:-0}" ] && MLO_NOTE='"mlo_changed":1'
     sh $GWDATA/wifi_up.sh >/tmp/wifi_up.log 2>&1 &
     ok_json "$MLO_NOTE"
+}
+
+# -- 终端频段锁定 (v2.47: 承接原访客"兼容机模式"需求 — 主 WiFi 按 MAC 钉死单频段,
+#    避免终端在双频间频繁切换; 访客隔离改强制开启后的兼容出口。wifi_up 消费
+#    band_pins.conf 在对侧频段 main BSS 挂 deny ACL。写配置不重启 — 由 GUI 显式
+#    应用(调 wifi_restart), 批量增删只付一次重启代价) --
+get_band_pin() {
+    [ -r $GWDATA/band_pins.conf ] || { printf '{"pins":[]}'; return; }
+    PINS=$(grep -v '^#' $GWDATA/band_pins.conf | awk -F'|' '$1!=""&&$2!=""{printf "{\"mac\":\"%s\",\"band\":\"%s\"},",$1,$2}')
+    printf '{"pins":[%s]}' "${PINS%,}"
+}
+apply_band_pin_add() {
+    M=$(form_kv mac | tr 'A-F' 'a-f'); B=$(form_kv band)
+    printf '%s' "$M" | grep -qE '^[0-9a-f]{2}(:[0-9a-f]{2}){5}$' || jerr bad_mac
+    case "$B" in 2g|5g) ;; *) jerr bad_band ;; esac
+    F=$GWDATA/band_pins.conf
+    grep -v "^$M|" $F 2>/dev/null > /tmp/bp.$$    # 同 MAC 再加 = 改频段
+    echo "$M|$B" >> /tmp/bp.$$
+    mv /tmp/bp.$$ $F
+    ok_json
+}
+apply_band_pin_del() {
+    M=$(form_kv mac | tr 'A-F' 'a-f')
+    printf '%s' "$M" | grep -qE '^[0-9a-f]{2}(:[0-9a-f]{2}){5}$' || jerr bad_mac
+    grep -v "^$M|" $GWDATA/band_pins.conf 2>/dev/null > /tmp/bp.$$
+    mv /tmp/bp.$$ $GWDATA/band_pins.conf
+    ok_json
 }
 
 
@@ -1207,8 +1237,21 @@ case "$EP" in
             chmod 600 $GWDATA/gui_auth.conf
         fi
         P=$(form_kv pass)
+        # v2.47 (审计P0): 失败锁定 — 连续 10 次失败锁 15 分钟(全局单管理员, 无按源
+        # 区分: LAN 内伪造源地址成本低, 全局足够)。成功即清零; 窗口滑动(每次失败
+        # 刷新时间戳)。文件只存"次数 时间戳", 无敏感内容。
+        FAILF=/tmp/gui_auth.fails; FC=0; FL=0
+        read FC FL < $FAILF 2>/dev/null
+        case "$FC" in ''|*[!0-9]*) FC=0 ;; esac
+        case "$FL" in ''|*[!0-9]*) FL=0 ;; esac
+        NOW=$(date +%s)
+        { [ "$FC" -ge 10 ] && [ $((NOW - FL)) -lt 900 ]; } && jerr locked
         H=$(printf '%s' "$P" | sha256sum | cut -d' ' -f1)
-        [ "$H" = "$(cat $GWDATA/gui_auth.conf 2>/dev/null)" ] || jerr bad_login
+        if [ "$H" != "$(cat $GWDATA/gui_auth.conf 2>/dev/null)" ]; then
+            echo "$((FC + 1)) $NOW" > $FAILF
+            jerr bad_login
+        fi
+        rm -f $FAILF
         _D=0; [ "$H" = "$(printf '%s' "lg6151m" | sha256sum | cut -d' ' -f1)" ] && _D=1
         printf '{"ok":true,"token":"%s","default":%s}' "$(tok_new)" "$_D"
         ;;
@@ -1216,6 +1259,9 @@ case "$EP" in
         need_tok; rm -f $TOKDIR/$(form_kv token); ok_json ;;
     # write POST (token)
     wifi_set)     need_tok; apply_wifi ;;
+    band_pin)     need_tok; get_band_pin ;;
+    band_pin_add) need_tok; apply_band_pin_add ;;
+    band_pin_del) need_tok; apply_band_pin_del ;;
     dhcp_set)     need_tok; apply_dhcp ;;
     fwd_add)      need_tok; apply_fwd_add ;;
     fwd_del)      need_tok; apply_fwd_del ;;

@@ -41,7 +41,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 |---|---|---|---|---|
 | `README.md` | **v1.1** | doc | `-` | 仓库总览与快速上手 |
 | `docs/ARCHITECTURE.md` | **v1.1** | doc | `-` | 架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针) |
-| `docs/GUI_TERMINOLOGY.md` | **v1.0** | doc | `-` | GUI用户可见文案常设基准(统一原则/冲突清单T·P/规范术语表/状态动作词/单位符号/错误码映射; gw/www文案改动前必查) |
+| `docs/GUI_TERMINOLOGY.md` | **v1.1** | doc | `-` | GUI用户可见文案常设基准(v1.1: +终端频段锁定行+locked错误码; 访客隔离标注固定开启; 历史版本见git) |
 | `gw/bin/fhstub.so` | **v1.0** | manifest | `/data/gw/fhstub.so` | FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径) |
 | `gw/bin/healthdog.ko` | **v1.0** | manifest | `/data/gw/healthdog.ko` | 取证看门狗内核模块(forensic=1) |
 | `gw/bin/mipc_cellular` | **v0.5** | manifest | `/data/gw/mipc_cellular` | 蜂窝MIPC直连CLI(getbands/setlock/unlock; 锁NR41+79实弹验证零扰动) |
@@ -60,8 +60,8 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/dial_variant.sh` | **v1.1** | manifest | `/data/gw/dial_variant.sh` | 5G 拨号参数变体实验器(iptype/apn/plmn/roam) |
 | `gw/fan_mgr.sh` | **v1.3** | manifest | `/data/gw/fan_mgr.sh` | 原厂梯度温控风扇(v1.3: 配置统一overlay+修复v1.2双/data/gw路径bug——GUI静音切换从未生效的根因) |
 | `gw/fan_mode.conf` | **v1.0** | manifest | `/data/gw/fan_mode.conf` | 风扇模式:performance|silent(静音+6°C偏移) |
-| `gw/fw_apply.sh` | **v1.3** | manifest | `/data/gw/fw_apply.sh` | 端口映射/DMZ/禁网安装器(rc_netfh开机+api共用); v1.2/P0: +V3WANGUARD WAN面纵深封禁(23/5683/30005/1899x, 双WAN面) |
-| `gw/guest_fw.sh` | **v1.5** | manifest | `/data/gw/guest_fw.sh` | 访客隔离防火墙v1.5(INPUT链--ip-dst=网关锚定——v1.4无差别DROP误杀访客待路由流量全断网; v1.4(ebtables INPUT本机交付链修访客可达管理面—桥接本地交付indev=br-lan致iptables -i<if>永不命中,ebtables按桥口匹配; v1.3(隔离开关GUEST_ISOLATE默认1,0=普通内网SSID兼容机模式); v1.2架构重设计(broute DROP强制L3路由在本内核+多WAN mark管线pre-conntrack蒸发→访客无网; 改纯桥接路径+ebtables双向L2+iptables L3, 与主WiFi同数据面; v1.1: iptables链白名单DHCP67:68/DNS53 — br_netfilter=1下桥接广播本地投递走INPUT, v1.0全DROP杀DHCP致手机卡获取IP(实弹10包实证)) |
+| `gw/fw_apply.sh` | **v1.4** | manifest | `/data/gw/fw_apply.sh` | 端口映射/DMZ/禁网安装器(rc_netfh开机+api共用); v1.4(审计P0): +V6WANGUARD—IPv6 WAN面默认拒绝(INPUT/FORWARD, 放行ICMPv6/DHCPv6/established), 实测堵死WAN侧v6直连:22; v1.3: +22入封禁 |
+| `gw/guest_fw.sh` | **v1.6** | manifest | `/data/gw/guest_fw.sh` | 访客隔离防火墙v1.6(审计P0: GUEST_ISOLATE开关删除=强制隔离; 兼容需求改由主WiFi终端频段锁定承接; 历史版本见git) |
 | `gw/healthdog.sh` | **v1.1** | manifest | `/data/gw/healthdog.sh` | 看门狗用户态心跳 |
 | `gw/led_mgr.sh` | **v1.7** | manifest | `/data/gw/led_mgr.sh` | 原厂风格LED守护(v1.7: 信标看门狗vif枚举动态化适配访客双频; v1.4传输层改sysfs gpio; v1.6 配置统一overlay+信标看门狗) |
 | `gw/mipc_dial_trace.sh` | **v1.0** | manifest | `/data/gw/mipc_dial_trace.sh` | 5G 拨号取证(xtrace 抓真参) |
@@ -80,10 +80,10 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/webs_revive.sh` | **v1.3** | manifest | `/data/gw/webs_revive.sh` | 原厂GUI复活器(自足nginx conf; 手动拉起) |
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
-| `gw/wifi_up.sh` | **v1.25** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.25: v1.19块过期'切换MLO必须reboot'注释修正(v1.23已改在线重应用); v1.24: MLD快照按本次运行uptime过滤(历史失败轮grp(0)污染断言,二犯); v1.23: MLO在线重应用先下电回冷启动等价态(T1-T5矩阵:-B后台化在接口UP+MLD武装态必死,下电即愈;撤销v2.41重启纪律); v1.22: 访客iface显式入桥(动态BSS不自动加bridge→帧死无IP接口→dnsmasq盲,tcpdump实证); v1.21: MLO访客静态单链路组17/18; v1.20: MLO单次AP启动; v1.19: MLO真双链路—MldGroup=1;0;x6写两带dat(RE实证stock同款,1基组号; 全零表=v1.15事故形态禁写; MldAddr/ApcliMloDisable勿写); v1.18: 访客独立化) |
-| `gw/www/api.sh` | **v2.46** | manifest | `/data/gw/www/api.sh` | GUI JSON端点(v2.46: get_cellular mipc分支修复=bandlock/celllock经%s展开(原单引号格式串把${BAND_EN:-0}字面量发给GUI)+回读CELL_i锁定表(原恒空); v2.45: 聚合五模式mode=; v2.44: sse端点) |
-| `gw/www/app.js` | **v3.29** | manifest | `/data/gw/www/app.js` | 控制台SPA(v3.29: 文案整改落地=术语表统一(docs/GUI_TERMINOLOGY.md)+错误码中文映射+审计G-01..G-46修复; v3.28: 聚合五模式选择; v3.23: MLO选项) |
-| `gw/www/index.html` | **v2.15** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.15: 导航改'终端'+页头去内部版本号+缓存v49) |
+| `gw/wifi_up.sh` | **v1.26** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.26: 终端频段锁定band_pins.conf→对侧频段main BSS deny ACL(macaddr_acl=0+deny_mac_file, 指令支持已实证); 无pin时conf与v1.25逐字节一致; 历史版本见git) |
+| `gw/www/api.sh` | **v2.47** | manifest | `/data/gw/www/api.sh` | GUI JSON端点(v2.47(审计P0): login失败锁定10次/15分钟(locked码); wifi_set auth补白名单堵settings.conf注入; gw_set拒控制字符; 访客隔离强制删开关+残留键清理; +band_pin/band_pin_add/band_pin_del终端频段锁定; 历史版本见git) |
+| `gw/www/app.js` | **v3.30** | manifest | `/data/gw/www/app.js` | 控制台SPA(v3.30: 访客隔离开关移除(强制隔离); +终端频段锁定卡(添加/删除/应用变更); +locked错误码; 历史版本见git) |
+| `gw/www/index.html` | **v2.16** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.16: 缓存v50) |
 | `gw/www/style.css` | **v2.1** | manifest | `/data/gw/www/style.css` | 控制台主题 |
 | `gw/zz_data_hook` | **v1.1** | manifest | `/data/build/rootfs/etc/init.d/zz_data_hook` | S98数据钩子(v1.1: plain sh——原厂无/etc/rc.common, rc.common式shebang致开机栈全灭; 回归实测发现) |
 | `gw/src/fhstub.c` | **v1.0** | src | `gw/bin/fhstub.so` | FH符号桩库源码 |
@@ -117,7 +117,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/lk_flip2.py` | **v1.1** | tool | `-` | LK 一键翻槽(a|b, misc[2060]字节) |
 | `tools/lk_write.py` | **v1.6** | tool | `-` | LK raw-shell 文件写入(回显校验+tmpfs挂载+cmdlist巡检, 取代lk_fix_access) |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
-| `tools/selftest.py` | **v2.10** | tool | `-` | 断言式全功能测试(v2.5: 访客桥成员断言; v2.4: MLO断言—dat组表与MLD建立日志一致+全零表护栏; v2.3: 隔离链DHCP/DNS白名单; 57项) |
+| `tools/selftest.py` | **v2.11** | tool | `-` | 断言式全功能测试(v2.11: 访客隔离断言改无条件—开关已删; 历史版本见git) |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |
 | `tools/serial_server.py` | **v1.7** | tool | `-` | 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets) |
 | `tools/vercheck.py` | **v1.5** | tool | `-` | 版本注册表校验/渲染/设备比对(v1.3: device()随deploy基座迁/data/gw; v1.2性质分区双向强制+全跟踪文件可归类; v1.1 image类md5钉死) |

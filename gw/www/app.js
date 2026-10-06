@@ -1,4 +1,4 @@
-/* app.js v3.29 (GUI 文案整改: 术语统一+错误码中文化+审计 G-01..G-46 落地, 基准=docs/GUI_TERMINOLOGY.md) -- v3 gateway console SPA
+/* app.js v3.30 (审计P0: 访客隔离强制开启删开关; +终端频段锁定卡(承接兼容需求); +locked错误码) -- v3 gateway console SPA
  * v3.28: 聚合五模式选择; v3.27: SSE 实时信号; v3.26: 聚合滑块应用后回读同步
  * v3.4: WiFi 分析仪(信道图/信道评级/AP列表/时间图 canvas多视图) + 信道下拉统一(2.4G补select, 双频加"自动"档)
  * 刷新机制彻底重做: 页面骨架只建一次(进入时), 轮询仅更新文本槽/小表格
@@ -37,7 +37,7 @@ document.getElementById("modal").addEventListener("click", e => { if (e.target.i
 /* ---------- 用户可见文案基准: docs/GUI_TERMINOLOGY.md ---------- */
 /* 错误码 -> 中文原因 (api.sh jerr 全集); 未列码兜底"操作失败" (术语表第七节) */
 const ERR = {
-    need_login: "登录已过期，请重新登录", bad_login: "密码错误", bad_old: "当前密码错误",
+    need_login: "登录已过期，请重新登录", bad_login: "密码错误", bad_old: "当前密码错误", locked: "失败次数过多，请 15 分钟后再试",
     bad_pass: "密码不符合要求（8-63 位字母、数字或连字符）", need_guest_pass: "开启访客网络前请先设置访客密码",
     bad_chars: "名称含不支持的字符（仅限字母、数字、空格与 . _ -）", bad_len: "名称过长（最多 32 个字符）",
     bad_ip: "IP 地址格式不正确", bad_mac: "MAC 地址格式不正确", bad_num: "请输入数字",
@@ -268,10 +268,18 @@ PAGES.wifi = {
           <div class="frm"><label>访客网络名称</label><input id="wa-gssid" placeholder="空 = 默认名称"></div>
           <div class="frm"><label>访客频段</label><select id="wa-gband"><option value="5g">5GHz</option><option value="2g">2.4GHz</option><option value="both">双频（同名漫游）</option></select></div>
           <div class="frm"><label>访客密码</label><input id="wa-gpass" type="password" placeholder="8-63 位，开启时必填"></div>
-          <div class="frm"><label>访客隔离</label><select id="wa-giso"><option value="1">开启（仅可上网）</option><option value="0">关闭（可访问内网）</option></select></div>
         </div>
         <button class="pri" onclick="waSave()">应用访客设置</button>
-        <span class="hint">名称、频段、密码独立于主 WiFi；隔离开启时仅可上网</span>`)}
+        <span class="hint">名称、频段、密码独立于主 WiFi；访客仅可上网，与内网隔离</span>`)}
+      ${card("终端频段锁定", `
+        <div class="row3">
+          <div class="frm"><label>MAC 地址</label><input id="bp-mac" placeholder="例如 aa:bb:cc:dd:ee:ff" class="mono"></div>
+          <div class="frm"><label>锁定频段</label><select id="bp-band"><option value="2g">2.4GHz</option><option value="5g">5GHz</option></select></div>
+          <div class="frm" style="align-self:end"><button class="pri mini" onclick="bpAdd()">添加</button></div>
+        </div>
+        <table><thead><tr><th>MAC 地址</th><th>锁定频段</th><th></th></tr></thead><tbody id="bp-tb"></tbody></table>
+        <button class="pri" onclick="bpApply()">应用变更</button>
+        <span class="hint">将终端固定在单一频段，避免双频之间频繁切换；应用后无线会短暂重启，已连接终端需重连。MLO 真双链路开启时，已锁定的终端自动回落单链路</span>`)}
       ${card("已连接终端", '<table><thead><tr><th>接口</th><th>MAC</th><th>信号</th><th>↓</th><th>↑</th></tr></thead><tbody id="wfs-tb"></tbody></table>')}
       ${card("WiFi 分析仪 (邻居网络)", `
         <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px">
@@ -310,10 +318,10 @@ PAGES.wifi = {
         F("wa-ch2", adv.ch2g); F("wa-bw2", adv.bw2g); F("wa-ch5", adv.ch5g);
         F("wa-bw5", adv.bw5g); F("wa-pw", adv.power); F("wa-hid", adv.hidden2g);
         F("wa-guest", adv.guest); F("wa-inone", adv.mlo == 1 ? "2" : adv.inone);
-        F("wa-giso", adv.guest_isolate == null ? "1" : String(adv.guest_isolate));
         F("wa-gband", adv.guest_band || "5g"); F("wa-gssid", adv.guest_ssid || "");
         F("wa-auth", adv.auth || "WPA2PSK");
         $("wa-gssid").placeholder = `空 = 默认 ${adv.guest_ssid_eff || "名称-Guest"}`;
+        bpList();   // v3.30: 终端频段锁定列表(带diff守卫, 不打字扰)
     }
 };
 /* v3.22: 主WiFi卡与访客卡共用一个原子提交(端点要求全字段);
@@ -321,7 +329,7 @@ PAGES.wifi = {
  * v3.23: 双频合一 select 第3值=MLO真双链路(映射 mlo=1&inone=1, 其余映射 mlo=0) */
 window.waSave = async () => {
     const io = $("wa-inone").value;
-    const body = `ch2=${$("wa-ch2").value}&ch5=${$("wa-ch5").value}&bw2=${$("wa-bw2").value}&bw5=${$("wa-bw5").value}&power=${$("wa-pw").value}&hidden=${$("wa-hid").value}&guest=${$("wa-guest").value}&inone=${io === "2" ? 1 : io}&mlo=${io === "2" ? 1 : 0}&guest_ssid=${encodeURIComponent($("wa-gssid").value)}&guest_band=${$("wa-gband").value}&guest_isolate=${$("wa-giso").value}&ssid_base=${encodeURIComponent($("wa-base").value)}&auth=${$("wa-auth").value}` +
+    const body = `ch2=${$("wa-ch2").value}&ch5=${$("wa-ch5").value}&bw2=${$("wa-bw2").value}&bw5=${$("wa-bw5").value}&power=${$("wa-pw").value}&hidden=${$("wa-hid").value}&guest=${$("wa-guest").value}&inone=${io === "2" ? 1 : io}&mlo=${io === "2" ? 1 : 0}&guest_ssid=${encodeURIComponent($("wa-gssid").value)}&guest_band=${$("wa-gband").value}&ssid_base=${encodeURIComponent($("wa-base").value)}&auth=${$("wa-auth").value}` +
         ($("wa-pass").value ? `&pass=${encodeURIComponent($("wa-pass").value)}` : "") +
         ($("wa-gpass").value ? `&guest_pass=${encodeURIComponent($("wa-gpass").value)}` : "");
     const j = await api("wifi_adv_set", body).catch(e => ({ error: e.message }));
@@ -330,6 +338,31 @@ window.waSave = async () => {
         $("wa-pass").value = ""; $("wa-gpass").value = "";
         setTimeout(() => PAGES.wifi.tick(), 4000);
     } else toast(eMsg(j.error), 1);
+};
+/* ---------- 终端频段锁定 (v3.30: 主WiFi按MAC钉死单频段 — 承接访客兼容需求, 访客隔离已强制开启) ---------- */
+let _bpLast = "";
+const bpList = async () => {
+    const j = await api("band_pin").catch(() => ({ pins: [] }));
+    const html = (j.pins || []).map(p =>
+        `<tr><td class="mono">${p.mac}</td><td>${p.band === "2g" ? "2.4GHz" : "5GHz"}</td><td><button class="ghost mini" onclick="bpDel('${p.mac}')">删除</button></td></tr>`).join("")
+        || `<tr><td colspan="3" class="hint">暂无锁定终端</td></tr>`;
+    if (html !== _bpLast) { _bpLast = html; H("bp-tb", html); }
+};
+window.bpAdd = async () => {
+    const mac = $("bp-mac").value.trim();
+    const j = await api("band_pin_add", `mac=${encodeURIComponent(mac)}&band=${$("bp-band").value}`).catch(e => ({ error: e.message }));
+    if (j.ok) { toast("已添加，应用变更后生效"); $("bp-mac").value = ""; bpList(); }
+    else toast(eMsg(j.error), 1);
+};
+window.bpDel = async (mac) => {
+    const j = await api("band_pin_del", `mac=${encodeURIComponent(mac)}`).catch(e => ({ error: e.message }));
+    if (j.ok) { toast("已删除，应用变更后生效"); bpList(); }
+    else toast(eMsg(j.error), 1);
+};
+window.bpApply = async () => {
+    const j = await api("wifi_restart").catch(e => ({ error: e.message }));
+    if (j.ok) { toast("已应用，无线重启中"); setTimeout(() => PAGES.wifi.tick(), 4000); }
+    else toast(eMsg(j.error), 1);
 };
 /* ---------- WiFi 分析仪 (仿 WiFi Analyzer: 信道图/信道评级/AP列表/时间图) ----------
  * 数据只来自 wifiscan 端点; 画布一次建骨架, 扫描后重绘; 时间图靠「自动」积累历史 */

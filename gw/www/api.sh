@@ -520,6 +520,11 @@ $R2"
         /^[ 	]+freq:/ { freq=$2 }
         /^[ 	]+SSID:/ { ssid=substr($0, index($0,":")+2) }
         /^[ 	]+(WPA|RSN):/ { sec="WPA" }
+        /channel width: [0-9]+ \(([0-9]+)/ {
+            w = $0; sub(/.*\(/, "", w); sub(/[^0-9].*/, "", w); vhtbw = w + 0
+        }
+        /center freq segment 1:/ { ctr = $NF }
+        /secondary channel offset: (above|below)/ { ht40 = 1 }
         END { flush() }
     ' | tr -d '\' | sed 's/,$//' > /tmp/scan.$$
     L=$(cat /tmp/scan.$$ | tr -d '\n'); rm -f /tmp/scan.$$

@@ -229,9 +229,12 @@ PAGES.wifi = {
         F("wf-base", j.ssid_base);
         WA.own = [j.ssid2g, j.ssid5g];   // 信道图只标注本机 SSID
         WA.ownCh = { 2: +j.ch2g || 0, 5: +j.ch5g || 0 };   // 本机信道(apcli扫不到自家BSS, 合成绘制)
+        WA.ownBw = { 2: 20, 5: 80 };   // v3.17: 本机带宽(adv0 就绪后更新) — 信道图按真实频宽画矩形
         setTag("tg-wfst", (j.hostapd2g > 0) && (j.hostapd5g > 0));
         T("wfs-2g", `${j.ssid2g} · ch${j.ch2g}`); T("wfs-5g", `${j.ssid5g} · ch${j.ch5g}`);
         const adv0 = await api("wifi_adv").catch(() => ({}));
+        if (adv0.bw2g) WA.ownBw[2] = +adv0.bw2g;
+        if (adv0.bw5g) WA.ownBw[5] = +adv0.bw5g;
         F("wa-base", adv0.ssid_base || "");
         T("wfs-sec", j.secured ? "WPA2-PSK (AES)" : "开放!");
         T("wfs-hap", `${j.hostapd2g > 0 ? "2G✓" : "2G✕"} ${j.hostapd5g > 0 ? "5G✓" : "5G✕"}`);
@@ -358,10 +361,23 @@ function waDrawChGraph() {
     for (let i = 0; i < n; i += step) x.fillText(String(chs[i]), xOfI(i), H - 8);
     const base = H - padB;
     const cl = v => Math.max(-100, Math.min(-30, v));
+    const chPx = (xOfI(1) - xOfI(0)) || 20;   // v3.17: 单信道像素宽 — 矩形按真实频宽
     for (const a of aps) {
-        const i = chs.indexOf(a.ch); if (i < 0) continue;
+        let i = chs.indexOf(a.ch); if (i < 0) continue;
         const col = waColor(a.mac);
-        const x0 = xOfI(i - 2), x1 = xOfI(i + 2);
+        let x0, x1;
+        const bw = +a.bw || 20, k = Math.max(1, Math.round(bw / 20));
+        const ci = +a.ctr && chs.includes(+a.ctr) ? chs.indexOf(+a.ctr) : -1;
+        if (WA.band === 5) {
+            /* 5G: 精确频宽块。有中心段(ctr)以中心对称; 无则绕主信道对称 */
+            const c = ci >= 0 ? ci : i;
+            x0 = xOfI(c) - (k * chPx) / 2 - chPx * 0.25;
+            x1 = xOfI(c) + (k * chPx) / 2 + chPx * 0.25;
+        } else {
+            /* 2.4G: 干扰重叠约定 — 20M ±2 信道, 40M ±4 */
+            const half = bw >= 40 ? 4 : 2;
+            x0 = xOfI(i - half); x1 = xOfI(i + half);
+        }
         const yTop = yOf(cl(a.sig));
         const w = x1 - x0, h = base - yTop;
         x.globalAlpha = 0.30;
@@ -378,7 +394,18 @@ function waDrawChGraph() {
     if (ownCh && chs.includes(ownCh)) {
         const i = chs.indexOf(ownCh);
         const ownSsid = WA.band === 2 ? (WA.own[0] || "本机") : (WA.own[1] || "本机");
-        const x0 = xOfI(i - 2), x1 = xOfI(i + 2);
+        /* v3.17: 本机按真实带宽(BW2G/BW5G)。5G 绕主信道对称铺 k 信道;
+           2.4G 维持重叠约定 ±2/±4 */
+        const obw = (WA.ownBw && WA.ownBw[WA.band]) || (WA.band === 2 ? 20 : 80);
+        let x0, x1;
+        if (WA.band === 5) {
+            const k = Math.max(1, Math.round(obw / 20));
+            x0 = xOfI(i) - (k * chPx) / 2 - chPx * 0.25;
+            x1 = xOfI(i) + (k * chPx) / 2 + chPx * 0.25;
+        } else {
+            const half = obw >= 40 ? 4 : 2;
+            x0 = xOfI(i - half); x1 = xOfI(i + half);
+        }
         const yTop = yOf(-35), h = base - yTop;
         x.save();
         x.beginPath(); x.rect(x0, yTop, x1 - x0, h); x.clip();

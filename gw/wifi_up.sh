@@ -1,5 +1,5 @@
 #!/bin/sh
-# wifi_up.sh — v3 WiFi bring-up (v1.22: 访客iface显式入桥(动态BSS不自动加bridge,dnsmasq盲根因); v1.21: MLO访客静态单链路组17/18; v1.20: MLO单次AP启动; v1.19: MLO真双链路 — 两带 dat 各写 MldGroup=1;0;x6
+# wifi_up.sh — v3 WiFi bring-up (v1.23: MLO在线重应用先下电回冷启动等价态, 撤销需重启纪律; v1.22: 访客iface显式入桥; v1.20: MLO单次AP启动; v1.19: MLO真双链路 — 两带 dat 各写 MldGroup=1;0;x6
 #   (RE实证: stock be_init_wlan_apcfg_file 同款形态, 1基组号配对成MLD; 全零表=v1.15
 #   事故形态禁写; MldAddr/ApcliMloDisable 勿写; MLD生效需冷启动(FW锁存); 纯MLO不需wapp);
 #   v1.18: 访客独立配置; v1.16: F3单进程hostapd; v1.10: 自动信道扫描选道),
@@ -461,13 +461,21 @@ ls -la /var/wlan/
 # 由自带 wpapmk 工具现算(PBKDF2-SHA1 4096)。apcfg 只管射频参数, BSS 内部
 # 保持 OPEN(被 hostapd 接管后无 OPEN 广播)。hostapd 起不来则射频关闭——
 # 绝不回退开放模式。
-# v1.20(E2): MLO=1 时跳过预启动 ifconfig up 与 hostapd 前的 down — E1实证双次AP启动
-# 会让第二链路(rai0)在 hostapd 阶段无法回组1而落入临时单链路组18(dmesg:
-# rai0 eht_ap_mld_create grp(18)(ML:0))。hostapd 的 nl80211 ADD_IF 本身完成
-# profile 应用+AP启动, 作为 MLO 下唯一一次 AP start。非 MLO 维持工厂配方双次序列。
+# v1.20(E2): MLO=1 时跳过预启动 ifconfig up — E1实证双次AP启动会让第二链路(rai0)
+# 在 hostapd 阶段无法回组1而落入临时单链路组18。hostapd 的 nl80211 ADD_IF 本身完成
+# profile 应用+AP启动。非 MLO 维持工厂配方双次序列。
+# v1.23(在线重应用拆链): MLO 下若接口已 UP(=在线重应用, 非冷启动), 先完整下电回
+# 冷启动等价态 — 受控实验矩阵(T1/T1'/T3×3次): hostapd -B 后台化子进程在"接口UP+
+# MLD已武装"继承态下必死(干净退出无core, 调用方不知情); 优雅杀旧+等待仍死(非竞态);
+# 下电后 -B 完全正常(T5: 4BSS+MLD组1/17/18干净重建)。前台模式可存活但弃用(失败链
+# 依赖 -B 返回码)。
 if [ "$MLO" != 1 ]; then
     ifconfig ra0 up
     ifconfig rai0 up
+elif ip link show ra0 2>/dev/null | grep -q ',UP'; then
+    echo "== live re-apply under MLO: teardown to cold-equivalent state"
+    for vif in ra0 rai0 ra1 rai1; do ifconfig $vif down 2>/dev/null; done
+    sleep 2
 fi
 sleep 3
 

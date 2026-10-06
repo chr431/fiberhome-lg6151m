@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.42 (v2.41 MLO保存+重启纪律; w1pct三级回退链修GUI滑块不同步) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.43 (v2.42 w1pct回退链; 撤销MLO重启纪律—wifi_up v1.23修复在线重应用) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -651,18 +651,14 @@ apply_wifi_adv() {
     if [ -n "$GSTP" ]; then gw_set GUEST_PASS "$GSTP"; fi
     [ -n "$MPW" ] && gw_set WPAPSK "$MPW"
     [ -n "$AUTHV" ] && gw_set AUTH "$AUTHV"
-    # v2.41: MLO=1 时禁止在线 wifi_up 重启 — 实证(MLO隔离开关切换实弹): 驱动 MLD
-    # 组状态存活时新 hostapd 在 rai0 建立中途死亡(仅 ra0/rai0 残留, 访客BSS全无)。
-    # MLO 下一切 WiFi 改动 = 保存配置 + 重启网关生效(FW 锁存纪律); GUI 以 mlo_reboot 提示。
-    # (ok_json 的 ${1:+,$1} 自带逗号前缀, NOTE 勿再带 — v2.22/v2.28/v2.39 同类逗号bug)
+    # v2.43: 撤销 v2.41 的 mlo_reboot 纪律 — wifi_up v1.23 修复在线重应用(MLO 下
+    # 接口已UP时先下电回冷启动等价态, T1-T5 受控实验矩阵实证; 原 -B 后台化子进程
+    # 在接口UP+MLD武装继承态必死)。MLO 下改动恢复即时生效。
+    # (ok_json 的 ${1:+,$1} 自带逗号前缀, NOTE 勿再带 — 逗号bug四犯防御)
     MLO_NOTE=""
     [ "$MLOV" != "${MLO:-0}" ] && MLO_NOTE='"mlo_changed":1'
-    if [ "$MLOV" = 1 ]; then
-        ok_json "\"mlo_reboot\":1${MLO_NOTE:+,$MLO_NOTE}"
-    else
-        sh $GWDATA/wifi_up.sh >/tmp/wifi_up.log 2>&1 &
-        ok_json "$MLO_NOTE"
-    fi
+    sh $GWDATA/wifi_up.sh >/tmp/wifi_up.log 2>&1 &
+    ok_json "$MLO_NOTE"
 }
 
 

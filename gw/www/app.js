@@ -67,7 +67,7 @@ function logout() { api("logout").catch(() => {}); setLogin(false); showLoginWal
 window.logout = logout;
 
 /* ---------- 视图小件 ---------- */
-function card(title, inner, wide) { return `<div class="card${wide ? " wide" : ""}"><h3>${title}</h3>${inner}</div>`; }
+function card(title, inner, wide, id) { return `<div class="card${wide ? " wide" : ""}"${id ? ` id="${id}"` : ""}><h3>${title}</h3>${inner}</div>`; }
 function kv(k, id, mono) {
     return `<div class="kv"><span>${k}</span><b id="${id}" class="${mono ? "mono" : ""}">--</b></div>`;
 }
@@ -605,15 +605,21 @@ window.fwdDel = async (i, p, e) => {
 /* ================ 聚合 ================ */
 PAGES.agg = {
     html: `<div>
-      ${card("聚合模式 " + tag("ag-on", "已启用", "已旁路"), `
-        <div class="frm"><label>总开关</label><select id="ag-en"><option value="1">启用（按权重分流 / 主备）</option><option value="0">旁路（全走当前主路，拆除分流）</option></select></div>
-        <button class="pri" onclick="agEn()">应用开关</button>
+      ${card("聚合模式 " + tag("ag-on", "运行中", "异常"), `
+        <div class="frm"><label>模式选择</label><select id="ag-mode">
+          <option value="weight">按权重分流 (双路并发, 新连接按比例)</option>
+          <option value="eth_prio">以太优先 (家宽主力, 5G 待命自动接管)</option>
+          <option value="cell_prio">蜂窝优先 (5G 主力, 家宽待命自动接管)</option>
+          <option value="eth_only">仅以太 (家宽单路)</option>
+          <option value="cell_only">仅蜂窝 (5G 单路)</option>
+        </select></div>
+        <button class="pri" onclick="agMode()">应用模式</button>
         ${kv("引擎", "ag-eng") + kv("当前形态", "ag-wm")}
-        <span class="hint">旁路 = 纯路由器单路上网（双活时走 5G，家宽主备时走家宽）；断线看门狗与 NAT 不受影响；重新启用即恢复分流</span>`)}
+        <span class="hint">优先模式: 待命侧仅在主力断线时接管, 恢复后自动切回; 仅模式: 单路运行不做切换; 断线看门狗与 NAT 不受影响</span>`)}
       ${card("聚合权重 (5G / 家宽)", `
-        <div class="slider-row"><input type="range" id="ag-w" min="0" max="100" step="5" oninput="T('ag-wv', this.value+'% / '+(100-this.value)+'%')"><b id="ag-wv">--</b></div>
+        <div class="slider-row"><input type="range" id="ag-w" min="5" max="95" step="5" oninput="T('ag-wv', this.value+'% / '+(100-this.value)+'%')"><b id="ag-wv">--</b></div>
         <button class="pri" onclick="agW()">应用权重</button>
-        <span class="hint">新连接按此比例分流; 已有连接保持粘性; 极端值(95~100/0~5)引擎按 95/5 实际执行</span>`)}
+        <span class="hint">新连接按此比例分流; 已有连接保持粘性; 仅在「按权重分流」模式下生效</span>`, 0, "card-aggw")}
       ${card("引擎状态", kv("状态机", "ag-sm") + kv("最近", "ag-log", 1))}
       ${card("MAC 钉死表", `<table><thead><tr><th>MAC</th><th>钉到</th><th></th></tr></thead><tbody id="pin-tb"></tbody></table>
          <div class="row3" style="margin-top:8px">
@@ -624,7 +630,11 @@ PAGES.agg = {
     </div>`,
     async tick() {
         const a = await api("agg");
-        F("ag-en", a.enable); setTag("ag-on", a.enable === "1");
+        const mode = a.mode || "weight";
+        F("ag-mode", mode); setTag("ag-on", true);
+        // v3.28: 权重卡只在按权重分流模式显示
+        const wc = document.getElementById("card-aggw");
+        if (wc) wc.style.display = (mode === "weight") ? "" : "none";
         T("ag-eng", a.engine === "vendor" ? "quecadp 内核" : (a.engine ? "iptables 用户态" : "--"));
         T("ag-wm", a.wanmode || "--");
         const s = await api("status");
@@ -638,9 +648,11 @@ PAGES.agg = {
         H("pin-tb", pins.map(p => { const [m, op] = p.trim().split(/\s+/); return `<tr><td class="mono">${m}</td><td>${op === "2" ? "家宽 WAN2" : "5G WAN1"}</td><td><button class="mini ghost" onclick="agPin('${m}',0)">删除</button></td></tr>`; }).join(""));
     }
 };
-window.agEn = async () => {
-    const j = await api("agg_mode", `enable=${$("ag-en").value}`).catch(e => ({ error: e.message }));
-    j.ok ? toast($("ag-en").value === "1" ? "聚合已启用（约 5s 内恢复分流）" : "聚合已旁路（约 5s 内单路化）") : toast("失败: " + j.error, 1);
+window.agMode = async () => {   // v3.28: 五模式选择(替代旧总开关)
+    const m = $("ag-mode").value;
+    const name = { weight: "按权重分流", eth_prio: "以太优先", cell_prio: "蜂窝优先", eth_only: "仅以太", cell_only: "仅蜂窝" }[m];
+    const j = await api("agg_mode", `mode=${m}`).catch(e => ({ error: e.message }));
+    j.ok ? toast(`已切换: ${name}（约 5s 内生效）`) : toast("失败: " + j.error, 1);
     setTimeout(() => PAGES.agg.tick(), 6500);
 };
 window.agW = async () => {

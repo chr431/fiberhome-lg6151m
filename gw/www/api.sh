@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.44 (sse端点: 服务小区信号3s事件流, v3httpd v2.4流式通道; v2.43撤销MLO重启纪律) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.45 (聚合五模式mode=weight|cell_prio|eth_prio|cell_only|eth_only; 权重滑块5-95钳制; v2.44 sse端点) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -188,24 +188,34 @@ apply_block() {
 
 apply_agg_weights() {
     W1=$(form_kv w1)
-    echo "$W1" | grep -qE '^[0-9]{1,3}$' || jerr bad_pct   # v2.10: {1,2}曾拒绝'100'(100:0引擎实测支持)
-    [ "$W1" -ge 0 ] && [ "$W1" -le 100 ] || jerr bad_pct
+    echo "$W1" | grep -qE '^[0-9]{1,3}$' || jerr bad_pct
+    # v2.45: 按权重分流滑块限 5..95 (极端值语义由显式模式承担, 引擎不再解释 0/100)
+    [ "$W1" -ge 5 ] && [ "$W1" -le 95 ] || jerr bad_pct
     W2=$((100 - W1))
-    EN=$(grep -m1 '^ENABLE=' $GWDATA/agg.conf 2>/dev/null | cut -d= -f2)
-    case "$EN" in 0|1) ;; *) EN=1 ;; esac
-    printf 'W1_PCT=%s\nW2_PCT=%s\nENABLE=%s\n' "$W1" "$W2" "$EN" > $GWDATA/agg.conf
+    MD=$(grep -m1 '^MODE=' $GWDATA/agg.conf 2>/dev/null | cut -d= -f2)
+    case "$MD" in weight|cell_prio|eth_prio|cell_only|eth_only) ;; *) MD=weight ;; esac
+    printf 'MODE=%s\nW1_PCT=%s\nW2_PCT=%s\nENABLE=1\n' "$MD" "$W1" "$W2" > $GWDATA/agg.conf
     # v2.20: vendor ioctl 只是引擎可用时的即时加速, 守护热载为准 — 不再因 ioctl 失败误报
     LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib LD_PRELOAD=$GWDATA/fhstub.so \
         $GWDATA/multiwan_ctl 1 $W1 $W2 1 1 >/dev/null 2>&1
     ok_json
 }
-apply_agg_mode() {   # v2.20: 聚合总开关 0=旁路(单路) 1=参战(分流/主备), wan_agg 热载生效
-    E=$(form_kv enable)
-    [ "$E" = 0 ] || [ "$E" = 1 ] || jerr bad_mode
+apply_agg_mode() {   # v2.45: 聚合模式选择(对齐原厂五模式), wan_agg 热载生效
+    M=$(form_kv mode)
+    case "$M" in
+        weight|cell_prio|eth_prio|cell_only|eth_only) ;;
+        *) # legacy enable=0/1 兼容(GUI 旧版/脚本)
+           E=$(form_kv enable)
+           case "$E" in
+               0) M=cell_only ;;
+               1) M=weight ;;
+               *) jerr bad_mode ;;
+           esac ;;
+    esac
     W=$(grep -m1 '^W1_PCT=' $GWDATA/agg.conf 2>/dev/null | cut -d= -f2)
-    echo "$W" | grep -qE '^[0-9]{1,3}$' || W=40
-    [ "$W" -ge 0 ] && [ "$W" -le 100 ] || W=40
-    printf 'W1_PCT=%s\nW2_PCT=%s\nENABLE=%s\n' "$W" "$((100-W))" "$E" > $GWDATA/agg.conf
+    echo "$W" | grep -qE '^[0-9]{1,3}$' || W=30
+    [ "$W" -ge 5 ] && [ "$W" -le 95 ] || W=30
+    printf 'MODE=%s\nW1_PCT=%s\nW2_PCT=%s\nENABLE=1\n' "$M" "$W" "$((100-W))" > $GWDATA/agg.conf
     ok_json
 }
 apply_agg_pin() {
@@ -1017,8 +1027,11 @@ get_agg() {
     MACS=$(grep -A9 'Current configuration:' /proc/multi_wan/mac_config 2>/dev/null | grep -E '^[0-9a-f]{2}:' | tr '\n' ';' | sed 's/;$//')
     AGG_EN=$(grep -m1 '^ENABLE=' $GWDATA/agg.conf 2>/dev/null | cut -d= -f2)
     case "$AGG_EN" in 0|1) ;; *) AGG_EN=1 ;; esac
+    AGG_MODE=$(grep -m1 '^MODE=' $GWDATA/agg.conf 2>/dev/null | cut -d= -f2)
+    case "$AGG_MODE" in weight|cell_prio|eth_prio|cell_only|eth_only) ;; *) AGG_MODE=weight ;; esac
     cat <<EOF3
 {"enable":"$AGG_EN",
+"mode":"$AGG_MODE",
 "engine":"$(cat /tmp/wan_engine 2>/dev/null)",
 "weights":{"w1":"$(grep "WAN1 weight" /proc/multi_wan/weight 2>/dev/null | grep -oE "[0-9]+" | tail -1)"},
 "wanmode":"$(cat /tmp/wan_mode 2>/dev/null)",

@@ -53,7 +53,8 @@ run_cycle() {
     check fan_mgr   "pgrep -f fan_mgr.sh"            "fan manager"
 
     # ---- data plane invariants ----
-    check agg_rules "iptables -t mangle -S WANAGG 2>/dev/null | grep -q sport" "split rules installed"
+    # v1.4: 模式无关 — weight 模式有 sport 分界, 优先/仅模式为单路 MARK 规则
+    check agg_rules "iptables -t mangle -S WANAGG 2>/dev/null | grep -q MARK" "split rules installed"
     check fwmark    "ip rule | grep -q fwmark"       "fwmark policy routing"
     check nat       "iptables -t nat -S POSTROUTING | grep -q MASQ"  "NAT masquerade"
     check bss       "[ \$(iw dev 2>/dev/null | grep -c 'type AP') -ge 2 ]"  "2+ BSS active"

@@ -498,12 +498,18 @@ def t_agg_daemon():
     record(t_agg_daemon._test_name, "agg", ok)
 
 
-@test("分流规则已安装 (sport + mark)")
+@test("分流规则已安装 (模式感知)")
 def t_agg_rules():
-    out = dev("iptables -t mangle -S WANAGG 2>/dev/null | grep -cE 'sport.*MARK'")
-    n = int(out.strip() or 0)
-    ok = n >= 4  # tcp+udp 各 2 条 sport 规则
-    record(t_agg_rules._test_name, "agg", ok, f"sport_rules={n}")
+    # v2.10: weight 模式须有 sport 分界(tcp+udp各2); 优先/仅模式为单路全量 MARK 规则
+    md = dev("grep -m1 '^MODE=' /data/gw/agg.conf 2>/dev/null | cut -d= -f2").strip() or "weight"
+    mk = dev("iptables -t mangle -S WANAGG 2>/dev/null | grep -c 'MARK'").strip()
+    if md == "weight":
+        n = int(dev("iptables -t mangle -S WANAGG 2>/dev/null | grep -cE 'sport.*MARK'").strip() or 0)
+        ok = n >= 4 and int(mk or 0) >= 4
+        record(t_agg_rules._test_name, "agg", ok, f"mode={md} sport={n}")
+    else:
+        ok = int(mk or 0) >= 1
+        record(t_agg_rules._test_name, "agg", ok, f"mode={md} mark_rules={mk}")
 
 
 @test("fwmark 策略路由存在 (v4)")
@@ -512,6 +518,22 @@ def t_agg_fwmark():
     n = int(out.strip() or 0)
     ok = n >= 1  # 至少 1 条 (主备模式可能只有单侧)
     record(t_agg_fwmark._test_name, "agg", ok, f"fwmark_rules={n}")
+
+
+@test("聚合模式配置合法且一致 (v2.18 五模式)")
+def t_agg_mode_cons():
+    md = dev("grep -m1 '^MODE=' /data/gw/agg.conf 2>/dev/null | cut -d= -f2").strip()
+    w1 = dev("grep -m1 '^W1_PCT=' /data/gw/agg.conf 2>/dev/null | cut -d= -f2").strip()
+    ok = md in ("weight", "cell_prio", "eth_prio", "cell_only", "eth_only")
+    note = f"mode={md} w1={w1}"
+    if ok and md == "weight":
+        ok = w1.isdigit() and 5 <= int(w1) <= 95   # 滑块钳制域
+    # wan_agg 进程内的 pmode 无法直读, 用行为侧面: 非weight模式不应存在sport分界
+    if ok and md != "weight":
+        sport = int(dev("iptables -t mangle -S WANAGG 2>/dev/null | grep -cE 'sport.*MARK'").strip() or 0)
+        ok = sport == 0
+        note += f" sport={sport}"
+    record(t_agg_mode_cons._test_name, "agg", ok, note)
 
 
 @test("聚合开关状态文件有效")

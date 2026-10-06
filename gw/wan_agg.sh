@@ -1,5 +1,5 @@
 #!/bin/sh
-# wan_agg.sh v2.10 — 双上行聚合主管 (vendor kernel engine + iptables fallback)
+# wan_agg.sh v2.18 — 双上行聚合主管 (vendor kernel engine + iptables fallback)
 # v2.6 规则分层修正 + 真相更正(2026-10-05 终局判别实验):
 #   [更正] 模块v6引擎完全正常(哈希%100读权重; 摘钉后100/0→4/4全WAN1实证)。
 #   早前"v6常数哈希缺陷"结论系MAC钉死自污染 — 钉死旁路哈希(v4/v6同样),
@@ -49,7 +49,25 @@ log() { echo "$(date '+%m-%d %H:%M:%S') $*" >> $LOG; }
 # v2.12: 主备模式 — 权重 100:0 -> 5G主力/家宽待命; 0:100 反之。
 # 语义: 待命侧对引擎恒为逻辑down(真实探测照跑), 主力真死才接班, 恢复自动切回。
 pmode_of() { case "$1" in 100) echo 1;; 0) echo 2;; *) echo 0;; esac; }
+# v2.18: 五模式(MODE 键, 对齐原厂语义) —
+#   weight    按权重分流 (W1_PCT 5..95; pmode 0)
+#   cell_prio 蜂窝优先   (5G 主力, 家宽待命 failover; pmode 1)
+#   eth_prio  以太优先   (家宽主力, 5G 待命 failover; pmode 2)
+#   cell_only 仅蜂窝     (5G 全量, 家宽不参战无failover; pmode 4)
+#   eth_only  仅以太     (家宽全量, 5G 不参战无failover; pmode 3)
+# legacy 派生(无 MODE 键): ENABLE=0->cell_only; W1=100->cell_prio; 0->eth_prio; 否则 weight
+pmode_of_mode() {
+    case "$1" in
+        weight)    echo 0 ;;
+        cell_prio) echo 1 ;;
+        eth_prio)  echo 2 ;;
+        eth_only)  echo 3 ;;
+        cell_only) echo 4 ;;
+        *)         echo 0 ;;
+    esac
+}
 PMODE=0
+MODE=weight
 
 # ---------- data plane ----------
 dp_setup() {
@@ -312,6 +330,28 @@ echo "$ENGINE" > /tmp/wan_engine
 # v2.15: 聚合总开关 (agg.conf ENABLE=0|1, GUI agg_mode 端点热切)
 AGG_ON=1
 grep -q '^ENABLE=0' /data/gw/agg.conf 2>/dev/null && AGG_ON=0
+# v2.18: MODE 读取 (无 agg.conf 时从 defaults 播种; 无 MODE 键走 legacy 派生)
+if [ ! -r /data/gw/agg.conf ] && [ -r /data/gw/defaults.conf ]; then
+    DM=$(grep -m1 '^AGG_MODE=' /data/gw/defaults.conf 2>/dev/null | cut -d= -f2)
+    DW=$(grep -m1 '^AGG_W1_PCT=' /data/gw/defaults.conf 2>/dev/null | cut -d= -f2)
+    case "$DM" in weight|cell_prio|eth_prio|cell_only|eth_only) ;; *) DM=weight ;; esac
+    case "$DW" in ''|*[!0-9]*) DW=30 ;; esac
+    [ "$DW" -ge 5 ] && [ "$DW" -le 95 ] || DW=30
+    printf 'MODE=%s
+W1_PCT=%s
+W2_PCT=%s
+ENABLE=1
+' "$DM" "$DW" "$((100-DW))" > /data/gw/agg.conf
+    log "agg.conf seeded from defaults: MODE=$DM W1=$DW"
+fi
+if [ -r /data/gw/agg.conf ]; then
+    . /data/gw/agg.conf
+    case "$MODE" in weight|cell_prio|eth_prio|cell_only|eth_only) ;; *) MODE=weight ;; esac
+    case "$W1_PCT" in ''|*[!0-9]*) W1_PCT=30 ;; esac
+    [ "$W1_PCT" -ge 5 ] && [ "$W1_PCT" -le 95 ] || W1_PCT=30
+    W2_PCT=$((100 - W1_PCT))
+    PMODE=$(pmode_of_mode "$MODE")
+fi
 dp_setup
 S1=1; S2=1; D1=0; D2=0; U1=0; U2=0
 if [ "$AGG_ON" = 1 ]; then
@@ -360,20 +400,24 @@ while :; do
     # v2.9: 权重在线热更 — GUI(api.sh agg_weights)写 /data/gw/agg.conf,
     # 本守护每周期重读, 值变即下发 ioctl + 记日志(状态迁移不再用旧权重打回)
     if [ -r /data/gw/agg.conf ] && [ "$AGG_ON" = 1 ]; then
-        OW1=$W1_PCT
+        OW1=$W1_PCT; OMODE=$MODE
         . /data/gw/agg.conf
+        case "$MODE" in weight|cell_prio|eth_prio|cell_only|eth_only) ;; *) MODE=$OMODE ;; esac
+        if [ "$MODE" != "$OMODE" ]; then          # v2.18: 模式热切
+            PMODE=$(pmode_of_mode "$MODE")
+            log "mode hot-reload: $OMODE -> $MODE (pmode=$PMODE)"
+            FORCE=1
+        fi
         case "$W1_PCT" in
             ''|*[!0-9]*) W1_PCT=$OW1 ;;
         esac
-        if [ "$W1_PCT" -ge 0 ] && [ "$W1_PCT" -le 100 ]; then :; else W1_PCT=$OW1; fi
+        if [ "$W1_PCT" -ge 5 ] && [ "$W1_PCT" -le 95 ]; then :; else W1_PCT=$OW1; fi
         if [ "$W1_PCT" != "$OW1" ]; then
             W2_PCT=$((100 - W1_PCT))
             log "weights hot-reload: $OW1/$((100-OW1)) -> $W1_PCT/$W2_PCT"
-            # v2.12: 100/0 触发主备语义切换, 交给状态机用有效态整体迁移
-            OP_MODE=$PMODE; PMODE=$(pmode_of "$W1_PCT")
-            if [ "$PMODE" != "$OP_MODE" ]; then
-                log "mode: pmode $OP_MODE -> $PMODE (0=双活 1=5G主备 2=家宽主备)"
-                FORCE=1
+            # v2.18: pmode 由 MODE 驱动(模式热切已在上面处理); 权重只影响分流比例
+            if [ "$MODE" = weight ]; then
+                FORCE=1    # 重建 sport 分界
             else
                 kernel_apply $S1 $S2 2>>$LOG
             fi
@@ -411,7 +455,9 @@ while :; do
     # v2.12: 主备模式注入有效态 — 待命侧恒为逻辑down(NS 仅用于真实生死判定),
     # 主力死(E主力=0)时待命侧 NS 值透传 -> 全量接班; 主力恢复 -> 待命侧归零回切
     E1=$NS1; E2=$NS2
-    if [ "$PMODE" = 1 ] && [ $NS1 -eq 1 ]; then E2=0
+    if [ "$PMODE" = 3 ]; then E1=0; E2=1          # v2.18 仅以太: 5G 逻辑死, 家宽恒活(无failover)
+    elif [ "$PMODE" = 4 ]; then E1=1; E2=0        # v2.18 仅蜂窝: 家宽逻辑死, 5G 恒活(无failover)
+    elif [ "$PMODE" = 1 ] && [ $NS1 -eq 1 ]; then E2=0
     elif [ "$PMODE" = 2 ] && [ $NS2 -eq 1 ]; then E1=0
     fi
     if [ "$AGG_ON" = 1 ] && { [ "$E1$E2" != "$S1$S2" ] || [ "${FORCE:-0}" = 1 ]; }; then

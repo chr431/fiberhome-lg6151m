@@ -154,5 +154,6 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `CLM-PLMN-SCAN`@ROADMAP.md | ✅实证 | `gw/src/mipc_cellular.c>=0.4` | SIM 就绪 (CPIN) | f48b803@2026-10-06 | C组逆向集成: ql_nw_network_scan异步回调+0x1288结构; 首发实弹8网络(真EONS名+status/RAT); GUI按钮实测渲染 |
 | `CLM-PIN-SIM-AT`@ROADMAP.md | ✅实证 | `gw/www/api.sh>=2.33` | API login + token 生命周期 | f48b803@2026-10-06 | PIN管理AT直发引擎(厂商序列clck/cpwd/cpin; enable/disable未实弹-有锁卡风险) + get_sim AT直读优先(CPIN/CIMI/CCID/CGSN/COPS实测全对) |
 | `CLM-P3-FINALE`@ROADMAP.md | ✅实证 | `gw/rc_netfh.sh>=3.1` | 蜂窝引擎小区列表活着 (P3 终章) | ba9bb1d@2026-10-06 | P3完整收官: cfgmgr+logmgr+mobilenetwork+cfg_tool+shmsnap全部下架; 2次冷启动(守护0/shm0/keeper拨号35s)+55/55×2+全端点引擎化; KEEP_TREE=1一键回滚 |
+| `CLM-GUEST-INDEP`@FEATURE_MATRIX.md | ✅实证 | `gw/wifi_up.sh>=1.18` | 访客 BSS 配置/隔离防火墙一致 (guest_fw) | 23c601f@2026-10-06 | 访客独立名称/频段(2g/5g/both)/密码; 隔离=原厂wifiguest.sh ebtables broute配方复刻(仅出网); 真MLO为v1.15锁存雷区不实现 |
 
 <!--CLMAUDIT:END-->

@@ -214,11 +214,14 @@ def t_wifi_mlo():
     g5 = dev("grep -h '^MldGroup=' /var/wlan/apcfg_5 2>/dev/null").strip()
     notes = f"mlo={int(mlo)} apcfg='{g2}' apcfg_5='{g5}'"
     if mlo:
-        ok = g2 == "MldGroup=1;0;0;0;0;0;0;0" and g5 == "MldGroup=1;0;0;0;0;0;0;0"
+        # v1.21: 访客BSS静态单链路组(2.4G访客token=17, 5G=18), 主BSS恒为组1
+        ok = re.fullmatch(r"MldGroup=1;(17|0);0;0;0;0;0;0", g2.removeprefix("MldGroup=")) is not None if g2 else False
+        ok = ok and (re.fullmatch(r"MldGroup=1;(18|0);0;0;0;0;0;0", g5.removeprefix("MldGroup=")) is not None if g5 else False)
         if ok:
             mld = dev("dmesg | grep -cE 'Create AP MLD|join MLD|Alloc ML Group|hostapd_event_bss_mlo_info'")
-            notes += f" mld_logs={mld.strip()}"
-            ok = int(mld.strip() or 0) >= 1
+            bad = dev("dmesg | grep -c 'rai0.*Create AP MLD, grp(0)'").strip()
+            notes += f" mld_logs={mld.strip()} rai0_grp0_creates={bad}"
+            ok = int(mld.strip() or 0) >= 1 and bad == "0"
     else:
         ok = g2 == "" and g5 == ""
     record(t_wifi_mlo._test_name, "wifi", ok, notes)

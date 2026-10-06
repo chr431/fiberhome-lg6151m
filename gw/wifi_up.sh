@@ -1,5 +1,5 @@
 #!/bin/sh
-# wifi_up.sh — v3 WiFi bring-up (v1.20: MLO单次AP启动; v1.19: MLO真双链路 — 两带 dat 各写 MldGroup=1;0;x6
+# wifi_up.sh — v3 WiFi bring-up (v1.21: MLO访客静态单链路组17/18; v1.20: MLO单次AP启动; v1.19: MLO真双链路 — 两带 dat 各写 MldGroup=1;0;x6
 #   (RE实证: stock be_init_wlan_apcfg_file 同款形态, 1基组号配对成MLD; 全零表=v1.15
 #   事故形态禁写; MldAddr/ApcliMloDisable 勿写; MLD生效需冷启动(FW锁存); 纯MLO不需wapp);
 #   v1.18: 访客独立配置; v1.16: F3单进程hostapd; v1.10: 自动信道扫描选道),
@@ -203,11 +203,27 @@ VHTBW_DAT=0; EHTAPBW_DAT=1
 [ "$BW5G" = 80 ]  && { VHTBW_DAT=1; EHTAPBW_DAT=2; }
 [ "$BW5G" = 160 ] && { VHTBW_DAT=2; EHTAPBW_DAT=3; }
 
-# v1.19: MLO 组表 — token按BSS序号: BSS1(主)入组1, 访客/其余=0(非成员, stock be_init
-# 同款实证形态)。MLO=0 时键整体缺失(键缺失=驱动不走MLD分支, 最安全形态;
-# 全零表=v1.15 事故形态绝对禁止)。MLO=1 时 hap 两链路同名(上方派生已强制)。
-MLDLINE=""
-[ "$MLO" = 1 ] && MLDLINE="MldGroup=1;0;0;0;0;0;0;0"
+# v1.19: MLO 组表 — token按BSS序号: BSS1(主)入组1。MLO=0 时键整体缺失(键缺失=
+#   驱动不走MLD分支, 最安全形态; 全零表=v1.15 事故形态绝对禁止)。
+#   MLO=1 时 hap 两链路同名(上方派生已强制)。
+# v1.21(E4): 访客BSS显式静态单链路组(2.4G访客=17, 5G访客=18) — E1/E2实证访客
+#   BSS动态创建时其mlo-info查询会扰动主组(rai0被重定向进临时组18), E3实证无访客
+#   时主组纯净。驱动本就给非成员BSS分配17+临时组, 静态化=消除创建时竞态。
+GB2=0; GB5=0
+if [ "$GUEST" = 1 ] && [ -n "$GUEST_PASS" ]; then
+    case "$GUEST_BAND" in
+        2g)   GB2=1 ;;
+        5g)   GB5=1 ;;
+        both) GB2=1; GB5=1 ;;
+    esac
+fi
+MLDLINE=""; MLDLINE5=""
+if [ "$MLO" = 1 ]; then
+    _T2="1;0;0;0;0;0;0;0"; _T5="1;0;0;0;0;0;0;0"
+    [ "$GB2" = 1 ] && _T2="1;17;0;0;0;0;0;0"
+    [ "$GB5" = 1 ] && _T5="1;18;0;0;0;0;0;0"
+    MLDLINE="MldGroup=$_T2"; MLDLINE5="MldGroup=$_T5"
+fi
 
 # ---- /var/wlan/apcfg (2G band0) : factory template, mt7992 values ----
 cat > /var/wlan/apcfg <<EOF2G
@@ -330,7 +346,7 @@ CountryRegionABand=0
 BssidNum=${BSSIDNUM}
 DBDC_MODE=1
 MacAddress=${rai0_mac}
-${MLDLINE}
+${MLDLINE5}
 SSID1=${SSID5}
 SSID2=fh_v3_ssid2_5G
 SSID3=fh_v3_ssid3_5G
@@ -530,14 +546,7 @@ HDFS
         # v1.18: 访客网络 — 独立名称/频段/密码; hostapd 第二BSS(动态创建), 客户端隔离。
         # 频段: 2g->ra1(2.4G) / 5g->rai1(5G, v1.4默认) / both->双频同名双BSS(漫游)。
         # 隔离的强制面(hostapd ap_isolate + guest_fw.sh ebtables)在 hostapd 拉起后统一施加。
-        GB2=0; GB5=0
-        if [ "$GUEST" = 1 ] && [ -n "$GUEST_PASS" ]; then
-            case "$GUEST_BAND" in
-                2g)   GB2=1 ;;
-                5g)   GB5=1 ;;
-                both) GB2=1; GB5=1 ;;
-            esac
-        fi
+        # (GB2/GB5 计算已前移至 dat 生成段 — v1.21 MLO 组表需要)
         guest_bss() {  # guest_bss <conf> <ifname> <bssid> — 追加访客BSS段(须在各hap conf写完后)
             cat >> "$1" <<HGUEST
 bss=$2

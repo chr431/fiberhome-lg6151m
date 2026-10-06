@@ -531,15 +531,14 @@ def t_cel_mipcrat():
            out.strip().replace("\n", " ")[:50])
 
 
-@test("cfg 树信号上报活着 (过渡期)")
+@test("蜂窝引擎小区列表活着 (P3 终章)")
 def t_cel_tree():
-    # mobilenetwork→cfgmgr→RadioSignalParameter 链路任一死亡即空值。
-    # 第二阶段裁撤 cfgmgr 后本测试翻转为自研引擎断言。
-    out = dev("LD_LIBRARY_PATH=/fhrom/lib /fhrom/bin/cfg_cmd get "
-              "InternetGatewayDevice.X_FH_MobileNetwork.RadioSignalParameter.BAND_NBR "
-              "2>/dev/null | tail -1")
-    ok = "value=" in out and len(out.strip()) > len("get success!value=")
-    record(t_cel_tree._test_name, "cellular", ok, out.strip()[:40])
+    # v1.10 起: cfg 树已整体退役(rc_netfh v3.1) — 断言翻转为自研引擎:
+    # mipc_cellular cells 返回服务小区(N41 带号) + 邻区列表。
+    out = dev("/data/gw/mipc_cellular cells 2>/dev/null | head -c 120")
+    ok = '"band":"N' in out and '"cells":[' in out
+    record(t_cel_tree._test_name, "cellular", ok,
+           out.strip()[:60] if not ok else "engine ok")
 
 
 @test("锁定状态跨层一致 (conf=树=模组 / mipc 引擎就位)")

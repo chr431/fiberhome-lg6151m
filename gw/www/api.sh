@@ -620,7 +620,7 @@ get_cellular() {
     if [ "$CELL_ENGINE" = mipc ] && [ -x /data/gw/mipc_cellular ]; then
         CJ=$(/data/gw/mipc_cellular cells 2>/dev/null | head -1)
         case "$CJ" in
-        '"serving"'*)
+        '"serving"'*|'{"serving"'*)
             CSQ=$(mipc_wan_cli --at_cmd "AT+CSQ" 2>/dev/null | grep -oE "[0-9]+, ?99" | cut -d, -f1)
             RSSI=""; case "$CSQ" in ''|0) RSSI="未知";; *) RSSI="$(( -113 + CSQ * 2 )) dBm";; esac
             CJ=${CJ#\{}; CJ=${CJ%\}}

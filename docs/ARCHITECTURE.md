@@ -76,7 +76,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
 | `gw/wifi_up.sh` | **v1.17** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.17: 出厂brmac兜底去设备化(eth0反推+合成末级; 原硬编码本机MAC洗出)) |
-| `gw/www/api.sh` | **v2.35** | manifest | `/data/gw/www/api.sh` | GUI JSON端点(v2.15: hostapd探测改iw AP-type(拓扑形态无关); v2.14: 配置统一cfg_load/gw_set读写defaults+settings overlay, 旧散落conf写路径全撤; v2.13端口强校验; v2.12: get_sys嵌套花括号默认值触发busybox ash展开bug多印1字节破坏JSON, 改-n分支; get_logs补\t\r反斜杠转义使严格JSON.parse通过; 状态聚合) |
+| `gw/www/api.sh` | **v2.36** | manifest | `/data/gw/www/api.sh` | GUI JSON端点(v2.15: hostapd探测改iw AP-type(拓扑形态无关); v2.14: 配置统一cfg_load/gw_set读写defaults+settings overlay, 旧散落conf写路径全撤; v2.13端口强校验; v2.12: get_sys嵌套花括号默认值触发busybox ash展开bug多印1字节破坏JSON, 改-n分支; get_logs补\t\r反斜杠转义使严格JSON.parse通过; 状态聚合) |
 | `gw/www/app.js` | **v3.20** | manifest | `/data/gw/www/app.js` | 控制台轮询逻辑 |
 | `gw/www/index.html` | **v2.14** | manifest | `/data/gw/www/index.html` | v3控制台页面 |
 | `gw/www/style.css` | **v2.1** | manifest | `/data/gw/www/style.css` | 控制台主题 |
@@ -110,7 +110,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/lk_flip2.py` | **v1.1** | tool | `-` | LK 一键翻槽(a|b, misc[2060]字节) |
 | `tools/lk_write.py` | **v1.6** | tool | `-` | LK raw-shell 文件写入(回显校验+tmpfs挂载+cmdlist巡检, 取代lk_fix_access) |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
-| `tools/selftest.py` | **v1.9** | tool | `-` | 断言式全功能测试(L13-L15: 7类51项; v1.3: +5G带宽跨层一致性(settings BW5G vs iw宽度, 守dat双字段链); v1.2: 设备侧强制ccmni探测+坏口令断言) |
+| `tools/selftest.py` | **v2.0** | tool | `-` | 断言式全功能测试(L13-L15: 7类51项; v1.3: +5G带宽跨层一致性(settings BW5G vs iw宽度, 守dat双字段链); v1.2: 设备侧强制ccmni探测+坏口令断言) |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |
 | `tools/serial_server.py` | **v1.7** | tool | `-` | 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets) |
 | `tools/vercheck.py` | **v1.5** | tool | `-` | 版本注册表校验/渲染/设备比对(v1.3: device()随deploy基座迁/data/gw; v1.2性质分区双向强制+全跟踪文件可归类; v1.1 image类md5钉死) |

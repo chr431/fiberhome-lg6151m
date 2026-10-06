@@ -649,8 +649,9 @@ apply_wifi_adv() {
     [ -n "$AUTHV" ] && gw_set AUTH "$AUTHV"
     sh $GWDATA/wifi_up.sh >/tmp/wifi_up.log 2>&1 &
     # v2.39: MLO 开关变化需重启网关生效(profile/FW 冷启动锁存), 通知GUI提示
+    # (ok_json 的 ${1:+,$1} 自带逗号前缀, NOTE 勿再带 — v2.22/v2.28 同类逗号bug第三次)
     MLO_NOTE=""
-    [ "$MLOV" != "${MLO:-0}" ] && MLO_NOTE=',"mlo_changed":1'
+    [ "$MLOV" != "${MLO:-0}" ] && MLO_NOTE='"mlo_changed":1'
     ok_json "$MLO_NOTE"
 }
 

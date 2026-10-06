@@ -282,13 +282,42 @@ apply_traffic_limit() {
 
 # -- SIM / PIN (展示+PIN管理走ubus update_pin_info; 误锁风险提示在前端) --
 get_sim() {
+    # v2.33: AT 直读优先(CPIN/CIMI/CCID/CGSN/COPS), 树值仅回退 — 展示面独立于 mobilenetwork
+    A_STAT=$(mipc_wan_cli --at_cmd "AT+CPIN?" 2>/dev/null | grep -oE 'CPIN: [A-Z ]+' | cut -d' ' -f2-)
+    A_IMSI=$(mipc_wan_cli --at_cmd "AT+CIMI" 2>/dev/null | grep -oE '^[0-9]{15}' | head -1)
+    A_ICCID=$(mipc_wan_cli --at_cmd "AT+CCID" 2>/dev/null | grep -oE '[0-9]{19,20}' | head -1)
+    A_IMEI=$(mipc_wan_cli --at_cmd "AT+CGSN" 2>/dev/null | grep -oE '^[0-9]{15}' | head -1)
+    A_OPS=$(mipc_wan_cli --at_cmd "AT+COPS?" 2>/dev/null | grep -oE '"[0-9]{5,6}"' | tr -d '"')
     S=$MN_TREE.SIM.1
-    printf '{"status":"%s","imsi":"%s","iccid":"%s","carrier":"%s","imei":"%s","phone":"%s","reg":"%s","pin_state":"%s","ts":%d}' \
-        "$(cfgget $S.SIMStatus)" "$(cfgget $S.IMSI)" "$(cfgget $S.ICCID)" \
-        "$(cfgget $S.CarrierName)" "$(cfgget $S.IMEI)" "$(cfgget $S.PhoneNumber)" \
-        "$(cfgget $S.RegisterStatus)" "$(mipc_wan_cli sim_pin_info_get 2>/dev/null | grep -oE 'state:[0-9]+' | cut -d: -f2)" "$(date +%s)"
+    printf '{"status":"%s","imsi":"%s","iccid":"%s","carrier":"%s","imei":"%s","phone":"%s","reg":"%s","pin_state":"%s","ts":%d}'         "${A_STAT:-$(cfgget $S.SIMStatus)}" "${A_IMSI:-$(cfgget $S.IMSI)}"         "${A_ICCID:-$(cfgget $S.ICCID)}" "$(op_name "${A_OPS:-$(cfgget $S.CarrierName)}")"         "${A_IMEI:-$(cfgget $S.IMEI)}" "$(cfgget $S.PhoneNumber)"         "$(cfgget $S.RegisterStatus)" "$(mipc_wan_cli sim_pin_info_get 2>/dev/null | grep -oE 'state:[0-9]+' | cut -d: -f2)" "$(date +%s)"
 }
 apply_pin() {
+    # v2.33 (P3.5): AT 直发引擎 — 厂商序列(mobilenetwork strings 实证):
+    #   disable: at+clck="sc",0,"PIN"   enable: at+clck="sc",1,"PIN"
+    #   change:  at+cpwd="sc","OLD","NEW"
+    #   unblock: at+cpin="NEW","PUK"     verify: at+cpin="PIN"
+    # 误锁风险提示在前端; AT 与 ubus 等价(同一模组面)。
+    CELL_ENGINE=mipc
+    [ -r $GWDATA/cellular_engine.conf ] && . $GWDATA/cellular_engine.conf
+    if [ "$CELL_ENGINE" = mipc ]; then
+        ACT=$(form_kv action)
+        P=$(form_kv pin); NP=$(form_kv new_pin); PUK=$(form_kv puk)
+        for v in "$P" "$NP" "$PUK"; do
+            printf '%s' "$v" | grep -qE '[^0-9]' && jerr bad_pin
+        done
+        case "$ACT" in
+        disable) ATCMD=$(printf 'at+clck="sc",0,"%s"' "$P") ;;
+        enable)  ATCMD=$(printf 'at+clck="sc",1,"%s"' "$P") ;;
+        change)  ATCMD=$(printf 'at+cpwd="sc","%s","%s"' "$P" "$NP") ;;
+        unblock) ATCMD=$(printf 'at+cpin="%s","%s"' "$NP" "$PUK") ;;
+        *) jerr bad_action ;;
+        esac
+        OUT=$(mipc_wan_cli --at_cmd "$ATCMD" 2>/dev/null)
+        printf '%s' "$OUT" | grep -qiE 'error|CME' && jerr pin_fail
+        printf '%s' "$OUT" | grep -qi OK || jerr pin_fail
+        ok_json '"engine":"mipc"'
+        return
+    fi
     ACT=$(form_kv action)
     P=$(form_kv pin); NP=$(form_kv new_pin); PUK=$(form_kv puk)
     for v in "$P" "$NP" "$PUK"; do

@@ -178,6 +178,26 @@ window.dsDel = async (m) => {
     if (j.ok) { toast("已删除"); PAGES.clients.tick(); } else toast("失败: " + j.error, 1);
 };
 
+/* v3.27: SSE 实时信号推送 — /api/sse 每3s推服务小区信号, 蜂窝卡免轮询等待;
+ * EventSource 断线自动重连(浏览器原生), 轮询路径保留兜底。 */
+(() => {
+    if (window.SSE_SIG) return;
+    try {
+        const es = new EventSource("/api/sse");
+        window.SSE_SIG = es;
+        es.onmessage = e => {
+            try {
+                const j = JSON.parse(e.data);
+                if (j && j.sig && j.sig.rsrp !== undefined) {
+                    setTag("tg-cel", true);
+                    T("cel-cell", `B${j.sig.band} · ARFCN ${j.sig.arfcn} · PCI ${j.sig.pci}`);
+                    T("cel-sig", `RSRP ${j.sig.rsrp} dBm · SINR ${j.sig.sinr} dB`);
+                }
+            } catch (_) { }
+        };
+    } catch (_) { }
+})();
+
 /* ================ WiFi ================ */
 PAGES.wifi = {
     html: `<div>

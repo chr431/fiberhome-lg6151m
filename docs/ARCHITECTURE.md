@@ -45,7 +45,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/bin/shmsnap` | **v1.0** | manifest | `/data/gw/shmsnap` | cfgmgr树共享内存快照工具(save/load 16MB原始字节, gzip后127KB, 开机恢复锁定状态) |
 | `gw/bin/v3_fix.ko` | **v1.1** | manifest | `/data/gw/v3_fix.ko` | TTL伪装/PPE解绑内核模块(wan_if/ttl_mode/unhook) |
 | `gw/bin/v3_steth.ko` | **v1.0** | manifest | `/data/gw/v3_steth.ko` | hook槽位听诊器(bias/interval) |
-| `gw/bin/v3httpd` | **v2.2** | manifest | `/data/gw/v3httpd` | 网关GUI HTTP服务(:80, 静态+JSON API) |
+| `gw/bin/v3httpd` | **v2.4** | manifest | `/data/gw/v3httpd` | 网关GUI HTTP服务(:80, 静态+JSON API) |
 | `gw/bin/wpapmk` | **v1.0** | manifest | `/data/gw/wpapmk` | WPA口令转PMK(纯C PBKDF2-SHA1; fh魔改hostapd只吃wpa_psk) |
 | `gw/capture_ubus.sh` | **v1.1** | manifest | `/data/gw/capture_ubus.sh` | stock拨号一次性捕获(ubus monitor+ccmni采样) |
 | `gw/cellular_replay.sh` | **v2.1** | manifest | `/data/gw/cellular_replay.sh` | 蜂窝锁定开机重放(频段/小区锁到cfgmgr树, 树每次开机由出厂档案重建) |
@@ -77,7 +77,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
 | `gw/wifi_up.sh` | **v1.24** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.24: MLD快照按本次运行uptime过滤(历史失败轮grp(0)污染断言,二犯); v1.23: MLO在线重应用先下电回冷启动等价态(T1-T5矩阵:-B后台化在接口UP+MLD武装态必死,下电即愈;撤销v2.41重启纪律); v1.22: 访客iface显式入桥(动态BSS不自动加bridge→帧死无IP接口→dnsmasq盲,tcpdump实证); v1.21: MLO访客静态单链路组17/18(E1/E2实证动态创建扰动主组,E3实证无访客纯净); v1.20: MLO单次AP启动(E1实证双次启动致rai0落临时组18); v1.19: MLO真双链路—MldGroup=1;0;x6写两带dat(RE实证stock同款,1基组号; 全零表=v1.15事故形态禁写; MldAddr/ApcliMloDisable勿写; 生效需冷启动); v1.18: 访客独立化) |
-| `gw/www/api.sh` | **v2.43** | manifest | `/data/gw/www/api.sh` | GUI JSON端点(v2.39: mlo字段+强制双频同名+mlo_changed重启提示; v2.38: 主WiFi密码/加密并入; v2.37访客独立化) |
+| `gw/www/api.sh` | **v2.44** | manifest | `/data/gw/www/api.sh` | GUI JSON端点(v2.39: mlo字段+强制双频同名+mlo_changed重启提示; v2.38: 主WiFi密码/加密并入; v2.37访客独立化) |
 | `gw/www/app.js` | **v3.26** | manifest | `/data/gw/www/app.js` | 控制台SPA(v3.23: 双频合一+MLO真双链路选项(值2映射mlo=1)+切换重启提示; v3.22: WiFi页重构) |
 | `gw/www/index.html` | **v2.14** | manifest | `/data/gw/www/index.html` | v3控制台页面 |
 | `gw/www/style.css` | **v2.1** | manifest | `/data/gw/www/style.css` | 控制台主题 |
@@ -89,7 +89,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/src/shmsnap.c` | **v1.0** | src | `gw/bin/shmsnap` | cfgmgr快照源码 |
 | `gw/src/v3_fix.c` | **v1.1** | src | `gw/bin/v3_fix.ko` | TTL/解绑模块源码(版本随产物) |
 | `gw/src/v3_steth.c` | **v1.0** | src | `gw/bin/v3_steth.ko` | 听诊器模块源码(版本随产物) |
-| `gw/src/v3httpd.c` | **v2.2** | src | `gw/bin/v3httpd` | GUI HTTP服务源码(公开版经zig重编译) |
+| `gw/src/v3httpd.c` | **v2.4** | src | `gw/bin/v3httpd` | GUI HTTP服务源码(公开版经zig重编译) |
 | `gw/src/wpapmk.c` | **v1.0** | src | `gw/bin/wpapmk` | WPA PMK转换源码(纯C PBKDF2) |
 | `install/run.sh` | **v1.1** | tool | `-` | raw shell自驱脚本(v1.1: 分区次设备号从/proc/partitions动态解析成布局门禁, RP102/RP103通用; v1.0硬编码259:7等) |
 | `tools/agg_pins.conf.example` | **v1.1** | tool | `-` | MAC钉死表模板(真实表设备侧自管, 含个人MAC不入库) |

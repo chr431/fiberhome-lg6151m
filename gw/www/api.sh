@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.43 (v2.42 w1pct回退链; 撤销MLO重启纪律—wifi_up v1.23修复在线重应用) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.44 (sse端点: 服务小区信号3s事件流, v3httpd v2.4流式通道; v2.43撤销MLO重启纪律) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -577,6 +577,26 @@ $R2"
     printf '{"aps":[%s],"ts":%d}' "$L" "$(date +%s)"
 }
 
+
+# -- SSE 事件流 (v2.44): v3httpd v2.4 已发流式响应头, 本端点只持续输出事件。
+# 事件 = 服务小区信号(3s节奏); 570s 自退(双保险, EventSource 自动重连)。
+get_sse() {
+    _t=0
+    while :; do
+        CJ=$(/data/gw/mipc_cellular cells 2>/dev/null | head -1)
+        SIG=""
+        case "$CJ" in
+            '{"serving"'*) SIG=$(printf '%s' "$CJ" | sed 's/^{"serving"://; s/,"cells".*//') ;;
+        esac
+        [ -z "$SIG" ] && SIG='null'
+        printf 'data: {"sig":%s,"ts":%s}
+
+' "$SIG" "$(date +%s)"
+        sleep 3
+        _t=$((_t+3)); [ $_t -ge 570 ] && exit 0
+    done
+}
+
 # -- WiFi 高级 (信道/带宽/功率/隐藏) + 访客(独立名称/频段/密码) + 双频合一 --
 get_wifi_adv() {
     cfg_load
@@ -724,10 +744,12 @@ get_cellular() {
     #   树值由 mobilenetwork 周期回填(有滞后), 直读消除断供风险(树死也有活数据)。
     MR=$(mipc_wan_cli --nw_get_signal 2>/dev/null | grep -oE 'RSRP=-?[0-9]+')
     [ -n "$MR" ] && SR="${MR#RSRP=}"
-    COPSR=$(mipc_wan_cli --at_cmd "AT+COPS?" 2>/dev/null | grep -oE '\+COPS: [^]*')
+    COPSR=$(mipc_wan_cli --at_cmd "AT+COPS?" 2>/dev/null | grep -oE '\+COPS: [^
+]*')
     CNUM=$(printf '%s' "$COPSR" | grep -oE '"[0-9]{5,6}"' | tr -d '"')
     [ -n "$CNUM" ] && PLMN="$CNUM"
-    ACT=$(printf '%s' "$COPSR" | awk -F, '{gsub(//,"");n=NF; gsub(/[^0-9]/,"",$n); print $n}')
+    ACT=$(printf '%s' "$COPSR" | awk -F, '{gsub(/
+/,"");n=NF; gsub(/[^0-9]/,"",$n); print $n}')
     case "$ACT" in
         0|1|3) RAT="GSM" ;;
         2|4|5|6) RAT="3G" ;;
@@ -1134,7 +1156,8 @@ case "$EP" in
     sys)      need_tok; get_sys ;;
     logs)     need_tok; get_logs ;;
     dhcp)     need_tok; get_dhcp ;;
-    cellular) need_tok; get_cellular ;;
+    cellular)  need_tok; get_cellular ;;
+    sse)       get_sse ;;   # v2.44: 流式事件(v3httpd 专用通道, 只读LAN)
     sms)       need_tok; get_sms ;;
     sms_send)  need_tok; apply_sms_send ;;
     traffic)   need_tok; get_traffic ;;

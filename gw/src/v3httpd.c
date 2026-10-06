@@ -1,4 +1,4 @@
-/* v3httpd.c v2.3 -- tiny HTTP server for the v3 gateway GUI (192.168.9.1:80).
+/* v3httpd.c v2.4 (SSE: GET /api/sse 流式事件通道) -- tiny HTTP server for the v3 gateway GUI (192.168.9.1:80).
  * zig cc -target aarch64-linux-musl tools/v3httpd.c -o v3httpd -O2
  *   (fully static: no FH libs; run directly)
  * Serves: GET  /            -> /data/gw/www/index.html
@@ -66,9 +66,10 @@ static void logline(const char *fmt, ...)
     va_end(ap);
 }
 
-static void send_all(int c, const char *b, int n)
+static int send_all(int c, const char *b, int n)   /* v2.4: 返回0=对端断开 */
 {
-    while (n > 0) { int k = send(c, b, n, 0); if (k <= 0) return; b += k; n -= k; }
+    while (n > 0) { int k = send(c, b, n, 0); if (k <= 0) return 0; b += k; n -= k; }
+    return 1;
 }
 
 static void send_file(int c, const char *path, const char *status)
@@ -151,6 +152,51 @@ static void run_cgi(int c, const char *ep, const char *method,
     bodybuf[total] = 0;
     send_json(c, bodybuf, total);
     logline("api %s %s (%dB)", method, ep, total);
+}
+
+/* v2.4 SSE: 流式 CGI — 响应头先行, 管道增量转发。api.sh sse 端点持续输出
+ * "data: {...}
+
+"; 寿命上限600s(子进程570s自退双保险), 空闲80s判死,
+ * EventSource 客户端自动重连。 */
+static void run_cgi_sse(int c, const char *ep)
+{
+    int pfd[2];
+    if (pipe(pfd) < 0) { send_json(c, "{\"error\":\"pipe\"}", 17); return; }
+    pid_t pid = fork();
+    if (pid == 0) {
+        setpgid(0, 0);
+        close(pfd[0]);
+        dup2(pfd[1], 1); close(pfd[1]);
+        int devnull = open("/dev/null", O_WRONLY);
+        if (devnull >= 0) { dup2(devnull, 2); close(devnull); }
+        char *argv[] = { (char*)"/bin/sh", (char*)WWW_ROOT "/api.sh", (char*)ep, 0 };
+        setenv("V3_METHOD", "GET", 1);
+        execv("/bin/sh", argv);
+        _exit(127);
+    }
+    close(pfd[1]);
+    setpgid(pid, pid);
+    static const char sse_hdr[] =
+        "HTTP/1.0 200 OK\r\nContent-Type: text/event-stream\r\n"
+        "Cache-Control: no-store\r\nConnection: close\r\n\r\n";
+    send_all(c, sse_hdr, sizeof sse_hdr - 1);
+    char buf[4096]; int k;
+    time_t t0 = time(0), last = t0;
+    while (time(0) - t0 < 600) {
+        struct pollfd pf = { pfd[0], POLLIN, 0 };
+        int pr = poll(&pf, 1, 2000);
+        if (pr == 0) { if (time(0) - last > 80) break; continue; }
+        if (pr < 0) break;
+        k = read(pfd[0], buf, sizeof buf);
+        if (k <= 0) break;
+        last = time(0);
+        if (!send_all(c, buf, k)) break;   /* 客户端断开 */
+    }
+    kill(-pid, SIGKILL); kill(pid, SIGKILL);
+    close(pfd[0]);
+    int st; while (waitpid(pid, &st, 0) < 0 && errno == EINTR) {}
+    logline("api GET %s (sse end)", ep);
 }
 
 static int ep_ok(const char *ep)
@@ -327,6 +373,8 @@ static void handle_conn(int c, char *req, size_t reqsz)
                 body[cp] = 0;
             }
             run_cgi(c, ep, "POST", query, body);
+        } else if (!strcmp(ep, "sse")) {
+            run_cgi_sse(c, ep);              /* v2.4: 信号推送事件流 */
         } else {
             run_cgi(c, ep, "GET", query, 0);
         }

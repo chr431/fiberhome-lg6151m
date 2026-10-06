@@ -622,6 +622,10 @@ apply_bandlock() {
 #   (AcT: lte=7, nr=11, 3GPP TS 27.007 语义; =? 实测参数域 {0,2,7,11})
 #   与频段锁互斥(原厂同款); 空表=EMMCHLCK=0 解锁。CELL_ENGINE 切换同
 #   cellular_engine.conf, 缺省 mipc, 树路径保留为回退。
+celllock_forget_env() {  # 清掉此前 source 残留的 CELL_* 环境变量(防重发旧锁)
+    for _k in $(set | cut -d= -f1 | grep -E '^CELL_[0-9]+$'); do unset "$_k"; done
+}
+
 celllock_send_all() {  # 从 cellular.conf 的 CELL_i 全量下发
     N=0; FIRST=1
     i=1
@@ -675,14 +679,14 @@ apply_celllock() {
             mv /tmp/cl2.$$ "$CONF"
             ;;
         clear)
-            : > "$CONF"
+            grep -v '^CELL_' "$CONF" 2>/dev/null > /tmp/cl.$$ || true
+            mv /tmp/cl.$$ "$CONF"
+            sed -i 's/^CELL_EN=.*/CELL_EN=0/' "$CONF" 2>/dev/null || echo "CELL_EN=0" >> "$CONF"
             ;;
         *) jerr bad_op ;;
         esac
+        celllock_forget_env
         . "$CONF"
-        if [ "${CELL_EN:-0}" = 1 ] || [ "$OP" = add ]; then
-            :  # add 默认即锁
-        fi
         # 全量下发 + 互斥(开小区锁时解锁频段)
         if [ "$OP" = add ]; then
             [ "${BAND_EN:-0}" = 1 ] && { /data/gw/mipc_cellular unlock >/dev/null 2>&1; sed -i 's/^BAND_EN=1/BAND_EN=0/' "$CONF"; }
@@ -691,6 +695,7 @@ apply_celllock() {
             echo "CELL_EN=0" >> "$CONF"
             [ "${BAND_EN:-0}" = 1 ] && /data/gw/mipc_cellular setlock lte="${LTE_MASK:-all}" nr="${NR_MASK:-all}" >/dev/null 2>&1
         fi
+        celllock_forget_env
         . "$CONF"
         N=$(celllock_send_all)
         ok_json ',"engine":"mipc","cells":'$N',"note":"modem重扫约20-60s"'

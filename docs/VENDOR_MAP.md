@@ -86,7 +86,7 @@ LK(按 misc[2060] bootctrl 选槽) ─ kernel 5.15.134 (aarch64, OpenWrt 23.05 r
 | LAN/交换 | lancc, onu_igmpv3, nding, arping, trafficmgr, link_detection, upnpd, fhtopo | libigmp/libmld/libipi/libmc_hal/libpal/libmap* | 主机表/组播/IPv6 ND/拓扑 |
 | WAN/协议 | **wancc(879KB 总控)**, protocolmgr, udhcpc/udhcpd, dhcp6c/dhcp6s, radvd, dnsmasq(私补丁), dnsrelay, pppd | rp-pppoe/pppol2tp 插件, libfhresolv | WAN 全家桶的母亲进程 |
 | 安全/VPN | secmgr(瑞士军刀), xtables-legacy-multi(+6 链接), ipset, charon/starter/stroke/pki(strongSwan), openssl, curl, fh_security_usb, telnetd_multicall | libstrongswan/libcharon + 44 插件, passwordcrypt.so(dlopen) | 防火墙+ACL+家长控制+IPSec/L2TP/PPTP+USB 验签 |
-| WiFi/Mesh | wifimgr, map_master/map_slave/map_cli, i5_ctl | libwifi*/libmap×6/libfhmap | EasyMesh 1905 Controller/Agent |
+| WiFi/Mesh | wifimgr, map_master/map_slave/map_cli, i5_ctl | libwifi*/libmap×6/libfhmap | EasyMesh 1905 Controller/Agent; 访客隔离 wifiguest.sh(ebtables broute 配方)→已由 gw/guest_fw.sh 复刻 |
 | 语音 | sip, (baresip@rc.d) | libsip_app + libql_slic/libqlvoice | FXS 话机（移动版无硬件=空转）|
 | 诊断 | pingdiag, traceroute, ntpdate, dumpleases, rastatus | libfhresolv, libpcap(†未消费) | |
 | 工厂 | load_cli(48 NEEDED!), dev_mgm_debug(FTP/TFTP 后门+端口镜像), kdrv_debug, get_led_config | 14 个 *_cli 库 | 仅 factorymodeflag 激活，常态隐藏攻击面 |

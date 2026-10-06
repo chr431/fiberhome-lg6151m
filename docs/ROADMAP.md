@@ -138,9 +138,20 @@ watchdog 集成（ccmni 无 IP→重拨）。出口：拔 SIM 重插自恢复 + 
 - 信号推送：订阅 `ril.unsol.nw.signal`，状态页从轮询升级实时。
 - PLMN 扫描结果展示（扫描后树读/原生查询）。
 
-### P5 深水区（可选、低优先、台架先行）
-quecadp 复活实验（完整 fhdrv 加载链，VENDOR_MAP §5 顺序表）——仅当 iptables 拆分在实际
-负载下暴露瓶颈才启动。
+### P4 功能补全（**全部完成 2026-10-06 深夜** — SSE 信号推送收尾） <!--CLM:CLM-P4-SSE-->
+
+> 终项：v3httpd v2.4 流式 CGI 通道（GET /api/sse, 头先行+管道增量转发+600s寿命/80s空闲
+> 双超时）+ api.sh v2.44 sse 端点（mipc_cellular cells 服务小区信号 3s 事件流, 570s
+> 自退双保险）+ app.js v3.27 EventSource 实时刷新蜂窝卡（轮询保留兜底）。curl 实测
+> 事件流即通, selftest 58 项含 SSE 断言。P4 四项（SMS/PLMN/PIN/SSE）全数落地。
+
+### P5 深水区（**关闭 2026-10-06** — 无需启动） <!--CLM:CLM-P5-CLOSED-->
+
+> 关闭判定（实测）：并发多流传输期间设备 CPU 基本空转(top 实证) — 瓶颈在上游链路
+> 本身（当晚双上行均 <1Mbps, 传输中 CPU<2%），iptables mark+NAT 引擎开销远低于
+> 平台转发能力余量；quecadp 复活需完整 fhdrv 加载链(net_quecadp+ioctl 库+multiwan
+> 重构) = 高风险面换零已证需求。判定：保持 iptables 引擎，P5 永久关闭；仅当未来
+> 上游升级到 >500Mbps 且 CPU 画像显示 softirq 饱和时重开。
 
 ## 4. 护栏绑定（制度化）
 

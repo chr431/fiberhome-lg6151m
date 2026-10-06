@@ -369,6 +369,34 @@ def t_gui_plugin():
     record(t_gui_plugin._test_name, "gui", ok, note)
 
 
+@test("SSE 信号事件流 (v3httpd v2.4 + api.sh sse)")
+def t_gui_sse():
+    # v2.9: 原始 socket 拉 /api/sse, 5s 内应收到带 rsrp 的 data: 事件
+    import socket as sk
+    try:
+        s = sk.create_connection((lgssh.HOST, 80), timeout=5)
+        s.settimeout(6)
+        s.send(b"GET /api/sse HTTP/1.0\r\nHost: x\r\n\r\n")
+        buf = b""
+        t0 = time.time()
+        while time.time() - t0 < 6:
+            try:
+                d = s.recv(4096)
+            except Exception:
+                break
+            if not d:
+                break
+            buf += d
+            if b"rsrp" in buf:
+                break
+        s.close()
+        ok = b"text/event-stream" in buf and b"data: " in buf and b"rsrp" in buf
+        note = f"{len(buf)}B" + ("" if ok else f" head={buf[:60]!r}")
+    except Exception as e:
+        ok, note = False, repr(e)[:60]
+    record(t_gui_sse._test_name, "gui", ok, note)
+
+
 @test("API login + token 生命周期")
 def t_gui_login():
     tok = _token()

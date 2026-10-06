@@ -1,5 +1,5 @@
 #!/bin/sh
-# wifi_up.sh — v3 WiFi bring-up (v1.19: MLO真双链路 — 两带 dat 各写 MldGroup=1;0;x6
+# wifi_up.sh — v3 WiFi bring-up (v1.20: MLO单次AP启动; v1.19: MLO真双链路 — 两带 dat 各写 MldGroup=1;0;x6
 #   (RE实证: stock be_init_wlan_apcfg_file 同款形态, 1基组号配对成MLD; 全零表=v1.15
 #   事故形态禁写; MldAddr/ApcliMloDisable 勿写; MLD生效需冷启动(FW锁存); 纯MLO不需wapp);
 #   v1.18: 访客独立配置; v1.16: F3单进程hostapd; v1.10: 自动信道扫描选道),
@@ -445,9 +445,14 @@ ls -la /var/wlan/
 # 由自带 wpapmk 工具现算(PBKDF2-SHA1 4096)。apcfg 只管射频参数, BSS 内部
 # 保持 OPEN(被 hostapd 接管后无 OPEN 广播)。hostapd 起不来则射频关闭——
 # 绝不回退开放模式。
-echo "== ifconfig up"
-ifconfig ra0 up
-ifconfig rai0 up
+# v1.20(E2): MLO=1 时跳过预启动 ifconfig up 与 hostapd 前的 down — E1实证双次AP启动
+# 会让第二链路(rai0)在 hostapd 阶段无法回组1而落入临时单链路组18(dmesg:
+# rai0 eht_ap_mld_create grp(18)(ML:0))。hostapd 的 nl80211 ADD_IF 本身完成
+# profile 应用+AP启动, 作为 MLO 下唯一一次 AP start。非 MLO 维持工厂配方双次序列。
+if [ "$MLO" != 1 ]; then
+    ifconfig ra0 up
+    ifconfig rai0 up
+fi
 sleep 3
 
 echo "== bridge into br-lan"
@@ -548,7 +553,10 @@ HGUEST
         }
         [ "$GB2" = 1 ] && guest_bss /var/wlan/hap_2g.conf ra1  "$ra1_mac"
         [ "$GB5" = 1 ] && guest_bss /var/wlan/hap_5g.conf rai1 "$rai1_mac"
-        ifconfig ra0 down; ifconfig rai0 down; sleep 1
+        # v1.20(E2): MLO 下不做 down/up 包夹(见函数头注), hostapd 即首次也是唯一 AP 启动
+        if [ "$MLO" != 1 ]; then
+            ifconfig ra0 down; ifconfig rai0 down; sleep 1
+        fi
         # ---- v1.16 F3: 单进程多配置(stock同款拓扑) ----
         # RE实证根因: 双 hostapd -B 的 START_AP 重叠落入 bss_mngr_con_dev_reg
         # 无锁窗口, bss_idx<->FW 映射错乱致 rai0 信标槽被 rai1 内容占用。
@@ -588,7 +596,7 @@ HGUEST
                 fi
             fi
         fi
-        ifconfig ra0 up; ifconfig rai0 up
+        [ "$MLO" = 1 ] || { ifconfig ra0 up; ifconfig rai0 up; }   # v1.20: MLO下hostapd已拉起, 幂等up也省
         # ---- v1.13 F2: 信标重装订(止血MLD注册竞态) ----
         # RE实证: 双hostapd -B的START_AP重叠落入 bss_mngr_con_dev_reg 无锁窗口,
         # 固件按错映射装订信标槽(rai0槽被rai1内容占用)。mwctl no_bcn 0 =

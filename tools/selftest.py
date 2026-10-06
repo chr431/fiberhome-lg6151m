@@ -615,6 +615,15 @@ def t_cel_keeper():
     record(t_cel_keeper._test_name, "cellular", ok, f"pid={out.strip()}" if ok else "dial_keeper 未运行")
 
 
+@test("SMS 引擎二进制冒烟 (P4)")
+def t_cel_smstool():
+    # ql_sms_send_msg 直发引擎: 二进制在位+可执行+用法出口正常
+    # (真实发送不做进测试 -- 产生费用; 实弹验证 2026-10-06 ret=0 已入台账)
+    out = dev("/data/gw/mipc_cellular >/dev/null 2>&1; echo rc=$?")
+    ok = "rc=1" in out
+    record(t_cel_smstool._test_name, "cellular", ok, out.strip())
+
+
 @test("GUI sms 端点 JSON 有效")
 def t_cel_apisms():
     tok = _token()

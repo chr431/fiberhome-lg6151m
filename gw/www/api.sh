@@ -332,7 +332,7 @@ net_plmn_scan() {
     # 固定缓冲(段错误, 同 AT+CLAC); 结果直读需 mipc_cellular ql_nw_network_scan
     # 逆向(下轮)或树结果节点定位。暂用 mobilenetwork ubus 通道(过渡层仍在)。
     ubus call mobile_network start_search_network "{}" >/dev/null 2>&1
-    ok_json ',"note":"scanning(ubus); 结果展示待P4.1续"'
+    ok_json '"note":"scanning(ubus); 结果展示待P4.1续"'
 }
 
 # -- 风扇/LED --
@@ -698,7 +698,7 @@ apply_celllock() {
         celllock_forget_env
         . "$CONF"
         N=$(celllock_send_all)
-        ok_json ',"engine":"mipc","cells":'$N',"note":"modem重扫约20-60s"'
+        ok_json '"engine":"mipc","cells":'$N',"note":"modem重扫约20-60s"'
         return
     fi
     case "$OP" in

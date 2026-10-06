@@ -30,6 +30,9 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 - `tools/VERSIONS.tsv`：唯一版本事实源；改动必 bump + commit；
   `python tools/vercheck.py check` 全绿才允许任何部署操作。
 - `tools/leak_check.py`：敏感词零命中门禁（建议 pre-push 跑 `--history`）。
+- `docs/GUI_TERMINOLOGY.md`：GUI 用户可见文案的唯一用词基准（常设）。
+  修改 `gw/www/` 任何界面文案前先查该表；引入新概念先在表中补行再写代码。
+  整改历史见 `docs/GUI_COPY_AUDIT.md`。
 
 ## 版本总表
 
@@ -37,7 +40,8 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | 文件 | 版本 | 类别 | 设备路径 | 用途 |
 |---|---|---|---|---|
 | `README.md` | **v1.1** | doc | `-` | 仓库总览与快速上手 |
-| `docs/ARCHITECTURE.md` | **v1.0** | doc | `-` | 架构+版本总表(本表生成) |
+| `docs/ARCHITECTURE.md` | **v1.1** | doc | `-` | 架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针) |
+| `docs/GUI_TERMINOLOGY.md` | **v1.0** | doc | `-` | GUI用户可见文案常设基准(统一原则/冲突清单T·P/规范术语表/状态动作词/单位符号/错误码映射; gw/www文案改动前必查) |
 | `gw/bin/fhstub.so` | **v1.0** | manifest | `/data/gw/fhstub.so` | FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径) |
 | `gw/bin/healthdog.ko` | **v1.0** | manifest | `/data/gw/healthdog.ko` | 取证看门狗内核模块(forensic=1) |
 | `gw/bin/mipc_cellular` | **v0.5** | manifest | `/data/gw/mipc_cellular` | 蜂窝MIPC直连CLI(getbands/setlock/unlock; 锁NR41+79实弹验证零扰动) |
@@ -76,10 +80,10 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/webs_revive.sh` | **v1.3** | manifest | `/data/gw/webs_revive.sh` | 原厂GUI复活器(自足nginx conf; 手动拉起) |
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
-| `gw/wifi_up.sh` | **v1.24** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.24: MLD快照按本次运行uptime过滤(历史失败轮grp(0)污染断言,二犯); v1.23: MLO在线重应用先下电回冷启动等价态(T1-T5矩阵:-B后台化在接口UP+MLD武装态必死,下电即愈;撤销v2.41重启纪律); v1.22: 访客iface显式入桥(动态BSS不自动加bridge→帧死无IP接口→dnsmasq盲,tcpdump实证); v1.21: MLO访客静态单链路组17/18(E1/E2实证动态创建扰动主组,E3实证无访客纯净); v1.20: MLO单次AP启动(E1实证双次启动致rai0落临时组18); v1.19: MLO真双链路—MldGroup=1;0;x6写两带dat(RE实证stock同款,1基组号; 全零表=v1.15事故形态禁写; MldAddr/ApcliMloDisable勿写; 生效需冷启动); v1.18: 访客独立化) |
+| `gw/wifi_up.sh` | **v1.25** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.25: v1.19块过期'切换MLO必须reboot'注释修正(v1.23已改在线重应用); v1.24: MLD快照按本次运行uptime过滤(历史失败轮grp(0)污染断言,二犯); v1.23: MLO在线重应用先下电回冷启动等价态(T1-T5矩阵:-B后台化在接口UP+MLD武装态必死,下电即愈;撤销v2.41重启纪律); v1.22: 访客iface显式入桥(动态BSS不自动加bridge→帧死无IP接口→dnsmasq盲,tcpdump实证); v1.21: MLO访客静态单链路组17/18; v1.20: MLO单次AP启动; v1.19: MLO真双链路—MldGroup=1;0;x6写两带dat(RE实证stock同款,1基组号; 全零表=v1.15事故形态禁写; MldAddr/ApcliMloDisable勿写); v1.18: 访客独立化) |
 | `gw/www/api.sh` | **v2.45** | manifest | `/data/gw/www/api.sh` | GUI JSON端点(v2.39: mlo字段+强制双频同名+mlo_changed重启提示; v2.38: 主WiFi密码/加密并入; v2.37访客独立化) |
-| `gw/www/app.js` | **v3.26** | manifest | `/data/gw/www/app.js` | 控制台SPA(v3.23: 双频合一+MLO真双链路选项(值2映射mlo=1)+切换重启提示; v3.22: WiFi页重构) |
-| `gw/www/index.html` | **v2.14** | manifest | `/data/gw/www/index.html` | v3控制台页面 |
+| `gw/www/app.js` | **v3.29** | manifest | `/data/gw/www/app.js` | 控制台SPA(v3.29: 文案整改落地=术语表统一(docs/GUI_TERMINOLOGY.md)+错误码中文映射+审计G-01..G-46修复; v3.28: 聚合五模式选择; v3.23: MLO选项) |
+| `gw/www/index.html` | **v2.15** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.15: 导航改'终端'+页头去内部版本号+缓存v49) |
 | `gw/www/style.css` | **v2.1** | manifest | `/data/gw/www/style.css` | 控制台主题 |
 | `gw/zz_data_hook` | **v1.1** | manifest | `/data/build/rootfs/etc/init.d/zz_data_hook` | S98数据钩子(v1.1: plain sh——原厂无/etc/rc.common, rc.common式shebang致开机栈全灭; 回归实测发现) |
 | `gw/src/fhstub.c` | **v1.0** | src | `gw/bin/fhstub.so` | FH符号桩库源码 |

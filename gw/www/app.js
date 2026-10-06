@@ -1,4 +1,5 @@
-/* app.js v3.26 (聚合滑块应用后回读同步) -- v3 gateway console SPA
+/* app.js v3.29 (GUI 文案整改: 术语统一+错误码中文化+审计 G-01..G-46 落地, 基准=docs/GUI_TERMINOLOGY.md) -- v3 gateway console SPA
+ * v3.28: 聚合五模式选择; v3.27: SSE 实时信号; v3.26: 聚合滑块应用后回读同步
  * v3.4: WiFi 分析仪(信道图/信道评级/AP列表/时间图 canvas多视图) + 信道下拉统一(2.4G补select, 双频加"自动"档)
  * 刷新机制彻底重做: 页面骨架只建一次(进入时), 轮询仅更新文本槽/小表格
  *   T(id,v) 文本槽(带变化检测)  H(id,v) 局部HTML(tbody级,带变化检测)
@@ -32,6 +33,48 @@ function modal(title, html) {
 }
 function modalClose() { document.getElementById("modal").classList.add("hidden"); }
 document.getElementById("modal").addEventListener("click", e => { if (e.target.id === "modal") modalClose(); });
+
+/* ---------- 用户可见文案基准: docs/GUI_TERMINOLOGY.md ---------- */
+/* 错误码 -> 中文原因 (api.sh jerr 全集); 未列码兜底"操作失败" (术语表第七节) */
+const ERR = {
+    need_login: "登录已过期，请重新登录", bad_login: "密码错误", bad_old: "当前密码错误",
+    bad_pass: "密码不符合要求（8-63 位字母、数字或连字符）", need_guest_pass: "开启访客网络前请先设置访客密码",
+    bad_chars: "名称含不支持的字符（仅限字母、数字、空格与 . _ -）", bad_len: "名称过长（最多 32 个字符）",
+    bad_ip: "IP 地址格式不正确", bad_mac: "MAC 地址格式不正确", bad_num: "请输入数字",
+    bad_lease: "租期格式不正确（示例：12h）", dnsmasq_fail: "局域网服务启动失败",
+    bad_proto: "协议只能是 TCP 或 UDP", bad_port: "端口需为 1-65535", bad_pct: "权重需在 5-95 之间",
+    bad_mode: "模式取值无效", bad_op: "操作类型无效", bad_flag: "开关取值无效", bad_action: "操作类型无效",
+    bad_ch: "2.4GHz 信道需为 0-13", bad_ch5: "5GHz 信道取值无效", bad_bw: "带宽取值无效",
+    bad_power: "发射功率需为 25-100", bad_auth: "加密方式无效", bad_band: "访客频段无效",
+    bad_bands: "频段格式不正确（逗号分隔的数字）", empty_bands: "请至少填写一个频段",
+    bad_arfcn: "频点（ARFCN）需为 0-875000", bad_pci: "PCI 需为 0-2000", bad_act: "制式无效",
+    bad_idx: "序号无效", dup_cell: "该小区已在列表中", list_full: "列表已满（最多 20 条）",
+    mipc_fail: "模组设置失败", tree_fail: "配置写入失败", at_fail: "模组无响应，请稍后重试",
+    ioctl_fail: "硬件接口调用失败", pin_fail: "PIN 操作失败", bad_pin: "PIN 码只能为数字",
+    bad_name: "主机名含不支持的字符", bad_srv: "服务器地址格式不正确", bad_tz: "时区格式不正确",
+    bad_ucs2: "短信编码格式不正确", empty_text: "短信内容不能为空", too_long: "内容过长",
+    need_ucs2: "暂不支持中文短信（仅英文/数字）", send_fail: "短信发送失败",
+    scan_failed: "扫描失败，请重试", tool_missing: "扫描组件缺失，请重试",
+    uplink_no_conf: "请先填写静态 IP 与网关", mac_fail: "MAC 地址设置失败", addr_fail: "IP 地址设置失败",
+    bad_cmd: "命令含不支持的字符", bad_form: "档案类型无效", unknown: "未知操作",
+    post_only: "请求方式不正确", bad_json: "响应解析失败", ubus: "系统信息服务暂不可用"
+};
+const eMsg = e => ERR[e] ? "操作失败：" + ERR[e] : "操作失败";
+/* 蜂窝频段统一写法: mipc 出 N41, 树出 41 -> n41 / B41 (术语表第六节; G-03) */
+const fmtBand = b => { b = String(b == null ? "" : b).trim(); if (!b || b === "--") return "--"; if (/^N/i.test(b)) return "n" + b.slice(1); if (/^B/i.test(b)) return b; return /^\d+$/.test(b) ? "B" + b : b; };
+/* /tmp/wan_mode 内容(off|agg:S1:S2) -> 运行状态文案; 空=检测中 (G-13/G-14, 不直出内部 token) */
+const wanModeTxt = v => !v ? "检测中" : (v === "off" ? "已停用" : "运行中");
+const TZ_TXT = { "CST-8": "北京时间（UTC+8）", "UTC": "UTC" };
+/* cells 归一: mipc=对象数组, 树=逗号串五元组 -> [{band,arfcn,pci,rsrp,sinr}] (G-05) */
+const celRows = j => {
+    const c = j && j.cells;
+    if (Array.isArray(c)) return c.map(x => ({ band: x.band, arfcn: x.arfcn, pci: x.pci, rsrp: x.rsrp, sinr: x.sinr }));
+    if (c && c.band) {
+        const g = k => String(c[k] || "").split(",");
+        return g("band").filter(Boolean).map((b, i) => ({ band: b, arfcn: g("arfcn")[i], pci: g("pci")[i], rsrp: g("rsrp")[i], sinr: g("sinr")[i] }));
+    }
+    return [];
+};
 
 /* ---------- DOM 更新助手 (刷新机制v4核心) ---------- */
 const $ = id => document.getElementById(id);
@@ -72,7 +115,7 @@ function kv(k, id, mono) {
     return `<div class="kv"><span>${k}</span><b id="${id}" class="${mono ? "mono" : ""}">--</b></div>`;
 }
 function tag(id, onTxt, offTxt) { return `<span class="tag" id="${id}" data-on="${onTxt}" data-off="${offTxt}">--</span>`; }
-function setTag(id, ok) { const e = $(id); if (!e) return; const v = ok ? e.dataset.on : e.dataset.off; if (e.textContent !== v) { e.textContent = v; e.className = "tag " + (ok ? "on" : "off"); } }
+function setTag(id, ok) { const e = $(id); if (!e) return; const v = ok == null ? "--" : (ok ? e.dataset.on : e.dataset.off); if (e.textContent !== v) { e.textContent = v; e.className = "tag " + (ok == null ? "" : (ok ? "on" : "off")); } }   // v3.29: null=未知态(G-09)
 
 /* ---------- pages ---------- */
 const PAGES = {};
@@ -82,18 +125,18 @@ let timer = null;
 PAGES.status = {
     html: `<div class="grid">
       ${card("系统", kv("运行时间", "up-up") + kv("负载", "up-load") + kv("内存", "up-mem") + kv("LAN", "up-lan"))}
-      ${card("上行 · 5G " + tag("tg-5g", "在线", "离线"),
+      ${card("上网线路 · 蜂窝（5G/4G） " + tag("tg-5g", "已连接", "未连接"),
         kv("接口", "w5-if") + kv("IPv4", "w5-ip", 1) + kv("IPv6", "w5-v6", 1) +
-        `<div class="rate"><span>↓ <b id="w5-rx">…</b></span><span>↑ <b id="w5-tx">…</b></span></div>`)}
-      ${card("上行 · 有线宽带 " + tag("tg-home", "已连接", "未连接"),
+        `<div class="rate"><span>下行 <b id="w5-rx">…</b></span><span>上行 <b id="w5-tx">…</b></span></div>`)}
+      ${card("上网线路 · 有线宽带 " + tag("tg-home", "已连接", "未连接"),
         kv("IPv4", "ho-ip", 1) + kv("IPv6", "ho-v6", 1) +
-        `<div class="rate"><span>↓ <b id="ho-rx">…</b></span><span>↑ <b id="ho-tx">…</b></span></div>`)}
-      ${card("蜂窝载波 " + tag("tg-cel", "5G", "无服务"),
-        kv("运营商", "cel-op") + kv("服务小区", "cel-cell", 1) + kv("信号", "cel-sig") + kv("载波聚合", "cel-n"))}
-      ${card("聚合引擎 " + tag("tg-agg", "运行中", "未启用"),
-        kv("内核引擎", "agg-eng") + kv("权重 5G/家宽", "agg-w") + kv("状态", "agg-st", 1))}
+        `<div class="rate"><span>下行 <b id="ho-rx">…</b></span><span>上行 <b id="ho-tx">…</b></span></div>`)}
+      ${card("蜂窝 " + tag("tg-cel", "已驻网", "无服务"),
+        kv("运营商", "cel-op") + kv("服务小区", "cel-cell", 1) + kv("信号强度", "cel-sig") + kv("小区数", "cel-n"))}
+      ${card("聚合 " + tag("tg-agg", "运行中", "已停用"),
+        kv("转发引擎", "agg-eng") + kv("分流权重 蜂窝/有线宽带", "agg-w") + kv("运行状态", "agg-st"))}
       ${card("WiFi " + tag("tg-wifi", "正常", "异常"),
-        kv("2.4G", "wf-2g") + kv("5G", "wf-5g") + kv("hostapd", "wf-hap"))}
+        kv("2.4GHz", "wf-2g") + kv("5GHz", "wf-5g") + kv("无线服务", "wf-hap"))}
       ${card("温度", '<div id="tp-body"></div>')}
       ${card("IPv6 LAN", kv("ULA", "v6-ula", 1) + kv("方式", "v6-mode"))}
     </div>`,
@@ -114,42 +157,43 @@ PAGES.status = {
         T("ho-rx", lastCounters ? rate(+j.counters.rxeth, +lastCounters.rxeth) : "…");
         T("ho-tx", lastCounters ? rate(+j.counters.txeth, +lastCounters.txeth) : "…");
         if (cel && cel.serving) {
-            setTag("tg-cel", cel.serving.rat !== "--");
+            setTag("tg-cel", fmtBand(cel.serving.band) !== "--");   // G-02: mipc 无 rat 字段, 按频段判驻网
             T("cel-op", `${cel.operator.name} (${cel.operator.plmn})`);
-            T("cel-cell", `B${cel.serving.band} · ARFCN ${cel.serving.arfcn} · PCI ${cel.serving.pci}`);
+            T("cel-cell", `${fmtBand(cel.serving.band)} · ARFCN ${cel.serving.arfcn} · PCI ${cel.serving.pci}`);
             T("cel-sig", `RSRP ${cel.serving.rsrp} dBm · SINR ${cel.serving.sinr} dB`);
-            T("cel-n", `${cel.cells.n} 个小区`);
+            T("cel-n", `${cel.n != null ? cel.n : celRows(cel).length} 个小区`);   // G-04: mipc 下 cells 是数组, 读顶层 n
         } else { setTag("tg-cel", false); T("cel-op", "--"); T("cel-cell", "--"); T("cel-sig", "--"); T("cel-n", "--"); }
-        setTag("tg-agg", j.agg.on === "1");
-        T("agg-eng", j.agg.on === "1" ? (j.agg.engine === "vendor" ? "quecadp (原厂)" : "iptables") : "已旁路");
-        const wp = /^\d+$/.test(j.agg.w1pct) ? `${j.agg.w1pct}% / ${100 - j.agg.w1pct}%` : "—";
-        T("agg-w", wp);
-        T("agg-st", j.agg.state);
+        const aggUnk = j.agg.on === "1" && !j.agg.wanmode;   // G-09: wan_mode 文件缺失时 on 误报 1
+        setTag("tg-agg", aggUnk ? null : j.agg.on === "1");
+        T("agg-eng", j.agg.engine === "vendor" ? "硬件加速" : (j.agg.engine ? "软件转发" : "--"));
+        const wpOk = /^\d+$/.test(j.agg.w1pct);
+        T("agg-w", wpOk ? `${j.agg.w1pct}% / ${100 - j.agg.w1pct}%` : "—");
+        T("agg-st", aggUnk ? "--" : wanModeTxt(j.agg.wanmode));   // G-14: 不直出日志行
         const w = j.wifi || {};
         setTag("tg-wifi", (w.hostapd2g > 0) && (w.hostapd5g > 0));
-        T("wf-2g", `${w.ssid2g || "?"} · ${w.secured ? "已加密" : "开放!"} · ch${w.ch2g}`);
-        T("wf-5g", `${w.ssid5g || "?"} · ${w.secured ? "已加密" : "开放!"} · ch${w.ch5g}`);
-        T("wf-hap", `${w.hostapd2g > 0 ? "2G✓" : "2G✕"} ${w.hostapd5g > 0 ? "5G✓" : "5G✕"}`);
+        T("wf-2g", `${w.ssid2g || "?"} · ${w.secured ? "已加密" : "开放"} · ch${w.ch2g}`);
+        T("wf-5g", `${w.ssid5g || "?"} · ${w.secured ? "已加密" : "开放"} · ch${w.ch5g}`);
+        T("wf-hap", `${w.hostapd2g > 0 ? "2.4GHz 正常" : "2.4GHz 异常"} · ${w.hostapd5g > 0 ? "5GHz 正常" : "5GHz 异常"}`);
         H("tp-body", Object.entries(j.temps || {}).map(([k, v]) => `<div class="kv"><span>${k}</span><b>${(v / 1000).toFixed(1)} °C</b></div>`).join(""));
-        T("v6-ula", "fd42:9ac1:7e50::/64"); T("v6-mode", "SLAAC + NAT66");
-        document.getElementById("hdr-sub").textContent = wp === "—" ? "v4 · 5G 聚合" : `v4 · 5G ${j.agg.w1pct}% / 家宽 ${100 - j.agg.w1pct}% · ${j.wanmode || ""}`;
+        T("v6-ula", "fd42:9ac1:7e50::/64"); T("v6-mode", "自动分配 + NAT 兼容");
+        document.getElementById("hdr-sub").textContent = !wpOk ? "蜂窝 + 有线宽带聚合" : `蜂窝 ${j.agg.w1pct}% / 有线宽带 ${100 - j.agg.w1pct}%`;   // G-07/G-37: 字段路径修正+去内部版本号
         lastCounters = j.counters; lastTs = j.ts;
     }
 };
 let lastCounters = null, lastTs = 0;
 
-/* ================ 设备 ================ */
+/* ================ 终端 ================ */
 PAGES.clients = {
     html: `<div id="cl-body">
-      ${card(`DHCP 客户端 <span class="tag on" id="cl-n">0 台</span>`, '<table><thead><tr><th>主机名</th><th>IP</th><th>MAC</th><th>状态</th><th></th></tr></thead><tbody id="cl-tb"></tbody></table>', 1)}
-      ${card("DHCP 静态租约", `<table><thead><tr><th>MAC</th><th>固定 IP</th><th>主机名</th><th></th></tr></thead><tbody id="ds-tb"></tbody></table>
+      ${card(`终端列表（DHCP） <span class="tag on" id="cl-n">0 台</span>`, '<table><thead><tr><th>主机名</th><th>IP</th><th>MAC</th><th>状态</th><th></th></tr></thead><tbody id="cl-tb"></tbody></table>', 1)}
+      ${card("DHCP 静态绑定", `<table><thead><tr><th>MAC</th><th>IP 地址</th><th>主机名</th><th></th></tr></thead><tbody id="ds-tb"></tbody></table>
          <div class="row3" style="margin-top:8px">
            <div class="frm"><label>MAC</label><input id="ds-mac" class="mono" placeholder="aa:bb:cc:dd:ee:ff"></div>
-           <div class="frm"><label>IP</label><input id="ds-ip" class="mono" placeholder="192.168.9.150"></div>
+           <div class="frm"><label>IP 地址</label><input id="ds-ip" class="mono" placeholder="192.168.9.150"></div>
            <div class="frm"><label>主机名</label><input id="ds-name" placeholder="mypc"></div>
          </div>
-         <button class="pri" onclick="dsAdd()">添加绑定</button>`)}
-      ${card("WiFi 已连接终端", '<table><thead><tr><th>接口</th><th>MAC</th><th>信号</th><th>↓流量</th><th>↑流量</th></tr></thead><tbody id="st-tb"></tbody></table>', 1)}
+         <button class="pri" onclick="dsAdd()">添加</button>`)}
+      ${card("WiFi 已连接终端", '<table><thead><tr><th>接口</th><th>MAC</th><th>信号</th><th>↓</th><th>↑</th></tr></thead><tbody id="st-tb"></tbody></table>', 1)}
     </div>`,
     async tick() {
         const j = await api("clients");
@@ -167,15 +211,15 @@ PAGES.clients = {
 };
 window.blk = async (mac, del) => {
     const j = await api("block_set", `mac=${mac}&del=${del}`).catch(e => ({ error: e.message }));
-    if (j.ok) { toast(del ? "已解禁" : "已禁网"); PAGES.clients.tick(); } else toast("操作失败: " + (j.error || ""), 1);
+    if (j.ok) { toast(del ? "已解禁" : "已禁网"); PAGES.clients.tick(); } else toast(eMsg(j.error), 1);
 };
 window.dsAdd = async () => {
     const j = await api("dhcp_static_set", `op=add&mac=${$("ds-mac").value}&ip=${$("ds-ip").value}&name=${encodeURIComponent($("ds-name").value)}`).catch(e => ({ error: e.message }));
-    if (j.ok) { toast("绑定已生效"); PAGES.clients.tick(); } else toast("失败: " + j.error, 1);
+    if (j.ok) { toast("已添加"); PAGES.clients.tick(); } else toast(eMsg(j.error), 1);
 };
 window.dsDel = async (m) => {
     const j = await api("dhcp_static_set", `op=del&mac=${m}`).catch(e => ({ error: e.message }));
-    if (j.ok) { toast("已删除"); PAGES.clients.tick(); } else toast("失败: " + j.error, 1);
+    if (j.ok) { toast("已删除"); PAGES.clients.tick(); } else toast(eMsg(j.error), 1);
 };
 
 /* v3.27: SSE 实时信号推送 — /api/sse 每3s推服务小区信号, 蜂窝卡免轮询等待;
@@ -190,7 +234,7 @@ window.dsDel = async (m) => {
                 const j = JSON.parse(e.data);
                 if (j && j.sig && j.sig.rsrp !== undefined) {
                     setTag("tg-cel", true);
-                    T("cel-cell", `B${j.sig.band} · ARFCN ${j.sig.arfcn} · PCI ${j.sig.pci}`);
+                    T("cel-cell", `${fmtBand(j.sig.band)} · ARFCN ${j.sig.arfcn} · PCI ${j.sig.pci}`);
                     T("cel-sig", `RSRP ${j.sig.rsrp} dBm · SINR ${j.sig.sinr} dB`);
                 }
             } catch (_) { }
@@ -201,33 +245,33 @@ window.dsDel = async (m) => {
 /* ================ WiFi ================ */
 PAGES.wifi = {
     html: `<div>
-      ${card("状态 " + tag("tg-wfst", "正常", "异常"),
-        kv("2.4G", "wfs-2g") + kv("5G", "wfs-5g") + kv("加密", "wfs-sec") + kv("hostapd", "wfs-hap"))}
+      ${card("WiFi 状态 " + tag("tg-wfst", "正常", "异常"),
+        kv("2.4GHz", "wfs-2g") + kv("5GHz", "wfs-5g") + kv("加密方式", "wfs-sec") + kv("无线服务", "wfs-hap"))}
       ${card("主 WiFi 设置", `
         <div class="row3">
-          <div class="frm"><label>WiFi 名称 (统一名称, 自动加频段后缀)</label><input id="wa-base"></div>
-          <div class="frm"><label>密码 (8-63 字符)</label><input id="wa-pass" type="password" placeholder="留空=不修改"></div>
-          <div class="frm"><label>加密</label><select id="wa-auth"><option value="WPA2PSK">WPA2PSK</option><option value="WPA2PSKWPA3PSK">WPA2+WPA3</option></select></div>
-          <div class="frm"><label>2.4G 信道</label><select id="wa-ch2"><option value="0">自动 (启动时扫描选道)</option>${Array.from({length:13},(_,i)=>i+1).map(c=>`<option value="${c}">${c}</option>`).join("")}</select></div>
-          <div class="frm"><label>2.4G 带宽 MHz</label><select id="wa-bw2"><option value="20">20</option><option value="40">40</option></select></div>
-          <div class="frm"><label>5G 信道</label><select id="wa-ch5"><option value="0">自动 (启动时扫描选道)</option>${[36,40,44,48,149,153,157,161].map(c=>`<option value="${c}">${c}</option>`).join("")}</select></div>
-          <div class="frm"><label>5G 带宽 MHz</label><select id="wa-bw5"><option value="20">20</option><option value="40">40</option><option value="80">80</option><option value="160">160 (含雷达信道, 启动需CAC约1分钟)</option></select></div>
-          <div class="frm"><label>发射功率 %</label><select id="wa-pw">${[25,50,75,100].map(p => `<option value="${p}">${p}</option>`).join("")}</select></div>
-          <div class="frm"><label>隐藏 SSID</label><select id="wa-hid"><option value="0">关闭</option><option value="1">隐藏</option></select></div>
-          <div class="frm"><label>双频合一</label><select id="wa-inone"><option value="0">独立双频</option><option value="1">同名单频(漫游)</option><option value="2">MLO 真双链路 (WiFi7并发, 切换后需重启网关)</option></select></div>
+          <div class="frm"><label>网络名称（SSID）</label><input id="wa-base"></div>
+          <div class="frm"><label>WiFi 密码（8-63 位）</label><input id="wa-pass" type="password" placeholder="留空=不修改"></div>
+          <div class="frm"><label>加密方式</label><select id="wa-auth"><option value="WPA2PSK">WPA2</option><option value="WPA2PSKWPA3PSK">WPA2+WPA3</option></select></div>
+          <div class="frm"><label>2.4GHz 信道</label><select id="wa-ch2"><option value="0">自动 (启动时扫描选道)</option>${Array.from({length:13},(_,i)=>i+1).map(c=>`<option value="${c}">${c}</option>`).join("")}</select></div>
+          <div class="frm"><label>2.4GHz 带宽（MHz）</label><select id="wa-bw2"><option value="20">20</option><option value="40">40</option></select></div>
+          <div class="frm"><label>5GHz 信道</label><select id="wa-ch5"><option value="0">自动 (启动时扫描选道)</option>${[36,40,44,48,149,153,157,161].map(c=>`<option value="${c}">${c}</option>`).join("")}</select></div>
+          <div class="frm"><label>5GHz 带宽（MHz）</label><select id="wa-bw5"><option value="20">20</option><option value="40">40</option><option value="80">80</option><option value="160">160 (含雷达信道，启用前检测约 1 分钟)</option></select></div>
+          <div class="frm"><label>发射功率（%）</label><select id="wa-pw">${[25,50,75,100].map(p => `<option value="${p}">${p}</option>`).join("")}</select></div>
+          <div class="frm"><label>隐藏网络名称</label><select id="wa-hid"><option value="0">关闭</option><option value="1">开启</option></select></div>
+          <div class="frm"><label>双频同名</label><select id="wa-inone"><option value="0">独立双频</option><option value="1">同名双频（漫游）</option><option value="2">MLO 真双链路（WiFi7 并发）</option></select></div>
         </div>
         <button class="pri" onclick="waSave()">应用主 WiFi 设置</button>
-        <span class="hint">应用会重启无线 (已连设备需重连); 信道选「自动」时每次启动多约10s扫描选道</span>`)}
+        <span class="hint">应用后无线会短暂重启，已连接终端需重连；独立双频时自动加 -2.4G/-5G 后缀</span>`)}
       ${card("访客网络", `
         <div class="row3">
           <div class="frm"><label>访客网络</label><select id="wa-guest"><option value="0">关闭</option><option value="1">开启</option></select></div>
-          <div class="frm"><label>访客名称</label><input id="wa-gssid" placeholder="空 = 主名-Guest"></div>
-          <div class="frm"><label>访客频段</label><select id="wa-gband"><option value="5g">5GHz</option><option value="2g">2.4GHz</option><option value="both">双频 (同名漫游)</option></select></div>
-          <div class="frm"><label>访客密码</label><input id="wa-gpass" type="password" placeholder="8-63位, 开启时必填"></div>
-          <div class="frm"><label>隔离</label><select id="wa-giso"><option value="1">开启 (仅出网)</option><option value="0">关闭 (可访内网, 兼容机模式)</option></select></div>
+          <div class="frm"><label>访客网络名称</label><input id="wa-gssid" placeholder="空 = 默认名称"></div>
+          <div class="frm"><label>访客频段</label><select id="wa-gband"><option value="5g">5GHz</option><option value="2g">2.4GHz</option><option value="both">双频（同名漫游）</option></select></div>
+          <div class="frm"><label>访客密码</label><input id="wa-gpass" type="password" placeholder="8-63 位，开启时必填"></div>
+          <div class="frm"><label>访客隔离</label><select id="wa-giso"><option value="1">开启（仅可上网）</option><option value="0">关闭（可访问内网）</option></select></div>
         </div>
         <button class="pri" onclick="waSave()">应用访客设置</button>
-        <span class="hint">独立名称/频段/密码, 与主 WiFi 完全解耦; 隔离开启=仅出网(不可达网关管理页与内网设备), 关闭=普通内网 SSID(适合不支持 MLO 的设备)</span>`)}
+        <span class="hint">名称、频段、密码独立于主 WiFi；隔离开启时仅可上网</span>`)}
       ${card("已连接终端", '<table><thead><tr><th>接口</th><th>MAC</th><th>信号</th><th>↓</th><th>↑</th></tr></thead><tbody id="wfs-tb"></tbody></table>')}
       ${card("WiFi 分析仪 (邻居网络)", `
         <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px">
@@ -240,17 +284,16 @@ PAGES.wifi = {
             <button class="tb" data-v="time" onclick="waView('time')">时间图</button>
           </span>
           <span id="wa-band" style="display:inline-flex;gap:2px;margin-left:auto">
-            <button class="tb act" data-b="2" onclick="waBand(2)">2.4G</button>
-            <button class="tb" data-b="5" onclick="waBand(5)">5G</button>
+            <button class="tb act" data-b="2" onclick="waBand(2)">2.4GHz</button>
+            <button class="tb" data-b="5" onclick="waBand(5)">5GHz</button>
           </span>
         </div>
         <canvas id="wa-cv" style="width:100%;height:340px"></canvas>
         <div id="wa-list" style="display:none"></div>
-        <span class="hint" id="wa-info">点击扫描 — 仿 WiFi Analyzer 多视图</span>`, 1)}
+        <span class="hint" id="wa-info">点击扫描 — 信道图 / 信道评级 / AP 列表 / 信号时间图</span>`, 1)}
     </div>`,
     async tick() {
         const j = await api("wifi");
-        F("wf-base", j.ssid_base);
         WA.own = [j.ssid2g, j.ssid5g];   // 信道图只标注本机 SSID
         WA.ownCh = { 2: +j.ch2g || 0, 5: +j.ch5g || 0 };   // 本机信道(apcli扫不到自家BSS, 合成绘制)
         WA.ownBw = { 2: 20, 5: 80 };   // v3.17: 本机带宽(adv0 就绪后更新) — 信道图按真实频宽画矩形
@@ -260,8 +303,8 @@ PAGES.wifi = {
         if (adv0.bw2g) WA.ownBw[2] = +adv0.bw2g;
         if (adv0.bw5g) WA.ownBw[5] = +adv0.bw5g;
         F("wa-base", adv0.ssid_base || "");
-        T("wfs-sec", j.secured ? "WPA2-PSK (AES)" : "开放!");
-        T("wfs-hap", `${j.hostapd2g > 0 ? "2G✓" : "2G✕"} ${j.hostapd5g > 0 ? "5G✓" : "5G✕"}`);
+        T("wfs-sec", adv0.auth === "WPA2PSKWPA3PSK" ? "WPA2+WPA3" : (j.secured ? "WPA2" : "开放"));   // G-06: 从 auth 派生, 不再硬编码
+        T("wfs-hap", `${j.hostapd2g > 0 ? "2.4GHz 正常" : "2.4GHz 异常"} · ${j.hostapd5g > 0 ? "5GHz 正常" : "5GHz 异常"}`);
         H("wfs-tb", (j.stations || []).map(s => `<tr><td>${s.if}</td><td class="mono">${s.mac}</td><td>${s.signal} dBm</td><td>${fmtB(s.rx)}</td><td>${fmtB(s.tx)}</td></tr>`).join(""));
         const adv = await api("wifi_adv");
         F("wa-ch2", adv.ch2g); F("wa-bw2", adv.bw2g); F("wa-ch5", adv.ch5g);
@@ -270,7 +313,7 @@ PAGES.wifi = {
         F("wa-giso", adv.guest_isolate == null ? "1" : String(adv.guest_isolate));
         F("wa-gband", adv.guest_band || "5g"); F("wa-gssid", adv.guest_ssid || "");
         F("wa-auth", adv.auth || "WPA2PSK");
-        $("wa-gssid").placeholder = `空 = ${adv.guest_ssid_eff || "主名-Guest"}`;
+        $("wa-gssid").placeholder = `空 = 默认 ${adv.guest_ssid_eff || "名称-Guest"}`;
     }
 };
 /* v3.22: 主WiFi卡与访客卡共用一个原子提交(端点要求全字段);
@@ -283,10 +326,10 @@ window.waSave = async () => {
         ($("wa-gpass").value ? `&guest_pass=${encodeURIComponent($("wa-gpass").value)}` : "");
     const j = await api("wifi_adv_set", body).catch(e => ({ error: e.message }));
     if (j.ok) {
-        toast(j.mlo_reboot ? "已保存 — MLO 模式下需重启网关生效" : (j.mlo_changed ? "已应用 — MLO 开关已变化, 需重启网关生效" : "已应用, 无线重启中"));
+        toast(j.mlo_changed ? "已应用 — MLO 开关已变化，无线正在重建（无需重启整机）" : "已应用，无线重启中");   // G-01: v2.43 起在线生效, mlo_reboot 死分支已删
         $("wa-pass").value = ""; $("wa-gpass").value = "";
-        setTimeout(() => PAGES.wifi.tick(), j.mlo_reboot ? 1500 : 4000);
-    } else toast("失败: " + (j.error || ""), 1);
+        setTimeout(() => PAGES.wifi.tick(), 4000);
+    } else toast(eMsg(j.error), 1);
 };
 /* ---------- WiFi 分析仪 (仿 WiFi Analyzer: 信道图/信道评级/AP列表/时间图) ----------
  * 数据只来自 wifiscan 端点; 画布一次建骨架, 扫描后重绘; 时间图靠「自动」积累历史 */
@@ -314,7 +357,7 @@ window.waBand = b => {
 window.waScan = async silent => {
     if (WA.busy) return;
     WA.busy = true;
-    if (!silent) T("wa-info", "扫描中… (~10s)");
+    if (!silent) T("wa-info", "扫描中…（约 10s）");
     try {
         const j = await api("wifiscan").catch(() => ({ aps: [] }));
         WA.aps = (j.aps || []).map(a => ({ ssid: a.ssid, mac: a.mac, sec: a.sec, fr: +a.freq, sig: +a.signal, ch: waChOf(a.freq), bw: +a.bw || 20, ctr: +a.ctr || 0 })).filter(a => a.ch > 0);
@@ -367,7 +410,7 @@ function waRender() {
 function waSummary() {
     const n2 = WA.aps.filter(a => a.fr < 4000).length, n5 = WA.aps.length - n2;
     const stamp = WA.hist.length ? new Date(WA.hist[WA.hist.length - 1].t).toLocaleTimeString() : "--";
-    return `${WA.aps.length} 个邻居 AP (2.4G ${n2} / 5G ${n5}) · ${WA.hist.length} 次扫描 · 最后 ${stamp}`;
+    return `${WA.aps.length} 个邻居 AP（2.4GHz ${n2} / 5GHz ${n5}）· ${WA.hist.length} 次扫描 · 最后 ${stamp}`;
 }
 /* 视图1: 信道图 — 每AP一个半透明矩形(±2信道宽, 顶边=信号), 填充/细边框/文字同色;
  * 索引映射向两侧各拓展2格, 最左/最右信道的矩形完整不截断; SSID 横排, 水平碰撞逐行上移 */
@@ -426,7 +469,7 @@ function waDrawChGraph() {
     const ownCh = WA.ownCh[WA.band];
     if (ownCh && chs.includes(ownCh)) {
         const i = chs.indexOf(ownCh);
-        const ownSsid = WA.band === 2 ? (WA.own[0] || "本机") : (WA.own[1] || "本机");
+        const ownSsid = WA.band === 2 ? (WA.own[0] || "网关") : (WA.own[1] || "网关");
         /* v3.17: 本机按真实带宽(BW2G/BW5G)。5G 绕主信道对称铺 k 信道;
            2.4G 维持重叠约定 ±2/±4 */
         const obw = (WA.ownBw && WA.ownBw[WA.band]) || (WA.band === 2 ? 20 : 80);
@@ -545,8 +588,8 @@ function waDrawTime() {
 function waListTable() {
     const aps = waBandAps().slice().sort((a, b) => b.sig - a.sig);
     return aps.length
-        ? `<table><thead><tr><th>SSID</th><th>MAC</th><th>频段</th><th>信道</th><th>信号</th><th>加密</th></tr></thead><tbody>` +
-          aps.map(a => `<tr><td>${esc(a.ssid) || "(隐藏)"}</td><td class="mono">${a.mac}</td><td>${a.fr < 4000 ? "2.4G" : "5G"}</td><td class="mono">${a.ch}</td><td>${a.sig} dBm</td><td>${a.sec}</td></tr>`).join("") + "</tbody></table>"
+        ? `<table><thead><tr><th>SSID</th><th>MAC</th><th>频段</th><th>信道</th><th>信号</th><th>加密方式</th></tr></thead><tbody>` +
+          aps.map(a => `<tr><td>${esc(a.ssid) || "(隐藏)"}</td><td class="mono">${a.mac}</td><td>${a.fr < 4000 ? "2.4GHz" : "5GHz"}</td><td class="mono">${a.ch}</td><td>${a.sig} dBm</td><td>${a.sec === "open" ? "开放" : esc(a.sec)}</td></tr>`).join("") + "</tbody></table>"
         : `<span class="hint">该频段未发现邻居 AP</span>`;
 }
 
@@ -562,19 +605,19 @@ PAGES.net = {
         <button class="pri" onclick="dhSave()">应用</button>`)}
       ${card("DMZ", `
         <div class="row3">
-          <div class="frm"><label>开关</label><select id="dm-en"><option value="0">关闭</option><option value="1">开启</option></select></div>
+          <div class="frm"><label>启用</label><select id="dm-en"><option value="0">关闭</option><option value="1">开启</option></select></div>
           <div class="frm"><label>目标 IP</label><input id="dm-ip" class="mono"></div>
         </div>
         <button class="pri" onclick="dmSave()">应用</button>
-        <span class="hint">开启后所有未映射入站端口转发到该主机</span>`)}
-      ${card("端口映射", `<table><thead><tr><th>协议</th><th>外部端口</th><th>目标 IP</th><th>内部端口</th><th></th></tr></thead><tbody id="fw-tb"></tbody></table>
+        <span class="hint">开启后所有未匹配规则的入站流量转发到该终端</span>`)}
+      ${card("端口转发", `<table><thead><tr><th>协议</th><th>外部端口</th><th>目标 IP</th><th>内部端口</th><th></th></tr></thead><tbody id="fw-tb"></tbody></table>
          <div class="row3" style="margin-top:8px">
            <div class="frm"><label>协议</label><select id="fw-p"><option>tcp</option><option>udp</option></select></div>
            <div class="frm"><label>外部端口</label><input id="fw-ep" class="mono" placeholder="8080"></div>
            <div class="frm"><label>目标 IP</label><input id="fw-ip" class="mono" placeholder="192.168.9.120"></div>
            <div class="frm"><label>内部端口</label><input id="fw-dp" class="mono" placeholder="80"></div>
          </div>
-         <button class="pri" onclick="fwdAdd()">添加映射</button>`, 1)}
+         <button class="pri" onclick="fwdAdd()">添加规则</button>`, 1)}
     </div>`,
     async tick() {
         const d = await api("dhcp");
@@ -587,86 +630,83 @@ PAGES.net = {
 };
 window.dhSave = async () => {
     const j = await api("dhcp_set", `r1=${$("dh-r1").value}&r2=${$("dh-r2").value}&lease=${$("dh-l").value}`).catch(e => ({ error: e.message }));
-    j.ok ? toast("DHCP 已应用") : toast("失败: " + j.error, 1);
+    j.ok ? toast("已应用") : toast(eMsg(j.error), 1);
 };
 window.dmSave = async () => {
     const j = await api("dmz_set", `enabled=${$("dm-en").value}&ip=${$("dm-ip").value}`).catch(e => ({ error: e.message }));
-    j.ok ? toast("DMZ 已应用") : toast("失败: " + j.error, 1);
+    j.ok ? toast("已应用") : toast(eMsg(j.error), 1);
 };
 window.fwdAdd = async () => {
     const j = await api("fwd_add", `proto=${$("fw-p").value}&eport=${$("fw-ep").value}&dip=${$("fw-ip").value}&dport=${$("fw-dp").value}`).catch(e => ({ error: e.message }));
-    if (j.ok) { toast("已添加"); PAGES.net.tick(); } else toast("失败: " + j.error, 1);
+    if (j.ok) { toast("已添加"); PAGES.net.tick(); } else toast(eMsg(j.error), 1);
 };
 window.fwdDel = async (i, p, e) => {
     const j = await api("fwd_del", `proto=${p}&eport=${e}`).catch(x => ({ error: x.message }));
-    if (j.ok) { toast("已删除"); PAGES.net.tick(); } else toast("失败: " + j.error, 1);
+    if (j.ok) { toast("已删除"); PAGES.net.tick(); } else toast(eMsg(j.error), 1);
 };
 
 /* ================ 聚合 ================ */
 PAGES.agg = {
     html: `<div>
-      ${card("聚合模式 " + tag("ag-on", "运行中", "异常"), `
+      ${card("聚合模式 " + tag("ag-on", "运行中", "已停用"), `
         <div class="frm"><label>模式选择</label><select id="ag-mode">
-          <option value="weight">按权重分流 (双路并发, 新连接按比例)</option>
-          <option value="eth_prio">以太优先 (家宽主力, 5G 待命自动接管)</option>
-          <option value="cell_prio">蜂窝优先 (5G 主力, 家宽待命自动接管)</option>
-          <option value="eth_only">仅以太 (家宽单路)</option>
-          <option value="cell_only">仅蜂窝 (5G 单路)</option>
+          <option value="weight">按权重分流</option>
+          <option value="eth_prio">有线宽带优先</option>
+          <option value="cell_prio">蜂窝优先</option>
+          <option value="eth_only">仅有线宽带</option>
+          <option value="cell_only">仅蜂窝</option>
         </select></div>
         <button class="pri" onclick="agMode()">应用模式</button>
-        ${kv("引擎", "ag-eng") + kv("当前形态", "ag-wm")}
-        <span class="hint">优先模式: 待命侧仅在主力断线时接管, 恢复后自动切回; 仅模式: 单路运行不做切换; 断线看门狗与 NAT 不受影响</span>`)}
-      ${card("聚合权重 (5G / 家宽)", `
+        ${kv("转发引擎", "ag-eng") + kv("运行状态", "ag-wm")}
+        <span class="hint">优先模式：备用线路在主用线路断开时自动接管，恢复后切回；单路模式不做切换；断线检测与 NAT 不受影响</span>`)}
+      ${card("分流权重（蜂窝 / 有线宽带）", `
         <div class="slider-row"><input type="range" id="ag-w" min="5" max="95" step="5" oninput="T('ag-wv', this.value+'% / '+(100-this.value)+'%')"><b id="ag-wv">--</b></div>
         <button class="pri" onclick="agW()">应用权重</button>
-        <span class="hint">新连接按此比例分流; 已有连接保持粘性; 仅在「按权重分流」模式下生效</span>`, 0, "card-aggw")}
-      ${card("引擎状态", kv("状态机", "ag-sm") + kv("最近", "ag-log", 1))}
-      ${card("MAC 钉死表", `<table><thead><tr><th>MAC</th><th>钉到</th><th></th></tr></thead><tbody id="pin-tb"></tbody></table>
+        <span class="hint">新连接按此比例分流；已有连接保持原线路；仅在「按权重分流」模式下生效</span>`, 0, "card-aggw")}
+      ${card("终端固定出口", `<table><thead><tr><th>MAC</th><th>出口线路</th><th></th></tr></thead><tbody id="pin-tb"></tbody></table>
          <div class="row3" style="margin-top:8px">
            <div class="frm"><label>MAC</label><input id="ap-mac" class="mono" placeholder="aa:bb:cc:dd:ee:ff"></div>
-           <div class="frm"><label>钉到</label><select id="ap-op"><option value="2">家宽 WAN2</option><option value="1">5G WAN1</option></select></div>
-         </div><button class="pri" onclick="agPinAdd()">添加钉死</button>
-         <span class="hint">会话绑定源 IP 的应用建议钉单侧</span>`, 1)}
+           <div class="frm"><label>出口线路</label><select id="ap-op"><option value="2">有线宽带</option><option value="1">蜂窝</option></select></div>
+         </div><button class="pri" onclick="agPinAdd()">添加</button>
+         <span class="hint">长时间保持连接的程序建议固定到单侧线路</span>`, 1)}
     </div>`,
     async tick() {
         const a = await api("agg");
         const mode = a.mode || "weight";
-        F("ag-mode", mode); setTag("ag-on", true);
+        F("ag-mode", mode); setTag("ag-on", a.enable === "1");   // G-10: 真实启用态, 删除恒真 tag
         // v3.28: 权重卡只在按权重分流模式显示
         const wc = document.getElementById("card-aggw");
         if (wc) wc.style.display = (mode === "weight") ? "" : "none";
-        T("ag-eng", a.engine === "vendor" ? "quecadp 内核" : (a.engine ? "iptables 用户态" : "--"));
-        T("ag-wm", a.wanmode || "--");
+        T("ag-eng", a.engine === "vendor" ? "硬件加速" : (a.engine ? "软件转发" : "--"));   // G-17: 引擎实现名不直出
+        T("ag-wm", wanModeTxt(a.wanmode));   // G-13: wan_mode token 映射为运行状态
         const s = await api("status");
         if (/^\d+$/.test(s.agg.w1pct)) {
             const w1 = +s.agg.w1pct;
             F("ag-w", w1); T("ag-wv", `${w1}% / ${100 - w1}%`);
         }
-        T("ag-sm", s.agg.wanmode);
-        T("ag-log", a.log);
         const pins = (a.pins_conf || "").split(";").filter(Boolean);
-        H("pin-tb", pins.map(p => { const [m, op] = p.trim().split(/\s+/); return `<tr><td class="mono">${m}</td><td>${op === "2" ? "家宽 WAN2" : "5G WAN1"}</td><td><button class="mini ghost" onclick="agPin('${m}',0)">删除</button></td></tr>`; }).join(""));
+        H("pin-tb", pins.map(p => { const [m, op] = p.trim().split(/\s+/); return `<tr><td class="mono">${m}</td><td>${op === "2" ? "有线宽带" : "蜂窝"}</td><td><button class="mini ghost" onclick="agPin('${m}',0)">删除</button></td></tr>`; }).join(""));
     }
 };
 window.agMode = async () => {   // v3.28: 五模式选择(替代旧总开关)
     const m = $("ag-mode").value;
-    const name = { weight: "按权重分流", eth_prio: "以太优先", cell_prio: "蜂窝优先", eth_only: "仅以太", cell_only: "仅蜂窝" }[m];
+    const name = { weight: "按权重分流", eth_prio: "有线宽带优先", cell_prio: "蜂窝优先", eth_only: "仅有线宽带", cell_only: "仅蜂窝" }[m];
     const j = await api("agg_mode", `mode=${m}`).catch(e => ({ error: e.message }));
-    j.ok ? toast(`已切换: ${name}（约 5s 内生效）`) : toast("失败: " + j.error, 1);
+    j.ok ? toast(`已应用：${name}（约 5s 内生效）`) : toast(eMsg(j.error), 1);
     setTimeout(() => PAGES.agg.tick(), 6500);
 };
 window.agW = async () => {
     const j = await api("agg_weights", `w1=${$("ag-w").value}`).catch(e => ({ error: e.message }));
-    if (j.ok) { toast("权重已下发"); setTimeout(() => PAGES.agg.tick(), 900); }   // v3.26: 应用后回读同步滑块/比例
-    else toast("失败: " + (j.error || ""), 1);
+    if (j.ok) { toast("已应用"); setTimeout(() => PAGES.agg.tick(), 900); }   // v3.26: 应用后回读同步滑块/比例
+    else toast(eMsg(j.error), 1);
 };
 window.agPinAdd = async () => {
     const j = await api("agg_pin", `mac=${$("ap-mac").value}&op=${$("ap-op").value}`).catch(e => ({ error: e.message }));
-    if (j.ok) { toast("已钉死"); PAGES.agg.tick(); } else toast("失败: " + j.error, 1);
+    if (j.ok) { toast("已添加"); PAGES.agg.tick(); } else toast(eMsg(j.error), 1);
 };
 window.agPin = async (m, op) => {
     const j = await api("agg_pin", `mac=${m}&op=${op}`).catch(e => ({ error: e.message }));
-    if (j.ok) { toast("已删除"); PAGES.agg.tick(); } else toast("失败: " + j.error, 1);
+    if (j.ok) { toast("已删除"); PAGES.agg.tick(); } else toast(eMsg(j.error), 1);
 };
 
 /* ================ 短信 ================ */
@@ -679,7 +719,7 @@ PAGES.sms = {
         </div>
         <div class="frm"><label>内容</label><textarea id="sm-txt" rows="3" style="width:100%;background:var(--input);border:1px solid var(--line);color:var(--tx);border-radius:7px;padding:8px;font-size:13px"></textarea></div>
         <button class="pri" onclick="smSend()">发送</button>
-        <span class="hint">MIPC 直发通道 (ql_sms_send_msg, 同步确认); 中文请用英文或后续 UCS2 支持</span>`)}
+        <span class="hint">暂不支持中文短信（仅英文/数字）</span>`)}
     </div>`,
     async tick() {
         const j = await api("sms");
@@ -690,72 +730,71 @@ PAGES.sms = {
 };
 window.smSend = async () => {
     const j = await api("sms_send", `num=${encodeURIComponent($("sm-to").value.trim())}&text=${encodeURIComponent($("sm-txt").value)}`).catch(e => ({ error: e.message }));
-    if (j.ok) { toast("已发送 (modem 确认)"); $("sm-txt").value = ""; }
-    else toast("发送失败: " + (j.error || "?"), 1);
+    if (j.ok) { toast("已发送"); $("sm-txt").value = ""; }
+    else toast(eMsg(j.error), 1);
 };
 
 /* ================ 蜂窝 ================ */
 PAGES.cellular = {
     html: `<div>
-      ${card("服务小区", kv("运营商", "ce-op") + kv("频段/频点/PCI", "ce-cell", 1) + kv("RSRP / SINR / RSSI", "ce-sig"))}
-      ${card("锁频段 " + tag("tg-bl", "已启用", "未启用"), `
+      ${card("服务小区", kv("运营商", "ce-op") + kv("频段 / 频点（ARFCN）/ PCI", "ce-cell", 1) + kv("RSRP / SINR / RSSI", "ce-sig"))}
+      ${card("频段锁定 " + tag("tg-bl", "已开启", "已关闭"), `
         <div class="row3">
-          <div class="frm"><label>开关</label><select id="cb-en"><option value="0">关闭</option><option value="1">开启</option></select></div>
+          <div class="frm"><label>启用</label><select id="cb-en"><option value="0">关闭</option><option value="1">开启</option></select></div>
           <div class="frm"><label>4G 频段</label><input id="cb-lte" class="mono" placeholder="3,8,38,39,40,41"></div>
           <div class="frm"><label>5G 频段</label><input id="cb-nr" class="mono" placeholder="28,41,79"></div>
         </div>
-        <button class="pri" onclick="cbSave()">应用锁频段</button>
-        <span class="hint">与锁小区互斥; 移动5G=n41,n79,n28 · 联通/电信=n78,n41</span>`)}
-      ${card("锁小区 " + tag("tg-cl", "已启用", "未启用"), `<table><thead><tr><th>#</th><th>制式</th><th>频点 ARFCN</th><th>PCI</th><th></th></tr></thead><tbody id="ce-lock-tb"></tbody></table>
+        <button class="pri" onclick="cbSave()">应用</button>
+        <span class="hint">与小区锁定不能同时开启；示例：移动 n41,n79；联通/电信 n78,n41</span>`)}
+      ${card("小区锁定 " + tag("tg-cl", "已开启", "已关闭"), `<table><thead><tr><th>#</th><th>制式</th><th>ARFCN</th><th>PCI</th><th></th></tr></thead><tbody id="ce-lock-tb"></tbody></table>
          <div class="row3" style="margin-top:8px">
-           <div class="frm"><label>制式</label><select id="ce-act"><option value="nr">5G NR</option><option value="lte">4G LTE</option></select></div>
-           <div class="frm"><label>频点 (0-875000)</label><input id="ce-arf" class="mono" placeholder="504990"></div>
-           <div class="frm"><label>PCI (0-2000)</label><input id="ce-pci" class="mono" placeholder="341"></div>
+           <div class="frm"><label>制式</label><select id="ce-act"><option value="nr">5G（NR）</option><option value="lte">4G（LTE）</option></select></div>
+           <div class="frm"><label>频点（ARFCN 0-875000）</label><input id="ce-arf" class="mono" placeholder="504990（示例）"></div>
+           <div class="frm"><label>PCI（0-2000）</label><input id="ce-pci" class="mono" placeholder="341（示例）"></div>
          </div>
          <button class="pri" onclick="ceAdd()">添加锁定小区</button>
          <button class="ghost" onclick="ceClear()">清空全部</button>`, 1)}
       ${card("网络制式", `
         <div class="row3">
-          <div class="frm"><label>制式</label><select id="nm-mode"><option value="0">仅 4G</option><option value="1">4G 优先</option><option value="2">仅 5G</option><option value="3" selected>5G 优先(自动)</option></select></div>
-          <div class="frm"><label>飞行模式</label><select id="nm-air"><option value="0">关闭</option><option value="1">开启(断网!)</option></select></div>
+          <div class="frm"><label>制式</label><select id="nm-mode"><option value="0">仅 4G</option><option value="1">4G 优先</option><option value="2">仅 5G</option><option value="3" selected>5G 优先（自动）</option></select></div>
+          <div class="frm"><label>飞行模式</label><select id="nm-air"><option value="0">关闭</option><option value="1">开启（将断网）</option></select></div>
         </div>
         <button class="pri" onclick="nmSave()">应用制式</button>
         <button class="ghost" onclick="nmAir()">应用飞行模式</button>
-        <button class="ghost" onclick="plmnScan()">扫描可用网络 (10-60s)</button>
+        <button class="ghost" onclick="plmnScan()">扫描可用网络（10-60s）</button>
         <div id="plmn-out" class="hint" style="margin-top:8px"></div>`)}
       ${card("SIM 卡", kv("IMSI", "sim-imsi", 1) + kv("ICCID", "sim-iccid", 1) + kv("运营商", "sim-carrier") +
-        kv("本机号码", "sim-phone", 1) + kv("IMEI", "sim-imei", 1) + `
+        kv("SIM 卡号码", "sim-phone", 1) + kv("IMEI", "sim-imei", 1) + `
         <div style="margin-top:10px"></div>
         <div class="row3">
           <div class="frm"><label>PIN 操作</label><select id="pin-act"><option value="disable">关闭 PIN 锁</option><option value="enable">开启 PIN 锁</option><option value="change">修改 PIN</option></select></div>
           <div class="frm"><label>PIN 码</label><input id="pin-cur" type="password" class="mono" maxlength="8"></div>
-          <div class="frm"><label>新 PIN (改锁时)</label><input id="pin-new" type="password" class="mono" maxlength="8"></div>
+          <div class="frm"><label>新 PIN（修改时）</label><input id="pin-new" type="password" class="mono" maxlength="8"></div>
         </div>
         <button class="ghost" onclick="pinDo()">执行 PIN 操作</button>
-        <span class="hint">连续错 3 次将锁卡需 PUK; 谨慎操作</span>`)}
-      ${card("流量统计", kv("下行累计", "tr-rx") + kv("上行累计", "tr-tx") + `
+        <span class="hint">连续输错 3 次将锁定 SIM 卡（需 PUK 解锁）</span>`)}
+      ${card("流量统计", kv("下行（累计）", "tr-rx") + kv("上行（累计）", "tr-tx") + `
         <div class="row3" style="margin-top:8px">
-          <div class="frm"><label>日限额 MB (0=不限)</label><input id="tr-day" class="mono"></div>
-          <div class="frm"><label>月限额 MB (0=不限)</label><input id="tr-month" class="mono"></div>
+          <div class="frm"><label>日限额（MB）</label><input id="tr-day" class="mono"></div>
+          <div class="frm"><label>月限额（MB）</label><input id="tr-month" class="mono"></div>
         </div>
-        <button class="ghost" onclick="trSave()">保存限额</button>`)}
+        <button class="ghost" onclick="trSave()">保存限额</button>
+        <span class="hint">0 = 不限</span>`)}
       ${card('实时小区列表 (<b id="ce-n">0</b>)', '<table><thead><tr><th></th><th>频段</th><th>ARFCN</th><th>PCI</th><th>RSRP</th><th>SINR</th></tr></thead><tbody id="ce-tb"></tbody></table>', 1)}
     </div>`,
     async tick() {
         const j = await api("cellular");
         T("ce-op", `${j.operator.name} (${j.operator.plmn})`);
-        T("ce-cell", `B${j.serving.band} · ${j.serving.arfcn} · PCI ${j.serving.pci}`);
+        T("ce-cell", `${fmtBand(j.serving.band)} · ARFCN ${j.serving.arfcn} · PCI ${j.serving.pci}`);   // G-03: 不再前置 B
         T("ce-sig", `${j.serving.rsrp} dBm · ${j.serving.sinr} dB · ${j.serving.rssi}`);
         setTag("tg-bl", j.bandlock.enable === "1");
         F("cb-en", j.bandlock.enable); F("cb-lte", j.bandlock.lte); F("cb-nr", j.bandlock.nr);
         setTag("tg-cl", j.celllock.enable === "1");
         H("ce-lock-tb", (j.celllock.entries || []).map(e => `<tr><td>${e.idx}</td><td>${e.act === "nr" ? "5G" : "4G"}</td><td class="mono">${e.arfcn}</td><td class="mono">${e.pci}</td>
             <td><button class="mini ghost" onclick="ceDel(${e.idx})">删除</button></td></tr>`).join(""));
-        const bands = (j.cells.band || "").split(",").filter(Boolean);
-        T("ce-n", j.cells.n || 0);
-        const arf = (j.cells.arfcn || "").split(","), pci = (j.cells.pci || "").split(",");
-        const rs = (j.cells.rsrp || "").split(","), si = (j.cells.sinr || "").split(",");
-        H("ce-tb", bands.map((b, i) => `<tr><td>${i === 0 ? `<span class="tag on">服务</span>` : ""}</td><td><b>${esc(b)}</b></td><td class="mono">${esc(arf[i])}</td><td class="mono">${esc(pci[i])}</td><td>${esc(rs[i])}</td><td>${esc(si[i])}</td></tr>`).join(""));
+        const rows = celRows(j);   // G-05: mipc=数组, 树=逗号串, 统一渲染
+        T("ce-n", j.n != null ? j.n : rows.length);
+        H("ce-tb", rows.map((c, i) => `<tr><td>${i === 0 ? `<span class="tag on">服务</span>` : ""}</td><td><b>${esc(fmtBand(c.band))}</b></td><td class="mono">${esc(c.arfcn)}</td><td class="mono">${esc(c.pci)}</td><td>${esc(c.rsrp)}</td><td>${esc(c.sinr)}</td></tr>`).join(""));
         const nm = await api("netmode");
         F("nm-mode", nm.mode); F("nm-air", nm.airplane || "0");
         const sim = await api("sim");
@@ -767,48 +806,48 @@ PAGES.cellular = {
 };
 window.cbSave = async () => {
     const j = await api("cell_bandlock", `enable=${$("cb-en").value}&lte=${encodeURIComponent($("cb-lte").value)}&nr=${encodeURIComponent($("cb-nr").value)}`).catch(e => ({ error: e.message }));
-    j.ok ? toast("锁频段已应用") : toast("失败: " + j.error, 1);
+    j.ok ? toast("已应用（模组重扫约 20-60 秒）") : toast(eMsg(j.error), 1);
 };
 window.ceAdd = async () => {
     const j = await api("cell_lock", `op=add&act=${$("ce-act").value}&arfcn=${$("ce-arf").value}&pci=${$("ce-pci").value}`).catch(e => ({ error: e.message }));
-    if (j.ok) { toast("已添加"); PAGES.cellular.tick(); } else toast("失败: " + j.error, 1);
+    if (j.ok) { toast("已添加（模组重扫约 20-60 秒）"); PAGES.cellular.tick(); } else toast(eMsg(j.error), 1);
 };
 window.ceDel = async (i) => {
     const j = await api("cell_lock", `op=del&idx=${i}`).catch(e => ({ error: e.message }));
-    if (j.ok) { toast("已删除"); PAGES.cellular.tick(); } else toast("失败: " + j.error, 1);
+    if (j.ok) { toast("已删除"); PAGES.cellular.tick(); } else toast(eMsg(j.error), 1);
 };
 window.ceClear = async () => {
     const j = await api("cell_lock", `op=clear`).catch(e => ({ error: e.message }));
-    j.ok ? toast("已清空") : toast("失败: " + j.error, 1);
+    j.ok ? toast("已清空") : toast(eMsg(j.error), 1);
 };
 window.nmSave = async () => {
     const j = await api("netmode_set", `mode=${$("nm-mode").value}`).catch(e => ({ error: e.message }));
-    j.ok ? toast("制式已应用") : toast("失败: " + j.error, 1);
+    j.ok ? toast("已应用") : toast(eMsg(j.error), 1);
 };
 window.plmnScan = async () => {
     const el = document.getElementById("plmn-out");
-    if (el) el.textContent = "扫描中... (10-60s)";
+    if (el) el.textContent = "扫描中…（10-60s）";
     const j = await api("plmn_scan").catch(e => ({ error: e.message }));
     if (!el) return;
-    if (j.error) { el.textContent = "扫描失败: " + j.error; return; }
+    if (j.error) { el.textContent = eMsg(j.error); return; }
     const rows = (j.networks || []).map(n =>
         `${n.name || n.mcc + n.mnc} [${n.rat}]${n.status === 1 ? " ←当前" : n.status === 4 ? " 可用" : ""}`);
     el.innerHTML = rows.length ? rows.join(" · ") : "无结果";
 };
 
 window.nmAir = async () => {
-    if ($("nm-air").value === "1" && !confirm("开启飞行模式将断开蜂窝网络, 确认?")) return;
+    if ($("nm-air").value === "1" && !confirm("开启飞行模式将断开蜂窝网络，确认执行？")) return;
     const j = await api("airplane_set", `on=${$("nm-air").value}`).catch(e => ({ error: e.message }));
-    j.ok ? toast("飞行模式已应用") : toast("失败: " + j.error, 1);
+    j.ok ? toast("已应用") : toast(eMsg(j.error), 1);
 };
 window.pinDo = async () => {
-    if (!confirm("确认执行 PIN 操作? 错误三次将锁卡!")) return;
+    if (!confirm("确认执行 PIN 操作？连续输错 3 次将锁定 SIM 卡")) return;
     const j = await api("pin_set", `action=${$("pin-act").value}&pin=${$("pin-cur").value}&new_pin=${$("pin-new").value}`).catch(e => ({ error: e.message }));
-    j.ok ? toast("PIN 操作已下发: " + (j.ubus || "")) : toast("失败: " + j.error, 1);
+    j.ok ? toast("PIN 操作已应用") : toast(eMsg(j.error), 1);   // G-08: mipc 路径无 ubus 字段, 悬空冒号已删
 };
 window.trSave = async () => {
     const j = await api("traffic_limit", `day=${$("tr-day").value}&month=${$("tr-month").value}`).catch(e => ({ error: e.message }));
-    j.ok ? toast("限额已保存") : toast("失败: " + j.error, 1);
+    j.ok ? toast("已保存") : toast(eMsg(j.error), 1);
 };
 
 /* ================ 插件页(可选) ================
@@ -837,46 +876,46 @@ window.LG_plugin = (p) => {
 PAGES.sys = {
     html: `<div>
       ${card("系统", kv("运行", "sy-up") + kv("固件", "sy-fw") + kv("内核", "sy-kern"))}
-      ${card("散热风扇", kv("模式", "fan-mode") + kv("转速", "fan-rpm") + kv("SoC 温度", "fan-temp") +
+      ${card("散热风扇", kv("风扇模式", "fan-mode") + kv("转速", "fan-rpm") + kv("SoC 温度", "fan-temp") +
         `<button class="ghost" id="fan-btn" onclick="fanTgl()">切换模式</button>`)}
       ${card("指示灯", kv("夜间模式", "led-night") +
         `<button class="ghost" id="led-btn" onclick="ledTgl()">切换</button>
-         <span class="hint">夜间模式 = 除电源外全灭</span>`)}
-      ${card("时间与 NTP", kv("当前时间", "ntp-date") + kv("时区", "ntp-tz") + kv("NTP 服务器", "ntp-srv") + `
+         <span class="hint">夜间模式 = 除电源外全部熄灭</span>`)}
+      ${card("时间同步（NTP）", kv("当前时间", "ntp-date") + kv("时区", "ntp-tz") + kv("NTP 服务器", "ntp-srv") + `
         <div class="row3" style="margin-top:8px">
-          <div class="frm"><label>时区</label><select id="nt-tz"><option value="CST-8">CST-8 (北京)</option><option value="UTC">UTC</option></select></div>
+          <div class="frm"><label>时区</label><select id="nt-tz"><option value="CST-8">北京时间（UTC+8）</option><option value="UTC">UTC</option></select></div>
           <div class="frm"><label>NTP 服务器</label><input id="nt-srv" class="mono"></div>
         </div>
-        <button class="ghost" onclick="ntSync()">保存并立即对时</button>`)}
+        <button class="ghost" onclick="ntSync()">应用并立即同步</button>`)}
       ${card("管理密码", `
         <div class="row3">
           <div class="frm"><label>当前密码</label><input id="pw-old" type="password"></div>
-          <div class="frm"><label>新密码 (8-63位)</label><input id="pw-new" type="password"></div>
+          <div class="frm"><label>新密码（8-63 位）</label><input id="pw-new" type="password"></div>
           <div class="frm"><label>确认新密码</label><input id="pw-new2" type="password"></div>
         </div>
         <button class="pri" onclick="pwDo()">修改密码</button>
         <span class="hint">修改后需重新登录</span>`)}
-      ${card("维护动作", `
+      ${card("维护", `
         <button class="ghost" onclick="syReboot()">重启网关</button>
         <button class="ghost" onclick="logout()">退出登录</button>
-        <span class="hint">重启约 3 分钟; 全部服务自动恢复</span>`)}
-      ${card("wan_agg 日志", '<pre class="log" id="log-agg"></pre>', 1)}
-      ${card("wifi 日志", '<pre class="log" id="log-wifi"></pre>', 1)}
+        <span class="hint">重启约 3 分钟；全部服务自动恢复</span>`)}
+      ${card("聚合日志", '<pre class="log" id="log-agg"></pre>', 1)}
+      ${card("WiFi 日志", '<pre class="log" id="log-wifi"></pre>', 1)}
     </div>`,
     async tick() {
         const s = await api("sys").catch(() => ({ uptime: 0 }));
         T("sy-up", s.uptime ? Math.floor(s.uptime / 86400) + " 天 " + Math.floor(s.uptime % 86400 / 3600) + " 时" : "--");
         T("sy-fw", "v4 slot-A RP0103 (lg6151m)"); T("sy-kern", "5.15.134 MT6990");
         const fan = await api("fan");
-        T("fan-mode", fan.mode === "silent" ? "静音 (+6°C)" : "性能");
+        T("fan-mode", fan.mode === "silent" ? "静音" : "性能");
         T("fan-rpm", `${fan.rpm} rpm`);
         T("fan-temp", (fan.soc_temp > 0 ? (fan.soc_temp / 1000).toFixed(1) : "--") + " °C");
-        T("fan-btn", fan.mode === "silent" ? "切性能模式" : "切静音模式");
+        T("fan-btn", fan.mode === "silent" ? "改为性能模式" : "改为静音模式");
         const led = await api("led");
-        T("led-night", led.night === "1" ? "已开启(全灭)" : "关闭");
+        T("led-night", led.night === "1" ? "已开启" : "已关闭");
         T("led-btn", led.night === "1" ? "恢复正常指示" : "进入夜间模式");
         const ntp = await api("ntp");
-        T("ntp-date", ntp.date); T("ntp-tz", ntp.tz); T("ntp-srv", ntp.ntp_server);
+        T("ntp-date", ntp.date); T("ntp-tz", TZ_TXT[ntp.tz] || ntp.tz || "--"); T("ntp-srv", ntp.ntp_server);
         F("nt-srv", ntp.ntp_server);
         const l = await api("logs");
         H("log-agg", esc((l.wan_agg || "").replace(/\\n/g, "\n")));
@@ -886,31 +925,31 @@ PAGES.sys = {
 window.fanTgl = async () => {
     const f = await api("fan");
     const j = await api("fan_set", `mode=${f.mode === "silent" ? "performance" : "silent"}`).catch(e => ({ error: e.message }));
-    if (j.ok) { toast("已切换"); PAGES.sys.tick(); } else toast("失败: " + j.error, 1);
+    if (j.ok) { toast("已应用"); PAGES.sys.tick(); } else toast(eMsg(j.error), 1);
 };
 window.ledTgl = async () => {
     const l = await api("led");
     const j = await api("led_set", `night=${l.night === "1" ? 0 : 1}`).catch(e => ({ error: e.message }));
-    if (j.ok) { toast("已切换 (10s 内生效)"); PAGES.sys.tick(); } else toast("失败: " + j.error, 1);
+    if (j.ok) { toast("已应用（10s 内生效）"); PAGES.sys.tick(); } else toast(eMsg(j.error), 1);
 };
 window.ntSync = async () => {
     const j = await api("ntp_set", `tz=${$("nt-tz").value}&server=${encodeURIComponent($("nt-srv").value)}`).catch(e => ({ error: e.message }));
-    j.ok ? toast("已保存并触发对时") : toast("失败: " + j.error, 1);
+    j.ok ? toast("已应用，正在同步时间") : toast(eMsg(j.error), 1);
 };
 window.pwDo = async () => {
     if (!confirm("确认修改管理密码?")) return;
     if ($("pw-new").value !== $("pw-new2").value) { toast("两次输入的新密码不一致", 1); return; }
     const j = await api("pass_set", `old=${encodeURIComponent($("pw-old").value)}&new=${encodeURIComponent($("pw-new").value)}`).catch(e => ({ error: e.message }));
     if (j.ok) { setLogin(false); toast("已修改, 请重新登录"); }
-    else toast(j.error === "bad_old" ? "当前密码错误" : "失败: " + j.error, 1);
+    else toast(eMsg(j.error), 1);
 };
 window.syReboot = () => {
-    modal("确认重启", `<p>确定要重启网关吗? 约 3 分钟恢复。</p><div class="row3"><button class="pri" onclick="syRebootGo()">确认重启</button><button class="ghost" onclick="modalClose()">取消</button></div>`);
+    modal("确认重启", `<p>确定要重启网关吗？约 3 分钟恢复。</p><div class="row3"><button class="pri" onclick="syRebootGo()">确认重启</button><button class="ghost" onclick="modalClose()">取消</button></div>`);
 };
 window.syRebootGo = async () => {
     modalClose();
     await api("sys_reboot").catch(() => {});
-    toast("重启中… 约 3 分钟");
+    toast("重启中…约 3 分钟");
 };
 
 /* ---------- router (骨架一次成型, 轮询仅 tick 更新槽位) ---------- */
@@ -923,12 +962,12 @@ function showLoginWall() {
         <div class="frm"><label>管理密码</label><input type="password" id="wall-pass" autofocus></div>
         <button class="pri" id="wall-go" style="width:100%">登 录</button>
         <span class="hint">未登录不可查看任何信息 (与原厂行为一致)</span>
-        <span class="hint">首次刷入的默认口令见 README (登录后请立即修改)</span>
+        <span class="hint">首次刷入的默认密码见 README (登录后请立即修改)</span>
       </div></div>`;
     const go = async () => {
         const j = await api("login", "pass=" + encodeURIComponent($("wall-pass").value)).catch(() => ({ error: "x" }));
         if (j.token) { TOKEN = j.token; sessionStorage.setItem("gw_token", TOKEN); setLogin(true); route();
-            if (j.default) setTimeout(() => modal("安全警告", `<p><b>当前使用默认口令!</b></p><p>任何能接入本网络的人都可完全控制网关。请立即到 系统 → 管理密码 修改。</p><div class="row3"><button class="pri" onclick="modalClose();location.hash='#/sys'">去修改</button><button class="ghost" onclick="modalClose()">稍后</button></div>`), 400); }
+            if (j.default) setTimeout(() => modal("安全警告", `<p><b>当前使用默认密码！</b></p><p>任何能接入本网络的人都可完全控制网关。请立即到 系统 → 管理密码 修改。</p><div class="row3"><button class="pri" onclick="modalClose();location.hash='#/sys'">去修改</button><button class="ghost" onclick="modalClose()">稍后</button></div>`), 400); }
         else { toast("密码错误", 1); $("wall-pass").value = ""; $("wall-pass").focus(); }
     };
     $("wall-go").onclick = go;
@@ -947,7 +986,7 @@ function route() {
     window.scrollTo(0, 0);            // 换页才回顶
     if (timer) clearInterval(timer);
     const run = () => PAGES[p].tick().catch(e => {
-        if (e.message !== "need_login") main.innerHTML = `<div class="card">加载失败: ${esc(e.message)} <button class="ghost" onclick="route()">重试</button></div>`;
+        if (e.message !== "need_login") main.innerHTML = `<div class="card">加载失败，请检查网络连接 <button class="ghost" onclick="route()">重试</button></div>`;   // G-40: 不直出英文异常
     });
     run();
     timer = setInterval(run, p === "status" ? 3000 : 8000);

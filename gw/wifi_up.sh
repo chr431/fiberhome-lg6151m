@@ -1,5 +1,5 @@
 #!/bin/sh
-# wifi_up.sh — v3 WiFi bring-up (v1.23: MLO在线重应用先下电回冷启动等价态, 撤销需重启纪律; v1.22: 访客iface显式入桥; v1.20: MLO单次AP启动; v1.19: MLO真双链路 — 两带 dat 各写 MldGroup=1;0;x6
+# wifi_up.sh — v3 WiFi bring-up (v1.25: v1.19 块过期 reboot 注释修正(v1.23 已撤销); v1.24: MLD快照按uptime过滤; v1.23: MLO在线重应用先下电回冷启动等价态, 撤销需重启纪律; v1.22: 访客iface显式入桥; v1.20: MLO单次AP启动; v1.19: MLO真双链路 — 两带 dat 各写 MldGroup=1;0;x6
 #   (RE实证: stock be_init_wlan_apcfg_file 同款形态, 1基组号配对成MLD; 全零表=v1.15
 #   事故形态禁写; MldAddr/ApcliMloDisable 勿写; MLD生效需冷启动(FW锁存); 纯MLO不需wapp);
 #   v1.18: 访客独立配置; v1.16: F3单进程hostapd; v1.10: 自动信道扫描选道),
@@ -64,8 +64,8 @@ SN=4           # mt7992 stream num
 #   - MldAddr 不写(全固件无人写, MLD地址驱动自派生=接口MAC+local bit);
 #     ApcliMloDisable 不写(EasyMesh 回程专用)
 #   - hostapd conf 无 MLO 键, 仅要求两链路同名同密(MLO=1 强制同名)
-#   - 生效需冷启动: profile 在模块加载/接口open时读, MLD状态在 FW 锁存;
-#     切换 MLO 后必须 reboot (恢复原语同)
+#   - 生效方式(v1.19 时结论"必须 reboot"已由 v1.23 撤销: 在线重应用会先下电
+#     回冷启动等价态, 无需重启整机)
 # v1.13: 配置统一 — defaults(只读出厂) + settings(用户稀疏覆盖) source叠加;
 #   过渡期回退旧 wifi.conf(迁移脚本生成 settings.conf 后不再命中)
 CFG_D=$B/defaults.conf; CFG_S=$B/settings.conf; WIFI_CONF=$B/wifi.conf

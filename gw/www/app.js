@@ -287,7 +287,7 @@ window.waScan = async silent => {
     if (!silent) T("wa-info", "扫描中… (~10s)");
     try {
         const j = await api("wifiscan").catch(() => ({ aps: [] }));
-        WA.aps = (j.aps || []).map(a => ({ ssid: a.ssid, mac: a.mac, sec: a.sec, fr: +a.freq, sig: +a.signal, ch: waChOf(a.freq) })).filter(a => a.ch > 0);
+        WA.aps = (j.aps || []).map(a => ({ ssid: a.ssid, mac: a.mac, sec: a.sec, fr: +a.freq, sig: +a.signal, ch: waChOf(a.freq), bw: +a.bw || 20, ctr: +a.ctr || 0 })).filter(a => a.ch > 0);
         WA.hist.push({ t: Date.now(), m: WA.aps.reduce((o, a) => (o[a.mac] = a.sig, o), {}) });
         if (WA.hist.length > 60) WA.hist.shift();
         waRender();
@@ -367,10 +367,10 @@ function waDrawChGraph() {
         const col = waColor(a.mac);
         let x0, x1;
         const bw = +a.bw || 20, k = Math.max(1, Math.round(bw / 20));
-        const ci = +a.ctr && chs.includes(+a.ctr) ? chs.indexOf(+a.ctr) : -1;
         if (WA.band === 5) {
-            /* 5G: 精确频宽块。有中心段(ctr)以中心对称; 无则绕主信道对称 */
-            const c = ci >= 0 ? ci : i;
+            /* 5G: 精确频宽块。中心 = 主信道 + (ctr-主)/20 信道浮点偏移
+               (ctr=42 等中心信道号不在 CH5_LIST, indexOf 必失败, 用线性内插) */
+            const c = i + (+a.ctr ? ((+a.ctr) - a.ch) / 20 : 0);
             x0 = xOfI(c) - (k * chPx) / 2 - chPx * 0.25;
             x1 = xOfI(c) + (k * chPx) / 2 + chPx * 0.25;
         } else {

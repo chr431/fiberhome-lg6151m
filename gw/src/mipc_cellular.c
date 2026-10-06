@@ -38,6 +38,7 @@ static int (*p_sms_init)(int);
 static int (*p_sms_send_msg)(const void *);
 static int (*p_nw_scan)(void *, void (*)(int, void *));
 static int (*p_scan_busy)(void);
+static int (*p_get_cell_info)(void *);
 
 static int load_lib(const char *path)
 {
@@ -70,6 +71,7 @@ static int load_lib(const char *path)
     p_sms_send_msg = (int (*)(const void *))dlsym(h, "ql_sms_send_msg");
     p_nw_scan = (int (*)(void *, void (*)(int, void *)))dlsym(h, "ql_nw_network_scan");
     p_scan_busy = (int (*)(void))dlsym(h, "ql_nw_net_scan_async_f");
+    p_get_cell_info = (int (*)(void *))dlsym(h, "ql_nw_get_cell_info");
     if (!p_get_band_info || !p_set_band_mode || !p_nw_init ||
         !p_sms_init || !p_sms_send_msg || !p_nw_scan) {
         fprintf(stderr, "dlsym: %s\n", dlerror());
@@ -146,6 +148,61 @@ static void build_and_send(const char *lte, const char *nr, const char *umts)
     int r = p_set_band_mode(b);
     printf("ret=%d (0x%x)\n", r, r);
     if (r) printf("NOTE: modem 重扫约 20-60s, PDN 由上层重拨\n");
+}
+
+/* 服务小区 + CA 小区列表 (D 组逆向 2026-10-06, 写树顺序三角互证):
+ * ql_nw_get_band_info(0x80): lte_band u16@0, nr_band u16@2, nr_dl bw[8]@0x14,
+ *   serving NR-ARFCN u32@0x34, nr CQI u8@0x25
+ * ql_nw_get_cell_info(0x8C8): rat u32@0(0x12=NR SA), nr_avail u8@0x500,
+ *   nr_cnt u8@0x501, PLMN char[8]@0x510, TAC u32@0x518, PCI u32@0x51C,
+ *   cells[]@0x528 stride 0x30 x20: rsrp s32@0, rsrq s32@4, sinr s32@8,
+ *   pci u32@0x24, arfcn u32@0x28; cells[0]=服务小区(与服务块同址互证)
+ * band 由 arfcn 现算(与 mobilenetwork fh_convert_arfcn_to_band 同思路)。 */
+struct bi { unsigned char b[0x80]; };
+struct ci { unsigned char b[0x8C8]; };
+/* 布局(cellraw 实测 2026-10-06, 与树值/直读三角互证):
+ *   PLMN char@0x510, TAC u32@0x518, PCI(服务) u32@0x51C,
+ *   cells 基址 0x520, stride 0x30: arfcn u32@+0x00, rsrp s32@+0x08,
+ *   sinr s32@+0x0C, PCI u32@+0x2C; cells[0]=服务小区; count=nr_cnt u8@0x501 */
+static uint32_t R32(const unsigned char *p) { uint32_t v; memcpy(&v, p, 4); return v; }
+
+static const char *nr_band_of(uint32_t a)
+{
+    if (a >= 499200 && a <= 515200) return "N41";
+    if (a >= 693330 && a <= 733000) return "N79";
+    if (a >= 632640 && a <= 657000) return "N78";
+    if (a >= 151600 && a <= 153600) return "N28";
+    if (a >= 205416 && a <= 208916) return "N1";
+    if (a >= 285416 && a <= 288916) return "N3";
+    return "?";
+}
+
+static int do_cells(void)
+{
+    struct bi bi; struct ci ci;
+    memset(&bi, 0, sizeof bi); memset(&ci, 0, sizeof ci);
+    int r1 = p_get_band_info(&bi);
+    int r2 = p_get_cell_info(&ci);
+    if (r1 || r2) { printf("{\"error\":\"ret %d/%d\"}\n", r1, r2); return 3; }
+    uint16_t nr_band; memcpy(&nr_band, bi.b + 2, 2);
+    char bw[9]; memcpy(bw, bi.b + 0x14, 8); bw[8] = 0;
+    int n = ci.b[0x501] > 20 ? 20 : ci.b[0x501];
+    const unsigned char *c0 = ci.b + 0x520;
+    printf("{\"serving\":{\"band\":\"N%d\",\"arfcn\":\"%u\",\"pci\":\"%u\","
+           "\"rsrp\":\"%d\",\"sinr\":\"%d\",\"bw\":\"%s\",\"plmn\":\"%.6s\",\"tac\":\"%u\"},",
+           nr_band, R32(c0), R32(ci.b + 0x51C),
+           (int32_t)R32(c0 + 8), (int32_t)R32(c0 + 0xC),
+           bw, ci.b + 0x510, R32(ci.b + 0x518));
+    printf("\"cells\":[");
+    for (int i = 0; i < n; i++) {
+        const unsigned char *r = ci.b + 0x520 + (size_t)i * 0x30;
+        printf("%s{\"band\":\"%s\",\"arfcn\":\"%u\",\"pci\":\"%u\","
+               "\"rsrp\":\"%d\",\"sinr\":\"%d\"}",
+               i ? "," : "", nr_band_of(R32(r)), R32(r), R32(r + 0x2C),
+               (int32_t)R32(r + 8), (int32_t)R32(r + 0xC));
+    }
+    printf("],\"n\":%d}\n", n);
+    return 0;
 }
 
 /* ql_sms_send_msg 结构 (B 组逆向 2026-10-06, 构包侧交叉证实):
@@ -276,6 +333,16 @@ int main(int argc, char **argv)
         printf("ret=%d (0x%x)\n", r, r);
         return 0;
     }
+    if (argc >= 2 && !strcmp(argv[1], "cellraw")) {
+        struct ci ci; memset(&ci, 0, sizeof ci);
+        p_get_cell_info(&ci);
+        unsigned char *p = (unsigned char *)&ci;
+        for (int i = 0; i < 0x700; i++) printf("%02x", p[i]);
+        printf("\n");
+        return 0;
+    }
+    if (argc >= 2 && !strcmp(argv[1], "cells"))          /* 服务+CA 小区列表 */
+        return do_cells();
     if (argc >= 2 && !strcmp(argv[1], "scan"))           /* PLMN 扫描(10-60s) */
         return do_scan(argc >= 3 ? atoi(argv[2]) : 60);
     if (argc >= 4 && !strcmp(argv[1], "sendsms"))        /* ASCII/GSM7 */

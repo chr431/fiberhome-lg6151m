@@ -612,6 +612,25 @@ apply_wifi_adv() {
 
 
 get_cellular() {
+    # v2.35 (P3 终章): mipc 引擎下服务小区+CA 列表直取 ql_nw_get_cell_info
+    # (mipc_cellular v0.5 cells, cellraw 实证布局) — 不再依赖树回填, mobilenetwork
+    # 至此零消费者。树路径仅在 engine=tree 时使用。
+    CELL_ENGINE=mipc
+    [ -r $GWDATA/cellular_engine.conf ] && . $GWDATA/cellular_engine.conf
+    if [ "$CELL_ENGINE" = mipc ] && [ -x /data/gw/mipc_cellular ]; then
+        CJ=$(/data/gw/mipc_cellular cells 2>/dev/null | head -1)
+        case "$CJ" in
+        '"serving"'*)
+            CSQ=$(mipc_wan_cli --at_cmd "AT+CSQ" 2>/dev/null | grep -oE "[0-9]+, ?99" | cut -d, -f1)
+            RSSI=""; case "$CSQ" in ''|0) RSSI="未知";; *) RSSI="$(( -113 + CSQ * 2 )) dBm";; esac
+            CJ=${CJ#\{}; CJ=${CJ%\}}
+            CJ=$(printf '%s' "$CJ" | sed "s/\"bw\"/\"rssi\":\"$RSSI\",\"bw\"/")
+            COPSR=$(mipc_wan_cli --at_cmd "AT+COPS?" 2>/dev/null | grep -oE '"[0-9]{5,6}"' | tr -d '"')
+            [ -r $GWDATA/cellular.conf ] && . $GWDATA/cellular.conf
+            printf '{"operator":{"plmn":"%s","name":"%s"},%s,"bandlock":{"enable":"${BAND_EN:-0}","lte":"${LTE_MASK:-}","nr":"${NR_MASK:-}"},"celllock":{"enable":"${CELL_EN:-0}","entries":[]},"engine":"mipc","ts":%d}'                 "${COPSR:-}" "$(op_name "$COPSR")" "$CJ" "$(date +%s)"
+            return
+        esac
+    fi
     R=$FH_TREE.RadioSignalParameter
     PLMN=$(cfgget $R.PLMN)
     BANDS=$(cfgget $R.BAND_NBR); ARFCN=$(cfgget $R.EARFCN_NBR)

@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.38 (v2.37访客独立化+DHCP隔离修复配套: 主WiFi密码/加密并入wifi_adv_set; 无线设置卡移除) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.39 (v2.38主WiFi卡; MLO真双链路开关: mlo字段+强制同名+变化提示重启) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -585,9 +585,9 @@ get_wifi_adv() {
     [ -r /tmp/wifi_autoch ] && . /tmp/wifi_autoch   # wifi_up 自动选道落点(信道=0时)
     GS_RAW="${GUEST_SSID:-}"
     GS_EFF="${GUEST_SSID:-${SSID_BASE:-}-Guest}"
-    printf '{"ssid_base":"%s","ch2g":"%s","ch5g":"%s","bw2g":"%s","bw5g":"%s","power":"%s","hidden2g":"%s","hidden5g":"%s","auth":"%s","guest":"%s","guest_ssid":"%s","guest_ssid_eff":"%s","guest_band":"%s","guest_pass":"%s","inone":"%s","res2g":"%s","res5g":"%s","ts":%d}' \
+    printf '{"ssid_base":"%s","ch2g":"%s","ch5g":"%s","bw2g":"%s","bw5g":"%s","power":"%s","hidden2g":"%s","hidden5g":"%s","auth":"%s","guest":"%s","guest_ssid":"%s","guest_ssid_eff":"%s","guest_band":"%s","guest_pass":"%s","inone":"%s","mlo":"%s","res2g":"%s","res5g":"%s","ts":%d}' \
         "${SSID_BASE:-}" "${CH2G:-6}" "${CH5G:-149}" "${BW2G:-20}" "${BW5G:-80}" "${POWER:-100}" \
-        "${H2:-0}" "0" "${AUTH:-WPA2PSK}" "${GUEST:-0}" "$GS_RAW" "$GS_EFF" "${GUEST_BAND:-5g}" "${GUEST_PASS:+1}" "${INONE:-0}" "${RCH2G:-}" "${RCH5G:-}" "$(date +%s)"
+        "${H2:-0}" "0" "${AUTH:-WPA2PSK}" "${GUEST:-0}" "$GS_RAW" "$GS_EFF" "${GUEST_BAND:-5g}" "${GUEST_PASS:+1}" "${INONE:-0}" "${MLO:-0}" "${RCH2G:-}" "${RCH5G:-}" "$(date +%s)"
 }
 apply_wifi_adv() {
     # v1.2: 先源旧conf(保留SSID/密码等非本表单字段), 再读表单值覆盖同名项
@@ -599,7 +599,7 @@ apply_wifi_adv() {
     echo "$SB" | grep -qE '[^A-Za-z0-9_. -]' && jerr bad_chars
     CH2=$(form_kv ch2); CH5=$(form_kv ch5); BW2=$(form_kv bw2); BW5=$(form_kv bw5)
     PW=$(form_kv power); HID=$(form_kv hidden); GUEST=$(form_kv guest)
-    GSTP=$(form_kv guest_pass); INONE=$(form_kv inone)
+    GSTP=$(form_kv guest_pass); INONE=$(form_kv inone); MLOV=$(form_kv mlo)
     # v2.37: 访客独立项 — 名称(present但可空=回退派生)/频段(2g|5g|both)
     GSS=""; form_has guest_ssid && GSS=$(form_kv guest_ssid)
     GBAND=$(form_kv guest_band)
@@ -613,6 +613,9 @@ apply_wifi_adv() {
     [ "$HID" = 0 ] || [ "$HID" = 1 ] || jerr bad_flag
     [ "$GUEST" = 0 ] || [ "$GUEST" = 1 ] || jerr bad_flag
     [ "$INONE" = 0 ] || [ "$INONE" = 1 ] || jerr bad_flag
+    # v2.39: MLO(真双链路) — 开启时强制双频同名(INONE=1); 生效需重启网关(FW锁存)
+    [ "$MLOV" = 0 ] || [ "$MLOV" = 1 ] || jerr bad_flag
+    [ "$MLOV" = 1 ] && INONE=1
     # 访客名称: 与主名称同字符集(防注入 settings.conf 被 source), ≤32字节(802.11上限)
     if [ -n "$GSS" ]; then
         echo "$GSS" | grep -qE '[^A-Za-z0-9_. -]' && jerr bad_chars
@@ -638,13 +641,17 @@ apply_wifi_adv() {
     gw_set SSID_BASE "$SB"
     gw_set CH2G "$CH2"; gw_set CH5G "$CH5"; gw_set BW2G "$BW2"; gw_set BW5G "$BW5"
     gw_set POWER "$PW"; gw_set HIDDEN "$HID"; gw_set GUEST "$GUEST"; gw_set INONE "$INONE"
+    gw_set MLO "$MLOV"
     gw_set GUEST_BAND "$GBAND"
     if [ -n "$GSS" ]; then gw_set GUEST_SSID "$GSS"; elif form_has guest_ssid; then gw_del GUEST_SSID; fi
     if [ -n "$GSTP" ]; then gw_set GUEST_PASS "$GSTP"; fi
     [ -n "$MPW" ] && gw_set WPAPSK "$MPW"
     [ -n "$AUTHV" ] && gw_set AUTH "$AUTHV"
     sh $GWDATA/wifi_up.sh >/tmp/wifi_up.log 2>&1 &
-    ok_json
+    # v2.39: MLO 开关变化需重启网关生效(profile/FW 冷启动锁存), 通知GUI提示
+    MLO_NOTE=""
+    [ "$MLOV" != "${MLO:-0}" ] && MLO_NOTE=',"mlo_changed":1'
+    ok_json "$MLO_NOTE"
 }
 
 

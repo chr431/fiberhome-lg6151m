@@ -203,6 +203,27 @@ def t_wifi_guest():
     record(t_wifi_guest._test_name, "wifi", ok, notes)
 
 
+@test("MLO 状态与 dat 键一致 (v1.19)")
+def t_wifi_mlo():
+    # v2.4: MLO=1 -> 两带 dat 各有 1基组表(stock形态) + 驱动/hostapd MLD 建立日志;
+    # MLO=0 -> 键必须整体缺失(键存在但全零=v1.15事故形态, 当场红)
+    conf = dev("cat /data/gw/settings.conf /data/gw/defaults.conf 2>/dev/null | "
+               "grep -E '^(MLO|INONE)=' | sort -u")
+    mlo = bool(re.search(r"^MLO=1$", conf, re.M))
+    g2 = dev("grep -h '^MldGroup=' /var/wlan/apcfg 2>/dev/null").strip()
+    g5 = dev("grep -h '^MldGroup=' /var/wlan/apcfg_5 2>/dev/null").strip()
+    notes = f"mlo={int(mlo)} apcfg='{g2}' apcfg_5='{g5}'"
+    if mlo:
+        ok = g2 == "MldGroup=1;0;0;0;0;0;0;0" and g5 == "MldGroup=1;0;0;0;0;0;0;0"
+        if ok:
+            mld = dev("dmesg | grep -cE 'Create AP MLD|join MLD|Alloc ML Group|hostapd_event_bss_mlo_info'")
+            notes += f" mld_logs={mld.strip()}"
+            ok = int(mld.strip() or 0) >= 1
+    else:
+        ok = g2 == "" and g5 == ""
+    record(t_wifi_mlo._test_name, "wifi", ok, notes)
+
+
 @test("hostapd 单进程多配置 (F3)")
 def t_wifi_hostapd():
     out = dev("ps | grep '[h]ostapd -B' | head -1")

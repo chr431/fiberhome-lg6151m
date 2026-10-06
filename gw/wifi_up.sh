@@ -1,6 +1,8 @@
 #!/bin/sh
-# wifi_up.sh — v3 WiFi bring-up (v1.18: 访客独立配置—名称/频段(2g|5g|both)/密码/BSSID派生
-#   +失败链泛化+隔离防火墙联动; v1.16: F3单进程hostapd根治信标竞态+F2重装订+PMF显式关; v1.10: 自动信道扫描选道),
+# wifi_up.sh — v3 WiFi bring-up (v1.19: MLO真双链路 — 两带 dat 各写 MldGroup=1;0;x6
+#   (RE实证: stock be_init_wlan_apcfg_file 同款形态, 1基组号配对成MLD; 全零表=v1.15
+#   事故形态禁写; MldAddr/ApcliMloDisable 勿写; MLD生效需冷启动(FW锁存); 纯MLO不需wapp);
+#   v1.18: 访客独立配置; v1.16: F3单进程hostapd; v1.10: 自动信道扫描选道),
 # replicating FH fac_start_wifi_BE5000.sh (mt7992 path)
 # without FH userspace. Driver = MTK hwifi softap: profile /var/wlan/apcfg{,_5} +
 # `ifconfig raX up` is the whole activation (ap_inf_open is ndo_open; apcfg is read
@@ -54,14 +56,21 @@ SN=4           # mt7992 stream num
 #   双频合一: <名> (两频同名)
 #   访客:    独立名 GUEST_SSID, 未设则派生 <名>-Guest (v1.18 前的唯一行为)
 # v1.18: 访客独立化 — GUEST_SSID(名称)/GUEST_BAND(频段 2g|5g|both)/GUEST_PASS(密码)三项独立;
-#   both=双频同名双BSS(与主WiFi"双频合一"同语义的漫游)。真MLO(dat键 MldGroup/MldAddr/
-#   ApcliMloDisable)为 v1.15 实证雷区——驱动开机锁存后 rai0 信标永久错乱、剥离不回退, 勿再写。
+#   both=双频同名双BSS(同名漫游)。
+# v1.19: MLO — MLO=1 时两带主BSS(ra0/rai0)入同一 MLD 组(真 802.11be 多链路):
+#   - 两带 dat 各写 MldGroup=1;0;0;0;0;0;0;0 (token=BSS序号, 1基组号; 访客BSS token=0
+#     为 stock 实证的非成员形态; 全零表是 v1.15 事故形态, 绝不写)
+#   - MldAddr 不写(全固件无人写, MLD地址驱动自派生=接口MAC+local bit);
+#     ApcliMloDisable 不写(EasyMesh 回程专用)
+#   - hostapd conf 无 MLO 键, 仅要求两链路同名同密(MLO=1 强制同名)
+#   - 生效需冷启动: profile 在模块加载/接口open时读, MLD状态在 FW 锁存;
+#     切换 MLO 后必须 reboot (恢复原语同)
 # v1.13: 配置统一 — defaults(只读出厂) + settings(用户稀疏覆盖) source叠加;
 #   过渡期回退旧 wifi.conf(迁移脚本生成 settings.conf 后不再命中)
 CFG_D=$B/defaults.conf; CFG_S=$B/settings.conf; WIFI_CONF=$B/wifi.conf
 SSID_BASE="LG6151M"
 WPAPSK=""; AUTHM="WPA2PSK"
-CH2G=6; CH5G=149; BW2G=20; BW5G=80; POWER=100; HIDDEN=0; GUEST=0; INONE=0
+CH2G=6; CH5G=149; BW2G=20; BW5G=80; POWER=100; HIDDEN=0; GUEST=0; INONE=0; MLO=0
 if [ -r "$CFG_D" ]; then . "$CFG_D"; fi          # v1.13: 只读出厂默认
 if [ -r "$CFG_S" ]; then . "$CFG_S"; fi          # v1.13: 用户稀疏覆盖
 if [ ! -r "$CFG_S" ] && [ -r "$WIFI_CONF" ]; then
@@ -75,7 +84,7 @@ if [ -z "$SSID_BASE" ]; then
     fi
 fi
 # 派生
-if [ "$INONE" = 1 ]; then
+if [ "$INONE" = 1 ] || [ "$MLO" = 1 ]; then
     SSID2="$SSID_BASE"; SSID5="$SSID_BASE"
 else
     SSID2="${SSID_BASE}-2.4G"; SSID5="${SSID_BASE}-5G"
@@ -194,6 +203,12 @@ VHTBW_DAT=0; EHTAPBW_DAT=1
 [ "$BW5G" = 80 ]  && { VHTBW_DAT=1; EHTAPBW_DAT=2; }
 [ "$BW5G" = 160 ] && { VHTBW_DAT=2; EHTAPBW_DAT=3; }
 
+# v1.19: MLO 组表 — token按BSS序号: BSS1(主)入组1, 访客/其余=0(非成员, stock be_init
+# 同款实证形态)。MLO=0 时键整体缺失(键缺失=驱动不走MLD分支, 最安全形态;
+# 全零表=v1.15 事故形态绝对禁止)。MLO=1 时 hap 两链路同名(上方派生已强制)。
+MLDLINE=""
+[ "$MLO" = 1 ] && MLDLINE="MldGroup=1;0;0;0;0;0;0;0"
+
 # ---- /var/wlan/apcfg (2G band0) : factory template, mt7992 values ----
 cat > /var/wlan/apcfg <<EOF2G
 Default
@@ -203,6 +218,7 @@ CountryRegionABand=0
 BssidNum=${BSSIDNUM}
 DBDC_MODE=1
 MacAddress=${ra0_mac}
+${MLDLINE}
 SSID1=${SSID2}
 SSID2=fh_v3_ssid2
 SSID3=fh_v3_ssid3
@@ -314,6 +330,7 @@ CountryRegionABand=0
 BssidNum=${BSSIDNUM}
 DBDC_MODE=1
 MacAddress=${rai0_mac}
+${MLDLINE}
 SSID1=${SSID5}
 SSID2=fh_v3_ssid2_5G
 SSID3=fh_v3_ssid3_5G

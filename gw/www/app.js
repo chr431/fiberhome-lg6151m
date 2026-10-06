@@ -1,4 +1,4 @@
-/* app.js v3.22 (WiFi页重构: 主WiFi卡含密码/加密 + 独立访客网络卡) -- v3 gateway console SPA
+/* app.js v3.23 (双频合一+MLO真双链路选项, 切换提示重启) -- v3 gateway console SPA
  * v3.4: WiFi 分析仪(信道图/信道评级/AP列表/时间图 canvas多视图) + 信道下拉统一(2.4G补select, 双频加"自动"档)
  * 刷新机制彻底重做: 页面骨架只建一次(进入时), 轮询仅更新文本槽/小表格
  *   T(id,v) 文本槽(带变化检测)  H(id,v) 局部HTML(tbody级,带变化检测)
@@ -194,7 +194,7 @@ PAGES.wifi = {
           <div class="frm"><label>5G 带宽 MHz</label><select id="wa-bw5"><option value="20">20</option><option value="40">40</option><option value="80">80</option><option value="160">160 (含雷达信道, 启动需CAC约1分钟)</option></select></div>
           <div class="frm"><label>发射功率 %</label><select id="wa-pw">${[25,50,75,100].map(p => `<option value="${p}">${p}</option>`).join("")}</select></div>
           <div class="frm"><label>隐藏 SSID</label><select id="wa-hid"><option value="0">关闭</option><option value="1">隐藏</option></select></div>
-          <div class="frm"><label>双频合一</label><select id="wa-inone"><option value="0">独立双频</option><option value="1">同名单频(漫游)</option></select></div>
+          <div class="frm"><label>双频合一</label><select id="wa-inone"><option value="0">独立双频</option><option value="1">同名单频(漫游)</option><option value="2">MLO 真双链路 (WiFi7并发, 切换后需重启网关)</option></select></div>
         </div>
         <button class="pri" onclick="waSave()">应用主 WiFi 设置</button>
         <span class="hint">应用会重启无线 (已连设备需重连); 信道选「自动」时每次启动多约10s扫描选道</span>`)}
@@ -245,21 +245,26 @@ PAGES.wifi = {
         const adv = await api("wifi_adv");
         F("wa-ch2", adv.ch2g); F("wa-bw2", adv.bw2g); F("wa-ch5", adv.ch5g);
         F("wa-bw5", adv.bw5g); F("wa-pw", adv.power); F("wa-hid", adv.hidden2g);
-        F("wa-guest", adv.guest); F("wa-inone", adv.inone);
+        F("wa-guest", adv.guest); F("wa-inone", adv.mlo == 1 ? "2" : adv.inone);
         F("wa-gband", adv.guest_band || "5g"); F("wa-gssid", adv.guest_ssid || "");
         F("wa-auth", adv.auth || "WPA2PSK");
         $("wa-gssid").placeholder = `空 = ${adv.guest_ssid_eff || "主名-Guest"}`;
     }
 };
 /* v3.22: 主WiFi卡与访客卡共用一个原子提交(端点要求全字段);
- * 密码类字段仅在非空时上送(留空=不修改) */
+ * 密码类字段仅在非空时上送(留空=不修改)。
+ * v3.23: 双频合一 select 第3值=MLO真双链路(映射 mlo=1&inone=1, 其余映射 mlo=0) */
 window.waSave = async () => {
-    const body = `ch2=${$("wa-ch2").value}&ch5=${$("wa-ch5").value}&bw2=${$("wa-bw2").value}&bw5=${$("wa-bw5").value}&power=${$("wa-pw").value}&hidden=${$("wa-hid").value}&guest=${$("wa-guest").value}&inone=${$("wa-inone").value}&guest_ssid=${encodeURIComponent($("wa-gssid").value)}&guest_band=${$("wa-gband").value}&ssid_base=${encodeURIComponent($("wa-base").value)}&auth=${$("wa-auth").value}` +
+    const io = $("wa-inone").value;
+    const body = `ch2=${$("wa-ch2").value}&ch5=${$("wa-ch5").value}&bw2=${$("wa-bw2").value}&bw5=${$("wa-bw5").value}&power=${$("wa-pw").value}&hidden=${$("wa-hid").value}&guest=${$("wa-guest").value}&inone=${io === "2" ? 1 : io}&mlo=${io === "2" ? 1 : 0}&guest_ssid=${encodeURIComponent($("wa-gssid").value)}&guest_band=${$("wa-gband").value}&ssid_base=${encodeURIComponent($("wa-base").value)}&auth=${$("wa-auth").value}` +
         ($("wa-pass").value ? `&pass=${encodeURIComponent($("wa-pass").value)}` : "") +
         ($("wa-gpass").value ? `&guest_pass=${encodeURIComponent($("wa-gpass").value)}` : "");
     const j = await api("wifi_adv_set", body).catch(e => ({ error: e.message }));
-    if (j.ok) { toast("已应用, 无线重启中"); $("wa-pass").value = ""; $("wa-gpass").value = ""; setTimeout(() => PAGES.wifi.tick(), 4000); }
-    else toast("失败: " + (j.error || ""), 1);
+    if (j.ok) {
+        toast(j.mlo_changed ? "已应用 — MLO 开关已变化, 需重启网关生效" : "已应用, 无线重启中");
+        $("wa-pass").value = ""; $("wa-gpass").value = "";
+        setTimeout(() => PAGES.wifi.tick(), 4000);
+    } else toast("失败: " + (j.error || ""), 1);
 };
 /* ---------- WiFi 分析仪 (仿 WiFi Analyzer: 信道图/信道评级/AP列表/时间图) ----------
  * 数据只来自 wifiscan 端点; 画布一次建骨架, 扫描后重绘; 时间图靠「自动」积累历史 */

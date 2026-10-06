@@ -12,7 +12,7 @@ gw/wifi_guard.sh	1.0	manifest	/data/gw/wifi_guard.sh	BA/TX 停滞自动恢复守
 gw/mipc_dial_trace.sh	1.0	manifest	/data/gw/mipc_dial_trace.sh	5G 拨号取证(xtrace 抓真参)
 gw/dial_5g.sh	1.2	manifest	/data/gw/dial_5g.sh	生产 5G 拨号器(check_ia+netagent补丁)
 gw/consfeed.sh	1.0	manifest	/data/gw/consfeed.sh	v2 控制台喂食器(无setsid,v2_access拉起)
-gw/rc_netfh.sh	3.0	manifest	/data/gw/rc_netfh.sh	路线A: FH modem栈环境(最小army, MODE.fh门控; v2.1=atci对复活修L14回归)
+gw/rc_netfh.sh	3.1	manifest	/data/gw/rc_netfh.sh	路线A: FH modem栈环境(最小army, MODE.fh门控; v2.1=atci对复活修L14回归)
 gw/radvd.conf	1.0	manifest	/data/gw/radvd.conf	IPv6 SLAAC+RDNSS通告(br-lan, ULA fd42:9ac1:7e50::/64)
 gw/capture_ubus.sh	1.1	manifest	/data/gw/capture_ubus.sh	stock拨号一次性捕获(ubus monitor+ccmni采样)
 gw/dial_variant.sh	1.1	manifest	/data/gw/dial_variant.sh	5G 拨号参数变体实验器(iptype/apn/plmn/roam)

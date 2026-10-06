@@ -17,16 +17,21 @@ export PATH=$PATH:/fhrom/bin:/fhrom/fhshell
 export LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib
 glog "===== rc_netfh v1.7 start ====="
 
-# 1. config base (mobilenetwork's declared deps)
-# v1.8: cfg_tool 先建 16MB cfgmgr shm(webs/树/信号上报的根, key=0x7539);
-#       无此段则 cfgmgr 降级运行, RadioSignalParameter 恒空
-if ! awk 'NR>1 && $3==16777216' /proc/sysvipc/shm 2>/dev/null | grep -q .; then
+# 1. config base — v3.1 (P3 终章): cfg_tool/shmsnap/树整体退役。
+#   蜂窝全功能(锁/制式/飞行/PIN/短信/扫描/拨号)已由 mipc_cellular+dial_keeper+
+#   AT 直发承担(台账 CLM-PLMN-SCAN/CLM-PIN-SIM-AT/CLM-DIALKEEPER); 树仅剩
+#   CA 小区列表展示回填, 由 mipc_cellular getbands 解析替代(v0.5+)。
+#   回滚开关: /data/gw/cellular_engine.conf 写 KEEP_TREE=1 恢复 cfg_tool+快照。
+KEEP_TREE=0
+[ -r /data/gw/cellular_engine.conf ] && . /data/gw/cellular_engine.conf
+if [ "$KEEP_TREE" = 1 ] && ! awk 'NR>1 && $3==16777216' /proc/sysvipc/shm 2>/dev/null | grep -q .; then
     LD_LIBRARY_PATH=/lib:/fhrom/lib /fhrom/bin/cfg_tool /fhrom/fhconf/param.pdt.enc >/dev/null 2>&1
-    glog "cfg_tool shm built"
-    # v1.9: 树快照整体恢复(锁频段/锁小区等全部树状态; 127KB gzip)
+    glog "cfg_tool shm built (KEEP_TREE=1 compat mode)"
     if [ -s /data/gw/cfgtree.snap.gz ]; then
-        gunzip -c /data/gw/cfgtree.snap.gz > /tmp/cfgtree.snap 2>/dev/null &&             /data/gw/shmsnap load /tmp/cfgtree.snap >/dev/null 2>&1 &&             glog "cfgtree snapshot restored" && rm -f /tmp/cfgtree.snap
+        gunzip -c /data/gw/cfgtree.snap.gz > /tmp/cfgtree.snap 2>/dev/null && /data/gw/shmsnap load /tmp/cfgtree.snap >/dev/null 2>&1 && glog "cfgtree snapshot restored" && rm -f /tmp/cfgtree.snap
     fi
+else
+    glog "tree retired (KEEP_TREE=${KEEP_TREE:-0}); cellular = mipc/AT direct"
 fi
 # v3.0 (P3-lite, 2026-10-06 实证): cfgmgr 守护与 logmgr 不再拉起 --
 #   kill cfgmgr 后 cfg_cmd get/set 全通(shm 由 cfg_tool 建立, libfhcfg 直操作),
@@ -54,7 +59,12 @@ sleep 2
 glog "plumbing netagent=$(pidof mtk_netagent) ql_netd=$(pidof ql_netd) ril=$(pidof ql_ril_service) submon=$(pidof mipc_submonitor)"
 
 # 3. THE stock dialer (army spawn form, taskset like process_start_list)
-pidof mobilenetwork >/dev/null || taskset -c 0,2 /fhrom/bin/mobilenetwork >/tmp/mn_boot.log 2>&1 &
+if [ "$KEEP_TREE" = 1 ]; then
+    pidof mobilenetwork >/dev/null || taskset -c 0,2 /fhrom/bin/mobilenetwork >/tmp/mn_boot.log 2>&1 &
+    glog "mobilenetwork spawned (compat)"
+else
+    glog "mobilenetwork retired; dial_keeper is the dialer"
+fi
 # v2.2 (P2): 拨号自持兜底 — mobilenetwork 死亡后 35s 内由本守护接管重拨
 pgrep -f dial_keeper.sh >/dev/null || nohup sh /data/gw/dial_keeper.sh >/dev/null 2>&1 &
 # v1.8: mobilenetwork 就绪后重放蜂窝锁定(频段/小区)

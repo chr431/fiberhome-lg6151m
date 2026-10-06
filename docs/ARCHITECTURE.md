@@ -64,7 +64,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/ntp_keeper.sh` | **v1.0** | manifest | `/data/gw/ntp_keeper.sh` | 每小时NTP守时(ntclient多源; 设备无RTC) |
 | `gw/radvd.conf` | **v1.0** | manifest | `/data/gw/radvd.conf` | IPv6 SLAAC+RDNSS通告(br-lan, ULA fd42:9ac1:7e50::/64) |
 | `gw/rc.extend.sh` | **v1.7** | manifest | `/data/rc.extend.sh` | 槽位调度器(v1.7: A槽TRY_A自清+hnat_qos恢复[S99误伤根治]+dropbear唯一属主; b=纯访问层,a=全栈; 设备gw路径正本回采) |
-| `gw/rc_netfh.sh` | **v3.0** | manifest | `/data/gw/rc_netfh.sh` | 路线A: FH modem栈环境(最小army, MODE.fh门控; v2.1=atci对复活修L14回归) |
+| `gw/rc_netfh.sh` | **v3.1** | manifest | `/data/gw/rc_netfh.sh` | 路线A: FH modem栈环境(最小army, MODE.fh门控; v2.1=atci对复活修L14回归) |
 | `gw/udhcpc_eth1.script` | **v1.0** | manifest | `/data/gw/udhcpc_eth1.script` | eth1口 udhcpc 事件钩子(补登记) |
 | `gw/udhcpc_wan.script` | **v1.0** | manifest | `/data/gw/udhcpc_wan.script` | WAN口 udhcpc 事件钩子(接口无关化) |
 | `gw/v2_access.sh` | **v6.1** | manifest | `/data/gw/v2_access.sh` | v2 极简访问层(串口/SSH/DHCP/防火墙22,零守护干涉) |

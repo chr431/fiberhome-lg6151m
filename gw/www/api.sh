@@ -513,9 +513,11 @@ $R2"
             gsub(/"/, "", ssid)
 
             band = freq+0 > 4000 ? "5G" : "2.4G"
-            printf "{\42ssid\42:\42%s\42,\42mac\42:\42%s\42,\42band\42:\42%s\42,\42freq\42:\42%s\42,\42signal\42:\42%s\42,\42sec\42:\42%s\42},", ssid, mac, band, freq, sig, sec
+            # v2.31: 带宽(VHT/HE op channel width 末次; HT secondary 判40; 默认20)+中心段
+            if (vhtbw == "") { bw = ht40 ? 40 : 20 } else { bw = vhtbw }
+            printf "{\42ssid\42:\42%s\42,\42mac\42:\42%s\42,\42band\42:\42%s\42,\42freq\42:\42%s\42,\42signal\42:\42%s\42,\42sec\42:\42%s\42,\42bw\42:\42%d\42,\42ctr\42:\42%s\42},", ssid, mac, band, freq, sig, sec, bw, ctr
         }
-        /^BSS / { flush(); mac=substr($2,1,17); sig=""; freq=""; ssid=""; sec="open" }
+        /^BSS / { flush(); mac=substr($2,1,17); sig=""; freq=""; ssid=""; sec="open"; vhtbw=""; ctr=""; ht40=0 }
         /^[ 	]+signal:/ { sig=$2 }
         /^[ 	]+freq:/ { freq=$2 }
         /^[ 	]+SSID:/ { ssid=substr($0, index($0,":")+2) }

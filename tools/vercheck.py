@@ -153,7 +153,7 @@ def check(fail=True):
 
     # 6) 性质分区: 登记行位置 <-> kind (v1.2)
     ZONE = {"manifest": ("gw/",), "src": ("gw/src/",), "doc": ("docs/",),
-            "tool": ("tools/", "_drill_backup/"),
+            "tool": ("tools/", "_drill_backup/", "install/"),   # v1.3: 安装套件脚本纳入工具区(RP102兼容轮)
             "image": ("_drill_backup/",)}
     for name, ver, kind, target, note in reg:
         if kind == "doc" and name == "README.md":

@@ -81,7 +81,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
 | `gw/wifi_up.sh` | **v1.25** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.25: v1.19块过期'切换MLO必须reboot'注释修正(v1.23已改在线重应用); v1.24: MLD快照按本次运行uptime过滤(历史失败轮grp(0)污染断言,二犯); v1.23: MLO在线重应用先下电回冷启动等价态(T1-T5矩阵:-B后台化在接口UP+MLD武装态必死,下电即愈;撤销v2.41重启纪律); v1.22: 访客iface显式入桥(动态BSS不自动加bridge→帧死无IP接口→dnsmasq盲,tcpdump实证); v1.21: MLO访客静态单链路组17/18; v1.20: MLO单次AP启动; v1.19: MLO真双链路—MldGroup=1;0;x6写两带dat(RE实证stock同款,1基组号; 全零表=v1.15事故形态禁写; MldAddr/ApcliMloDisable勿写); v1.18: 访客独立化) |
-| `gw/www/api.sh` | **v2.45** | manifest | `/data/gw/www/api.sh` | GUI JSON端点(v2.39: mlo字段+强制双频同名+mlo_changed重启提示; v2.38: 主WiFi密码/加密并入; v2.37访客独立化) |
+| `gw/www/api.sh` | **v2.46** | manifest | `/data/gw/www/api.sh` | GUI JSON端点(v2.46: get_cellular mipc分支修复=bandlock/celllock经%s展开(原单引号格式串把${BAND_EN:-0}字面量发给GUI)+回读CELL_i锁定表(原恒空); v2.45: 聚合五模式mode=; v2.44: sse端点) |
 | `gw/www/app.js` | **v3.29** | manifest | `/data/gw/www/app.js` | 控制台SPA(v3.29: 文案整改落地=术语表统一(docs/GUI_TERMINOLOGY.md)+错误码中文映射+审计G-01..G-46修复; v3.28: 聚合五模式选择; v3.23: MLO选项) |
 | `gw/www/index.html` | **v2.15** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.15: 导航改'终端'+页头去内部版本号+缓存v49) |
 | `gw/www/style.css` | **v2.1** | manifest | `/data/gw/www/style.css` | 控制台主题 |

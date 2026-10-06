@@ -375,3 +375,22 @@
 - `wifi_up.sh` 文件头停在 v1.23 而注册表为 v1.24——随 v1.25 修正对齐。
 - `index.html:26` 残留空白行（附录条目）已删；导航"设备"改"终端"（P-07）；
   页头去内部版本号"v4"（G-37）；缓存参数 v48→v49。
+
+---
+
+## 部署后抽检补充发现（G-47，api.sh v2.46 修复）
+
+**2026-10-06 部署后浏览器抽检抓获，审计与术语表均未覆盖（属 api.sh 数据面 bug，非文案）**：
+
+- **现象**：蜂窝页"4G 频段 / 5G 频段"输入框显示字面量 `${LTE_MASK:-}` /
+  `${NR_MASK:-}`；`bandlock.enable`/`celllock.enable` 恒为 `${BAND_EN:-0}` 字面量
+  （GUI 侧 `=== "1"` 恒假 → 频段锁定/小区锁定 tag 永远显示"已关闭"，
+  与实际锁定状态无关）；mipc 分支 `celllock.entries` 恒 `[]`（已加的小区锁
+  在 GUI 表中永远不出现）。
+- **根因**：`api.sh` v2.45 `get_cellular` mipc 早退分支把 `bandlock`/`celllock`
+  对象写进 printf **单引号格式串**——shell 变量不展开，原文直出（正是术语表
+  T-30 禁止的"内部标识外泄"的设备侧变体）；entries 则硬编码空数组。
+- **修复（v2.46）**：bandlock/celllock 六值改经 `%s` 参数展开（source
+  cellular.conf 后的 `BAND_EN/LTE_MASK/NR_MASK/CELL_EN`）；entries 复用树路径
+  同款 `CELL_i` 回读循环构造。本地 JSON 合法性模拟验证通过。
+- **复验**：部署后蜂窝页输入框显示真实掩码/空值+占位符，锁定 tag 反映真实状态。

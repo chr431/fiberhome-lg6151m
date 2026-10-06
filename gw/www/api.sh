@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.45 (聚合五模式mode=weight|cell_prio|eth_prio|cell_only|eth_only; 权重滑块5-95钳制; v2.44 sse端点) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.46 (get_cellular mipc 分支修复: bandlock/celllock 经 %s 展开(原单引号串把 ${BAND_EN:-0} 字面量发给 GUI)+回读 CELL_i 锁定表; v2.45: 聚合五模式mode=weight|cell_prio|eth_prio|cell_only|eth_only; 权重滑块5-95钳制; v2.44 sse端点) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -708,7 +708,20 @@ get_cellular() {
             CJ=$(printf '%s' "$CJ" | sed "s/\"bw\"/\"rssi\":\"$RSSI\",\"bw\"/")
             COPSR=$(mipc_wan_cli --at_cmd "AT+COPS?" 2>/dev/null | grep -oE '"[0-9]{5,6}"' | tr -d '"')
             [ -r $GWDATA/cellular.conf ] && . $GWDATA/cellular.conf
-            printf '{"operator":{"plmn":"%s","name":"%s"},%s,"bandlock":{"enable":"${BAND_EN:-0}","lte":"${LTE_MASK:-}","nr":"${NR_MASK:-}"},"celllock":{"enable":"${CELL_EN:-0}","entries":[]},"engine":"mipc","ts":%d}'                 "${COPSR:-}" "$(op_name "$COPSR")" "$CJ" "$(date +%s)"
+            # v2.46: bandlock/celllock 须经 %s 展开 — 原写在单引号格式串里,
+            # ${BAND_EN:-0} 等字面量直接发给了 GUI(输入框显示 shell 变量原文,
+            # 部署后 GUI 抽检抓获); mipc 分支同时回读 CELL_i 锁定表(原恒空)。
+            ENTRIES=""
+            i=1
+            while [ $i -le 20 ]; do
+                eval "E=\${CELL_$i:-}"
+                [ -z "$E" ] && break
+                AC=${E%%:*}; REST=${E#*:}; A=${REST%%:*}; PC=${REST##*:}
+                ENTRIES="$ENTRIES{\"idx\":$i,\"act\":\"$AC\",\"arfcn\":\"$A\",\"pci\":\"$PC\"},"
+                i=$((i+1))
+            done
+            ENTRIES=${ENTRIES%,}
+            printf '{"operator":{"plmn":"%s","name":"%s"},%s,"bandlock":{"enable":"%s","lte":"%s","nr":"%s"},"celllock":{"enable":"%s","entries":[%s]},"engine":"mipc","ts":%d}'                 "${COPSR:-}" "$(op_name "$COPSR")" "$CJ" "${BAND_EN:-0}" "${LTE_MASK:-}" "${NR_MASK:-}" "${CELL_EN:-0}" "$ENTRIES" "$(date +%s)"
             return
         esac
     fi

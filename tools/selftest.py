@@ -844,13 +844,14 @@ def t_sys_disk():
 
 @test("无内核 OOPS/PANIC")
 def t_sys_kernel():
-    # aee_aed ipanic 探测行(开机 expdb MTD 探测噪声)与 kernel_panic_sysfs_init
-    # (函数名含 panic 的正常 initcall)排除; ramoops 初始化行(含 oops 子串)排除;
-    # 真 Oops/BUG/panic 必须为 0
-    out = dev("dmesg | grep -iE 'Oops:|BUG:|panic' | grep -vcE 'aee_aed|_panic_|ramoops' 2>/dev/null")
-    n = int((out.strip() or "0").split("\n")[-1])
-    record(t_sys_kernel._test_name, "system", n == 0,
-           f"events={n} (噪声已滤)")
+    # 过滤移到 Python 侧(lgssh 包装器管道偶发吞掉 grep -v 引号, ramoops 误报三犯):
+    # 排除 aee_aed ipanic 探测噪声 / *_panic_* initcall / ramoops 初始化行;
+    # 真 Oops:/BUG:/panic 必须为 0
+    out = dev("dmesg | grep -iE 'Oops:|BUG:|panic'")
+    real = [l for l in out.splitlines()
+            if not any(k in l for k in ("aee_aed", "_panic_", "ramoops"))]
+    record(t_sys_kernel._test_name, "system", len(real) == 0,
+           f"events={len(real)} (噪声已滤)" + (f" first={real[0][:80]}" if real else ""))
 
 
 @test("不变量看门狗活着且无未恢复故障")

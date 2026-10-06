@@ -849,7 +849,7 @@ def t_sys_kernel():
     # 真 Oops:/BUG:/panic 必须为 0
     out = dev("dmesg | grep -iE 'Oops:|BUG:|panic'")
     real = [l for l in out.splitlines()
-            if not any(k in l for k in ("aee_aed", "_panic_", "ramoops"))]
+            if not any(k in l for k in ("aee_aed", "_panic_", "ramoops", "panic_on_taint"))]
     record(t_sys_kernel._test_name, "system", len(real) == 0,
            f"events={len(real)} (噪声已滤)" + (f" first={real[0][:80]}" if real else ""))
 

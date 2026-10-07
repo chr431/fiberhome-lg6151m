@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.54 (运营商映射修正 46015/46016=中国广电; status 增 m5 五模式字段; CMGL→CMGR 逐条读: ql_ril CMGL 未读列表路径段错误; CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.55 (wifiscan 补采 40M 方向 dir; 运营商映射修正 46015/46016=中国广电; status 增 m5 五模式字段; CMGL→CMGR 逐条读: ql_ril CMGL 未读列表路径段错误; CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -634,6 +634,7 @@ apply_pass_set() {
 
 # -- 邻居 AP 扫描 (apclii0 短暂 up 扫 5G; ra0/apcli0 扫 2.4G) --
 get_wifiscan() {
+    # v2.55: 补采 2.4G 40M 上/下侧信道方向(dir) — 信道图按真实占用频段绘制的前提
     # v2: 预热3s(1s时几乎扫不到) + 双轮扫描合并(第二轮更饱满) + 按MAC去重
     ifconfig apcli0 up 2>/dev/null; ifconfig apclii0 up 2>/dev/null; sleep 3
     R1=$(iw apcli0 scan 2>/dev/null; iw apclii0 scan 2>/dev/null)
@@ -650,9 +651,9 @@ $R2"
             band = freq+0 > 4000 ? "5G" : "2.4G"
             # v2.31: 带宽(VHT/HE op channel width 末次; HT secondary 判40; 默认20)+中心段
             if (vhtbw == "") { bw = ht40 ? 40 : 20 } else { bw = vhtbw }
-            printf "{\42ssid\42:\42%s\42,\42mac\42:\42%s\42,\42band\42:\42%s\42,\42freq\42:\42%s\42,\42signal\42:\42%s\42,\42sec\42:\42%s\42,\42bw\42:\42%d\42,\42ctr\42:\42%s\42},", ssid, mac, band, freq, sig, sec, bw, ctr
+            printf "{\42ssid\42:\42%s\42,\42mac\42:\42%s\42,\42band\42:\42%s\42,\42freq\42:\42%s\42,\42signal\42:\42%s\42,\42sec\42:\42%s\42,\42bw\42:\42%d\42,\42ctr\42:\42%s\42,\42dir\42:\42%d\42},", ssid, mac, band, freq, sig, sec, bw, ctr, dir
         }
-        /^BSS / { flush(); mac=substr($2,1,17); sig=""; freq=""; ssid=""; sec="open"; vhtbw=""; ctr=""; ht40=0 }
+        /^BSS / { flush(); mac=substr($2,1,17); sig=""; freq=""; ssid=""; sec="open"; vhtbw=""; ctr=""; ht40=0; dir=0 }
         /^[ 	]+signal:/ { sig=$2 }
         /^[ 	]+freq:/ { freq=$2 }
         /^[ 	]+SSID:/ { ssid=substr($0, index($0,":")+2) }
@@ -661,7 +662,8 @@ $R2"
             w = $0; sub(/.*\(/, "", w); sub(/[^0-9].*/, "", w); vhtbw = w + 0
         }
         /center freq segment 1:/ { ctr = $NF }
-        /secondary channel offset: (above|below)/ { ht40 = 1 }
+        /secondary channel offset: above/ { ht40 = 1; dir = 1 }
+        /secondary channel offset: below/ { ht40 = 1; dir = -1 }
         END { flush() }
     ' | tr -d '\' | sed 's/,$//' > /tmp/scan.$$
     L=$(cat /tmp/scan.$$ | tr -d '\n'); rm -f /tmp/scan.$$

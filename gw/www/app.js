@@ -1,6 +1,6 @@
 /* app.js v3.32 (P2: WPA3虚假选项移除(hostapd仅WPA2-PSK); plmnScan XSS修复(textContent); v3.31: sse带token) -- v3 gateway console SPA
  * v3.28: 聚合五模式选择; v3.27: SSE 实时信号; v3.26: 聚合滑块应用后回读同步
- * v3.4: WiFi 分析仪(信道图/信道评级/AP列表/时间图 canvas多视图) + 信道下拉统一(2.4G补select, 双频加"自动"档)
+ * v3.4: WiFi 分析仪(信道图v3.34 频率域:真实占用频段+防越界钳位/信道评级/AP列表/时间图 canvas多视图) + 信道下拉统一(2.4G补select, 双频加"自动"档)
  * 刷新机制彻底重做: 页面骨架只建一次(进入时), 轮询仅更新文本槽/小表格
  *   T(id,v) 文本槽(带变化检测)  H(id,v) 局部HTML(tbody级,带变化检测)
  *   F(id,v) 表单值(聚焦中不打扰)  —— 整页DOM永不重建: 无滚动丢失/无闪烁/
@@ -401,7 +401,7 @@ window.waScan = async silent => {
     if (!silent) T("wa-info", "扫描中…（约 10s）");
     try {
         const j = await api("wifiscan").catch(() => ({ aps: [] }));
-        WA.aps = (j.aps || []).map(a => ({ ssid: a.ssid, mac: a.mac, sec: a.sec, fr: +a.freq, sig: +a.signal, ch: waChOf(a.freq), bw: +a.bw || 20, ctr: +a.ctr || 0 })).filter(a => a.ch > 0);
+        WA.aps = (j.aps || []).map(a => ({ ssid: a.ssid, mac: a.mac, sec: a.sec, fr: +a.freq, sig: +a.signal, ch: waChOf(a.freq), bw: +a.bw || 20, ctr: +a.ctr || 0, dir: +a.dir || 0 })).filter(a => a.ch > 0);
         WA.hist.push({ t: Date.now(), m: WA.aps.reduce((o, a) => (o[a.mac] = a.sig, o), {}) });
         if (WA.hist.length > 60) WA.hist.shift();
         waRender();
@@ -453,16 +453,38 @@ function waSummary() {
     const stamp = WA.hist.length ? new Date(WA.hist[WA.hist.length - 1].t).toLocaleTimeString() : "--";
     return `${WA.aps.length} 个邻居 AP（2.4GHz ${n2} / 5GHz ${n5}）· ${WA.hist.length} 次扫描 · 最后 ${stamp}`;
 }
-/* 视图1: 信道图 — 每AP一个半透明矩形(±2信道宽, 顶边=信号), 填充/细边框/文字同色;
- * 索引映射向两侧各拓展2格, 最左/最右信道的矩形完整不截断; SSID 横排, 水平碰撞逐行上移 */
+/* 视图1: 信道图 v3.34 — 频率域绘制: 每AP矩形=真实占用频段[bw/2, +bw/2]MHz;
+ * 2.4G 40M 按上下侧信道方向定位(RM2100@ch13-above 实弹驱动); 5G 中心=ctr信道
+ * (仅 bw>=40 时采纳, 20M 带 ctr 的 HE 域是虚指 — DIRECT-* 实测会错位); 域两侧
+ * 各扩 30/45MHz 容纳边缘 40M/160M 半宽, 末道硬钳位彻底杜绝越界。 */
 function waDrawChGraph() {
     const [x, W, H] = waCanvas();
     const chs = WA.band === 2 ? CH2_LIST : CH5_LIST;
     const aps = waBandAps().slice().sort((a, b) => a.sig - b.sig);   // 弱者先画, 强者居顶
     const padL = 36, padR = 10, padT = 16, padB = 24;
     const n = chs.length;
-    const xOfI = i => padL + (i + 2) / (n + 3) * (W - padL - padR);  // i∈[-2, n+1]
+    const chF = c => WA.band === 2 ? 2407 + 5 * c : 5000 + 5 * c;   // 信道号->中心频率MHz
+    const EXT = WA.band === 2 ? 30 : 45;                            // 域边缘余量(MHz)
+    const fmin = chF(chs[0]) - EXT, fmax = chF(chs[n - 1]) + EXT;
+    const xOfF = f => padL + (f - fmin) / (fmax - fmin) * (W - padL - padR);
     const yOf = s => padT + (-30 - s) / 70 * (H - padT - padB);      // -30..-100 dBm
+    const clampBox = (x0, x1) => {
+        const L = padL + 0.5, R = W - padR - 0.5;
+        x0 = Math.max(L, x0); x1 = Math.min(R, x1);
+        if (x1 < x0 + 2) x1 = Math.min(R, x0 + 2);                  // 钳后仍保底可读宽
+        return [x0, x1];
+    };
+    /* AP 真实占用频段(MHz): fp=控制信道频率, bw=频宽, ctr=中心信道(5G), dir=40M方向(2.4G) */
+    const spanOf = a => {
+        const fp = a.fr || chF(a.ch), bw = +a.bw || 20;
+        if (WA.band === 5) {
+            const fc = (bw >= 40 && a.ctr > 0) ? 5000 + 5 * a.ctr : fp;
+            return [fc - bw / 2, fc + bw / 2];
+        }
+        if (bw >= 40 && a.dir) return [fp - 10, fp + 10 + 20 * a.dir];   // 上侧: [fp-10,fp+30]; 下侧: [fp-30,fp+10]
+        if (bw >= 40) return [fp - 20, fp + 20];                        // 40M 无方向: 对称近似
+        return [fp - 10, fp + 10];
+    };
     x.font = "10px sans-serif";
     for (let s = -30; s >= -100; s -= 10) {
         const y = yOf(s);
@@ -472,29 +494,14 @@ function waDrawChGraph() {
     }
     x.textAlign = "center"; x.fillStyle = "#7fa3c4";
     const step = n > 16 ? 2 : 1;
-    for (let i = 0; i < n; i += step) x.fillText(String(chs[i]), xOfI(i), H - 8);
+    for (let i = 0; i < n; i += step) x.fillText(String(chs[i]), xOfF(chF(chs[i])), H - 8);
     const base = H - padB;
     const cl = v => Math.max(-100, Math.min(-30, v));
-    /* v3.19: CH5_LIST 相邻索引隔 4 信道(80MHz) — "信道像素"须除以索引步。
-       v3.17 的 4 倍过宽 bug 即源于把索引步当信道(视觉回归实测抓出)。 */
-    const chStep = (chs[1] - chs[0]) || 1;
-    const chPx = ((xOfI(1) - xOfI(0)) || 20) / chStep;   // 单信道(20MHz)像素宽
     for (const a of aps) {
-        let i = chs.indexOf(a.ch); if (i < 0) continue;
+        if (a.ch <= 0 || chs.indexOf(a.ch) < 0) continue;           // 带外(如 ch14)不绘
         const col = waColor(a.mac);
-        let x0, x1;
-        const bw = +a.bw || 20, k = Math.max(1, Math.round(bw / 20));
-        if (WA.band === 5) {
-            /* 5G: 精确频宽块。中心 = 主信道 + (ctr-主)/20 信道浮点偏移
-               (ctr=42 等中心信道号不在 CH5_LIST, indexOf 必失败, 用线性内插) */
-            const c = i + (+a.ctr ? ((+a.ctr) - a.ch) / chStep : 0);
-            x0 = xOfI(c) - (k * chPx) / 2 - chPx * 0.25;
-            x1 = xOfI(c) + (k * chPx) / 2 + chPx * 0.25;
-        } else {
-            /* 2.4G: 干扰重叠约定 — 20M ±2 信道, 40M ±4 */
-            const half = bw >= 40 ? 4 : 2;
-            x0 = xOfI(i - half); x1 = xOfI(i + half);
-        }
+        const [flo, fhi] = spanOf(a);
+        let [x0, x1] = clampBox(xOfF(flo) - 1, xOfF(fhi) + 1);
         const yTop = yOf(cl(a.sig));
         const w = x1 - x0, h = base - yTop;
         x.globalAlpha = 0.30;
@@ -505,24 +512,13 @@ function waDrawChGraph() {
         x.strokeStyle = col;
         x.strokeRect(x0 + 0.5, yTop + 0.5, w - 1, h - 1);
     }
-    /* 标签: 邻居过多重叠不可避免 → 邻居只显色块; 本机 BSS 不被自家 apcli 扫描
-     * 报告(实测 0 命中), 用已知信道合成绘制专属标记: 斜纹柱 + 加粗名 */
+    /* 本机 BSS 合成标记: 斜纹柱 + 粗框 + 加粗名(自家 apcli 扫不到) */
     const ownCh = WA.ownCh[WA.band];
     if (ownCh && chs.includes(ownCh)) {
-        const i = chs.indexOf(ownCh);
         const ownSsid = WA.band === 2 ? (WA.own[0] || "网关") : (WA.own[1] || "网关");
-        /* v3.17: 本机按真实带宽(BW2G/BW5G)。5G 绕主信道对称铺 k 信道;
-           2.4G 维持重叠约定 ±2/±4 */
         const obw = (WA.ownBw && WA.ownBw[WA.band]) || (WA.band === 2 ? 20 : 80);
-        let x0, x1;
-        if (WA.band === 5) {
-            const k = Math.max(1, Math.round(obw / 20));
-            x0 = xOfI(i) - (k * chPx) / 2 - chPx * 0.25;
-            x1 = xOfI(i) + (k * chPx) / 2 + chPx * 0.25;
-        } else {
-            const half = obw >= 40 ? 4 : 2;
-            x0 = xOfI(i - half); x1 = xOfI(i + half);
-        }
+        const fc = chF(ownCh);
+        let [x0, x1] = clampBox(xOfF(fc - obw / 2) - 1, xOfF(fc + obw / 2) + 1);
         const yTop = yOf(-35), h = base - yTop;
         x.save();
         x.beginPath(); x.rect(x0, yTop, x1 - x0, h); x.clip();
@@ -545,9 +541,10 @@ function waDrawChGraph() {
     x.font = "bold 11px sans-serif";
     x.textAlign = "center";
     for (const a of aps) {
-        if (!a.ssid || !WA.own.includes(a.ssid)) continue;
-        const i = chs.indexOf(a.ch); if (i < 0) continue;
-        const cx = (xOfI(i - 2) + xOfI(i + 2)) / 2;
+        if (!a.ssid || !WA.own.includes(a.ssid) || chs.indexOf(a.ch) < 0) continue;
+        const [flo, fhi] = spanOf(a);
+        const [x0, x1] = clampBox(xOfF(flo), xOfF(fhi));
+        const cx = (x0 + x1) / 2;
         const ly = yOf(cl(a.sig)) - 8;
         x.fillStyle = waColor(a.mac);
         x.fillText(a.ssid, Math.min(W - padR - 40, Math.max(padL + 40, cx)), Math.max(padT + 10, ly));

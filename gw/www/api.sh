@@ -335,7 +335,9 @@ BEGIN{ n=0; cidx="?" }
 /^\+CMGR: /{
   gsub(/\r/,"")
   idx=cidx
-  oa=$0; sub(/^[^,]*,/,"",oa); sub(/^[^,]*,/,"",oa); sub(/,.*/,"",oa); gsub(/"/,"",oa)
+  # CMGR 行无 CMGL 的索引字段: [stat],[oa],[pid/dcs],[time] — 剥一层取 oa(v2.53 修补:
+  # 原双剥继承自 CMGL 格式, 多剥一层 = from 列恒空)
+  oa=$0; sub(/^[^,]*,/,"",oa); sub(/,.*/,"",oa); gsub(/"/,"",oa)
   tm=$0; sub(/^.*,/,"",tm); gsub(/"/,"",tm)
   getline raw; gsub(/\r/,"",raw)
   if(raw == "" || raw ~ /^(AT response|OK|\+CMS|\+CME)/) next   # 洞位/错误块

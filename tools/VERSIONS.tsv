@@ -87,3 +87,4 @@ gw/guest_fw.sh	1.6	manifest	/data/gw/guest_fw.sh	访客隔离防火墙v1.6(审�
 install/run.sh	1.1	tool	-	raw shell自驱脚本(v1.1: 分区次设备号从/proc/partitions动态解析成布局门禁, RP102/RP103通用; v1.0硬编码259:7等)
 tools/build_v3httpd.sh	1.0	tool	-	v3httpd构建(zig cc aarch64-linux-musl全静态, 同mipc_cellular链)
 tools/upgrade_slot.py	1.0	tool	-	SSH整槽升级器(P3第一档: vercheck/槽位/空间预检→md5门禁→dd备份旧p26→写新镜像→挂载sanity断言(toor/rcS/#v3:/procd)→失败自动整槽还原不重启→清TRY_A→reboot; PC侧轮询日志+回连终检; --dry-run)
+tools/rescue_shadow.py	1.0	tool	-	shadow.override未bind网络救援(getpass旧口令→只读探针: 文件md5/grep行为单测/部署钩子sh -x跟踪→从.bak恢复+重bind; 依赖rc.extend v2.1)

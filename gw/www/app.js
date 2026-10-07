@@ -259,7 +259,7 @@ PAGES.wifi = {
         <div class="row3">
           <div class="frm"><label>网络名称（SSID）</label><input id="wa-base"></div>
           <div class="frm"><label>WiFi 密码（8-63 位）</label><input id="wa-pass" type="password" placeholder="留空=不修改"></div>
-          <div class="frm"><label>加密方式</label><select id="wa-auth"><option value="WPA2PSK">WPA2</option></select><span class="hint">本机 hostapd 仅支持 WPA2-PSK（fh 魔改版不接受 SAE 口令派生），"WPA2+WPA3" 选项因名不符实已移除</span></div>
+          <div class="frm"><label>加密方式</label><select id="wa-auth"><option value="WPA2PSK">WPA2</option><option value="WPA2PSKWPA3PSK">WPA2+WPA3</option></select></div>
           <div class="frm"><label>2.4GHz 信道</label><select id="wa-ch2"><option value="0">自动 (启动时扫描选道)</option>${Array.from({length:13},(_,i)=>i+1).map(c=>`<option value="${c}">${c}</option>`).join("")}</select></div>
           <div class="frm"><label>2.4GHz 带宽（MHz）</label><select id="wa-bw2"><option value="20">20</option><option value="40">40</option></select></div>
           <div class="frm"><label>5GHz 信道</label><select id="wa-ch5"><option value="0">自动 (启动时扫描选道)</option>${[36,40,44,48,149,153,157,161].map(c=>`<option value="${c}">${c}</option>`).join("")}</select></div>
@@ -327,7 +327,7 @@ PAGES.wifi = {
         F("wa-bw5", adv.bw5g); F("wa-pw", adv.power); F("wa-hid", adv.hidden2g);
         F("wa-guest", adv.guest); F("wa-inone", adv.mlo == 1 ? "2" : adv.inone);
         F("wa-gband", adv.guest_band || "5g"); F("wa-gssid", adv.guest_ssid || "");
-        F("wa-auth", "WPA2PSK");   // v3.32: 单一真实选项; 存量 WPA2+WPA3 存值回落
+        F("wa-auth", adv.auth || "WPA2PSK");   // v3.36: WPA2+WPA3 选项恢复(备后续 hostapd 更新), 存量值如实回显
         $("wa-gssid").placeholder = `空 = 默认 ${adv.guest_ssid_eff || "名称-Guest"}`;
         bpList();   // v3.30: 终端频段锁定列表(带diff守卫, 不打字扰)
     }

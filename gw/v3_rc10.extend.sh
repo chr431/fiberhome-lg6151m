@@ -133,8 +133,21 @@ sleep 15
 nohup sh /data/gw/wan_agg.sh >/tmp/wagg.out 2>&1 &
 
 # --- v2.16: 可插拔上行认证守护 — conf 里 AUTHD_CMD 为任意认证程序
+# v2.21: static 档案开机重应用 — MAC 伪装与静态 IP 是运行态, 断电/重启即丢
+#   (2026-10-07 实弹: 断电重启后 eth0 回原生 MAC+无 IP, authd 带错 MAC 反复重试
+#    且无人察觉; 现开机先恢复伪装与 IP 再拉认证, 与 apply_uplink_form 同配方)
 if [ -r /data/gw/uplink.conf ] && grep -q '^ENABLE=1' /data/gw/uplink.conf; then
     . /data/gw/uplink.conf 2>/dev/null
+    if [ "${FORM:-home}" = "static" ] && [ -n "${AUTH_IP:-}" ]; then
+        ip addr flush dev eth0 2>/dev/null
+        if [ "${MAC_SPOOF:-0}" = "1" ] && [ -n "${SPOOF_MAC:-}" ]; then
+            ip link set eth0 down 2>/dev/null
+            ip link set eth0 address "$SPOOF_MAC" 2>/dev/null
+        fi
+        ip addr add "$AUTH_IP/${AUTH_MASK:-255.255.255.128}" dev eth0 2>/dev/null
+        ip link set eth0 up
+        ip route replace default via "$AUTH_GW" dev eth0 metric 200 2>/dev/null
+    fi
     [ -n "${AUTHD_CMD:-}" ] && nohup $AUTHD_CMD >/dev/null 2>&1 &
 fi
 

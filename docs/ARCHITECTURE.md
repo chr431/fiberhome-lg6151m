@@ -81,7 +81,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
 | `gw/wifi_up.sh` | **v1.26** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.26: 终端频段锁定band_pins.conf→对侧频段main BSS deny ACL(macaddr_acl=0+deny_mac_file, 指令支持已实证); 无pin时conf与v1.25逐字节一致; 历史版本见git) |
-| `gw/www/api.sh` | **v2.52** | manifest | `/data/gw/www/api.sh` | GUI JSON端点; v2.49(P2): 严格IP/MAC校验(ip_ok/mac_ok)+dnsmasq失败回落默认参(rebind防护同源)+settings.conf 600; 历史见git |
+| `gw/www/api.sh` | **v2.53** | manifest | `/data/gw/www/api.sh` | GUI JSON端点; v2.49(P2): 严格IP/MAC校验(ip_ok/mac_ok)+dnsmasq失败回落默认参(rebind防护同源)+settings.conf 600; 历史见git |
 | `gw/www/app.js` | **v3.32** | manifest | `/data/gw/www/app.js` | 控制台SPA; v3.32(P2): WPA3虚假选项移除(hostapd仅WPA2-PSK)+plmnScan XSS修复(textContent); 历史见git |
 | `gw/www/index.html` | **v2.18** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.18: 缓存v52) |
 | `gw/www/style.css` | **v2.1** | manifest | `/data/gw/www/style.css` | 控制台主题 |

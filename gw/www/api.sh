@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.52 (CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.53 (CMGL→CMGR 逐条读: ql_ril CMGL 未读列表路径段错误; CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -288,20 +288,32 @@ op_name() {
 # ---------- 批次B: 短信读/流量/PIN/制式/风扇/LED/静态租约/NTP/邻居扫描/WiFi高级/访客 ----------
 MN_TREE=InternetGatewayDevice.X_FH_MobileNetwork
 
-# -- 短信(只读收件: 文本模式 CMGL; 发送走 mipc_cellular sendsms) --
-# v2.50(2026-10-07 实弹修复): modem 出厂 CMGF=0(PDU 模式)下 CMGL="ALL" 必报
-#   +CME ERROR:100 = GUI 短信页恒空(短信其实都在, +CPMS? 实证 3 条在 MT)。
-#   现每次先 AT+CMGF=1(易失配置, modem 重启回 0, 故幂等设置)再列表。
+# -- 短信(只读收件: CMGR 逐条; 发送走 mipc_cellular sendsms) --
+# v2.53(2026-10-07 实弹): CMGL 全线弃用 — ql_ril 的 CMGL 未读列表路径段错误
+#   (新到未读短信在存储时, CMGL="ALL"/"REC UNREAD" 必崩 mipc_wan_cli, "REC READ"
+#   空返回不崩; CMGR 逐条完全正常)。改为 CPMS 计数 + CMGR 1..N 循环(CMGR 读后
+#   自动转已读 = 顺带绕开崩溃路径)。索引可能因删除有洞, 洞位返回 CMS ERROR 跳过。
+# v2.50(2026-10-07 实弹修复): modem 出厂 CMGF=0(PDU 模式)下字符串 stat 参数必报
+#   +CME ERROR:100 = GUI 短信页恒空。现每次先 AT+CMGF=1(易失配置, modem 重启回
+#   0, 故幂等设置), 读毕还原 0(11:5x 入信丢失窗口与 1 态重合, 宁可信其有)。
 #   正文: 中文运营商短信是 UCS2-BE 十六进制(多段带 UDH 头 050003|ref|n|seq),
 #   原样透传=乱码; 现解码 UCS2->UTF-8 并按 (oa,ref) 合并多段, GSM7 可读正文
 #   原样透传。busybox awk 无 strtonum -> h2d 手工换算; 无区间量词 -> 显式判长。
 get_sms() {
     mipc_wan_cli --at_cmd "AT+CMGF=1" >/dev/null 2>&1
-    OUT=$(mipc_wan_cli --at_cmd "AT+CMGL=\"ALL\"" 2>/dev/null)
-    # v2.52: 读毕立即还原 CMGF=0 — 11:5x 入信丢失窗口与 CMGF=1 重合(回环实验
-    #   在 0 态收存正常), 宁可信其有; 窗口缩到毫秒级。
+    N=$(mipc_wan_cli --at_cmd "AT+CPMS?" 2>/dev/null | grep -oE '\+CPMS: "[A-Z]+", [0-9]+' | grep -oE '[0-9]+$')
+    case "$N" in ''|*[!0-9]*) N=0;; esac
+    [ "$N" -gt 30 ] && N=30
+    OUT=""
+    i=1
+    while [ "$i" -le "$N" ]; do
+        OUT="$OUT+IDX: $i
+$(mipc_wan_cli --at_cmd "AT+CMGR=$i" 2>/dev/null)
+"
+        i=$((i+1))
+    done
     mipc_wan_cli --at_cmd "AT+CMGF=0" >/dev/null 2>&1
-    # +CMGL: <idx>,"stat","<oa>",[...],"<time>"\n<text>
+    # +IDX: <i> 块内 +CMGR: "stat","<oa>",[...],"<time>"\n<text>
     echo "$OUT" | awk '
 function h2d(c){ return index("0123456789ABCDEF", c)-1 }
 function esc(s){ gsub(/\\/,"\\\\",s); gsub(/"/,"\\\"",s); gsub(/[\r\n\t]/," ",s); return s }
@@ -315,13 +327,18 @@ function dec(h,  i,cp,b1,b2,b3,o){
   }
   return o
 }
-BEGIN{ n=0 }
-/^\+CMGL: /{
+BEGIN{ n=0; cidx="?" }
+/^\+IDX: /{
   gsub(/\r/,"")
-  idx=$0; sub(/^\+CMGL: /,"",idx); sub(/,.*/,"",idx)
+  cidx=$0; sub(/^\+IDX: /,"",cidx)
+}
+/^\+CMGR: /{
+  gsub(/\r/,"")
+  idx=cidx
   oa=$0; sub(/^[^,]*,/,"",oa); sub(/^[^,]*,/,"",oa); sub(/,.*/,"",oa); gsub(/"/,"",oa)
   tm=$0; sub(/^.*,/,"",tm); gsub(/"/,"",tm)
   getline raw; gsub(/\r/,"",raw)
+  if(raw == "" || raw ~ /^(AT response|OK|\+CMS|\+CME)/) next   # 洞位/错误块
   ref=""; body=raw
   if(body ~ /^050003/ && length(body) >= 12){
     ref=substr(body,7,4)

@@ -316,7 +316,7 @@ BEGIN{ n=0 }
 /^\+CMGL: /{
   gsub(/\r/,"")
   idx=$0; sub(/^\+CMGL: /,"",idx); sub(/,.*/,"",idx)
-  oa=$0; sub(/^[^,]*,/,"",oa); sub(/,.*/,"",oa); gsub(/"/,"",oa)
+  oa=$0; sub(/^[^,]*,/,"",oa); sub(/^[^,]*,/,"",oa); sub(/,.*/,"",oa); gsub(/"/,"",oa)
   tm=$0; sub(/^.*,/,"",tm); gsub(/"/,"",tm)
   getline raw; gsub(/\r/,"",raw)
   ref=""; body=raw

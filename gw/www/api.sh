@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.49 (P2/M-5: 严格IP/MAC校验+dnsmasq失败回落+rebind防护; L-2: settings.conf 600; P1(v2.48): sse加token门+并发上限8; uplink AUTHD_CMD收权root通道(防现成二进制一键root化, get_uplink回显只读); 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.50 (SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -288,23 +288,57 @@ op_name() {
 # ---------- 批次B: 短信读/流量/PIN/制式/风扇/LED/静态租约/NTP/邻居扫描/WiFi高级/访客 ----------
 MN_TREE=InternetGatewayDevice.X_FH_MobileNetwork
 
-# -- 短信(只读收件: AT+CMGL 白名单放行; 发送暂缓—CMGS交互式会毒死ril承载) --
+# -- 短信(只读收件: 文本模式 CMGL; 发送走 mipc_cellular sendsms) --
+# v2.50(2026-10-07 实弹修复): modem 出厂 CMGF=0(PDU 模式)下 CMGL="ALL" 必报
+#   +CME ERROR:100 = GUI 短信页恒空(短信其实都在, +CPMS? 实证 3 条在 MT)。
+#   现每次先 AT+CMGF=1(易失配置, modem 重启回 0, 故幂等设置)再列表。
+#   正文: 中文运营商短信是 UCS2-BE 十六进制(多段带 UDH 头 050003|ref|n|seq),
+#   原样透传=乱码; 现解码 UCS2->UTF-8 并按 (oa,ref) 合并多段, GSM7 可读正文
+#   原样透传。busybox awk 无 strtonum -> h2d 手工换算; 无区间量词 -> 显式判长。
 get_sms() {
+    mipc_wan_cli --at_cmd "AT+CMGF=1" >/dev/null 2>&1
     OUT=$(mipc_wan_cli --at_cmd "AT+CMGL=\"ALL\"" 2>/dev/null)
     # +CMGL: <idx>,"stat","<oa>",[...],"<time>"\n<text>
     echo "$OUT" | awk '
-        /^\+CMGL: / {
-            gsub(/\r/,"")
-            split($0, a, ",")
-            idx=a[1]; sub(/^\+CMGL: /,"",idx)
-            stat=a[2]; oa=a[3]; gsub(/"/,"",oa)
-            tm=$0; sub(/^.*,/,"",tm)  # 最后段含时间
-            getline txt; gsub(/\r/,"",txt)
-            printf "{\"idx\":\"%s\",\"stat\":%s,\"from\":\"%s\",\"text\":\"%s\"},", idx, stat, oa, txt
-        }' | sed 's/","text"/,"text"/2g' > /tmp/sms.$$
-    L=$(cat /tmp/sms.$$ | sed 's/,$//'); rm -f /tmp/sms.$$
+function h2d(c){ return index("0123456789ABCDEF", c)-1 }
+function esc(s){ gsub(/\\/,"\\\\",s); gsub(/"/,"\\\"",s); gsub(/[\r\n\t]/," ",s); return s }
+function dec(h,  i,cp,b1,b2,b3,o){
+  o=""; h=toupper(h)
+  for(i=1;i+3<=length(h);i+=4){
+    cp=h2d(substr(h,i,1))*4096+h2d(substr(h,i+1,1))*256+h2d(substr(h,i+2,1))*16+h2d(substr(h,i+3,1))
+    if(cp<128) o=o sprintf("%c",cp)
+    else if(cp<2048){ b1=192+int(cp/64); b2=128+cp%64; o=o sprintf("%c%c",b1,b2) }
+    else { b1=224+int(cp/4096); b2=128+int(cp/64)%64; b3=128+cp%64; o=o sprintf("%c%c%c",b1,b2,b3) }
+  }
+  return o
+}
+BEGIN{ n=0 }
+/^\+CMGL: /{
+  gsub(/\r/,"")
+  idx=$0; sub(/^\+CMGL: /,"",idx); sub(/,.*/,"",idx)
+  oa=$0; sub(/^[^,]*,/,"",oa); sub(/,.*/,"",oa); gsub(/"/,"",oa)
+  tm=$0; sub(/^.*,/,"",tm); gsub(/"/,"",tm)
+  getline raw; gsub(/\r/,"",raw)
+  ref=""; body=raw
+  if(body ~ /^050003/ && length(body) >= 12){
+    ref=substr(body,7,4)
+    k=oa "|" ref
+    if(k in txt){ txt[k]=txt[k] substr(body,13); next }
+    body=substr(body,13)
+  } else k="i" idx
+  order[++n]=k; koa[k]=oa; ktm[k]=tm; kidx[k]=idx
+  txt[k]=body
+}
+END{
+  for(i=1;i<=n;i++){ k=order[i]
+    h=txt[k]
+    if(h ~ /^[0-9A-Fa-f]+$/ && length(h)%2==0 && length(h)>=4) t=dec(h); else t=h
+    printf "{\"idx\":\"%s\",\"from\":\"%s\",\"time\":\"%s\",\"text\":\"%s\"},", kidx[k], koa[k], ktm[k], esc(t)
+  }
+}' > /tmp/sms.$$
+    L=$(sed 's/,$//' /tmp/sms.$$); rm -f /tmp/sms.$$
     N=$(printf '%s' "$L" | grep -o '"idx"' | wc -l)
-    printf '{"msgs":[%s],"count":%d,"send_supported":false,"ts":%d}' "$L" "$N" "$(date +%s)"
+    printf '{"msgs":[%s],"count":%d,"send_supported":true,"ts":%d}' "$L" "$N" "$(date +%s)"
 }
 
 # -- 流量统计 (ubus 活方法; 限额自管) --

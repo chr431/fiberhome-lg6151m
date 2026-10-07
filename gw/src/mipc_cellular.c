@@ -29,9 +29,8 @@
 #include <dlfcn.h>
 #include <time.h>
 #include <fcntl.h>
-#include <unistd.h>
-
-static int usleep(unsigned int);   /* musl 提供; C99 严格模式需自声明 */
+#include <unistd.h>   /* v0.7 引入: smswatch 落盘用; usleep 由 musl 头提供
+                         (原 static 自声明因头文件缺席而存在, 今删) */
 
 static int (*p_get_band_info)(void *);
 static int (*p_set_band_mode)(const void *);

@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.53 (CMGL→CMGR 逐条读: ql_ril CMGL 未读列表路径段错误; CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.54 (运营商映射修正 46015/46016=中国广电; status 增 m5 五模式字段; CMGL→CMGR 逐条读: ql_ril CMGL 未读列表路径段错误; CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -279,8 +279,9 @@ cfgdel_ok() { LD_LIBRARY_PATH=/fhrom/lib /fhrom/bin/cfg_cmd del "$1" >/dev/null 
 op_name() {
     case "$1" in
         46000|46002|46004|46007|46008) echo "中国移动" ;;
-        46001|46006|46009|46015) echo "中国联通" ;;
+        46001|46006|46009) echo "中国联通" ;;
         46003|46005|46011|46012) echo "中国电信" ;;
+        46015|46016) echo "中国广电" ;;   # v2.54: 46015 误入联通组(192 号段卡实测显示错误); 46016 同属广电 
         *) echo "${1:-未知}" ;;
     esac
 }
@@ -1127,7 +1128,7 @@ get_status() {
 {"uptime":"${UP_D}天${UP_H}时${UP_M}分","load":"$LOAD","mem":{"total":${MEM%% *},"avail":${MEM##* }},
 "wan5g":{"if":"$W5G_IF","ip":"${W5G_IP:-无}","v6":"${W5G_V6:-无}"},
 "home":{"ip":"${ETH_IP:-无}","v6":"${ETH_V6:-无}","carrier":"$ETH_C"},
-"agg":{"mode":"${AGG_M:-0}","engine":"$(cat /tmp/wan_engine 2>/dev/null)","on":"$(grep -q '^off' /tmp/wan_mode 2>/dev/null && echo 0 || echo 1)","w1pct":"${AGG_W:-?}","state":"$(tail -1 /tmp/wan_agg.log 2>/dev/null | sed 's/"/\\"/g')","wanmode":"$WAN_MODE"},
+"agg":{"m5":"$(grep -m1 '^MODE=' $GWDATA/agg.conf 2>/dev/null | cut -d= -f2)","mode":"${AGG_M:-0}","engine":"$(cat /tmp/wan_engine 2>/dev/null)","on":"$(grep -q '^off' /tmp/wan_mode 2>/dev/null && echo 0 || echo 1)","w1pct":"${AGG_W:-?}","state":"$(tail -1 /tmp/wan_agg.log 2>/dev/null | sed 's/"/\\"/g')","wanmode":"$WAN_MODE"},
 "wifi":{$(wifi_state)},
 "temps":{$TEMPS},
 "counters":{"tx5g":"$TX5","rx5g":"$RX5","txeth":"$TXE","rxeth":"$RXE"},

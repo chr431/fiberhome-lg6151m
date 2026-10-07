@@ -64,6 +64,9 @@ const eMsg = e => ERR[e] ? "操作失败：" + ERR[e] : "操作失败";
 const fmtBand = b => { b = String(b == null ? "" : b).trim(); if (!b || b === "--") return "--"; if (/^N/i.test(b)) return "n" + b.slice(1); if (/^B/i.test(b)) return b; return /^\d+$/.test(b) ? "B" + b : b; };
 /* /tmp/wan_mode 内容(off|agg:S1:S2) -> 运行状态文案; 空=检测中 (G-13/G-14, 不直出内部 token) */
 const wanModeTxt = v => !v ? "检测中" : (v === "off" ? "已停用" : "运行中");
+/* v3.29: 聚合五模式文案(status.agg.m5); 状态页权重行仅 weight 模式有意义 */
+const AGG_MODE_TXT = { weight: "按权重分流", cell_prio: "蜂窝优先", eth_prio: "有线宽带优先", cell_only: "仅蜂窝", eth_only: "仅有线宽带" };
+const aggModeTxt = m => AGG_MODE_TXT[m] || (m ? m : "—");
 const TZ_TXT = { "CST-8": "北京时间（UTC+8）", "UTC": "UTC" };
 /* cells 归一: mipc=对象数组, 树=逗号串五元组 -> [{band,arfcn,pci,rsrp,sinr}] (G-05) */
 const celRows = j => {
@@ -134,7 +137,7 @@ PAGES.status = {
       ${card("蜂窝 " + tag("tg-cel", "已驻网", "无服务"),
         kv("运营商", "cel-op") + kv("服务小区", "cel-cell", 1) + kv("信号强度", "cel-sig") + kv("小区数", "cel-n"))}
       ${card("聚合 " + tag("tg-agg", "运行中", "已停用"),
-        kv("转发引擎", "agg-eng") + kv("分流权重 蜂窝/有线宽带", "agg-w") + kv("运行状态", "agg-st"))}
+        kv("转发引擎", "agg-eng") + kv("聚合模式", "agg-mode") + kv("分流权重 蜂窝/有线宽带", "agg-w") + kv("运行状态", "agg-st"))}
       ${card("WiFi " + tag("tg-wifi", "正常", "异常"),
         kv("2.4GHz", "wf-2g") + kv("5GHz", "wf-5g") + kv("无线服务", "wf-hap"))}
       ${card("温度", '<div id="tp-body"></div>')}
@@ -166,8 +169,10 @@ PAGES.status = {
         const aggUnk = j.agg.on === "1" && !j.agg.wanmode;   // G-09: wan_mode 文件缺失时 on 误报 1
         setTag("tg-agg", aggUnk ? null : j.agg.on === "1");
         T("agg-eng", j.agg.engine === "vendor" ? "硬件加速" : (j.agg.engine ? "软件转发" : "--"));
-        const wpOk = /^\d+$/.test(j.agg.w1pct);
-        T("agg-w", wpOk ? `${j.agg.w1pct}% / ${100 - j.agg.w1pct}%` : "—");
+        T("agg-mode", aggModeTxt(j.agg.m5));
+        const inWeight = j.agg.m5 === "weight";   // v3.29: 权重仅 weight 模式有意义, 其余模式显不适用
+        const wpOk = inWeight && /^\d+$/.test(j.agg.w1pct);
+        T("agg-w", wpOk ? `${j.agg.w1pct}% / ${100 - j.agg.w1pct}%` : (inWeight ? "—" : "不适用"));
         T("agg-st", aggUnk ? "--" : wanModeTxt(j.agg.wanmode));   // G-14: 不直出日志行
         const w = j.wifi || {};
         setTag("tg-wifi", (w.hostapd2g > 0) && (w.hostapd5g > 0));
@@ -176,7 +181,7 @@ PAGES.status = {
         T("wf-hap", `${w.hostapd2g > 0 ? "2.4GHz 正常" : "2.4GHz 异常"} · ${w.hostapd5g > 0 ? "5GHz 正常" : "5GHz 异常"}`);
         H("tp-body", Object.entries(j.temps || {}).map(([k, v]) => `<div class="kv"><span>${k}</span><b>${(v / 1000).toFixed(1)} °C</b></div>`).join(""));
         T("v6-ula", "fd42:9ac1:7e50::/64"); T("v6-mode", "自动分配 + NAT 兼容");
-        document.getElementById("hdr-sub").textContent = !wpOk ? "蜂窝 + 有线宽带聚合" : `蜂窝 ${j.agg.w1pct}% / 有线宽带 ${100 - j.agg.w1pct}%`;   // G-07/G-37: 字段路径修正+去内部版本号
+        document.getElementById("hdr-sub").textContent = !j.agg.m5 ? "蜂窝 + 有线宽带聚合" : (inWeight ? `蜂窝 ${j.agg.w1pct}% / 有线宽带 ${100 - j.agg.w1pct}%` : aggModeTxt(j.agg.m5));   // v3.29: 非 weight 模式显模式名; G-07/G-37
         lastCounters = j.counters; lastTs = j.ts;
     }
 };

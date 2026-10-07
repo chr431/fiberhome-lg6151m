@@ -1,5 +1,5 @@
 #!/bin/sh
-# wan_agg.sh v2.19 — 双上行聚合主管 (vendor kernel engine + iptables fallback)
+# wan_agg.sh v2.20 — 硬截止故障转移(00:06 事件根治) 双上行聚合主管 (vendor kernel engine + iptables fallback)
 # v2.19(2026-10-07, eth_prio 静态形态失灵根因): [键名断链] w2_alive 静态分支读
 #   UPLINK_PROBE_GW/UPLINK_GW, 而 api.sh uplink_set 与模板写的是 PROBE_GW/AUTH_GW
 #   — 有线侧探活恒空->永久判死->5G 全量接管(GUI"有线宽带优先"形同虚设, 实弹
@@ -309,7 +309,11 @@ w2_alive() {
         [ -z "$BB_GW" ] && BB_GW=$(grep -m1 '^AUTH_GW=' /data/gw/uplink.conf | cut -d= -f2)
         [ -z "$BB_GW" ] && BB_GW=$(grep -m1 '^UPLINK_GW=' /data/gw/uplink.conf | cut -d= -f2)
         [ -z "$BB_GW" ] && return 1
+        # v2.20: 公网兜底 — 网关应答但上游断(00:06 型会话拆卸前的窗口/白天上游
+        # 故障)也要能触发转移; 网关探测放首位(最本地最廉价)。
         probe $W2_IF "$BB_GW" && return 0
+        probe $W2_IF 223.5.5.5 && return 0
+        probe $W2_IF 120.53.53.53 && return 0
         return 1
     fi
     [ -z "$BB_GW" ] && return 1
@@ -379,6 +383,7 @@ ENABLE=1
 fi
 dp_setup
 S1=1; S2=1; D1=0; D2=0; U1=0; U2=0
+W1_OK=$(date +%s); W2_OK=$(date +%s)   # v2.20: 硬截止基线(上一次成功探活时刻)
 if [ "$AGG_ON" = 1 ]; then
     [ "$ENGINE" = iptables ] && fw_setup 60
     fw6_rules; fw6_setup 1   # v2.4: v6 低8位自建分流(模块v6哈希常数缺陷的对策)
@@ -463,9 +468,17 @@ while :; do
             fi
         done < /data/gw/agg_pins.conf
     fi
-    if w1_alive; then U1=$((U1+1)); D1=0; else D1=$((D1+1)); U1=0; fi
-    if w2_alive; then U2=$((U2+1)); D2=0; else D2=$((D2+1)); U2=0; fi
+    if w1_alive; then U1=$((U1+1)); D1=0; W1_OK=$(date +%s); else D1=$((D1+1)); U1=0; fi
+    if w2_alive; then U2=$((U2+1)); D2=0; W2_OK=$(date +%s); else D2=$((D2+1)); U2=0; fi
+    now=$(date +%s)
     NS1=$S1; NS2=$S2
+    # v2.20: 硬截止判死 — 活侧距上次成功探活 >60s 即判死, 跳过3连击。
+    #   背景(2026-10-08 00:06 实弹): 上行 00:05:56 被服务器踢会话(端口未授权,
+    #   v4gw/v4net/v6 三死, v6watch 30s 采样实证), 3连击机制却拖到 00:12:56 才
+    #   完成转移(6.5min) = 断网扩大的根因。计数制可被迟滞/饥饿模式饿死; 时间
+    #   截止不可 — 无论探测序列怎样, 故障转移上界 = 60s + 一个环循周期。
+    [ $S1 -eq 1 ] && [ $((now - W1_OK)) -gt 60 ] && { NS1=0; D1=99; }
+    [ $S2 -eq 1 ] && [ $((now - W2_OK)) -gt 60 ] && { NS2=0; D2=99; }
     # v2.0: 确定性信号瞬时降级 — 无载波/无IP是"确定"而非"疑似"(重租约窗口被hash到
     #       家宽的新流全灭=恢复期粗糙窗口的根因), 跳过3连击立即全量切5G
     W2_READY=0

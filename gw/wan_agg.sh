@@ -1,5 +1,5 @@
 #!/bin/sh
-# wan_agg.sh v2.20 — 硬截止故障转移(00:06 事件根治) 双上行聚合主管 (vendor kernel engine + iptables fallback)
+# wan_agg.sh v2.21 — 硬截止故障转移 + 安全启动 双上行聚合主管 (vendor kernel engine + iptables fallback)
 # v2.19(2026-10-07, eth_prio 静态形态失灵根因): [键名断链] w2_alive 静态分支读
 #   UPLINK_PROBE_GW/UPLINK_GW, 而 api.sh uplink_set 与模板写的是 PROBE_GW/AUTH_GW
 #   — 有线侧探活恒空->永久判死->5G 全量接管(GUI"有线宽带优先"形同虚设, 实弹
@@ -383,7 +383,10 @@ ENABLE=1
 fi
 dp_setup
 S1=1; S2=1; D1=0; D2=0; U1=0; U2=0
-W1_OK=$(date +%s); W2_OK=$(date +%s)   # v2.20: 硬截止基线(上一次成功探活时刻)
+# v2.21: 安全启动 — W2_OK=0(eth 从未验证成功) => 硬截止立即判死 => 5G 起步;
+# eth 探活 3 连过后自动回切。杜绝"上行已死时重启/开机, 状态机先盲目把
+# 流量灌进死 eth0"的黑洞窗口(2026-10-08 00:33 实弹 29s 黑洞)。
+W1_OK=$(date +%s); W2_OK=0
 if [ "$AGG_ON" = 1 ]; then
     [ "$ENGINE" = iptables ] && fw_setup 60
     fw6_rules; fw6_setup 1   # v2.4: v6 低8位自建分流(模块v6哈希常数缺陷的对策)

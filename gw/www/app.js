@@ -481,7 +481,11 @@ function waDrawChGraph() {
             const fc = (bw >= 40 && a.ctr > 0) ? 5000 + 5 * a.ctr : fp;
             return [fc - bw / 2, fc + bw / 2];
         }
-        if (bw >= 40 && a.dir) return [fp - 10, fp + 10 + 20 * a.dir];   // 上侧: [fp-10,fp+30]; 下侧: [fp-30,fp+10]
+        if (bw >= 40 && a.dir) {                                            // v3.35: 上侧[fp-10,fp+30]/下侧[fp-30,fp+10]
+            const lo40 = fp - 10 - (a.dir < 0 ? 20 : 0);                   // (原 fp+10+20*dir 在 dir=-1 时 hi==lo = 零宽尖刺)
+            const hi40 = fp + 10 + (a.dir > 0 ? 20 : 0);
+            return [lo40, hi40];
+        }
         if (bw >= 40) return [fp - 20, fp + 20];                        // 40M 无方向: 对称近似
         return [fp - 10, fp + 10];
     };

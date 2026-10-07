@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.50 (SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.51 (AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -1171,13 +1171,17 @@ apply_uplink() {
     case "$TVA" in 64|65|128) ;; *) TVA=64 ;; esac
     # AUTHD_CMD 表单不传则保留 conf 现值; PROBE_GW 供 wan_agg 探活(与认证程序解耦)
     OLD=""; [ -r $GWDATA/uplink.conf ] && OLD=$(grep '^FORM=' $GWDATA/uplink.conf)
-    OAC=""; [ -r $GWDATA/uplink.conf ] && OAC=$(grep -m1 '^AUTHD_CMD=' $GWDATA/uplink.conf | cut -d= -f2-)
+    # v2.51: 读旧值剥引号(见下) — conf 值现以引号落盘
+    OAC=""; [ -r $GWDATA/uplink.conf ] && OAC=$(grep -m1 '^AUTHD_CMD=' $GWDATA/uplink.conf | cut -d= -f2- | sed "s/^'//;s/'\$//")
     # v2.48(P1-B): AUTHD_CMD 收权 root 通道 — GUI/API 不再可写。原实现字符集校验
     # 仍放行 "telnetd -p 2323" / "/bin/sh <conf>" 等现成 root 二进制 = 一键 root 化;
     # 该字段自此仅经 SSH/install.py 手编 uplink.conf(与插件部署同特权层)。
     form_has authd_cmd && jerr bad_cmd
     AC="${OAC:-/data/gw/authd eth0}"
-    printf 'ENABLE=%s\nAUTH_USER=%s\nAUTH_PASS=%s\nAUTH_IP=%s\nAUTH_MASK=%s\nAUTH_GW=%s\nPROBE_GW=%s\nAUTHD_CMD=%s\nMAC_SPOOF=%s\nSPOOF_MAC=%s\nTTL_SPOOF=%s\nTTL_VALUE=%s\n%s\n' \
+    # v2.51: AUTHD_CMD 带空格(二进制+iface 参数), 裸 KEY=v1 v2 被 rc19 `. conf`
+    # 按 POSIX 解析为"env 前缀赋值+执行 v2" — 赋值丢弃, authd 永不启动
+    # (2026-10-07 冷启动实弹: eth0: not found, AUTHD_CMD 空)。落盘加引号。
+    printf 'ENABLE=%s\nAUTH_USER=%s\nAUTH_PASS=%s\nAUTH_IP=%s\nAUTH_MASK=%s\nAUTH_GW=%s\nPROBE_GW=%s\nAUTHD_CMD='"'"'%s'"'"'\nMAC_SPOOF=%s\nSPOOF_MAC=%s\nTTL_SPOOF=%s\nTTL_VALUE=%s\n%s\n' \
         "$EN" "$U" "$PW" "$IP" "$MASK" "$GW" "$GW" "$AC" "$MSP" "$SMA" "$TSP" "$TVA" "${OLD:-FORM=home}" > $GWDATA/uplink.conf
     chmod 600 $GWDATA/uplink.conf
     ok_json

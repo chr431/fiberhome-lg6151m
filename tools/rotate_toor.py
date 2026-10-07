@@ -129,6 +129,8 @@ def main():
         want = hashlib.md5(payload).hexdigest()
         remote = "/data/gw/shadow.override"
         tmp = remote + ".putting"
+        # v1.4(P3): 现役 override 先存档 .bak — rc.extend v2.1 的回退源
+        print(run(c, "[ -f %s ] && cp -f %s %s.bak && echo BAK-SAVED || echo no-previous" % (remote, remote, remote)).strip())
         delivered = False
         for attempt in (1, 2, 3):
             run(c, "rm -f %s" % tmp)

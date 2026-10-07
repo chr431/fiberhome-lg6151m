@@ -1,5 +1,6 @@
 #!/bin/sh
-# rc.extend.sh v2.0 -- slot-aware dispatcher (shared /data between v2/v3)
+# rc.extend.sh v2.1 -- slot-aware dispatcher (shared /data between v2/v3)
+# v2.1(P3): shadow.override 合法性校验+.bak回退自愈(坏文件不再锁死登录)
 # v2.0: +clear /tmp/gui_tokens/* at boot (P2/L-7 stale token survival)
 # v1.9: /etc/shadow bind 覆盖钩子(审计P0-5 凭据轮换前置; 见文件内注释)
 # v1.6: route A -- FH modem-stack environment (MODE.fh gate)
@@ -24,12 +25,25 @@ rm -f /tmp/gui_tokens/* 2>/dev/null
 # --- v1.9 (审计P0-5): /etc/shadow 覆盖 -- rootfs squashfs 只读, 凭据轮换经
 # /data/gw/shadow.override bind 到 /etc/shadow (dropbear/getty 每次认证时读取,
 # bind 后 passwd 写入会穿透到 override 文件 = 后续轮换可直接 passwd)。
-# 生成方: PC 侧轮换流程(全量拷贝现 shadow 仅改目标行, 600 权限); 无文件=零变化。
-if [ -f /data/gw/shadow.override ] && ! grep -q ' /etc/shadow ' /proc/mounts; then
-    chmod 600 /data/gw/shadow.override 2>/dev/null
-    mount --bind /data/gw/shadow.override /etc/shadow 2>/dev/null \
-        && logger -t rc.extend "shadow.override bind OK" \
-        || logger -t rc.extend "shadow.override bind FAILED"
+# v2.1(P3): 合法性校验 + .bak 回退自愈 — 主文件无有效 toor 哈希行时改绑 .bak
+# (上一次成功轮换的存档)并回写主文件; 两者皆坏则跳过 bind(回落镜像内建口令,
+# 至少可登录修复), 杜绝坏 override 把 SSH+串口一起锁死的自锁类事故。
+if ! grep -q ' /etc/shadow ' /proc/mounts; then
+    SO=/data/gw/shadow.override; SB=/data/gw/shadow.override.bak
+    _pick=""
+    for _f in $SO $SB; do
+        [ -f "$_f" ] && grep -qE '^toor:(\$[16]\$|!)' "$_f" 2>/dev/null && { _pick=$_f; break; }
+    done
+    if [ -n "$_pick" ]; then
+        [ "$_pick" = "$SB" ] && cp -f "$SB" "$SO" 2>/dev/null   # bak 有效而主坏: 自愈回写
+        [ "$_pick" = "$SO" ] && cp -f "$SO" "$SB" 2>/dev/null    # 主有效: 刷新存档
+        chmod 600 "$SO" 2>/dev/null
+        mount --bind "$SO" /etc/shadow 2>/dev/null \
+            && logger -t rc.extend "shadow bind OK (via $_pick)" \
+            || logger -t rc.extend "shadow bind FAILED ($_pick)"
+    else
+        logger -t rc.extend "shadow.override 无有效文件, 跳过 bind"
+    fi
 fi
 
 # --- v1.7: dropbear single-owner (race-proof; downstream pgrep guards short-circuit)

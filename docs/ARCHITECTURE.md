@@ -68,7 +68,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/night_report.sh` | **v1.0** | manifest | `/data/gw/night_report.sh` | 夜间体检报告 |
 | `gw/ntp_keeper.sh` | **v1.0** | manifest | `/data/gw/ntp_keeper.sh` | 每小时NTP守时(ntclient多源; 设备无RTC) |
 | `gw/radvd.conf` | **v1.0** | manifest | `/data/gw/radvd.conf` | IPv6 SLAAC+RDNSS通告(br-lan, ULA fd42:9ac1:7e50::/64) |
-| `gw/rc.extend.sh` | **v2.0** | manifest | `/data/rc.extend.sh` | 槽位调度器; v2.0(P2): +开机清/tmp/gui_tokens/*(token跨重启残留); v1.9: shadow bind; 历史见git |
+| `gw/rc.extend.sh` | **v2.1** | manifest | `/data/rc.extend.sh` | 槽位调度器; v2.1(P3): shadow.override合法性校验+.bak回退自愈(坏文件不再锁死SSH+串口); v2.0: 开机清token; 历史见git |
 | `gw/rc_netfh.sh` | **v3.1** | manifest | `/data/gw/rc_netfh.sh` | 路线A: FH modem栈环境(最小army, MODE.fh门控; v2.1=atci对复活修L14回归) |
 | `gw/udhcpc_eth1.script` | **v1.0** | manifest | `/data/gw/udhcpc_eth1.script` | eth1口 udhcpc 事件钩子(补登记) |
 | `gw/udhcpc_wan.script` | **v1.0** | manifest | `/data/gw/udhcpc_wan.script` | WAN口 udhcpc 事件钩子(接口无关化) |
@@ -102,7 +102,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/build_steth.sh` | **v1.0** | tool | `-` | v3_steth.ko构建 |
 | `tools/build_v3fix.sh` | **v1.0** | tool | `-` | v3_fix.ko构建 |
 | `tools/build_v3httpd.sh` | **v1.0** | tool | `-` | v3httpd构建(zig cc aarch64-linux-musl全静态, 同mipc_cellular链) |
-| `tools/deploy.py` | **v2.13** | tool | `-` | MANIFEST部署/漂移检查; v2.13(P2/PC-M1): push原子写(tmp+md5门禁+mv, 传输中断不再留半截脚本供开机执行); 历史见git |
+| `tools/deploy.py` | **v2.14** | tool | `-` | MANIFEST部署/漂移检查; v2.14: doctor白名单+shadow.override.bak; 历史见git |
 | `tools/device_local.py.example` | **v1.0** | tool | `-` | 凭证模板(真件gitignored) |
 | `tools/doc_audit.py` | **v1.1** | tool | `-` | 台账↔文档内联标记双向审计(v1.1: 标记扫描纳入台账引用的docs/外文档如install/README.md; v1.0: 版本绑定+TEST-MISSING/STALE-CODE/UNREGISTERED-CLAIM) |
 | `tools/gen_kernel_inc.py` | **v1.0** | tool | `-` | kernel头生成(构建辅助) |
@@ -116,11 +116,12 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/lk_flash_v4_eth1.py` | **v1.1** | tool | `-` | v1.1路径随项目根迁移; eth1刷入实证器(全链条: 陷阱→raw shell→eth1起链[历史疑点:PHY仅ifup后attach]→curl传输→deploy2自驱→重启回v4.1) |
 | `tools/lk_flip2.py` | **v1.1** | tool | `-` | LK 一键翻槽(a|b, misc[2060]字节) |
 | `tools/lk_write.py` | **v1.6** | tool | `-` | LK raw-shell 文件写入(回显校验+tmpfs挂载+cmdlist巡检, 取代lk_fix_access) |
-| `tools/rotate_toor.py` | **v1.3** | tool | `-` | toor口令轮换器(只读rootfs shadow覆盖通道); v1.2: 投递改本会话直投(deploy.put同款协议; 子进程方式在轮换窗口期不可靠)+去掉%TEMP%残件; v1.1: md5独立校验; v1.3: 会话同样走指纹钉死 |
+| `tools/rotate_toor.py` | **v1.4** | tool | `-` | toor口令轮换器; v1.4: 轮换前存档.bak(rc.extend v2.1回退源); 历史见git |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
 | `tools/selftest.py` | **v2.12** | tool | `-` | 断言式全功能测试; v2.12(P1): sse断言改token门双验(无token拒/带token出流); WANGUARD断言改default-deny语义(链尾DROP+FORWARD钩子); 历史见git |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |
 | `tools/serial_server.py` | **v1.7** | tool | `-` | 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets) |
+| `tools/upgrade_slot.py` | **v1.0** | tool | `-` | SSH整槽升级器(P3第一档: vercheck/槽位/空间预检→md5门禁→dd备份旧p26→写新镜像→挂载sanity断言(toor/rcS/#v3:/procd)→失败自动整槽还原不重启→清TRY_A→reboot; PC侧轮询日志+回连终检; --dry-run) |
 | `tools/vercheck.py` | **v1.5** | tool | `-` | 版本注册表校验/渲染/设备比对(v1.3: device()随deploy基座迁/data/gw; v1.2性质分区双向强制+全跟踪文件可归类; v1.1 image类md5钉死) |
 | `tools/verify_v4.py` | **v1.0** | tool | `-` | v4刷后落地验证器(串口toor登录; 身份/钩子/数据/网络/进程巡检; 口令走argv不落盘) |
 | `tools/verify_v4_services.py` | **v1.0** | tool | `-` | v4服务巡检器(监听端口/GUI/WiFi双频/5G WAN实网ping) |

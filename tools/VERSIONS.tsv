@@ -79,8 +79,8 @@ docs/GUI_TERMINOLOGY.md	1.2	doc	-	GUI文案基准; v1.2: bad_cmd文案更新+sse
 gw/watchdog.sh	1.4	manifest	/data/gw/watchdog.sh	持续不变量看门狗(L13: 17项不变量; v1.2/L14: +蜂窝控制面 atcid自愈+CFUN探针+注册态, airplane容忍)
 tools/selftest.py	2.12	tool	-	断言式全功能测试; v2.12(P1): sse断言改token门双验(无token拒/带token出流); WANGUARD断言改default-deny语义(链尾DROP+FORWARD钩子); 历史见git
 tools/doc_audit.py	1.1	tool	-	台账↔文档内联标记双向审计(v1.1: 标记扫描纳入台账引用的docs/外文档如install/README.md; v1.0: 版本绑定+TEST-MISSING/STALE-CODE/UNREGISTERED-CLAIM)
-gw/src/mipc_cellular.c	0.6	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源(P1): dlopen闭包预载+ql_nw_init; v0.2: 168B结构全破译(setlock lte/nr=列表 解锁=全1; NR三段位图1-32/34-64/65-96)
-gw/bin/mipc_cellular	0.6	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI(getbands/setlock/unlock; 锁NR41+79实弹验证零扰动)
+gw/src/mipc_cellular.c	0.7	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源(P1): dlopen闭包预载+ql_nw_init; v0.2: 168B结构全破译(setlock lte/nr=列表 解锁=全1; NR三段位图1-32/34-64/65-96)
+gw/bin/mipc_cellular	0.7	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI(getbands/setlock/unlock; 锁NR41+79实弹验证零扰动)
 tools/build_mipc_cellular.sh	1.0	tool	-	mipc_cellular构建(zig cc aarch64-musl动态)
 gw/dial_keeper.sh	1.0	manifest	/data/gw/dial_keeper.sh	拨号自持兜底守护(P2): ccmni无IP超35s→MIPC直连重拨(deact_apn+act_type配方实测result:0);退避15-300s;不经mobilenetwork
 gw/guest_fw.sh	1.6	manifest	/data/gw/guest_fw.sh	访客隔离防火墙v1.6(审计P0: GUEST_ISOLATE开关删除=强制隔离; 兼容需求改由主WiFi终端频段锁定承接; 历史版本见git)

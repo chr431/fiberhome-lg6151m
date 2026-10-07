@@ -28,6 +28,8 @@
 #include <stdint.h>
 #include <dlfcn.h>
 #include <time.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 static int usleep(unsigned int);   /* musl 提供; C99 严格模式需自声明 */
 
@@ -36,6 +38,8 @@ static int (*p_set_band_mode)(const void *);
 static int (*p_nw_init)(int);
 static int (*p_sms_init)(int);
 static int (*p_sms_send_msg)(const void *);
+static int (*p_nw_set_pdu_recv_cb)(void (*)(const void *));
+static int (*p_sms_get_store_number)(void);
 static int (*p_nw_scan)(void *, void (*)(int, void *));
 static int (*p_scan_busy)(void);
 static int (*p_get_cell_info)(void *);
@@ -69,6 +73,9 @@ static int load_lib(const char *path)
     p_nw_init = (int (*)(int))dlsym(h, "ql_nw_init");
     p_sms_init = (int (*)(int))dlsym(h, "ql_sms_init");
     p_sms_send_msg = (int (*)(const void *))dlsym(h, "ql_sms_send_msg");
+    /* v0.7: 接收消费者(可选装载, smswatch 用) — 缺失不算致命 */
+    p_nw_set_pdu_recv_cb = (int (*)(void (*)(const void *)))dlsym(h, "ql_sms_set_pdu_recv_cb");
+    p_sms_get_store_number = (int (*)(void))dlsym(h, "ql_sms_get_store_message_number");
     p_nw_scan = (int (*)(void *, void (*)(int, void *)))dlsym(h, "ql_nw_network_scan");
     p_scan_busy = (int (*)(void))dlsym(h, "ql_nw_net_scan_async_f");
     p_get_cell_info = (int (*)(void *))dlsym(h, "ql_nw_get_cell_info");
@@ -232,6 +239,42 @@ struct scan_resp {
     unsigned char plmn[32][0x94];
 };
 
+/* ---- v0.7: 短信接收消费者 (smswatch) ----
+ * 背景(2026-10-07 实弹): v4 无 mobilenetwork => 无人 ql_sms_set_pdu_recv_cb
+ * 注册 => 入信 RIL 事件无消费者丢弃(MO 发送正常/MT 全灭, 与 CMGF/RAT 无关)。
+ * 本模式注册最小消费者: 回调原始结构体 hex 落盘 /data/gw/sms_rx.log。
+ * 逆向锚点(mobilenetwork aarch64): 注册点 0x40c59c-0x40c5a0, cb=0x413f40
+ * 单指针入参 x0; cb 内 [p+0]=u32(type==1 走状态报告分支), [p+4]=u16
+ * (以 %d 进厂商日志)。精确布局由下一封实测入信揭示。 */
+static void sms_rx_dump(const void *p)
+{
+    if (!p) return;
+    char buf[0x600];
+    int n = snprintf(buf, sizeof buf, "[%ld] recv:", (long)time(0));
+    const unsigned char *b = (const unsigned char *)p;
+    for (int i = 0; i < 0x180 && n < (int)sizeof buf - 4; i++)
+        n += snprintf(buf + n, sizeof buf - n, "%02x", b[i]);
+    n += snprintf(buf + n, sizeof buf - n, "\n");
+    int fd = open("/data/gw/sms_rx.log", O_WRONLY | O_CREAT | O_APPEND, 0600);
+    if (fd >= 0) {
+        ssize_t w = write(fd, buf, n); (void)w;
+        close(fd);
+    }
+}
+
+static int do_smswatch(void)
+{
+    if (!p_nw_set_pdu_recv_cb) { puts("no ql_sms_set_pdu_recv_cb"); return 1; }
+    int ir = p_sms_init(0);
+    int rr = p_nw_set_pdu_recv_cb(sms_rx_dump);
+    printf("smswatch: init(0)=%d cb_reg=%d store_n=%s%d\n", ir, rr,
+           p_sms_get_store_number ? "" : "?",
+           p_sms_get_store_number ? p_sms_get_store_number() : -1);
+    fflush(stdout);
+    for (;;) pause();
+    return 0;
+}
+
 static volatile int g_scan_done;
 static struct scan_resp g_scan_buf;
 
@@ -350,7 +393,9 @@ int main(int argc, char **argv)
         return do_send(0, argv[2], argv[3], 0);
     if (argc >= 4 && !strcmp(argv[1], "senducs2"))       /* 中文: UCS2-BE hex */
         return do_send(2, argv[2], argv[3], 1);
-    puts("usage: mipc_cellular getbands | unlock\n"
+    if (argc >= 2 && !strcmp(argv[1], "smswatch"))       /* v0.7: 入信消费者 */
+        return do_smswatch();
+    puts("usage: mipc_cellular getbands | unlock | smswatch\n"
          "                setlock lte=<list|all> nr=<list|all> [umts=<list|all>]\n"
          "                setbands <hexblob>\n"
          "                sendsms <num> <ascii-text> | senducs2 <num> <ucs2-be-hex>\n"

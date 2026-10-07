@@ -1,5 +1,12 @@
 #!/bin/sh
-# wan_agg.sh v2.18 — 双上行聚合主管 (vendor kernel engine + iptables fallback)
+# wan_agg.sh v2.19 — 双上行聚合主管 (vendor kernel engine + iptables fallback)
+# v2.19(2026-10-07, eth_prio 静态形态失灵根因): [键名断链] w2_alive 静态分支读
+#   UPLINK_PROBE_GW/UPLINK_GW, 而 api.sh uplink_set 与模板写的是 PROBE_GW/AUTH_GW
+#   — 有线侧探活恒空->永久判死->5G 全量接管(GUI"有线宽带优先"形同虚设, 实弹
+#   agg:1:0 d2=99 不回切)。修复: 键链 UPLINK_PROBE_GW -> PROBE_GW -> AUTH_GW ->
+#   UPLINK_GW 依次回退; [udhcpc 噪声] FORM=static 时 ensure_lease 跳过 one-shot
+#   udhcpc(静态 IP 归 rc19 档案管, 向未认证口狂发 DHCPDISCOVER 无意义)。
+#   配套 rc19 v2.22: static 档案写 /tmp/wan.gw(表200/主表切换依赖)。
 # v2.6 规则分层修正 + 真相更正(2026-10-05 终局判别实验):
 #   [更正] 模块v6引擎完全正常(哈希%100读权重; 摘钉后100/0→4/4全WAN1实证)。
 #   早前"v6常数哈希缺陷"结论系MAC钉死自污染 — 钉死旁路哈希(v4/v6同样),
@@ -226,7 +233,10 @@ ensure_lease() {
     ip link set $W2_IF up 2>/dev/null   # v1.4: PHY 只在 ifup 后 attach, 别再裸 DOWN
     if [ -z "$(ip -4 addr show $W2_IF 2>/dev/null | grep inet)" ]; then
         # v1.6: 本机busybox无timeout(127静默失败的元凶); 载波守卫防链路断时udhcpc长挂
-        if [ "$(cat /sys/class/net/$W2_IF/carrier 2>/dev/null)" = "1" ]; then
+        # v2.19: FORM=static 跳过 — 静态 IP 归 rc19 档案管(开机窗口此处狂发
+        #        DHCPDISCOVER 到未认证口是纯噪声, 2026-10-07 实弹 15s 一条刷屏)
+        if [ "$(cat /sys/class/net/$W2_IF/carrier 2>/dev/null)" = "1" ] && \
+           ! grep -q '^FORM=static' /data/gw/uplink.conf 2>/dev/null; then
             log "lease: no IP on $W2_IF, one-shot udhcpc"
             # v1.5: 唯一所有者=本循环; 弃 renewal 守护(双udhcpc打架=全网黑洞根源)
             udhcpc -i $W2_IF -n -q -t 3 -T 3 -p $UDHCPC_PID -s $UDHCPC_SCRIPT >/dev/null 2>&1
@@ -288,11 +298,15 @@ probe() {  # $1=iface $2=dst
 }
 w1_alive() { probe $W1_IF 223.5.5.5 || probe $W1_IF 120.53.53.53; }
 w2_alive() {
-    # v2.13: 通用探活 — conf 的 UPLINK_PROBE_GW 优先(与认证程序解耦, 可插拔),
-    # 旧字段 UPLINK_GW 兼容回退; 家宽形态探 BB_GW/公网DNS
+    # v2.13: 通用探活 — conf 的 UPLINK_PROBE_GW 优先(与认证程序解耦, 可插拔)
+    # v2.19: 键链回退 — api.sh/模板实际写 PROBE_GW(注释明言"供 wan_agg 探活"),
+    #   AUTH_GW 为静态档案固有键; 旧字段 UPLINK_GW 兜底。原只认 UPLINK_* 前缀
+    #   = 键名断链, 有线侧永久判死(eth_prio 形同虚设)。
     BB_GW=$(head -1 $GW_FILE 2>/dev/null)
     if [ -r /data/gw/uplink.conf ] && grep -q '^FORM=static' /data/gw/uplink.conf; then
         BB_GW=$(grep -m1 '^UPLINK_PROBE_GW=' /data/gw/uplink.conf | cut -d= -f2)
+        [ -z "$BB_GW" ] && BB_GW=$(grep -m1 '^PROBE_GW=' /data/gw/uplink.conf | cut -d= -f2)
+        [ -z "$BB_GW" ] && BB_GW=$(grep -m1 '^AUTH_GW=' /data/gw/uplink.conf | cut -d= -f2)
         [ -z "$BB_GW" ] && BB_GW=$(grep -m1 '^UPLINK_GW=' /data/gw/uplink.conf | cut -d= -f2)
         [ -z "$BB_GW" ] && return 1
         probe $W2_IF "$BB_GW" && return 0

@@ -1,5 +1,8 @@
 #!/bin/sh
-# rc19.sh v2 (=local v3_rc10.extend.sh) v2.20 -- Frankenstein v3.1: br-lan world + WiFi.
+# rc19.sh v2 (=local v3_rc10.extend.sh) v2.22 -- Frankenstein v3.1: br-lan world + WiFi.
+# v2.22(P1): static 档案补写 /tmp/wan.gw — wan_agg 表200默认路由与 eth_prio
+#   主表切换以此为 BB_GW 源, 静态形态无人写 = 表200恒空(与 wan_agg v2.19 键链
+#   修复配套, "有线宽带优先"对静态上行形同虚设的第二天键)。
 # v2.20(P2): dnsmasq +rebind protection; DHCP range read from settings (fix reboot drift).
 # Boot: FH init loads wifi modules (mt7992 chain) + daemon subset; netifd (if it
 # starts) builds br-lan per uci (lan.ipaddr=192.168.9.1 committed 2026-10-01).
@@ -147,6 +150,9 @@ if [ -r /data/gw/uplink.conf ] && grep -q '^ENABLE=1' /data/gw/uplink.conf; then
         ip addr add "$AUTH_IP/${AUTH_MASK:-255.255.255.128}" dev eth0 2>/dev/null
         ip link set eth0 up
         ip route replace default via "$AUTH_GW" dev eth0 metric 200 2>/dev/null
+        # v2.22: wan.gw 喂给 wan_agg — 其表200默认路由与 eth_prio 主表切换
+        # 均以此为 BB_GW 源(静态形态 udhcpc 不跑, 此文件原本无人写 = 表200恒空)
+        echo "$AUTH_GW" > /tmp/wan.gw
     fi
     [ -n "${AUTHD_CMD:-}" ] && nohup $AUTHD_CMD >/dev/null 2>&1 &
 fi

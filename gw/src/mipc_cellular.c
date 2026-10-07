@@ -131,7 +131,8 @@ static void build_and_send(const char *lte, const char *nr, const char *umts)
     unsigned char b[0xA8];
     uint32_t lw0, lw1, lw2, nw0, nw1, nw2, uw0, uw1, uw2;
     memset(b, 0, sizeof b);
-    bands_to_words(lte, &lw0, &lw1, &lw2, 1, 34, 0);      /* LTE 无 66+ 段 */
+    bands_to_words(lte, &lw0, &lw1, &lw2, 1, 34, 66);  /* LTE w1=34-65; v0.2 原 base2=0 使
+        [34,0) 恒假 = 38/39/40/41(国内主力)永远编不进(2026-10-07 实弹); ≥66 无 w2 字段, 落 w2 即弃 */
     bands_to_words(nr,  &nw0, &nw1, &nw2, 1, 34, 65);   /* w2: n-65 (厂商 0x410f68: sub 0x41) */
     bands_to_words(umts, &uw0, &uw1, &uw2, 1, 34, 0);
     /* umts 仅 u32@4 单字 */

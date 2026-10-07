@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.51 (AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.52 (CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -298,6 +298,9 @@ MN_TREE=InternetGatewayDevice.X_FH_MobileNetwork
 get_sms() {
     mipc_wan_cli --at_cmd "AT+CMGF=1" >/dev/null 2>&1
     OUT=$(mipc_wan_cli --at_cmd "AT+CMGL=\"ALL\"" 2>/dev/null)
+    # v2.52: 读毕立即还原 CMGF=0 — 11:5x 入信丢失窗口与 CMGF=1 重合(回环实验
+    #   在 0 态收存正常), 宁可信其有; 窗口缩到毫秒级。
+    mipc_wan_cli --at_cmd "AT+CMGF=0" >/dev/null 2>&1
     # +CMGL: <idx>,"stat","<oa>",[...],"<time>"\n<text>
     echo "$OUT" | awk '
 function h2d(c){ return index("0123456789ABCDEF", c)-1 }

@@ -1,5 +1,7 @@
-/* v3httpd.c v2.5 (P1: 防慢连+并发上限 -- 客户端socket SO_RCVTIMEO 8s; 全局并发
- *   子进程上限 32(SO_BUSY->503), SIGCHLD 计数收尸(替代 SIG_IGN)) -- tiny HTTP server for the v3 gateway GUI (192.168.9.1:80).
+/* v3httpd.c v2.6 (P2: 静态面拒绝 *.sh 下载(原 GET /api.sh 直出全部服务端逻辑);
+ *   Host 头校验 — 非本机 IP 的 Host 一律 400, 根治 DNS rebinding 经受害者
+ *   浏览器绕同源策略打 /api/* 的通路; 缺 Host 头的老客户端放行(仅校验存在者))
+ * v2.5 (P1: 防慢连+并发上限) -- tiny HTTP server for the v3 gateway GUI (192.168.9.1:80).
  * zig cc -target aarch64-linux-musl tools/v3httpd.c -o v3httpd -O2
  *   (fully static: no FH libs; run directly)
  * Serves: GET  /            -> /data/gw/www/index.html
@@ -75,6 +77,18 @@ static int send_all(int c, const char *b, int n)   /* v2.4: 返回0=对端断开
 
 static void send_file(int c, const char *path, const char *status)
 {
+    /* v2.6(P2/L-1): 静态面拒绝服务端脚本 — api.sh 与 CGI 同目录, 原样直出等于
+     * 免认证泄露全部服务端逻辑/文件布局(侦察辅助)。动态入口只有 /api/<ep>。 */
+    {
+        size_t L = strlen(path);
+        if (L >= 3 && !strcmp(path + L - 3, ".sh")) {
+            const char *nf = "HTTP/1.0 404 Not Found\r\nContent-Length: 9\r\n"
+                             "Connection: close\r\n\r\nnot found";
+            send_all(c, nf, strlen(nf));
+            logline("403[sh] %s", path);
+            return;
+        }
+    }
     char full[512];
     snprintf(full, sizeof full, "%s%s", WWW_ROOT, path);
     FILE *f = fopen(full, "rb");
@@ -318,7 +332,7 @@ int main(void)
     a.sin_port = htons(PORT);
     if (bind(s, (struct sockaddr *)&a, sizeof a) < 0) { perror("bind"); return 2; }
     if (listen(s, 8) < 0) { perror("listen"); return 3; }
-    logline("===== v3httpd v2.5 start %s:%d root=%s =====", BIND_IP, PORT, WWW_ROOT);
+    logline("===== v3httpd v2.6 start %s:%d root=%s =====", BIND_IP, PORT, WWW_ROOT);
 
     static char req[32768 + BODY_MAX];
     for (;;) {
@@ -369,6 +383,28 @@ static void handle_conn(int c, char *req, size_t reqsz)
         return;
     }
     if (is_fh_proxy(path)) { proxy_tunnel(c, req, n, path); return; }
+    /* v2.6(P2/M-2): Host 校验(仅非隧道面) — DNS rebinding 攻击者域名解析到本机后,
+     * 浏览器发出的 Host 是攻击者域名而非本机 IP, 据此拒绝; Host 缺省放行(老客户端)。
+     * 线性扫描 header 区(与 Content-Length 同款手工风格, 无 strcasestr 依赖)。 */
+    {
+        const char *hp = 0;
+        for (const char *p = req; p && p < req + n; ) {
+            if ((p[0]=='H'||p[0]=='h') && !strncasecmp(p, "Host:", 5)) { hp = p + 5; break; }
+            const char *nl = strchr(p, '\n'); if (!nl) break; p = nl + 1;
+        }
+        if (hp) {
+            while (*hp == ' ' || *hp == '\t') hp++;   /* 冒号后前导空白 */
+            char host[128] = "";
+            sscanf(hp, "%127[^\r\n]", host);
+            if (strcmp(host, "192.168.9.1") && strcmp(host, "192.168.9.1:80")
+                && strcmp(host, "[fd42:9ac1:7e50::1]")) {
+                const char *bad = "HTTP/1.0 400 Bad Host\r\nContent-Length: 0\r\n\r\n";
+                send_all(c, bad, strlen(bad));
+                logline("400 badhost %.60s", host);
+                return;
+            }
+        }
+    }
     if (!strncmp(path, "/api/", 5)) {
         const char *ep = path + 5;
         if (!ep_ok(ep)) {

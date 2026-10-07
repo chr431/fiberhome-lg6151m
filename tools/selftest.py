@@ -370,7 +370,7 @@ def t_gui_sse():
     try:
         s = sk.create_connection((lgssh.HOST, 80), timeout=5)
         s.settimeout(3)
-        s.send(b"GET /api/sse HTTP/1.0\r\nHost: x\r\n\r\n")
+        s.send(b"GET /api/sse HTTP/1.0\r\nHost: 192.168.9.1\r\n\r\n")
         head = b""
         try:
             while len(head) < 2048:
@@ -387,7 +387,7 @@ def t_gui_sse():
         tok = _token()
         s = sk.create_connection((lgssh.HOST, 80), timeout=5)
         s.settimeout(6)
-        s.send(b"GET /api/sse?token=" + tok.encode() + b" HTTP/1.0\r\nHost: x\r\n\r\n")
+        s.send(b"GET /api/sse?token=" + tok.encode() + b" HTTP/1.0\r\nHost: 192.168.9.1\r\n\r\n")
         buf = b""
         t0 = time.time()
         while time.time() - t0 < 6:

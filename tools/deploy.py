@@ -276,10 +276,27 @@ def push(names=None):
             continue
         data = stamp(local, data)
         ssh_cmd(c, "mkdir -p %s" % os.path.dirname(remote))
-        ssh_cmd(c, "cat > %s && chmod +x %s" % (remote, remote), stdin_data=data)
-        got_out = ssh_cmd(c, "md5sum %s 2>/dev/null" % remote).split()
-        got = got_out[0] if got_out else "ABSENT"
+        # v2.13(P2/PC-M1): 原子写 — tmp+md5门禁+mv(与 put() 同款)。原实现直写最终
+        # 路径: 传输中断即留半截脚本, 开机 dispatcher 执行残件(弱网/串口噪声下实发过);
+        # >1.2MB 单通道死亡时目标不再被触碰, 残件止于 .pushing(doctor 可见)。
+        tmp = remote + ".pushing"
         want = hashlib.md5(data).hexdigest()
+        try:
+            got = "ABSENT"
+            for attempt in range(1, 4):
+                ssh_cmd(c, "rm -f %s" % tmp)
+                ssh_cmd(c, "cat > %s" % tmp, stdin_data=data)
+                got_out = ssh_cmd(c, "md5sum %s 2>/dev/null" % tmp).split()
+                got = got_out[0] if got_out else "ABSENT"
+                if got == want:
+                    break
+                print("  attempt %d: tmp md5 %s, retry" % (attempt, got))
+            if got == want:
+                ssh_cmd(c, "chmod +x %s && mv -f %s %s" % (tmp, tmp, remote))
+                got_out = ssh_cmd(c, "md5sum %s 2>/dev/null" % remote).split()
+                got = got_out[0] if got_out else "ABSENT"
+        finally:
+            ssh_cmd(c, "rm -f %s" % tmp)
         print("%-22s -> %-26s %s" % (local, remote, "OK" if got == want else "MD5-MISMATCH"))
     c.close()
 

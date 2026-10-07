@@ -1,5 +1,6 @@
 #!/bin/sh
-# rc.extend.sh v1.9 -- slot-aware dispatcher (shared /data between v2/v3)
+# rc.extend.sh v2.0 -- slot-aware dispatcher (shared /data between v2/v3)
+# v2.0: +clear /tmp/gui_tokens/* at boot (P2/L-7 stale token survival)
 # v1.9: /etc/shadow bind 覆盖钩子(审计P0-5 凭据轮换前置; 见文件内注释)
 # v1.6: route A -- FH modem-stack environment (MODE.fh gate)
 # v1.8 = v1.7 + 启动行去&(同步启动); v1.7: A槽保活 + dropbear唯一属主
@@ -14,6 +15,11 @@
 # v1.5: flag-gated one-shot capture launch (capture_ubus.sh) BEFORE slot case
 #   -- must precede FH's mobilenetwork dial to record the stock datacall blob.
 grep -q healthdog /proc/modules 2>/dev/null || true
+
+# --- v2.0(P2/L-7): session tokens cleared at boot -- /tmp is not tmpfs, stale
+# tokens survive reboots (bad after password rotation); v3httpd/rc19 start
+# after this script, ordering is safe.
+rm -f /tmp/gui_tokens/* 2>/dev/null
 
 # --- v1.9 (审计P0-5): /etc/shadow 覆盖 -- rootfs squashfs 只读, 凭据轮换经
 # /data/gw/shadow.override bind 到 /etc/shadow (dropbear/getty 每次认证时读取,

@@ -49,7 +49,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/bin/shmsnap` | **v1.0** | manifest | `/data/gw/shmsnap` | cfgmgr树共享内存快照工具(save/load 16MB原始字节, gzip后127KB, 开机恢复锁定状态) |
 | `gw/bin/v3_fix.ko` | **v1.1** | manifest | `/data/gw/v3_fix.ko` | TTL伪装/PPE解绑内核模块(wan_if/ttl_mode/unhook) |
 | `gw/bin/v3_steth.ko` | **v1.0** | manifest | `/data/gw/v3_steth.ko` | hook槽位听诊器(bias/interval) |
-| `gw/bin/v3httpd` | **v2.5** | manifest | `/data/gw/v3httpd` | 网关GUI HTTP服务; v2.5(P1): 客户端socket SO_RCVTIMEO 8s(根治慢连占死子进程)+全局并发上限32(满则503)+SIGCHLD计数收尸 |
+| `gw/bin/v3httpd` | **v2.6** | manifest | `/data/gw/v3httpd` | 网关GUI HTTP服务; v2.6(P2): 静态面拒*.sh(免认证源码泄露)+Host头校验(根治DNS rebinding) |
 | `gw/bin/wpapmk` | **v1.0** | manifest | `/data/gw/wpapmk` | WPA口令转PMK(纯C PBKDF2-SHA1; fh魔改hostapd只吃wpa_psk) |
 | `gw/capture_ubus.sh` | **v1.1** | manifest | `/data/gw/capture_ubus.sh` | stock拨号一次性捕获(ubus monitor+ccmni采样) |
 | `gw/cellular_replay.sh` | **v2.1** | manifest | `/data/gw/cellular_replay.sh` | 蜂窝锁定开机重放(频段/小区锁到cfgmgr树, 树每次开机由出厂档案重建) |
@@ -68,22 +68,22 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/night_report.sh` | **v1.0** | manifest | `/data/gw/night_report.sh` | 夜间体检报告 |
 | `gw/ntp_keeper.sh` | **v1.0** | manifest | `/data/gw/ntp_keeper.sh` | 每小时NTP守时(ntclient多源; 设备无RTC) |
 | `gw/radvd.conf` | **v1.0** | manifest | `/data/gw/radvd.conf` | IPv6 SLAAC+RDNSS通告(br-lan, ULA fd42:9ac1:7e50::/64) |
-| `gw/rc.extend.sh` | **v1.9** | manifest | `/data/rc.extend.sh` | 槽位调度器(v1.9: +/etc/shadow bind覆盖钩子(只读rootfs下的凭据轮换通道, 审计P0-5前置); v1.7: A槽TRY_A自清+hnat_qos恢复+dropbear唯一属主; b=纯访问层,a=全栈) |
+| `gw/rc.extend.sh` | **v2.0** | manifest | `/data/rc.extend.sh` | 槽位调度器; v2.0(P2): +开机清/tmp/gui_tokens/*(token跨重启残留); v1.9: shadow bind; 历史见git |
 | `gw/rc_netfh.sh` | **v3.1** | manifest | `/data/gw/rc_netfh.sh` | 路线A: FH modem栈环境(最小army, MODE.fh门控; v2.1=atci对复活修L14回归) |
 | `gw/udhcpc_eth1.script` | **v1.0** | manifest | `/data/gw/udhcpc_eth1.script` | eth1口 udhcpc 事件钩子(补登记) |
 | `gw/udhcpc_wan.script` | **v1.0** | manifest | `/data/gw/udhcpc_wan.script` | WAN口 udhcpc 事件钩子(接口无关化) |
 | `gw/v2_access.sh` | **v6.1** | manifest | `/data/gw/v2_access.sh` | v2 极简访问层(串口/SSH/DHCP/防火墙22,零守护干涉) |
 | `gw/v3_babysit_v2.sh` | **v2.0** | manifest | `/data/gw/babysit_v2.sh` | 启动保姆(T1杀rcS/T2核爆回B) |
-| `gw/v3_rc10.extend.sh` | **v2.19** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2(br-lan+wifi+wan+DNS; v2.5网口对调; v2.6/2.7 eth1 MAC钉死+归因修正) |
+| `gw/v3_rc10.extend.sh` | **v2.20** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2; v2.20(P2): dnsmasq +rebind防护(stop-dns-rebind/bogus-priv); DHCP范围读settings(修GUI改后重启漂移); 历史见git |
 | `gw/wan_agg.sh` | **v2.18** | manifest | `/data/gw/wan_agg.sh` | 双上行聚合主管(v2.17: v4免插件配方(statistic插件缺libxtables.so.12/mac插件不存在——v4分流自精简启动以来从未生效): 源端口区间分流(v6同款)+钉死改源IP(邻居解析+漂移重建); v2.15: 聚合总开关ENABLE=0旁路/1参战, 热切+GUI agg_mode; 照抄原厂quecadp内核分流+fwmark路由; v1.7 to-LAN护盾规则自愈(全灭黑洞终根因) |
 | `gw/watchdog.sh` | **v1.4** | manifest | `/data/gw/watchdog.sh` | 持续不变量看门狗(L13: 17项不变量; v1.2/L14: +蜂窝控制面 atcid自愈+CFUN探针+注册态, airplane容忍) |
 | `gw/webs_revive.sh` | **v1.3** | manifest | `/data/gw/webs_revive.sh` | 原厂GUI复活器(自足nginx conf; 手动拉起) |
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
 | `gw/wifi_up.sh` | **v1.26** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.26: 终端频段锁定band_pins.conf→对侧频段main BSS deny ACL(macaddr_acl=0+deny_mac_file, 指令支持已实证); 无pin时conf与v1.25逐字节一致; 历史版本见git) |
-| `gw/www/api.sh` | **v2.48** | manifest | `/data/gw/www/api.sh` | GUI JSON端点; v2.48(P1): sse+token门+并发上限8(原唯一未认证读端点); uplink AUTHD_CMD收权root通道(拒表单参数, get_uplink回显只读); 历史见git |
-| `gw/www/app.js` | **v3.31** | manifest | `/data/gw/www/app.js` | 控制台SPA; v3.31(P1): sse带token+重连退避(未登录/连败3次关流); bad_cmd文案改root通道语义; +sse_busy码; 历史见git |
-| `gw/www/index.html` | **v2.17** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.17: 缓存v51) |
+| `gw/www/api.sh` | **v2.49** | manifest | `/data/gw/www/api.sh` | GUI JSON端点; v2.49(P2): 严格IP/MAC校验(ip_ok/mac_ok)+dnsmasq失败回落默认参(rebind防护同源)+settings.conf 600; 历史见git |
+| `gw/www/app.js` | **v3.32** | manifest | `/data/gw/www/app.js` | 控制台SPA; v3.32(P2): WPA3虚假选项移除(hostapd仅WPA2-PSK)+plmnScan XSS修复(textContent); 历史见git |
+| `gw/www/index.html` | **v2.18** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.18: 缓存v52) |
 | `gw/www/style.css` | **v2.1** | manifest | `/data/gw/www/style.css` | 控制台主题 |
 | `gw/zz_data_hook` | **v1.1** | manifest | `/data/build/rootfs/etc/init.d/zz_data_hook` | S98数据钩子(v1.1: plain sh——原厂无/etc/rc.common, rc.common式shebang致开机栈全灭; 回归实测发现) |
 | `gw/src/fhstub.c` | **v1.0** | src | `gw/bin/fhstub.so` | FH符号桩库源码 |
@@ -93,7 +93,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/src/shmsnap.c` | **v1.0** | src | `gw/bin/shmsnap` | cfgmgr快照源码 |
 | `gw/src/v3_fix.c` | **v1.1** | src | `gw/bin/v3_fix.ko` | TTL/解绑模块源码(版本随产物) |
 | `gw/src/v3_steth.c` | **v1.0** | src | `gw/bin/v3_steth.ko` | 听诊器模块源码(版本随产物) |
-| `gw/src/v3httpd.c` | **v2.5** | src | `gw/bin/v3httpd` | GUI HTTP服务源码(公开版经zig重编译); v2.5: 同产物 |
+| `gw/src/v3httpd.c` | **v2.6** | src | `gw/bin/v3httpd` | GUI HTTP服务源码; v2.6: 同产物 |
 | `gw/src/wpapmk.c` | **v1.0** | src | `gw/bin/wpapmk` | WPA PMK转换源码(纯C PBKDF2) |
 | `install/run.sh` | **v1.1** | tool | `-` | raw shell自驱脚本(v1.1: 分区次设备号从/proc/partitions动态解析成布局门禁, RP102/RP103通用; v1.0硬编码259:7等) |
 | `tools/agg_pins.conf.example` | **v1.1** | tool | `-` | MAC钉死表模板(真实表设备侧自管, 含个人MAC不入库) |
@@ -102,14 +102,14 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/build_steth.sh` | **v1.0** | tool | `-` | v3_steth.ko构建 |
 | `tools/build_v3fix.sh` | **v1.0** | tool | `-` | v3_fix.ko构建 |
 | `tools/build_v3httpd.sh` | **v1.0** | tool | `-` | v3httpd构建(zig cc aarch64-linux-musl全静态, 同mipc_cellular链) |
-| `tools/deploy.py` | **v2.12** | tool | `-` | MANIFEST部署/漂移检查(版本注入+预检); v2.12: doctor白名单+shadow.override(rc.extend v1.9运行态); v2.11: connect指纹钉死复用lgssh.PinPolicy; v2.10: connect凭证链env覆盖(LG_HOST/LG_TOOR_USER/LG_TOOR_PASS优先, 与lgssh对齐)——轮换窗口期rotate_toor注入旧口令的依赖; 历史版本见git |
+| `tools/deploy.py` | **v2.13** | tool | `-` | MANIFEST部署/漂移检查; v2.13(P2/PC-M1): push原子写(tmp+md5门禁+mv, 传输中断不再留半截脚本供开机执行); 历史见git |
 | `tools/device_local.py.example` | **v1.0** | tool | `-` | 凭证模板(真件gitignored) |
 | `tools/doc_audit.py` | **v1.1** | tool | `-` | 台账↔文档内联标记双向审计(v1.1: 标记扫描纳入台账引用的docs/外文档如install/README.md; v1.0: 版本绑定+TEST-MISSING/STALE-CODE/UNREGISTERED-CLAIM) |
 | `tools/gen_kernel_inc.py` | **v1.0** | tool | `-` | kernel头生成(构建辅助) |
 | `tools/health_check.py` | **v1.1** | tool | `-` | v4全系统体检器(SSH 18项; v1.1 fw_ver读/data/gw/VERSIONS: 身份/槽位/bootctrl/服务/WiFi/5G/外网/资源/温度/存储/数据/日志) |
 | `tools/identify2.py` | **v1.0** | tool | `-` | 残留终验取证器(user_data清单/p26纯净性挂载验证/proc-net快照) |
 | `tools/identify_fw.py` | **v1.0** | tool | `-` | 只读固件身份取证器(release/cmdline/v4标记/挂载表; 前置空格防tty首字符丢失) |
-| `tools/leak_check.py` | **v1.1** | tool | `-` | 敏感词+设备MAC零命中门禁(工作树+可选全历史; 建议pre-push) |
+| `tools/leak_check.py` | **v2.0** | tool | `-` | 敏感词零命中门禁; v2.0(P2/PC-M4): 个人PII模式外置_local/secrets/leak_patterns.py(源内仅留仓纪律词; 拼接构造可被人眼拼回=自泄); 历史见git |
 | `tools/lgssh.py` | **v1.3** | tool | `-` | SSH助手(env/_local/secrets凭证; run()命令通道); v1.3: 主机密钥指纹钉死PinPolicy(HOST_KEY_FP/LG_HOST_KEY_FP, 认证前校验, 审计P0-5) |
 | `tools/lk_eth1_resume.py` | **v1.1** | tool | `-` | eth1续链器(LK控制台接管: kcmdline已注入态恢复; 含misc回退现场抓取; 补登记) |
 | `tools/lk_flash_v4.py` | **v1.1** | tool | `-` | v1.1路径随项目根迁移; 终版刷入器(LK陷阱→raw shell→/dev/null修复→curl送deploy2.sh→后台自驱+轮询deploy.log→重启监测; 修三雷: uclient罢工/&需/dev/null/串口前台等待吃首字符) |

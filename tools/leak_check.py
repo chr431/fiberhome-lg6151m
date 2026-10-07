@@ -9,6 +9,7 @@ git 提交对象（内容与提交信息）。命中 = exit 1。
   python tools/leak_check.py --history    # 工作树 + 全部历史
 建议接入 pre-push 钩子:  git push 前自动跑 --history。
 """
+import io
 import os
 import re
 import subprocess
@@ -17,12 +18,26 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 
-# 拼接构造: 工具自身源码不出现连续的敏感字面量(否则扫到自己)
-PAT_PARTS = ["chen" + "5533", "0206" + "7859", "2024" + "30350049",
-             "110[.]65" + "[.]40[.]", "fc:5c:" + "ee:6c", "1927" + "0085330",
-             "d8:f5:" + "07:db:2a:9", r"\+861\d{9}",
-             "sc" + "ut", "cam" + "pus", "校" + "园", "dr" + "com"]
-SCAN_PAT = re.compile("|".join(PAT_PARTS), re.I)
+# v1.2(P2/PC-M4): 模式分两层 —
+#   PAT_GENERIC: 仓纪律词(本仓设计上必须零命中的中性标识), 留在源内
+#   个人 PII 模式(姓名/号码/IMEI/MAC/IP): 外置 _local/secrets/leak_patterns.py
+#   (仓外, LG_SECRETS_DIR 可覆盖; 预期内容 PATTERNS=[...])。
+#   动机: 拼接构造只骗得过它自己的 grep, 骗不过人 — 源码里两段字面量并排
+#   即可拼回完整 MAC/姓名片段, 等于把要防的 PII 发布在公开仓里。
+PAT_GENERIC = ["sc" + "ut", "cam" + "pus", "校" + "园", "dr" + "com"]
+SECRETS_DIR = os.path.abspath(os.environ.get("LG_SECRETS_DIR")
+                              or os.path.join(REPO, "..", "_local", "secrets"))
+PERSONAL = []
+_pfile = os.path.join(SECRETS_DIR, "leak_patterns.py")
+if os.path.isfile(_pfile):
+    _ns = {}
+    exec(io.open(_pfile, encoding="utf-8").read(), _ns)
+    PERSONAL = _ns.get("PATTERNS", [])
+    if not PERSONAL:
+        print("WARN: %s 存在但 PATTERNS 为空" % _pfile)
+else:
+    print("WARN: 个人PII模式未配置(%s) — 仅扫描仓纪律词" % _pfile)
+SCAN_PAT = re.compile("|".join(PAT_GENERIC + PERSONAL), re.I)
 
 
 def scan_text(rel, text, hits):

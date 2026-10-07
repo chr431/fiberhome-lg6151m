@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.48 (P1: sse加token门+并发上限8; uplink AUTHD_CMD收权root通道(防现成二进制一键root化, get_uplink回显只读); 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.49 (P2/M-5: 严格IP/MAC校验+dnsmasq失败回落+rebind防护; L-2: settings.conf 600; P1(v2.48): sse加token门+并发上限8; uplink AUTHD_CMD收权root通道(防现成二进制一键root化, get_uplink回显只读); 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -74,11 +74,21 @@ gw_set() {  # gw_set <key> <value> — upsert settings.conf
     grep -v "^$K=" "$F" 2>/dev/null > "$F.new"
     echo "$K=$V" >> "$F.new"
     mv "$F.new" "$F"
+    chmod 600 "$F"   # v2.49(P2/L-2): 明文PSK/口令类收紧
 }
 gw_del() {  # v2.37: gw_del <key> — 从 settings.conf 删除键(回退派生值语义)
     K=$1; F=$GWDATA/settings.conf
     grep -v "^$K=" "$F" 2>/dev/null > "$F.new"
     mv "$F.new" "$F"
+}
+
+# v2.49(P2/M-5): 严格点分十进制/MAC 校验 — 原 [^0-9.] 放行 "1.2.3.4.5" 类垃圾值,
+# 非法值致 dnsmasq 拒启(DHCP 自杀至重启)或 iptables 规则静默失效。
+ip_ok() {
+    printf '%s' "$1" | grep -qE '^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}$'
+}
+mac_ok() {
+    printf '%s' "$1" | grep -qE '^[0-9a-f]{2}(:[0-9a-f]{2}){5}$'
 }
 form_has() {  # v2.37: form_has <key> — 键是否出现在POST body(区分"未提交"与"空值")
     [ -n "$V3_BODY" ] || return 1
@@ -145,14 +155,22 @@ apply_wifi() {
 
 apply_dhcp() {
     R1=$(form_kv r1); R2=$(form_kv r2); LEASE=$(form_kv lease)
-    echo "$R1$R2" | grep -qE '[^0-9.]' && jerr bad_ip
+    ip_ok "$R1" && ip_ok "$R2" || jerr bad_ip   # v2.49(P2/M-5): 严格点分十进制
     echo "$LEASE" | grep -qE '^[0-9]+[hm]$' || jerr bad_lease
     gw_set DHCP_R1 "$R1"; gw_set DHCP_R2 "$R2"; gw_set DHCP_LEASE "$LEASE"
     kill $(cat /var/run/dnsmasd_br.pid 2>/dev/null) 2>/dev/null; sleep 1
-    dnsmasq -p 53 --no-resolv --server=223.5.5.5 --server=119.29.29.29 \
+    # v2.49(P2/M-5): +rebind防护(与rc19 v2.20同源); 启动失败回落默认参数复活DHCP
+    # (原实现直接 jerr, DHCP 死到重启), GUI 提示失败但服务不灭。
+    dnsmasq -p 53 --no-resolv --server=223.5.5.5 --server=119.29.29.29 --stop-dns-rebind --bogus-priv \
         -i br-lan -I lo -F 192.168.9.0/255.255.255.0,${R1},${R2},${LEASE} \
         --dhcp-option=3,192.168.9.1 --dhcp-option=6,192.168.9.1 \
-        --dhcp-leasefile=/tmp/dnsmasq_br.leases -x /var/run/dnsmasd_br.pid || jerr dnsmasq_fail
+        --dhcp-leasefile=/tmp/dnsmasq_br.leases -x /var/run/dnsmasd_br.pid || {
+        dnsmasq -p 53 --no-resolv --server=223.5.5.5 --server=119.29.29.29 --stop-dns-rebind --bogus-priv \
+            -i br-lan -I lo -F 192.168.9.100,192.168.9.200,255.255.255.0,12h \
+            --dhcp-option=3,192.168.9.1 --dhcp-option=6,192.168.9.1 \
+            --dhcp-leasefile=/tmp/dnsmasq_br.leases -x /var/run/dnsmasd_br.pid
+        jerr dnsmasq_fail
+    }
     ok_json
 }
 
@@ -163,7 +181,7 @@ apply_fwd_add() {
         case "$PT" in ""|*[!0-9]*) jerr bad_port ;; esac
         [ "$PT" -ge 1 ] && [ "$PT" -le 65535 ] || jerr bad_port
     done
-    echo "$DIP" | grep -qE '[^0-9.]' && jerr bad_ip
+    ip_ok "$DIP" || jerr bad_ip   # v2.49(P2/M-5)
     grep -v "^$P|$EP|" $GWDATA/forwards.conf 2>/dev/null > /tmp/f.$$
     echo "$P|$EP|$DIP|$DP" >> /tmp/f.$$
     mv /tmp/f.$$ $GWDATA/forwards.conf
@@ -177,13 +195,13 @@ apply_fwd_del() {
 apply_dmz() {
     EN=$(form_kv enabled); IP=$(form_kv ip)
     [ "$EN" = 0 ] || [ "$EN" = 1 ] || jerr bad_flag
-    if [ "$EN" = 1 ]; then echo "$IP" | grep -qE '[^0-9.]' && jerr bad_ip; fi
+    if [ "$EN" = 1 ]; then ip_ok "$IP" || jerr bad_ip; fi   # v2.49(P2/M-5)
     printf 'DMZ_EN=%s\nDMZ_IP=%s\n' "$EN" "${IP:-}" > $GWDATA/dmz.conf
     fw_apply; ok_json
 }
 apply_block() {
     M=$(form_kv mac | tr 'A-F' 'a-f')
-    echo "$M" | grep -qE '^[0-9a-f:]{17}$' || jerr bad_mac
+    mac_ok "$M" || jerr bad_mac   # v2.49(P2/M-5): 严格格式(原正则放行 ":::::::::::")
     if [ "$(form_kv del)" = 1 ]; then
         grep -v "^$M$" $GWDATA/block.conf 2>/dev/null > /tmp/b.$$; mv /tmp/b.$$ $GWDATA/block.conf
     else

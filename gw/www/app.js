@@ -1,4 +1,4 @@
-/* app.js v3.31 (P1: sse带token; bad_cmd文案改root通道语义; +sse_busy码) -- v3 gateway console SPA
+/* app.js v3.32 (P2: WPA3虚假选项移除(hostapd仅WPA2-PSK); plmnScan XSS修复(textContent); v3.31: sse带token) -- v3 gateway console SPA
  * v3.28: 聚合五模式选择; v3.27: SSE 实时信号; v3.26: 聚合滑块应用后回读同步
  * v3.4: WiFi 分析仪(信道图/信道评级/AP列表/时间图 canvas多视图) + 信道下拉统一(2.4G补select, 双频加"自动"档)
  * 刷新机制彻底重做: 页面骨架只建一次(进入时), 轮询仅更新文本槽/小表格
@@ -254,7 +254,7 @@ PAGES.wifi = {
         <div class="row3">
           <div class="frm"><label>网络名称（SSID）</label><input id="wa-base"></div>
           <div class="frm"><label>WiFi 密码（8-63 位）</label><input id="wa-pass" type="password" placeholder="留空=不修改"></div>
-          <div class="frm"><label>加密方式</label><select id="wa-auth"><option value="WPA2PSK">WPA2</option><option value="WPA2PSKWPA3PSK">WPA2+WPA3</option></select></div>
+          <div class="frm"><label>加密方式</label><select id="wa-auth"><option value="WPA2PSK">WPA2</option></select><span class="hint">本机 hostapd 仅支持 WPA2-PSK（fh 魔改版不接受 SAE 口令派生），"WPA2+WPA3" 选项因名不符实已移除</span></div>
           <div class="frm"><label>2.4GHz 信道</label><select id="wa-ch2"><option value="0">自动 (启动时扫描选道)</option>${Array.from({length:13},(_,i)=>i+1).map(c=>`<option value="${c}">${c}</option>`).join("")}</select></div>
           <div class="frm"><label>2.4GHz 带宽（MHz）</label><select id="wa-bw2"><option value="20">20</option><option value="40">40</option></select></div>
           <div class="frm"><label>5GHz 信道</label><select id="wa-ch5"><option value="0">自动 (启动时扫描选道)</option>${[36,40,44,48,149,153,157,161].map(c=>`<option value="${c}">${c}</option>`).join("")}</select></div>
@@ -314,7 +314,7 @@ PAGES.wifi = {
         if (adv0.bw2g) WA.ownBw[2] = +adv0.bw2g;
         if (adv0.bw5g) WA.ownBw[5] = +adv0.bw5g;
         F("wa-base", adv0.ssid_base || "");
-        T("wfs-sec", adv0.auth === "WPA2PSKWPA3PSK" ? "WPA2+WPA3" : (j.secured ? "WPA2" : "开放"));   // G-06: 从 auth 派生, 不再硬编码
+        T("wfs-sec", j.secured ? "WPA2" : "开放");   // v3.32: WPA3 选项已移除(hostapd 不支持 SAE, 名不符实); 存量 WPA2PSKWPA3PSK 值实际亦为 WPA2
         T("wfs-hap", `${j.hostapd2g > 0 ? "2.4GHz 正常" : "2.4GHz 异常"} · ${j.hostapd5g > 0 ? "5GHz 正常" : "5GHz 异常"}`);
         H("wfs-tb", (j.stations || []).map(s => `<tr><td>${s.if}</td><td class="mono">${s.mac}</td><td>${s.signal} dBm</td><td>${fmtB(s.rx)}</td><td>${fmtB(s.tx)}</td></tr>`).join(""));
         const adv = await api("wifi_adv");
@@ -322,7 +322,7 @@ PAGES.wifi = {
         F("wa-bw5", adv.bw5g); F("wa-pw", adv.power); F("wa-hid", adv.hidden2g);
         F("wa-guest", adv.guest); F("wa-inone", adv.mlo == 1 ? "2" : adv.inone);
         F("wa-gband", adv.guest_band || "5g"); F("wa-gssid", adv.guest_ssid || "");
-        F("wa-auth", adv.auth || "WPA2PSK");
+        F("wa-auth", "WPA2PSK");   // v3.32: 单一真实选项; 存量 WPA2+WPA3 存值回落
         $("wa-gssid").placeholder = `空 = 默认 ${adv.guest_ssid_eff || "名称-Guest"}`;
         bpList();   // v3.30: 终端频段锁定列表(带diff守卫, 不打字扰)
     }
@@ -868,7 +868,7 @@ window.plmnScan = async () => {
     if (j.error) { el.textContent = eMsg(j.error); return; }
     const rows = (j.networks || []).map(n =>
         `${n.name || n.mcc + n.mnc} [${n.rat}]${n.status === 1 ? " ←当前" : n.status === 4 ? " 可用" : ""}`);
-    el.innerHTML = rows.length ? rows.join(" · ") : "无结果";
+    el.textContent = rows.length ? rows.join(" · ") : "无结果";   // v3.32(P2/L-3): innerHTML→textContent, 运营商名/伪基站注入不再成为 XSS 面
 };
 
 window.nmAir = async () => {

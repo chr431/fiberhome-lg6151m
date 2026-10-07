@@ -1,5 +1,6 @@
 #!/bin/sh
-# rc19.sh v2 (=local v3_rc10.extend.sh) -- Frankenstein v3.1: br-lan world + WiFi.
+# rc19.sh v2 (=local v3_rc10.extend.sh) v2.20 -- Frankenstein v3.1: br-lan world + WiFi.
+# v2.20(P2): dnsmasq +rebind protection; DHCP range read from settings (fix reboot drift).
 # Boot: FH init loads wifi modules (mt7992 chain) + daemon subset; netifd (if it
 # starts) builds br-lan per uci (lan.ipaddr=192.168.9.1 committed 2026-10-01).
 # Timeline (dispatcher S98zz runs this at ~26.5s):
@@ -85,9 +86,11 @@ kill -9 $(pidof dnsmasq) 2>/dev/null; sleep 1   # stale ranges from earlier boot
 #       answered :53 (PC nslookup timed out; phone survived on cache/fallback).
 #       Device resolv.conf is empty, so pin public upstreams -- both verified
 #       38ms through the ccmni2 NAT path (2026-10-03). stderr kept (no 2>null).
+. /data/gw/defaults.conf 2>/dev/null; . /data/gw/settings.conf 2>/dev/null   # v2.20: DHCP range configurable via GUI (fix reboot drift)
 dnsmasq -p 53 --no-resolv --server=223.5.5.5 --server=119.29.29.29 \
+    --stop-dns-rebind --bogus-priv \
     -i br-lan -I lo \
-    -F 192.168.9.100,192.168.9.200,255.255.255.0,12h \
+    -F ${DHCP_R1:-192.168.9.100},${DHCP_R2:-192.168.9.200},255.255.255.0,${DHCP_LEASE:-12h} \
     --dhcp-option=3,192.168.9.1 --dhcp-option=6,192.168.9.1 \
     --dhcp-leasefile=/tmp/dnsmasq_br.leases \
     -x /var/run/dnsmasd_br.pid 2>>/tmp/rc19_dnsmasq.err

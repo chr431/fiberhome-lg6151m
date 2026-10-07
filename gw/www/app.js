@@ -1,4 +1,4 @@
-/* app.js v3.30 (审计P0: 访客隔离强制开启删开关; +终端频段锁定卡(承接兼容需求); +locked错误码) -- v3 gateway console SPA
+/* app.js v3.31 (P1: sse带token; bad_cmd文案改root通道语义; +sse_busy码) -- v3 gateway console SPA
  * v3.28: 聚合五模式选择; v3.27: SSE 实时信号; v3.26: 聚合滑块应用后回读同步
  * v3.4: WiFi 分析仪(信道图/信道评级/AP列表/时间图 canvas多视图) + 信道下拉统一(2.4G补select, 双频加"自动"档)
  * 刷新机制彻底重做: 页面骨架只建一次(进入时), 轮询仅更新文本槽/小表格
@@ -56,7 +56,7 @@ const ERR = {
     need_ucs2: "暂不支持中文短信（仅英文/数字）", send_fail: "短信发送失败",
     scan_failed: "扫描失败，请重试", tool_missing: "扫描组件缺失，请重试",
     uplink_no_conf: "请先填写静态 IP 与网关", mac_fail: "MAC 地址设置失败", addr_fail: "IP 地址设置失败",
-    bad_cmd: "命令含不支持的字符", bad_form: "档案类型无效", unknown: "未知操作",
+    bad_cmd: "认证命令仅限命令行修改", bad_form: "档案类型无效", sse_busy: "实时刷新通道繁忙，请稍后重试", unknown: "未知操作",
     post_only: "请求方式不正确", bad_json: "响应解析失败", ubus: "系统信息服务暂不可用"
 };
 const eMsg = e => ERR[e] ? "操作失败：" + ERR[e] : "操作失败";
@@ -227,8 +227,11 @@ window.dsDel = async (m) => {
 (() => {
     if (window.SSE_SIG) return;
     try {
-        const es = new EventSource("/api/sse");
+        const es = new EventSource("/api/sse" + (TOKEN ? `?token=${TOKEN}` : ""));   // v3.31: sse 已加 token 门
         window.SSE_SIG = es;
+        let esf = 0;   // v3.31: 重连退避 — 未登录/凭证失效/连败3次即关流(防无限重连), 轮询兜底
+        es.onopen = () => { esf = 0; };
+        es.onerror = () => { if (!TOKEN || ++esf > 3) { es.close(); window.SSE_SIG = null; } };
         es.onmessage = e => {
             try {
                 const j = JSON.parse(e.data);

@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.47 (审计P0: login失败锁定10次/15分钟; wifi_set auth补白名单(堵settings.conf注入); gw_set拒控制字符; 访客隔离强制开启删开关; +终端频段锁定band_pin*) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.48 (P1: sse加token门+并发上限8; uplink AUTHD_CMD收权root通道(防现成二进制一键root化, get_uplink回显只读); 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -597,6 +597,10 @@ $R2"
 # -- SSE 事件流 (v2.44): v3httpd v2.4 已发流式响应头, 本端点只持续输出事件。
 # 事件 = 服务小区信号(3s节奏); 570s 自退(双保险, EventSource 自动重连)。
 get_sse() {
+    # v2.48(P1): 全局 SSE 并发上限 — 每连接常驻 570s, 占用 = httpd子进程+api.sh+
+    # 周期性 mipc 子进程; 上限 8 足够真实客户端(GUI 单开), 挡批量资源耗尽。
+    _n=$(ps | grep -c "[a]pi.sh sse")
+    [ "$_n" -gt 8 ] && { printf '{"error":"sse_busy"}'; exit 0; }
     _t=0
     while :; do
         CJ=$(/data/gw/mipc_cellular cells 2>/dev/null | head -1)
@@ -1116,9 +1120,11 @@ apply_uplink() {
     # AUTHD_CMD 表单不传则保留 conf 现值; PROBE_GW 供 wan_agg 探活(与认证程序解耦)
     OLD=""; [ -r $GWDATA/uplink.conf ] && OLD=$(grep '^FORM=' $GWDATA/uplink.conf)
     OAC=""; [ -r $GWDATA/uplink.conf ] && OAC=$(grep -m1 '^AUTHD_CMD=' $GWDATA/uplink.conf | cut -d= -f2-)
-    AC=$(form_kv authd_cmd)
-    [ -z "$AC" ] && AC="${OAC:-/data/gw/authd eth0}"
-    echo "$AC" | grep -qE '[^A-Za-z0-9_ ./-]' && jerr bad_cmd
+    # v2.48(P1-B): AUTHD_CMD 收权 root 通道 — GUI/API 不再可写。原实现字符集校验
+    # 仍放行 "telnetd -p 2323" / "/bin/sh <conf>" 等现成 root 二进制 = 一键 root 化;
+    # 该字段自此仅经 SSH/install.py 手编 uplink.conf(与插件部署同特权层)。
+    form_has authd_cmd && jerr bad_cmd
+    AC="${OAC:-/data/gw/authd eth0}"
     printf 'ENABLE=%s\nAUTH_USER=%s\nAUTH_PASS=%s\nAUTH_IP=%s\nAUTH_MASK=%s\nAUTH_GW=%s\nPROBE_GW=%s\nAUTHD_CMD=%s\nMAC_SPOOF=%s\nSPOOF_MAC=%s\nTTL_SPOOF=%s\nTTL_VALUE=%s\n%s\n' \
         "$EN" "$U" "$PW" "$IP" "$MASK" "$GW" "$GW" "$AC" "$MSP" "$SMA" "$TSP" "$TVA" "${OLD:-FORM=home}" > $GWDATA/uplink.conf
     chmod 600 $GWDATA/uplink.conf
@@ -1176,8 +1182,8 @@ get_uplink() {
     EM=$(cat /sys/class/net/eth0/address 2>/dev/null)
     TR="无"
     nft list ruleset 2>/dev/null | grep -q "ttl set" && TR="已生效"
-    printf '{"enable":"%s","user":"%s","ip":"%s","gw":"%s","form":"%s","daemon":"%s","mac_spoof":"%s","spoof_mac":"%s","ttl_spoof":"%s","ttl_value":"%s","eth0_mac":"%s","ttl_rule":"%s","ts":%d}' \
-        "${ENABLE:-0}" "${AUTH_USER:-}" "${AUTH_IP:-}" "${AUTH_GW:-}" "${FORM:-home}" "$D" \
+    printf '{"enable":"%s","user":"%s","ip":"%s","gw":"%s","form":"%s","daemon":"%s","authd_cmd":"%s","mac_spoof":"%s","spoof_mac":"%s","ttl_spoof":"%s","ttl_value":"%s","eth0_mac":"%s","ttl_rule":"%s","ts":%d}' \
+        "${ENABLE:-0}" "${AUTH_USER:-}" "${AUTH_IP:-}" "${AUTH_GW:-}" "${FORM:-home}" "$D" "${AUTHD_CMD:-}" \
         "${MAC_SPOOF:-0}" "${SPOOF_MAC:-}" "${TTL_SPOOF:-0}" "${TTL_VALUE:-64}" "$EM" "$TR" "$(date +%s)"
 }
 
@@ -1213,7 +1219,7 @@ case "$EP" in
     logs)     need_tok; get_logs ;;
     dhcp)     need_tok; get_dhcp ;;
     cellular)  need_tok; get_cellular ;;
-    sse)       get_sse ;;   # v2.44: 流式事件(v3httpd 专用通道, 只读LAN)
+    sse)       need_tok; get_sse ;;   # v2.48(P1): +token 门(原为路由表唯一未认证读端点, 泄蜂窝身份/信号=位置侧信道); EventSource 走 ?token=
     sms)       need_tok; get_sms ;;
     sms_send)  need_tok; apply_sms_send ;;
     traffic)   need_tok; get_traffic ;;

@@ -1,4 +1,5 @@
-/* v3httpd.c v2.4 (SSE: GET /api/sse 流式事件通道) -- tiny HTTP server for the v3 gateway GUI (192.168.9.1:80).
+/* v3httpd.c v2.5 (P1: 防慢连+并发上限 -- 客户端socket SO_RCVTIMEO 8s; 全局并发
+ *   子进程上限 32(SO_BUSY->503), SIGCHLD 计数收尸(替代 SIG_IGN)) -- tiny HTTP server for the v3 gateway GUI (192.168.9.1:80).
  * zig cc -target aarch64-linux-musl tools/v3httpd.c -o v3httpd -O2
  *   (fully static: no FH libs; run directly)
  * Serves: GET  /            -> /data/gw/www/index.html
@@ -159,7 +160,7 @@ static void run_cgi(int c, const char *ep, const char *method,
 
 "; 寿命上限600s(子进程570s自退双保险), 空闲80s判死,
  * EventSource 客户端自动重连。 */
-static void run_cgi_sse(int c, const char *ep)
+static void run_cgi_sse(int c, const char *ep, const char *query)
 {
     int pfd[2];
     if (pipe(pfd) < 0) { send_json(c, "{\"error\":\"pipe\"}", 17); return; }
@@ -172,6 +173,9 @@ static void run_cgi_sse(int c, const char *ep)
         if (devnull >= 0) { dup2(devnull, 2); close(devnull); }
         char *argv[] = { (char*)"/bin/sh", (char*)WWW_ROOT "/api.sh", (char*)ep, 0 };
         setenv("V3_METHOD", "GET", 1);
+        /* v2.5: 补传 V3_QUERY — 原实现漏传(api.sh sse 旧无 token 门从未暴露;
+         * need_tok 需从 query 读 token, 缺此即恒 need_login) */
+        if (query) { char q[1024]; snprintf(q, sizeof q, "%.1000s", query); setenv("V3_QUERY", q, 1); }
         execv("/bin/sh", argv);
         _exit(127);
     }
@@ -206,6 +210,15 @@ static int ep_ok(const char *ep)
         if (!((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '_'))
             return 0;
     return 1;
+}
+
+/* ---- v2.5: 全局并发计数(SIGCHLD 收尸; 原 SIG_IGN 自动收尸但不计数) ---- */
+static volatile sig_atomic_t g_nconn = 0;
+static void on_chld(int sig)
+{
+    (void)sig;
+    while (waitpid(-1, 0, WNOHANG) > 0)
+        if (g_nconn > 0) g_nconn--;
 }
 
 /* ---- v2.2: FH App API 隧道 ---- */
@@ -289,7 +302,11 @@ static void proxy_tunnel(int c, char *req, int n, const char *path)
 
 int main(void)
 {
-    signal(SIGCHLD, SIG_IGN);
+    struct sigaction sa; memset(&sa, 0, sizeof sa);
+    sa.sa_handler = on_chld;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
+    sigaction(SIGCHLD, &sa, 0);
     int s = socket(AF_INET, SOCK_STREAM, 0);
     if (s < 0) { perror("socket"); return 1; }
     int one = 1;
@@ -301,13 +318,22 @@ int main(void)
     a.sin_port = htons(PORT);
     if (bind(s, (struct sockaddr *)&a, sizeof a) < 0) { perror("bind"); return 2; }
     if (listen(s, 8) < 0) { perror("listen"); return 3; }
-    logline("===== v3httpd v2.1 start %s:%d root=%s =====", BIND_IP, PORT, WWW_ROOT);
+    logline("===== v3httpd v2.5 start %s:%d root=%s =====", BIND_IP, PORT, WWW_ROOT);
 
     static char req[32768 + BODY_MAX];
     for (;;) {
         struct sockaddr_in ca; socklen_t cl = sizeof ca;
         int c = accept(s, (struct sockaddr *)&ca, &cl);
         if (c < 0) continue;
+        /* v2.5: 并发上限 — 满则 503 立即关(不 fork, 资源面保护: 慢连/海量连接) */
+        if (g_nconn >= 32) {
+            static const char busy[] =
+                "HTTP/1.0 503 Busy\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            send_all(c, busy, sizeof busy - 1);
+            close(c);
+            logline("503 busy (nconn=%d)", (int)g_nconn);
+            continue;
+        }
         /* v2.1: fork-per-connection 并发 — 串行循环曾因单个 CGI 挂死拖垮整个 GUI */
         pid_t h = fork();
         if (h == 0) {
@@ -316,13 +342,18 @@ int main(void)
             close(c);
             _exit(0);
         }
-        if (h > 0) close(c);
+        if (h > 0) { g_nconn++; close(c); }
+        else close(c);
     }
     return 0;
 }
 
 static void handle_conn(int c, char *req, size_t reqsz)
 {
+    /* v2.5: 首包/后续包统一 8s 接收超时 — 慢连攻击(只连不发)占死子进程的根治;
+     * LAN 内正常请求亚秒级, 8s 极宽松; 超时 recv 返回 EAGAIN -> k<=0 分支自退 */
+    struct timeval tv = { 8, 0 };
+    setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
     int n = recv(c, req, reqsz - 1, 0);
     if (n <= 0) return;
     req[n] = 0;
@@ -374,7 +405,7 @@ static void handle_conn(int c, char *req, size_t reqsz)
             }
             run_cgi(c, ep, "POST", query, body);
         } else if (!strcmp(ep, "sse")) {
-            run_cgi_sse(c, ep);              /* v2.4: 信号推送事件流 */
+            run_cgi_sse(c, ep, query);         /* v2.4: 信号推送事件流(v2.5: 带query) */
         } else {
             run_cgi(c, ep, "GET", query, 0);
         }

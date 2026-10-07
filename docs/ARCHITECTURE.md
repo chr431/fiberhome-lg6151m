@@ -41,7 +41,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 |---|---|---|---|---|
 | `README.md` | **v1.1** | doc | `-` | 仓库总览与快速上手 |
 | `docs/ARCHITECTURE.md` | **v1.1** | doc | `-` | 架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针) |
-| `docs/GUI_TERMINOLOGY.md` | **v1.1** | doc | `-` | GUI用户可见文案常设基准(v1.1: +终端频段锁定行+locked错误码; 访客隔离标注固定开启; 历史版本见git) |
+| `docs/GUI_TERMINOLOGY.md` | **v1.2** | doc | `-` | GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git |
 | `gw/bin/fhstub.so` | **v1.0** | manifest | `/data/gw/fhstub.so` | FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径) |
 | `gw/bin/healthdog.ko` | **v1.0** | manifest | `/data/gw/healthdog.ko` | 取证看门狗内核模块(forensic=1) |
 | `gw/bin/mipc_cellular` | **v0.5** | manifest | `/data/gw/mipc_cellular` | 蜂窝MIPC直连CLI(getbands/setlock/unlock; 锁NR41+79实弹验证零扰动) |
@@ -49,7 +49,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/bin/shmsnap` | **v1.0** | manifest | `/data/gw/shmsnap` | cfgmgr树共享内存快照工具(save/load 16MB原始字节, gzip后127KB, 开机恢复锁定状态) |
 | `gw/bin/v3_fix.ko` | **v1.1** | manifest | `/data/gw/v3_fix.ko` | TTL伪装/PPE解绑内核模块(wan_if/ttl_mode/unhook) |
 | `gw/bin/v3_steth.ko` | **v1.0** | manifest | `/data/gw/v3_steth.ko` | hook槽位听诊器(bias/interval) |
-| `gw/bin/v3httpd` | **v2.4** | manifest | `/data/gw/v3httpd` | 网关GUI HTTP服务(:80, 静态+JSON API) |
+| `gw/bin/v3httpd` | **v2.5** | manifest | `/data/gw/v3httpd` | 网关GUI HTTP服务; v2.5(P1): 客户端socket SO_RCVTIMEO 8s(根治慢连占死子进程)+全局并发上限32(满则503)+SIGCHLD计数收尸 |
 | `gw/bin/wpapmk` | **v1.0** | manifest | `/data/gw/wpapmk` | WPA口令转PMK(纯C PBKDF2-SHA1; fh魔改hostapd只吃wpa_psk) |
 | `gw/capture_ubus.sh` | **v1.1** | manifest | `/data/gw/capture_ubus.sh` | stock拨号一次性捕获(ubus monitor+ccmni采样) |
 | `gw/cellular_replay.sh` | **v2.1** | manifest | `/data/gw/cellular_replay.sh` | 蜂窝锁定开机重放(频段/小区锁到cfgmgr树, 树每次开机由出厂档案重建) |
@@ -60,7 +60,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/dial_variant.sh` | **v1.1** | manifest | `/data/gw/dial_variant.sh` | 5G 拨号参数变体实验器(iptype/apn/plmn/roam) |
 | `gw/fan_mgr.sh` | **v1.3** | manifest | `/data/gw/fan_mgr.sh` | 原厂梯度温控风扇(v1.3: 配置统一overlay+修复v1.2双/data/gw路径bug——GUI静音切换从未生效的根因) |
 | `gw/fan_mode.conf` | **v1.0** | manifest | `/data/gw/fan_mode.conf` | 风扇模式:performance|silent(静音+6°C偏移) |
-| `gw/fw_apply.sh` | **v1.4** | manifest | `/data/gw/fw_apply.sh` | 端口映射/DMZ/禁网安装器(rc_netfh开机+api共用); v1.4(审计P0): +V6WANGUARD—IPv6 WAN面默认拒绝(INPUT/FORWARD, 放行ICMPv6/DHCPv6/established), 实测堵死WAN侧v6直连:22; v1.3: +22入封禁 |
+| `gw/fw_apply.sh` | **v1.5** | manifest | `/data/gw/fw_apply.sh` | 端口映射/DMZ/禁网安装器(rc_netfh开机+api共用); v1.5(P1): v4 WAN面default-deny(icmp/DHCP客户端/established放行其余DROP, 含旧7端口黑名单语义)+V4WANGUARDF挡WAN->LAN新建转发(-A挂载保DNAT优先); v1.4: v6同构; 历史见git |
 | `gw/guest_fw.sh` | **v1.6** | manifest | `/data/gw/guest_fw.sh` | 访客隔离防火墙v1.6(审计P0: GUEST_ISOLATE开关删除=强制隔离; 兼容需求改由主WiFi终端频段锁定承接; 历史版本见git) |
 | `gw/healthdog.sh` | **v1.1** | manifest | `/data/gw/healthdog.sh` | 看门狗用户态心跳 |
 | `gw/led_mgr.sh` | **v1.7** | manifest | `/data/gw/led_mgr.sh` | 原厂风格LED守护(v1.7: 信标看门狗vif枚举动态化适配访客双频; v1.4传输层改sysfs gpio; v1.6 配置统一overlay+信标看门狗) |
@@ -81,9 +81,9 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
 | `gw/wifi_up.sh` | **v1.26** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.26: 终端频段锁定band_pins.conf→对侧频段main BSS deny ACL(macaddr_acl=0+deny_mac_file, 指令支持已实证); 无pin时conf与v1.25逐字节一致; 历史版本见git) |
-| `gw/www/api.sh` | **v2.47** | manifest | `/data/gw/www/api.sh` | GUI JSON端点(v2.47(审计P0): login失败锁定10次/15分钟(locked码); wifi_set auth补白名单堵settings.conf注入; gw_set拒控制字符; 访客隔离强制删开关+残留键清理; +band_pin/band_pin_add/band_pin_del终端频段锁定; 历史版本见git) |
-| `gw/www/app.js` | **v3.30** | manifest | `/data/gw/www/app.js` | 控制台SPA(v3.30: 访客隔离开关移除(强制隔离); +终端频段锁定卡(添加/删除/应用变更); +locked错误码; 历史版本见git) |
-| `gw/www/index.html` | **v2.16** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.16: 缓存v50) |
+| `gw/www/api.sh` | **v2.48** | manifest | `/data/gw/www/api.sh` | GUI JSON端点; v2.48(P1): sse+token门+并发上限8(原唯一未认证读端点); uplink AUTHD_CMD收权root通道(拒表单参数, get_uplink回显只读); 历史见git |
+| `gw/www/app.js` | **v3.31** | manifest | `/data/gw/www/app.js` | 控制台SPA; v3.31(P1): sse带token+重连退避(未登录/连败3次关流); bad_cmd文案改root通道语义; +sse_busy码; 历史见git |
+| `gw/www/index.html` | **v2.17** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.17: 缓存v51) |
 | `gw/www/style.css` | **v2.1** | manifest | `/data/gw/www/style.css` | 控制台主题 |
 | `gw/zz_data_hook` | **v1.1** | manifest | `/data/build/rootfs/etc/init.d/zz_data_hook` | S98数据钩子(v1.1: plain sh——原厂无/etc/rc.common, rc.common式shebang致开机栈全灭; 回归实测发现) |
 | `gw/src/fhstub.c` | **v1.0** | src | `gw/bin/fhstub.so` | FH符号桩库源码 |
@@ -93,7 +93,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/src/shmsnap.c` | **v1.0** | src | `gw/bin/shmsnap` | cfgmgr快照源码 |
 | `gw/src/v3_fix.c` | **v1.1** | src | `gw/bin/v3_fix.ko` | TTL/解绑模块源码(版本随产物) |
 | `gw/src/v3_steth.c` | **v1.0** | src | `gw/bin/v3_steth.ko` | 听诊器模块源码(版本随产物) |
-| `gw/src/v3httpd.c` | **v2.4** | src | `gw/bin/v3httpd` | GUI HTTP服务源码(公开版经zig重编译) |
+| `gw/src/v3httpd.c` | **v2.5** | src | `gw/bin/v3httpd` | GUI HTTP服务源码(公开版经zig重编译); v2.5: 同产物 |
 | `gw/src/wpapmk.c` | **v1.0** | src | `gw/bin/wpapmk` | WPA PMK转换源码(纯C PBKDF2) |
 | `install/run.sh` | **v1.1** | tool | `-` | raw shell自驱脚本(v1.1: 分区次设备号从/proc/partitions动态解析成布局门禁, RP102/RP103通用; v1.0硬编码259:7等) |
 | `tools/agg_pins.conf.example` | **v1.1** | tool | `-` | MAC钉死表模板(真实表设备侧自管, 含个人MAC不入库) |
@@ -118,7 +118,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/lk_write.py` | **v1.6** | tool | `-` | LK raw-shell 文件写入(回显校验+tmpfs挂载+cmdlist巡检, 取代lk_fix_access) |
 | `tools/rotate_toor.py` | **v1.3** | tool | `-` | toor口令轮换器(只读rootfs shadow覆盖通道); v1.2: 投递改本会话直投(deploy.put同款协议; 子进程方式在轮换窗口期不可靠)+去掉%TEMP%残件; v1.1: md5独立校验; v1.3: 会话同样走指纹钉死 |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
-| `tools/selftest.py` | **v2.11** | tool | `-` | 断言式全功能测试(v2.11: 访客隔离断言改无条件—开关已删; 历史版本见git) |
+| `tools/selftest.py` | **v2.12** | tool | `-` | 断言式全功能测试; v2.12(P1): sse断言改token门双验(无token拒/带token出流); WANGUARD断言改default-deny语义(链尾DROP+FORWARD钩子); 历史见git |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |
 | `tools/serial_server.py` | **v1.7** | tool | `-` | 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets) |
 | `tools/vercheck.py` | **v1.5** | tool | `-` | 版本注册表校验/渲染/设备比对(v1.3: device()随deploy基座迁/data/gw; v1.2性质分区双向强制+全跟踪文件可归类; v1.1 image类md5钉死) |
@@ -164,8 +164,8 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `CLM-GUEST-INDEP`@FEATURE_MATRIX.md | ✅实证 | `gw/wifi_up.sh>=1.22` | 访客 BSS 配置/隔离防火墙一致 (guest_fw) | 87bebe7@2026-10-06 | 访客独立名称/频段(2g/5g/both)/密码; 隔离=原厂wifiguest.sh配方(仅出网); v1.22: 动态BSS必须显式入桥(hostapd不自动加, 帧死无IP接口致dnsmasq盲=tcpdump实证真根因); 真MLO见CLM-MLO |
 | `CLM-MLO`@FEATURE_MATRIX.md | ✅实证 | `gw/wifi_up.sh>=1.23` | MLO 状态与 dat 键一致 (v1.19) | 2a6b1c5@2026-10-06 | MLO真双链路可用+在线即时生效(v1.23拆链修复): -B在线重应用死亡机制已完全闭环(旧实例TERM不注销驱动MLD(设计行为), rai0 sync调和残留态发ML REMOVE(ra0)拆组退出,尾部日志被stdio缓冲吞; 下电清bss_mngr链路态即愈, T1-T7实证); 原厂=global守护永不重启+逐BSS REMOVE/ADD热重载; MLO开关双向在线切换验证; 全零表=v1.15事故形态禁写 |
 | `CLM-RP102-COMPAT`@install/README.md | ✅实证 | `install/run.sh>=1.1` | API login + token 生命周期 | a808fe0@2026-10-06 | RP102前向兼容: kit现场构建路径全兼容(底座自适应); 预构建RP103镜像禁入RP102(MDDB P56/P40+18个.ko+fhrom漂移三处错配); LK代码级相同仅签名槽差异; run.sh分区号动态解析成门禁 |
-| `CLM-P4-SSE`@ROADMAP.md | ✅实证 | `gw/bin/v3httpd>=2.4` | SSE 信号事件流 (v3httpd v2.4 + api.sh sse) | ecb2e20@2026-10-06 | SSE信号推送落地: 流式CGI通道+3s事件+EventSource前端, curl/selftest双验证; P4全数完成 |
-| `CLM-P5-CLOSED`@ROADMAP.md | ✅实证 | `tools/selftest.py>=2.9` | SSE 信号事件流 (v3httpd v2.4 + api.sh sse) | ecb2e20@2026-10-06 | P5关闭: 实测传输期CPU空转,瓶颈在上游非引擎; quecadp复活=高风险零收益; 重开条件=>500Mbps上游+softirq饱和 |
+| `CLM-P4-SSE`@ROADMAP.md | ✅实证 | `gw/bin/v3httpd>=2.4` | SSE 信号事件流 (v3httpd v2.5 + api.sh sse token 门) | ecb2e20@2026-10-06 | SSE信号推送落地: 流式CGI通道+3s事件+EventSource前端, curl/selftest双验证; P4全数完成 |
+| `CLM-P5-CLOSED`@ROADMAP.md | ✅实证 | `tools/selftest.py>=2.9` | SSE 信号事件流 (v3httpd v2.5 + api.sh sse token 门) | ecb2e20@2026-10-06 | P5关闭: 实测传输期CPU空转,瓶颈在上游非引擎; quecadp复活=高风险零收益; 重开条件=>500Mbps上游+softirq饱和 |
 | `CLM-AGG-MODES`@ROADMAP.md | ✅实证 | `gw/wan_agg.sh>=2.18` | 聚合模式配置合法且一致 (v2.18 五模式) | 3aaf20b@2026-10-06 | 聚合五模式(对齐原厂): weight/cell_prio/eth_prio/cell_only/eth_only; 仅模式=E1/E2强制注入(无failover); MODE热载+旧格式迁移(100/0映射优先模式); 滑块5-95钳制(极端值语义归显式模式); GUI权重卡条件显示; 五模式API实弹循环切换全过 |
 
 <!--CLMAUDIT:END-->

@@ -225,7 +225,7 @@
 | `scan_failed` / `tool_missing` | 扫描失败 / 扫描组件缺失，请重试 |
 | `uplink_no_conf` | 请先填写静态 IP 与网关 |
 | `mac_fail` / `addr_fail` | MAC 地址设置失败 / IP 地址设置失败 |
-| `bad_cmd` / `bad_form` | 认证命令含不支持的字符 / 档案类型无效 |
+| `bad_cmd` / `bad_form` / `sse_busy` | 认证命令仅限命令行修改 / 档案类型无效 / 实时刷新通道繁忙，请稍后重试 |
 | `unknown` / `post_only` | 未知操作 / 请求方式不正确 |
 | `bad_json`（前端） | 响应解析失败 |
 

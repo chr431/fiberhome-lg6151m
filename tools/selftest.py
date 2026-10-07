@@ -362,14 +362,32 @@ def t_gui_plugin():
     record(t_gui_plugin._test_name, "gui", ok, note)
 
 
-@test("SSE 信号事件流 (v3httpd v2.4 + api.sh sse)")
+@test("SSE 信号事件流 (v3httpd v2.5 + api.sh sse token 门)")
 def t_gui_sse():
     # v2.9: 原始 socket 拉 /api/sse, 5s 内应收到带 rsrp 的 data: 事件
+    # v2.12(P1): sse 已加 token 门 — 先验无 token 被拒, 再验带 token 出流
     import socket as sk
     try:
         s = sk.create_connection((lgssh.HOST, 80), timeout=5)
-        s.settimeout(6)
+        s.settimeout(3)
         s.send(b"GET /api/sse HTTP/1.0\r\nHost: x\r\n\r\n")
+        head = b""
+        try:
+            while len(head) < 2048:
+                d = s.recv(512)
+                if not d:
+                    break
+                head += d
+                if b"need_login" in head:
+                    break
+        except Exception:
+            pass
+        s.close()
+        no_tok_ok = b"need_login" in head   # 头之后跟 need_login JSON(SSE 头由 v3httpd 先行)
+        tok = _token()
+        s = sk.create_connection((lgssh.HOST, 80), timeout=5)
+        s.settimeout(6)
+        s.send(b"GET /api/sse?token=" + tok.encode() + b" HTTP/1.0\r\nHost: x\r\n\r\n")
         buf = b""
         t0 = time.time()
         while time.time() - t0 < 6:
@@ -383,8 +401,8 @@ def t_gui_sse():
             if b"rsrp" in buf:
                 break
         s.close()
-        ok = b"text/event-stream" in buf and b"data: " in buf and b"rsrp" in buf
-        note = f"{len(buf)}B" + ("" if ok else f" head={buf[:60]!r}")
+        ok = no_tok_ok and b"text/event-stream" in buf and b"data: " in buf and b"rsrp" in buf
+        note = f"{len(buf)}B notok={'Y' if no_tok_ok else 'N'}" + ("" if ok else f" head={buf[:60]!r}")
     except Exception as e:
         ok, note = False, repr(e)[:60]
     record(t_gui_sse._test_name, "gui", ok, note)
@@ -861,13 +879,17 @@ def t_sec_vendorweb():
 
 @test("WAN 面纵深封禁链在位 (P0)")
 def t_sec_wanguard():
-    # V3WANGUARD: 23/5683/30005/1899x 双协议 DROP, 挂在 eth0+ccmni INPUT
-    out = dev("iptables -S V3WANGUARD 2>/dev/null | grep -c '\\-j DROP'")
-    hook = dev("iptables -S INPUT 2>/dev/null | grep -c 'V3WANGUARD'")
-    n, h = int(out.strip() or 0), int(hook.strip() or 0)
-    ok = n >= 14 and h >= 2   # 7口(22/23/5683/30005/1899x3)x2协议
+    # v1.5(P1): v4 链 default-deny — icmp/DHCP客户端/established 放行, 末条 DROP
+    # (原 7 端口黑名单语义被包含); FORWARD 挂 V4WANGUARDF 挡 WAN->LAN 新建。
+    out = dev("iptables -S V3WANGUARD 2>/dev/null")
+    hook = dev("iptables -S INPUT 2>/dev/null | grep -c 'V3WANGUARD'").strip() or "0"
+    fh = dev("iptables -S FORWARD 2>/dev/null | grep -c 'V4WANGUARDF'").strip() or "0"
+    lines = [l.strip() for l in out.strip().splitlines() if l.strip()]
+    ok = ("RELATED,ESTABLISHED -j ACCEPT" in out
+          and lines and lines[-1].endswith("-A V3WANGUARD -j DROP")
+          and int(hook) >= 2 and int(fh) >= 2)
     record(t_sec_wanguard._test_name, "security", ok,
-           f"drop_rules={n} wan_hooks={h}")
+           f"tail={'DROP' if lines and lines[-1].endswith('DROP') else lines[-1] if lines else 'EMPTY'} in_hooks={hook} fwd_hooks={fh}")
 
 
 # =================================================================

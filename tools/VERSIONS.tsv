@@ -34,16 +34,16 @@ README.md	1.1	doc	-	仓库总览与快速上手
 gw/bin/multiwan_ctl	1.1	manifest	/data/gw/multiwan_ctl	原厂multiwan引擎ioctl控制器(zig动态链libfhdrv_net_api,36B结构体)
 gw/bin/fhstub.so	1.0	manifest	/data/gw/fhstub.so	FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径)
 gw/led_mgr.sh	1.7	manifest	/data/gw/led_mgr.sh	原厂风格LED守护(v1.7: 信标看门狗vif枚举动态化适配访客双频; v1.4传输层改sysfs gpio; v1.6 配置统一overlay+信标看门狗)
-gw/bin/v3httpd	2.4	manifest	/data/gw/v3httpd	网关GUI HTTP服务(:80, 静态+JSON API)
-gw/www/api.sh	2.47	manifest	/data/gw/www/api.sh	GUI JSON端点(v2.47(审计P0): login失败锁定10次/15分钟(locked码); wifi_set auth补白名单堵settings.conf注入; gw_set拒控制字符; 访客隔离强制删开关+残留键清理; +band_pin/band_pin_add/band_pin_del终端频段锁定; 历史版本见git)
-gw/www/index.html	2.16	manifest	/data/gw/www/index.html	v3控制台页面(v2.16: 缓存v50)
+gw/bin/v3httpd	2.5	manifest	/data/gw/v3httpd	网关GUI HTTP服务; v2.5(P1): 客户端socket SO_RCVTIMEO 8s(根治慢连占死子进程)+全局并发上限32(满则503)+SIGCHLD计数收尸
+gw/www/api.sh	2.48	manifest	/data/gw/www/api.sh	GUI JSON端点; v2.48(P1): sse+token门+并发上限8(原唯一未认证读端点); uplink AUTHD_CMD收权root通道(拒表单参数, get_uplink回显只读); 历史见git
+gw/www/index.html	2.17	manifest	/data/gw/www/index.html	v3控制台页面(v2.17: 缓存v51)
 gw/www/style.css	2.1	manifest	/data/gw/www/style.css	控制台主题
-gw/www/app.js	3.30	manifest	/data/gw/www/app.js	控制台SPA(v3.30: 访客隔离开关移除(强制隔离); +终端频段锁定卡(添加/删除/应用变更); +locked错误码; 历史版本见git)
+gw/www/app.js	3.31	manifest	/data/gw/www/app.js	控制台SPA; v3.31(P1): sse带token+重连退避(未登录/连败3次关流); bad_cmd文案改root通道语义; +sse_busy码; 历史见git
 tools/agg_pins.conf.example	1.1	tool	-	MAC钉死表模板(真实表设备侧自管, 含个人MAC不入库)
 gw/fan_mgr.sh	1.3	manifest	/data/gw/fan_mgr.sh	原厂梯度温控风扇(v1.3: 配置统一overlay+修复v1.2双/data/gw路径bug——GUI静音切换从未生效的根因)
 gw/fan_mode.conf	1.0	manifest	/data/gw/fan_mode.conf	风扇模式:performance|silent(静音+6°C偏移)
 gw/bin/wpapmk	1.0	manifest	/data/gw/wpapmk	WPA口令转PMK(纯C PBKDF2-SHA1; fh魔改hostapd只吃wpa_psk)
-gw/fw_apply.sh	1.4	manifest	/data/gw/fw_apply.sh	端口映射/DMZ/禁网安装器(rc_netfh开机+api共用); v1.4(审计P0): +V6WANGUARD—IPv6 WAN面默认拒绝(INPUT/FORWARD, 放行ICMPv6/DHCPv6/established), 实测堵死WAN侧v6直连:22; v1.3: +22入封禁
+gw/fw_apply.sh	1.5	manifest	/data/gw/fw_apply.sh	端口映射/DMZ/禁网安装器(rc_netfh开机+api共用); v1.5(P1): v4 WAN面default-deny(icmp/DHCP客户端/established放行其余DROP, 含旧7端口黑名单语义)+V4WANGUARDF挡WAN->LAN新建转发(-A挂载保DNAT优先); v1.4: v6同构; 历史见git
 gw/cellular_replay.sh	2.1	manifest	/data/gw/cellular_replay.sh	蜂窝锁定开机重放(频段/小区锁到cfgmgr树, 树每次开机由出厂档案重建)
 gw/bin/shmsnap	1.0	manifest	/data/gw/shmsnap	cfgmgr树共享内存快照工具(save/load 16MB原始字节, gzip后127KB, 开机恢复锁定状态)
 gw/webs_revive.sh	1.3	manifest	/data/gw/webs_revive.sh	原厂GUI复活器(自足nginx conf; 手动拉起)
@@ -69,15 +69,15 @@ tools/build_v3fix.sh	1.0	tool	-	v3_fix.ko构建
 tools/gen_kernel_inc.py	1.0	tool	-	kernel头生成(构建辅助)
 gw/src/multiwan_ctl.c	1.1	src	gw/bin/multiwan_ctl	multiwan控制器源码(随产物1.1)
 gw/src/shmsnap.c	1.0	src	gw/bin/shmsnap	cfgmgr快照源码
-gw/src/v3httpd.c	2.4	src	gw/bin/v3httpd	GUI HTTP服务源码(公开版经zig重编译)
+gw/src/v3httpd.c	2.5	src	gw/bin/v3httpd	GUI HTTP服务源码(公开版经zig重编译); v2.5: 同产物
 gw/src/wpapmk.c	1.0	src	gw/bin/wpapmk	WPA PMK转换源码(纯C PBKDF2)
 gw/src/fhstub.c	1.0	src	gw/bin/fhstub.so	FH符号桩库源码
 gw/defaults.conf	1.3	manifest	/data/gw/defaults.conf	统一配置只读出厂基线(444); 消费方source叠加settings.conf稀疏覆盖
 tools/leak_check.py	1.1	tool	-	敏感词+设备MAC零命中门禁(工作树+可选全历史; 建议pre-push)
 docs/ARCHITECTURE.md	1.1	doc	-	架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针)
-docs/GUI_TERMINOLOGY.md	1.1	doc	-	GUI用户可见文案常设基准(v1.1: +终端频段锁定行+locked错误码; 访客隔离标注固定开启; 历史版本见git)
+docs/GUI_TERMINOLOGY.md	1.2	doc	-	GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git
 gw/watchdog.sh	1.4	manifest	/data/gw/watchdog.sh	持续不变量看门狗(L13: 17项不变量; v1.2/L14: +蜂窝控制面 atcid自愈+CFUN探针+注册态, airplane容忍)
-tools/selftest.py	2.11	tool	-	断言式全功能测试(v2.11: 访客隔离断言改无条件—开关已删; 历史版本见git)
+tools/selftest.py	2.12	tool	-	断言式全功能测试; v2.12(P1): sse断言改token门双验(无token拒/带token出流); WANGUARD断言改default-deny语义(链尾DROP+FORWARD钩子); 历史见git
 tools/doc_audit.py	1.1	tool	-	台账↔文档内联标记双向审计(v1.1: 标记扫描纳入台账引用的docs/外文档如install/README.md; v1.0: 版本绑定+TEST-MISSING/STALE-CODE/UNREGISTERED-CLAIM)
 gw/src/mipc_cellular.c	0.5	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源(P1): dlopen闭包预载+ql_nw_init; v0.2: 168B结构全破译(setlock lte/nr=列表 解锁=全1; NR三段位图1-32/34-64/65-96)
 gw/bin/mipc_cellular	0.5	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI(getbands/setlock/unlock; 锁NR41+79实弹验证零扰动)

@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.60 (蜂窝 conf 写方统一 upsert(cell_set): 原频段锁整文件覆盖冲掉 NM_MODE/CELL_i、celllock del 压实丢 NM_MODE、clear 重复键 — 同文件多写方互毁全消; get_sim phone/reg 迁活源 AT CNUM/CEREG 并删死树回退(树退役后恒空, 与 NTP 同族); cell_persist 仅 tree 引擎调用+shm 缺席跳过快照; v2.59: NTP 僵尸路径修复: 配置树 v3.1 已退役 -> cfg_cmd 全键恒失败(实测 shm_attach rc=-1), 时间同步卡片服务器字段改自管配置 NTP_SERVER(defaults 默认叠 settings 覆盖; 留空=gw_del 回退默认), 同步链全源失败显性 jerr sync_fail(原链式失败照报 synced:true=假成功); v2.58: wifiscan 中文 SSID: iw \xNN 转义解码为原始 UTF-8 字节 — 原样透传+tr去反斜杠=页面显示 xe8xbf... 垃圾; 历史: traffic_hist 空库边界修复; 流量双网分别统计(erx/etx) + traffic_hist 周/月聚合端点; wifiscan 补采 40M 方向 dir; 运营商映射修正 46015/46016=中国广电; status 增 m5 五模式字段; CMGL→CMGR 逐条读: ql_ril CMGL 未读列表路径段错误; CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.61 (sim reg 推导修正: 本模组 AT CEREG?/CREG? 恒 0,0(数据畅通仍报未注册, 实测) — 改由 COPS 是否返回 PLMN 推导; v2.60: 蜂窝 conf 写方统一 upsert(cell_set): 原频段锁整文件覆盖冲掉 NM_MODE/CELL_i、celllock del 压实丢 NM_MODE、clear 重复键 — 同文件多写方互毁全消; get_sim phone/reg 迁活源 AT CNUM/CEREG 并删死树回退(树退役后恒空, 与 NTP 同族); cell_persist 仅 tree 引擎调用+shm 缺席跳过快照; v2.59: NTP 僵尸路径修复: 配置树 v3.1 已退役 -> cfg_cmd 全键恒失败(实测 shm_attach rc=-1), 时间同步卡片服务器字段改自管配置 NTP_SERVER(defaults 默认叠 settings 覆盖; 留空=gw_del 回退默认), 同步链全源失败显性 jerr sync_fail(原链式失败照报 synced:true=假成功); v2.58: wifiscan 中文 SSID: iw \xNN 转义解码为原始 UTF-8 字节 — 原样透传+tr去反斜杠=页面显示 xe8xbf... 垃圾; 历史: traffic_hist 空库边界修复; 流量双网分别统计(erx/etx) + traffic_hist 周/月聚合端点; wifiscan 补采 40M 方向 dir; 运营商映射修正 46015/46016=中国广电; status 增 m5 五模式字段; CMGL→CMGR 逐条读: ql_ril CMGL 未读列表路径段错误; CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -434,10 +434,11 @@ get_sim() {
     A_ICCID=$(mipc_wan_cli --at_cmd "AT+CCID" 2>/dev/null | grep -oE '[0-9]{19,20}' | head -1)
     A_IMEI=$(mipc_wan_cli --at_cmd "AT+CGSN" 2>/dev/null | grep -oE '^[0-9]{15}' | head -1)
     A_OPS=$(mipc_wan_cli --at_cmd "AT+COPS?" 2>/dev/null | grep -oE '"[0-9]{5,6}"' | tr -d '"')
-    # v2.60: CNUM=本机号(未开通即空=诚实显示); CEREG stat: 0未注册 1已注册 2搜索中 3拒绝 5漫游
+    # v2.60: CNUM=本机号(未开通即空=诚实显示)。注册态 v2.61 修正: 本模组 AT CEREG?/CREG?
+    #   恒 0,0(实测数据畅通仍报未注册 — AT 语境注册≠数据栈注册), 改由 COPS 是否返回
+    #   运营商数字标识推导(有 PLMN=已注册 1, 无=0)。
     A_NUM=$(mipc_wan_cli --at_cmd "AT+CNUM" 2>/dev/null | grep -oE '\+CNUM: *"[^"]*","[+0-9]+"' | sed 's/.*"\(+[0-9]*\)"$/\1/')
-    A_REG=$(mipc_wan_cli --at_cmd "AT+CEREG?" 2>/dev/null | grep -oE 'CEREG: *[0-9],[0-9]' | grep -oE '[0-9]$')
-    [ -n "$A_REG" ] || A_REG=$(mipc_wan_cli --at_cmd "AT+CREG?" 2>/dev/null | grep -oE 'CREG: *[0-9],[0-9]' | grep -oE '[0-9]$')
+    A_REG=""; [ -n "$A_OPS" ] && A_REG=1
     printf '{"status":"%s","imsi":"%s","iccid":"%s","carrier":"%s","imei":"%s","phone":"%s","reg":"%s","pin_state":"%s","ts":%d}'         "${A_STAT:-}" "${A_IMSI:-}"         "${A_ICCID:-}" "$(op_name "${A_OPS:-}")"         "${A_IMEI:-}" "$A_NUM"         "${A_REG:-}" "$(mipc_wan_cli sim_pin_info_get 2>/dev/null | grep -oE 'state:[0-9]+' | cut -d: -f2)" "$(date +%s)"
 }
 apply_pin() {

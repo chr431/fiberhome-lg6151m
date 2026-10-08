@@ -82,7 +82,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
 | `gw/wifi_up.sh` | **v1.26** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.26: 终端频段锁定band_pins.conf→对侧频段main BSS deny ACL(macaddr_acl=0+deny_mac_file, 指令支持已实证); 无pin时conf与v1.25逐字节一致; 历史版本见git) |
-| `gw/www/api.sh` | **v2.60** | manifest | `/data/gw/www/api.sh` | GUI JSON端点; v2.60: 蜂窝conf统一upsert(cell_set, 原写方互冲NM_MODE)+sim phone/reg迁活源; 历史见git |
+| `gw/www/api.sh` | **v2.61** | manifest | `/data/gw/www/api.sh` | GUI JSON端点; v2.61: sim reg 改 COPS 推导(本模组 CEREG 恒 0,0); v2.60: 蜂窝conf统一upsert+sim迁活源; 历史见git |
 | `gw/www/app.js` | **v3.41** | manifest | `/data/gw/www/app.js` | 控制台SPA; v3.41: NTP卡片应用后清脏标即时回显; 历史见git |
 | `gw/www/index.html` | **v2.23** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.23: 缓存v57) |
 | `gw/www/style.css` | **v2.1** | manifest | `/data/gw/www/style.css` | 控制台主题 |

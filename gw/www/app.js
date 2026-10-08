@@ -1,4 +1,4 @@
-/* app.js v3.40 (NTP 时间同步卡片修复: 服务器字段改自管配置回显(树退役后 cfgget 恒空)+留空回退默认+时区下拉回显+同步全败显性报错) -- v3 gateway console SPA
+/* app.js v3.41 (NTP 卡片: 应用成功清脏标 => 留空回退默认即时回显; 历史: v3.40 服务器字段自管配置回显+时区下拉回显+同步全败显性报错) -- v3 gateway console SPA
  * v3.39 (WiFi 分析仪 4 视图改进: 信道图邻居SSID标注+避让+文字光晕; 评级修复不可见信道号/徽标重叠+经典道同口径+本机标记+干扰计数; 列表可排序/色标/带宽/信号条; 时间图图例+数据点+历史本地持久)
  * v3.32(P2): WPA3虚假选项移除(hostapd仅WPA2-PSK); plmnScan XSS修复(textContent); v3.31: sse带token
  * v3.28: 聚合五模式选择; v3.27: SSE 实时信号; v3.26: 聚合滑块应用后回读同步
@@ -1172,7 +1172,11 @@ window.ledTgl = async () => {
 };
 window.ntSync = async () => {
     const j = await api("ntp_set", `tz=${$("nt-tz").value}&server=${encodeURIComponent($("nt-srv").value)}`).catch(e => ({ error: e.message }));
-    if (j.ok) { toast("已应用，正在同步时间"); PAGES.sys.tick(); }
+    if (j.ok) {
+        // 提交成功 = 服务器值即权威: 清脏标, 让 tick 把"留空=>默认"等结果立刻回显
+        ["nt-srv", "nt-tz"].forEach(id => { DIRTY.delete(id); const e = $(id); if (e) e.classList.remove("dirty"); });
+        toast("已应用，正在同步时间"); PAGES.sys.tick();
+    }
     else toast(eMsg(j.error), 1);
 };
 window.pwDo = async () => {

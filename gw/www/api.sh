@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.62 (组网模式 ENDC: netmode 增 endc 字段(1=SA 2=NSA 3=SA+NSA, 存 cellular.conf ENDC_MODE), apply_netmode 照抄官方联动规则(仅5G强制SA/仅4G-3G不下发)经 mipc_cellular endc 下发; v2.61: sim reg 推导修正: 本模组 AT CEREG?/CREG? 恒 0,0(数据畅通仍报未注册, 实测) — 改由 COPS 是否返回 PLMN 推导; v2.60: 蜂窝 conf 写方统一 upsert(cell_set): 原频段锁整文件覆盖冲掉 NM_MODE/CELL_i、celllock del 压实丢 NM_MODE、clear 重复键 — 同文件多写方互毁全消; get_sim phone/reg 迁活源 AT CNUM/CEREG 并删死树回退(树退役后恒空, 与 NTP 同族); cell_persist 仅 tree 引擎调用+shm 缺席跳过快照; v2.59: NTP 僵尸路径修复: 配置树 v3.1 已退役 -> cfg_cmd 全键恒失败(实测 shm_attach rc=-1), 时间同步卡片服务器字段改自管配置 NTP_SERVER(defaults 默认叠 settings 覆盖; 留空=gw_del 回退默认), 同步链全源失败显性 jerr sync_fail(原链式失败照报 synced:true=假成功); v2.58: wifiscan 中文 SSID: iw \xNN 转义解码为原始 UTF-8 字节 — 原样透传+tr去反斜杠=页面显示 xe8xbf... 垃圾; 历史: traffic_hist 空库边界修复; 流量双网分别统计(erx/etx) + traffic_hist 周/月聚合端点; wifiscan 补采 40M 方向 dir; 运营商映射修正 46015/46016=中国广电; status 增 m5 五模式字段; CMGL→CMGR 逐条读: ql_ril CMGL 未读列表路径段错误; CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.63 (netmode_set 变更时后台自动重附(cfun循环) — 实弹实证 LTE→NR-SA 不自发重选, 重发 nwmode 也不触发, 不重附则改完驻留 LTE 不生效; 幂等重应用不重附; v2.62: 组网模式 ENDC: netmode 增 endc 字段(1=SA 2=NSA 3=SA+NSA, 存 cellular.conf ENDC_MODE), apply_netmode 照抄官方联动规则(仅5G强制SA/仅4G-3G不下发)经 mipc_cellular endc 下发; v2.61: sim reg 推导修正: 本模组 AT CEREG?/CREG? 恒 0,0(数据畅通仍报未注册, 实测) — 改由 COPS 是否返回 PLMN 推导; v2.60: 蜂窝 conf 写方统一 upsert(cell_set): 原频段锁整文件覆盖冲掉 NM_MODE/CELL_i、celllock del 压实丢 NM_MODE、clear 重复键 — 同文件多写方互毁全消; get_sim phone/reg 迁活源 AT CNUM/CEREG 并删死树回退(树退役后恒空, 与 NTP 同族); cell_persist 仅 tree 引擎调用+shm 缺席跳过快照; v2.59: NTP 僵尸路径修复: 配置树 v3.1 已退役 -> cfg_cmd 全键恒失败(实测 shm_attach rc=-1), 时间同步卡片服务器字段改自管配置 NTP_SERVER(defaults 默认叠 settings 覆盖; 留空=gw_del 回退默认), 同步链全源失败显性 jerr sync_fail(原链式失败照报 synced:true=假成功); v2.58: wifiscan 中文 SSID: iw \xNN 转义解码为原始 UTF-8 字节 — 原样透传+tr去反斜杠=页面显示 xe8xbf... 垃圾; 历史: traffic_hist 空库边界修复; 流量双网分别统计(erx/etx) + traffic_hist 周/月聚合端点; wifiscan 补采 40M 方向 dir; 运营商映射修正 46015/46016=中国广电; status 增 m5 五模式字段; CMGL→CMGR 逐条读: ql_ril CMGL 未读列表路径段错误; CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -524,6 +524,8 @@ apply_netmode() {
     CELL_ENGINE=mipc
     [ -r $GWDATA/cellular_engine.conf ] && . $GWDATA/cellular_engine.conf
     if [ "$CELL_ENGINE" = mipc ]; then
+        [ -r $GWDATA/cellular.conf ] && . $GWDATA/cellular.conf
+        OM=${NM_MODE:-1}; OE=${ENDC_MODE:-3}   # v2.63: 变更前值(供重附判定)
         E=$(erat_of "$M") || jerr bad_mode
         R=$(mipc_wan_cli --at_cmd "AT+erat=$E" 2>/dev/null | grep -c OK)
         [ "$R" -ge 1 ] || jerr at_fail
@@ -541,6 +543,17 @@ apply_netmode() {
             ERC=$(/data/gw/mipc_cellular endc set "$EC" 2>&1)
             printf '%s' "$ERC" | grep -q '"ret":0' || jerr at_fail
             cell_set ENDC_MODE "$EC"
+        fi
+        # v2.63: 配置实际变化 -> 后台重附(cfun 循环)。实证: LTE 驻留时改 ENDC/制式,
+        #   LTE→NR-SA 不自发重选, 重发 nwmode 也不触发, 不重附则新值不生效(2026-10-09 实弹);
+        #   CFUN 循环=厂商飞行同款恢复路径, keeper 约 40s 自动重拨。幂等重应用不重附。
+        if [ "$OM" != "$M" ] || { [ -n "$EC" ] && [ "$OE" != "$EC" ]; }; then
+            ( sleep 2
+              mipc_wan_cli --at_cmd "AT+cfun=0" >/dev/null 2>&1
+              sleep 8
+              mipc_wan_cli --at_cmd "AT+cfun=1" >/dev/null 2>&1 ) >/dev/null 2>&1 &
+            ok_json '"engine":"mipc","erat":"'"$E"'","note":"reattaching"'
+            return
         fi
         ok_json '"engine":"mipc","erat":"'"$E"'"'
         return

@@ -1,4 +1,4 @@
-/* app.js v3.42 (蜂窝页新增"组网模式"SA/NSA/SA+NSA — 官方 networkSet.js 联动规则照抄: 仅4G/3G隐藏整行, 仅5G只留SA并强制; netmode_set 随制式一并下发) -- v3 gateway console SPA
+/* app.js v3.43 (组网模式提示更新: 变更后模组自动重附约1分钟 — 服务端 v2.63 变更即重附) -- v3 gateway console SPA
  * v3.39 (WiFi 分析仪 4 视图改进: 信道图邻居SSID标注+避让+文字光晕; 评级修复不可见信道号/徽标重叠+经典道同口径+本机标记+干扰计数; 列表可排序/色标/带宽/信号条; 时间图图例+数据点+历史本地持久)
  * v3.32(P2): WPA3虚假选项移除(hostapd仅WPA2-PSK); plmnScan XSS修复(textContent); v3.31: sse带token
  * v3.28: 聚合五模式选择; v3.27: SSE 实时信号; v3.26: 聚合滑块应用后回读同步
@@ -916,7 +916,7 @@ PAGES.cellular = {
           <div class="frm"><label>组网模式</label><select id="nm-endc"><option value="1">SA（独立组网）</option><option value="2">NSA（非独立）</option><option value="3">SA+NSA</option></select></div>
           <div class="frm"><label>飞行模式</label><select id="nm-air"><option value="0">关闭</option><option value="1">开启（将断网）</option></select></div>
         </div>
-        <span class="hint">组网模式：SA=独立组网，NSA=非独立（需 LTE 锚点）；仅 5G 时固定 SA</span>
+        <span class="hint">组网模式：SA=独立组网，NSA=非独立（需 LTE 锚点）；仅 5G 时固定 SA；变更后模组自动重附，约 1 分钟生效</span>
         <button class="pri" onclick="nmSave()">应用制式</button>
         <button class="ghost" onclick="nmAir()">应用飞行模式</button>
         <button class="ghost" onclick="plmnScan()">扫描可用网络（10-60s）</button>
@@ -1068,7 +1068,7 @@ window.nmEndcSync = () => {
 };
 window.nmSave = async () => {
     const j = await api("netmode_set", `mode=${$("nm-mode").value}&endc=${$("nm-endc").value}`).catch(e => ({ error: e.message }));
-    j.ok ? toast("已应用") : toast(eMsg(j.error), 1);
+    j.ok ? toast("已应用，模组重附中（约 1 分钟）") : toast(eMsg(j.error), 1);
 };
 window.plmnScan = async () => {
     const el = document.getElementById("plmn-out");

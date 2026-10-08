@@ -1,5 +1,5 @@
 #!/bin/sh
-# wan_agg.sh v2.22 — 故障转移提速(42s->~30s) 双上行聚合主管 (vendor kernel engine + iptables fallback)
+# wan_agg.sh v2.23 — 恢复迟滞(抖动churn黑洞修复) 双上行聚合主管 (vendor kernel engine + iptables fallback)
 # v2.19(2026-10-07, eth_prio 静态形态失灵根因): [键名断链] w2_alive 静态分支读
 #   UPLINK_PROBE_GW/UPLINK_GW, 而 api.sh uplink_set 与模板写的是 PROBE_GW/AUTH_GW
 #   — 有线侧探活恒空->永久判死->5G 全量接管(GUI"有线宽带优先"形同虚设, 实弹
@@ -490,9 +490,11 @@ while :; do
     if [ $S2 -eq 1 ] && [ $W2_READY -eq 0 ]; then NS2=0; D2=99; fi
     # 3 连续判死/判活 (原厂 brokenHeartCount 同款节奏, 5s 周期 -> ~15s 收敛)
     [ $S1 -eq 1 ] && [ $D1 -ge 3 ] && NS1=0
-    [ $S1 -eq 0 ] && [ $U1 -ge 3 ] && NS1=1
+    # v2.23: 恢复迟滞 U>=6 — 死亡快(25s 硬截止)恢复慢(持续通过), 掐灭抖动源
+    # (00:07:46-53 实弹: 上行策略态探活间歇通过 -> 状态抖动 -> 规则重建churn -> 8s 黑洞)
+    [ $S1 -eq 0 ] && [ $U1 -ge 6 ] && NS1=1
     [ $S2 -eq 1 ] && [ $D2 -ge 3 ] && NS2=0
-    [ $S2 -eq 0 ] && [ $U2 -ge 3 ] && NS2=1
+    [ $S2 -eq 0 ] && [ $U2 -ge 6 ] && NS2=1
     # v2.12: 主备模式注入有效态 — 待命侧恒为逻辑down(NS 仅用于真实生死判定),
     # 主力死(E主力=0)时待命侧 NS 值透传 -> 全量接班; 主力恢复 -> 待命侧归零回切
     E1=$NS1; E2=$NS2

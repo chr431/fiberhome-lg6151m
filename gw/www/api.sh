@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.56 (流量双网分别统计(erx/etx) + traffic_hist 周/月聚合端点; wifiscan 补采 40M 方向 dir; 运营商映射修正 46015/46016=中国广电; status 增 m5 五模式字段; CMGL→CMGR 逐条读: ql_ril CMGL 未读列表路径段错误; CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.57 (traffic_hist 空库边界修复; 流量双网分别统计(erx/etx) + traffic_hist 周/月聚合端点; wifiscan 补采 40M 方向 dir; 运营商映射修正 46015/46016=中国广电; status 增 m5 五模式字段; CMGL→CMGR 逐条读: ql_ril CMGL 未读列表路径段错误; CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -398,6 +398,10 @@ get_traffic_hist() {
           tod0 = int((now + 28800) / 86400) * 86400
           if (tl >= tod0) { tc += $2 + $3; te += $4 + $5 } }
         END {
+          if (mx <= 0) {   /* v2.57: 空文件/尚无数据 — 否则负 epoch 垃圾桶 */
+              printf "{\"span\":\"%s\",\"step\":%d,\"buckets\":[],\"today\":{\"c\":0,\"e\":0}}", span, step
+              exit
+          }
           start = mx - step * (n - 1)
           printf "{\"span\":\"%s\",\"step\":%d,\"buckets\":[", span, step
           for (t = start; t <= mx; t += step)

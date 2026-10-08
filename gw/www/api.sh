@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.57 (traffic_hist 空库边界修复; 流量双网分别统计(erx/etx) + traffic_hist 周/月聚合端点; wifiscan 补采 40M 方向 dir; 运营商映射修正 46015/46016=中国广电; status 增 m5 五模式字段; CMGL→CMGR 逐条读: ql_ril CMGL 未读列表路径段错误; CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.58 (wifiscan 中文 SSID: iw \xNN 转义解码为原始 UTF-8 字节 — 原样透传+tr去反斜杠=页面显示 xe8xbf... 垃圾; 历史: traffic_hist 空库边界修复; 流量双网分别统计(erx/etx) + traffic_hist 周/月聚合端点; wifiscan 补采 40M 方向 dir; 运营商映射修正 46015/46016=中国广电; status 增 m5 五模式字段; CMGL→CMGR 逐条读: ql_ril CMGL 未读列表路径段错误; CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -675,9 +675,28 @@ get_wifiscan() {
     RES="$R1
 $R2"
     echo "$RES" | awk '
+        # v2.58: iw 把非打印/非 ASCII 字节转义为 \xNN(中文 SSID 必踩) — 原来原样透传,
+        # 末端 tr -d "\" 去反斜杠后得到 "xe8xbfx9e..." 垃圾文本入 JSON;
+        # 此处按字节解码回原始 UTF-8(v>=32 且 !=127), 控制字符丢弃。
+        function unhex(c) { return index("0123456789abcdef", tolower(c)) - 1 }
+        function unesc(s,   out, i, v, h, a, b) {
+            out = ""
+            while ((i = index(s, "\\x")) > 0) {
+                out = out substr(s, 1, i - 1)
+                h = tolower(substr(s, i + 2, 2))
+                if (length(h) < 2) { out = out "x"; s = substr(s, i + 1); continue }
+                a = unhex(substr(h, 1, 1)); b = unhex(substr(h, 2, 1))
+                if (a < 0 || b < 0) { out = out "x" h; s = substr(s, i + 4); continue }
+                v = a * 16 + b
+                if (v >= 32 && v != 127) out = out sprintf("%c", v)
+                s = substr(s, i + 4)
+            }
+            return out s
+        }
         function flush() {
             if (ssid == "" || (mac in seen)) return
             seen[mac] = 1
+            ssid = unesc(ssid)
             gsub(/"/, "", ssid)
 
             band = freq+0 > 4000 ? "5G" : "2.4G"

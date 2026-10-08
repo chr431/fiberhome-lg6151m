@@ -13,7 +13,7 @@ gw/wifi_guard.sh	1.0	manifest	/data/gw/wifi_guard.sh	BA/TX 停滞自动恢复守
 gw/mipc_dial_trace.sh	1.0	manifest	/data/gw/mipc_dial_trace.sh	5G 拨号取证(xtrace 抓真参)
 gw/dial_5g.sh	1.2	manifest	/data/gw/dial_5g.sh	生产 5G 拨号器(check_ia+netagent补丁)
 gw/consfeed.sh	1.0	manifest	/data/gw/consfeed.sh	v2 控制台喂食器(无setsid,v2_access拉起)
-gw/rc_netfh.sh	3.1	manifest	/data/gw/rc_netfh.sh	路线A: FH modem栈环境(最小army, MODE.fh门控; v2.1=atci对复活修L14回归)
+gw/rc_netfh.sh	3.2	manifest	/data/gw/rc_netfh.sh	路线A: FH modem栈环境(最小army, MODE.fh门控; v3.2: shm在位判$3perms→$4size修正)
 gw/radvd.conf	1.0	manifest	/data/gw/radvd.conf	IPv6 SLAAC+RDNSS通告(br-lan, ULA fd42:9ac1:7e50::/64)
 gw/capture_ubus.sh	1.1	manifest	/data/gw/capture_ubus.sh	stock拨号一次性捕获(ubus monitor+ccmni采样)
 gw/dial_variant.sh	1.1	manifest	/data/gw/dial_variant.sh	5G 拨号参数变体实验器(iptype/apn/plmn/roam)
@@ -36,7 +36,7 @@ gw/bin/multiwan_ctl	1.1	manifest	/data/gw/multiwan_ctl	原厂multiwan引擎ioctl
 gw/bin/fhstub.so	1.0	manifest	/data/gw/fhstub.so	FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径)
 gw/led_mgr.sh	1.7	manifest	/data/gw/led_mgr.sh	原厂风格LED守护(v1.7: 信标看门狗vif枚举动态化适配访客双频; v1.4传输层改sysfs gpio; v1.6 配置统一overlay+信标看门狗)
 gw/bin/v3httpd	2.6	manifest	/data/gw/v3httpd	网关GUI HTTP服务; v2.6(P2): 静态面拒*.sh(免认证源码泄露)+Host头校验(根治DNS rebinding)
-gw/www/api.sh	2.59	manifest	/data/gw/www/api.sh	GUI JSON端点; v2.59: NTP卡片改自管配置(树退役后cfgget恒空修复)+同步全败显性报错; 历史见git
+gw/www/api.sh	2.60	manifest	/data/gw/www/api.sh	GUI JSON端点; v2.60: 蜂窝conf统一upsert(cell_set, 原写方互冲NM_MODE)+sim phone/reg迁活源; 历史见git
 gw/www/index.html	2.23	manifest	/data/gw/www/index.html	v3控制台页面(v2.23: 缓存v57)
 gw/www/style.css	2.1	manifest	/data/gw/www/style.css	控制台主题
 gw/www/app.js	3.41	manifest	/data/gw/www/app.js	控制台SPA; v3.41: NTP卡片应用后清脏标即时回显; 历史见git
@@ -78,7 +78,7 @@ tools/leak_check.py	2.2	tool	-	敏感词零命中门禁; v2.2: --history 全量�
 docs/ARCHITECTURE.md	1.1	doc	-	架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针)
 docs/GUI_TERMINOLOGY.md	1.2	doc	-	GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git
 gw/watchdog.sh	1.4	manifest	/data/gw/watchdog.sh	持续不变量看门狗(L13: 17项不变量; v1.2/L14: +蜂窝控制面 atcid自愈+CFUN探针+注册态, airplane容忍)
-tools/selftest.py	2.12	tool	-	断言式全功能测试; v2.12(P1): sse断言改token门双验(无token拒/带token出流); WANGUARD断言改default-deny语义(链尾DROP+FORWARD钩子); 历史见git
+tools/selftest.py	2.13	tool	-	断言式全功能测试; v2.13: 蜂窝conf schema适配+NTP自管断言+WiFi FW WARN中继排除; 历史见git
 tools/doc_audit.py	1.1	tool	-	台账↔文档内联标记双向审计(v1.1: 标记扫描纳入台账引用的docs/外文档如install/README.md; v1.0: 版本绑定+TEST-MISSING/STALE-CODE/UNREGISTERED-CLAIM)
 gw/src/mipc_cellular.c	0.7	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源(P1): dlopen闭包预载+ql_nw_init; v0.2: 168B结构全破译(setlock lte/nr=列表 解锁=全1; NR三段位图1-32/34-64/65-96)
 gw/bin/mipc_cellular	0.7	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI(getbands/setlock/unlock; 锁NR41+79实弹验证零扰动)

@@ -24,7 +24,9 @@ glog "===== rc_netfh v1.7 start ====="
 #   回滚开关: /data/gw/cellular_engine.conf 写 KEEP_TREE=1 恢复 cfg_tool+快照。
 KEEP_TREE=0
 [ -r /data/gw/cellular_engine.conf ] && . /data/gw/cellular_engine.conf
-if [ "$KEEP_TREE" = 1 ] && ! awk 'NR>1 && $3==16777216' /proc/sysvipc/shm 2>/dev/null | grep -q .; then
+# v3.2: shm 在位判 $3(perms)→$4(size) — /proc/sysvipc/shm 列序 key,shmid,perms,size,
+#       原判恒假(每次 KEEP_TREE=1 开机都重建 16MB 树再覆盖恢复快照)
+if [ "$KEEP_TREE" = 1 ] && ! awk 'NR>1 && $4==16777216' /proc/sysvipc/shm 2>/dev/null | grep -q .; then
     LD_LIBRARY_PATH=/lib:/fhrom/lib /fhrom/bin/cfg_tool /fhrom/fhconf/param.pdt.enc >/dev/null 2>&1
     glog "cfg_tool shm built (KEEP_TREE=1 compat mode)"
     if [ -s /data/gw/cfgtree.snap.gz ]; then

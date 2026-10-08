@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.59 (NTP 僵尸路径修复: 配置树 v3.1 已退役 -> cfg_cmd 全键恒失败(实测 shm_attach rc=-1), 时间同步卡片服务器字段改自管配置 NTP_SERVER(defaults 默认叠 settings 覆盖; 留空=gw_del 回退默认), 同步链全源失败显性 jerr sync_fail(原链式失败照报 synced:true=假成功); v2.58: wifiscan 中文 SSID: iw \xNN 转义解码为原始 UTF-8 字节 — 原样透传+tr去反斜杠=页面显示 xe8xbf... 垃圾; 历史: traffic_hist 空库边界修复; 流量双网分别统计(erx/etx) + traffic_hist 周/月聚合端点; wifiscan 补采 40M 方向 dir; 运营商映射修正 46015/46016=中国广电; status 增 m5 五模式字段; CMGL→CMGR 逐条读: ql_ril CMGL 未读列表路径段错误; CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.60 (蜂窝 conf 写方统一 upsert(cell_set): 原频段锁整文件覆盖冲掉 NM_MODE/CELL_i、celllock del 压实丢 NM_MODE、clear 重复键 — 同文件多写方互毁全消; get_sim phone/reg 迁活源 AT CNUM/CEREG 并删死树回退(树退役后恒空, 与 NTP 同族); cell_persist 仅 tree 引擎调用+shm 缺席跳过快照; v2.59: NTP 僵尸路径修复: 配置树 v3.1 已退役 -> cfg_cmd 全键恒失败(实测 shm_attach rc=-1), 时间同步卡片服务器字段改自管配置 NTP_SERVER(defaults 默认叠 settings 覆盖; 留空=gw_del 回退默认), 同步链全源失败显性 jerr sync_fail(原链式失败照报 synced:true=假成功); v2.58: wifiscan 中文 SSID: iw \xNN 转义解码为原始 UTF-8 字节 — 原样透传+tr去反斜杠=页面显示 xe8xbf... 垃圾; 历史: traffic_hist 空库边界修复; 流量双网分别统计(erx/etx) + traffic_hist 周/月聚合端点; wifiscan 补采 40M 方向 dir; 运营商映射修正 46015/46016=中国广电; status 增 m5 五模式字段; CMGL→CMGR 逐条读: ql_ril CMGL 未读列表路径段错误; CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -80,6 +80,14 @@ gw_del() {  # v2.37: gw_del <key> — 从 settings.conf 删除键(回退派生�
     K=$1; F=$GWDATA/settings.conf
     grep -v "^$K=" "$F" 2>/dev/null > "$F.new"
     mv "$F.new" "$F"
+}
+# v2.60: cellular.conf 统一 upsert — 原多写方混用整文件覆盖(频段锁 `>` 冲掉 NM_MODE/
+#   CELL_i)与 grep+append(重复键), 全部收敛到本助手(gw_set 同款原子语义)。
+cell_set() {  # cell_set <key> <value>
+    K=$1; V=$2; F=$GWDATA/cellular.conf
+    grep -v "^$K=" "$F" 2>/dev/null > "$F.new.$$"
+    echo "$K=$V" >> "$F.new.$$"
+    mv "$F.new.$$" "$F"
 }
 
 # v2.49(P2/M-5): 严格点分十进制/MAC 校验 — 原 [^0-9.] 放行 "1.2.3.4.5" 类垃圾值,
@@ -419,13 +427,18 @@ apply_traffic_limit() {
 # -- SIM / PIN (展示+PIN管理走ubus update_pin_info; 误锁风险提示在前端) --
 get_sim() {
     # v2.33: AT 直读优先(CPIN/CIMI/CCID/CGSN/COPS), 树值仅回退 — 展示面独立于 mobilenetwork
+    # v2.60: 死树回退删除 + phone/reg 迁活源(CNUM/CEREG) — 树 v3.1 退役后 cfgget 恒空,
+    #   "手机号/注册状态"两栏自退役起就恒空(与 NTP 卡片同族僵尸)。
     A_STAT=$(mipc_wan_cli --at_cmd "AT+CPIN?" 2>/dev/null | grep -oE 'CPIN: [A-Z ]+' | cut -d' ' -f2-)
     A_IMSI=$(mipc_wan_cli --at_cmd "AT+CIMI" 2>/dev/null | grep -oE '^[0-9]{15}' | head -1)
     A_ICCID=$(mipc_wan_cli --at_cmd "AT+CCID" 2>/dev/null | grep -oE '[0-9]{19,20}' | head -1)
     A_IMEI=$(mipc_wan_cli --at_cmd "AT+CGSN" 2>/dev/null | grep -oE '^[0-9]{15}' | head -1)
     A_OPS=$(mipc_wan_cli --at_cmd "AT+COPS?" 2>/dev/null | grep -oE '"[0-9]{5,6}"' | tr -d '"')
-    S=$MN_TREE.SIM.1
-    printf '{"status":"%s","imsi":"%s","iccid":"%s","carrier":"%s","imei":"%s","phone":"%s","reg":"%s","pin_state":"%s","ts":%d}'         "${A_STAT:-$(cfgget $S.SIMStatus)}" "${A_IMSI:-$(cfgget $S.IMSI)}"         "${A_ICCID:-$(cfgget $S.ICCID)}" "$(op_name "${A_OPS:-$(cfgget $S.CarrierName)}")"         "${A_IMEI:-$(cfgget $S.IMEI)}" "$(cfgget $S.PhoneNumber)"         "$(cfgget $S.RegisterStatus)" "$(mipc_wan_cli sim_pin_info_get 2>/dev/null | grep -oE 'state:[0-9]+' | cut -d: -f2)" "$(date +%s)"
+    # v2.60: CNUM=本机号(未开通即空=诚实显示); CEREG stat: 0未注册 1已注册 2搜索中 3拒绝 5漫游
+    A_NUM=$(mipc_wan_cli --at_cmd "AT+CNUM" 2>/dev/null | grep -oE '\+CNUM: *"[^"]*","[+0-9]+"' | sed 's/.*"\(+[0-9]*\)"$/\1/')
+    A_REG=$(mipc_wan_cli --at_cmd "AT+CEREG?" 2>/dev/null | grep -oE 'CEREG: *[0-9],[0-9]' | grep -oE '[0-9]$')
+    [ -n "$A_REG" ] || A_REG=$(mipc_wan_cli --at_cmd "AT+CREG?" 2>/dev/null | grep -oE 'CREG: *[0-9],[0-9]' | grep -oE '[0-9]$')
+    printf '{"status":"%s","imsi":"%s","iccid":"%s","carrier":"%s","imei":"%s","phone":"%s","reg":"%s","pin_state":"%s","ts":%d}'         "${A_STAT:-}" "${A_IMSI:-}"         "${A_ICCID:-}" "$(op_name "${A_OPS:-}")"         "${A_IMEI:-}" "$A_NUM"         "${A_REG:-}" "$(mipc_wan_cli sim_pin_info_get 2>/dev/null | grep -oE 'state:[0-9]+' | cut -d: -f2)" "$(date +%s)"
 }
 apply_pin() {
     # v2.33 (P3.5): AT 直发引擎 — 厂商序列(mobilenetwork strings 实证):
@@ -513,8 +526,7 @@ apply_netmode() {
         E=$(erat_of "$M") || jerr bad_mode
         R=$(mipc_wan_cli --at_cmd "AT+erat=$E" 2>/dev/null | grep -c OK)
         [ "$R" -ge 1 ] || jerr at_fail
-        sed -i '/^NM_MODE=/d' $GWDATA/cellular.conf 2>/dev/null
-        echo "NM_MODE=$M" >> $GWDATA/cellular.conf
+        cell_set NM_MODE "$M"   # v2.60: upsert(原 sed 删+append, 等价但统一助手)
         ok_json '"engine":"mipc","erat":"'"$E"'"'
         return
     fi
@@ -983,8 +995,9 @@ apply_bandlock() {
         RET=$(printf '%s' "$R" | grep -oE 'ret=[0-9-]+' | tail -1 | cut -d= -f2)
         [ "$RET" = 0 ] || jerr mipc_fail
         # 状态持久化到自管 conf (mipc 模式不写树; 树同步由 mobilenetwork 上报被动跟随)
-        { echo "BAND_EN=$EN"; echo "LTE_MASK=$LTE"; echo "NR_MASK=$NR";
-          echo "CELL_EN=0"; } > $GWDATA/cellular.conf
+        # v2.60: 整文件覆盖改 cell_set upsert — 原写法冲掉 NM_MODE 与 CELL_i 表(跨功能状态互毁)
+        cell_set BAND_EN "$EN"; cell_set LTE_MASK "$LTE"; cell_set NR_MASK "$NR"
+        cell_set CELL_EN 0
         ok_json '"engine":"mipc","note":"modem重扫约20-60s"'
         return
     fi
@@ -1045,35 +1058,34 @@ apply_celllock() {
                 i=$((i+1))
             done
             [ $i -gt 20 ] && jerr list_full
-            grep -v "^CELL_$i=" "$CONF" 2>/dev/null > /tmp/cl.$$; echo "CELL_$i=$ACT:$ARF:$PC" >> /tmp/cl.$$
-            mv /tmp/cl.$$ "$CONF"
+            cell_set "CELL_$i" "$ACT:$ARF:$PC"
             ;;
         del)
             IDX=$(form_kv idx); echo "$IDX" | grep -qE '^[0-9]+$' || jerr bad_idx
             [ "$IDX" -ge 1 ] && [ "$IDX" -le 20 ] || jerr bad_idx
-            grep -v "^CELL_$IDX=" "$CONF" 2>/dev/null > /tmp/cl.$$ && mv /tmp/cl.$$ "$CONF"
-            # 压实槽位(防空洞)
-            awk -F= '/^CELL_[0-9]+=/{print} /^(BAND_EN|LTE_MASK|NR_MASK|CELL_EN)=/{print}' "$CONF" > /tmp/cl2.$$
+            grep -v "^CELL_$IDX=" "$CONF" 2>/dev/null > "$CONF.new.$$" && mv "$CONF.new.$$" "$CONF"
+            # 压实槽位(防空洞); v2.60: 保留其余键(NM_MODE 等) — 原 awk 白名单
+            #   只回写 CELL_*/锁键, del 一次就把 NM_MODE 冲掉
+            grep -v '^CELL_' "$CONF" 2>/dev/null > "$CONF.new.$$"
             n=1; grep -oE '^CELL_[0-9]+=[^[:space:]]+' "$CONF" | cut -d= -f2- | while read -r e; do
-                [ -n "$e" ] && { echo "CELL_$n=$e" >> /tmp/cl2.$$; n=$((n+1)); }
+                [ -n "$e" ] && { echo "CELL_$n=$e" >> "$CONF.new.$$"; n=$((n+1)); }
             done
-            mv /tmp/cl2.$$ "$CONF"
+            mv "$CONF.new.$$" "$CONF"
             ;;
         clear)
-            grep -v '^CELL_' "$CONF" 2>/dev/null > /tmp/cl.$$ || true
-            mv /tmp/cl.$$ "$CONF"
-            sed -i 's/^CELL_EN=.*/CELL_EN=0/' "$CONF" 2>/dev/null || echo "CELL_EN=0" >> "$CONF"
+            grep -v '^CELL_' "$CONF" 2>/dev/null > "$CONF.new.$$" || true
+            mv "$CONF.new.$$" "$CONF"
+            cell_set CELL_EN 0
             ;;
         *) jerr bad_op ;;
         esac
         celllock_forget_env
         . "$CONF"
-        # 全量下发 + 互斥(开小区锁时解锁频段)
+        # 全量下发 + 互斥(开小区锁时解锁频段); v2.60: sed/裸 append 改 cell_set(防重复键)
         if [ "$OP" = add ]; then
-            [ "${BAND_EN:-0}" = 1 ] && { /data/gw/mipc_cellular unlock >/dev/null 2>&1; sed -i 's/^BAND_EN=1/BAND_EN=0/' "$CONF"; }
-            sed -i 's/^CELL_EN=.*/CELL_EN=1/' "$CONF" 2>/dev/null || echo "CELL_EN=1" >> "$CONF"
+            [ "${BAND_EN:-0}" = 1 ] && { /data/gw/mipc_cellular unlock >/dev/null 2>&1; cell_set BAND_EN 0; }
+            cell_set CELL_EN 1
         elif [ "$OP" = clear ]; then
-            echo "CELL_EN=0" >> "$CONF"
             [ "${BAND_EN:-0}" = 1 ] && /data/gw/mipc_cellular setlock lte="${LTE_MASK:-all}" nr="${NR_MASK:-all}" >/dev/null 2>&1
         fi
         celllock_forget_env
@@ -1120,21 +1132,22 @@ apply_celllock() {
     ok_json
 }
 
-# 持久化到自管 conf (cfgmgr树每次开机由出厂档案重建, rc_netfh 开机重放)
+# 持久化到自管 conf — v2.60: 仅 tree 引擎(兼容回滚路径)调用; upsert 保 NM_MODE 等他键
+#   (原整文件覆盖); mipc 引擎的写方在各 apply 内联 cell_set。
 cell_persist() {
     NS=$FH_TREE.NetworkSettings
-    {
-        echo "BAND_EN=$(cfgget $NS.LockBandEnable)"
-        echo "LTE_MASK=$(cfgget $NS.LTELockBAND)"
-        echo "NR_MASK=$(cfgget $NS.NRLockBAND)"
-        echo "CELL_EN=$(cfgget $FH_TREE.LockCellList.LockEnable)"
-        i=1; while [ $i -le 20 ]; do
-            A=$(cfgget $FH_TREE.LockCellList.LockCell.$i.arfcn); [ -z "$A" ] && break
-            echo "CELL_$i=$(cfgget $FH_TREE.LockCellList.LockCell.$i.act):$A:$(cfgget $FH_TREE.LockCellList.LockCell.$i.pci)"
-            i=$((i+1))
-        done
-    } > /data/gw/cellular.conf
+    cell_set BAND_EN "$(cfgget $NS.LockBandEnable)"
+    cell_set LTE_MASK "$(cfgget $NS.LTELockBAND)"
+    cell_set NR_MASK "$(cfgget $NS.NRLockBAND)"
+    cell_set CELL_EN "$(cfgget $FH_TREE.LockCellList.LockEnable)"
+    i=1; while [ $i -le 20 ]; do
+        A=$(cfgget $FH_TREE.LockCellList.LockCell.$i.arfcn); [ -z "$A" ] && break
+        cell_set "CELL_$i" "$(cfgget $FH_TREE.LockCellList.LockCell.$i.act):$A:$(cfgget $FH_TREE.LockCellList.LockCell.$i.pci)"
+        i=$((i+1))
+    done
     # 树快照(16MB→~127KB): 开机 cfg_tool 建出厂树后整体恢复, 锁定跨重启
+    # v2.60: shm 不在(树退役态)时跳过 — 原静默失败留误导性假快照链
+    [ -n "$(awk 'NR>1 && $4==16777216' /proc/sysvipc/shm 2>/dev/null)" ] && \
     /data/gw/shmsnap save /tmp/cfgtree.snap >/dev/null 2>&1 &&         gzip -c /tmp/cfgtree.snap > /data/gw/cfgtree.snap.gz 2>/dev/null &&         rm -f /tmp/cfgtree.snap
 }
 

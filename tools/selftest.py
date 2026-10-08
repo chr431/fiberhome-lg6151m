@@ -11,6 +11,10 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
+v2.13 (2026-10-08): 蜂窝 conf 多写方 schema 适配(锁键∪NM_MODE, api.sh v2.60 cell_set
+  upsert 后纯制式态不再误判"无 BAND_EN"); +NTP 自管配置生效断言(defaults叠settings,
+  僵尸读回归护栏); +WiFi 固件 WARN 中继(WiFi@WARN.FW,UniCmdResultRsp, 字面 BUG::)
+  排除出 OOPS 计数 — 实测>1天 400+ 条而 WiFi/整机全程正常=良性固件噪声。
 v1.1 (L14, 2026-10-05): phase-1 strip killed atcid -> AT channel (SMS/CSQ/
 lock dispatch) died silently for 3 days while every data-plane test stayed
 green. Coverage now spans EVERY consumer surface: all 18 GET endpoints
@@ -727,16 +731,28 @@ def t_cel_lockcons():
         out = dev("ls -la /data/gw/mipc_cellular 2>/dev/null | grep -c '^-rwx'")
         if out.strip() != "1":
             mism.append("mipc_cellular 缺失/不可执行")
-        be = re.search(r"BAND_EN=(\d)", conf)
-        ce = re.search(r"CELL_EN=(\d)", conf)
+        if not dev("ls /data/gw/cellular_replay.sh 2>/dev/null").strip():
+            mism.append("cellular_replay.sh 缺失(conf 为其开机重放源)")
+        # v2.13: conf 是多写方共享文件(api.sh v2.60 cell_set 统一 upsert):
+        #   键集合 {BAND_EN,LTE_MASK,NR_MASK,CELL_EN,CELL_i,NM_MODE}; 无锁键但含
+        #   NM_MODE = 合法"未设锁"态(原判"非空必含 BAND_EN"误伤纯制式设置)。
+        lines = [l for l in conf.splitlines() if l.strip()]
+        keys = [l.split("=", 1)[0] for l in lines if "=" in l]
+        dup = sorted({k for k in keys if keys.count(k) > 1})
+        if dup:
+            mism.append("重复键:" + ",".join(dup))
+        bad = [l for l in lines if "=" not in l or not re.match(
+            r"^(BAND_EN|LTE_MASK|NR_MASK|CELL_EN|NM_MODE|CELL_[0-9]+)=", l)]
+        if bad:
+            mism.append("conf 非法行:" + bad[0][:24])
+        be = re.search(r"^BAND_EN=([01])$", conf, re.M)
+        ce = re.search(r"^CELL_EN=([01])$", conf, re.M)
+        if re.search(r"^BAND_EN=", conf, re.M) and not be:
+            mism.append("BAND_EN 值域非 0/1")
+        if re.search(r"^CELL_EN=", conf, re.M) and not ce:
+            mism.append("CELL_EN 值域非 0/1")
         if be and ce and be.group(1) == "1" and ce.group(1) == "1":
             mism.append("频段锁与小区锁互斥违反")
-        # v2.8: 首刷态 cellular.conf 尚未生成 = 从未设锁 = 一致(与 tree 分支同语义)
-        if not be:
-            if not conf.strip():
-                record(t_cel_lockcons._test_name, "cellular", True, "no lock conf (virgin)")
-                return
-            mism.append("cellular.conf 无 BAND_EN")
     else:
         if not conf.strip():
             record(t_cel_lockcons._test_name, "cellular", True, "no lock conf")
@@ -930,8 +946,13 @@ def t_sys_kernel():
     # 排除 aee_aed ipanic 探测噪声 / *_panic_* initcall / ramoops 初始化行;
     # 真 Oops:/BUG:/panic 必须为 0
     out = dev("dmesg | grep -iE 'Oops:|BUG:|panic'")
+    # v2.13: +排除 MTK WiFi 固件 WARN 中继(HwCtrlTask_0: WiFi@WARN.FW,UniCmdResultRsp
+    #   ... BUG::UniCmdResult.u4Status=0xc0000001 cid=0x2) — 固件单行 warn 中继, 非内核
+    #   Oops(无寄存器dump/无调用栈), 实测>1天 400+ 条而 WiFi/整机全程正常=良性噪声;
+    #   "BUG::" 只是固件日志字面串。其它 HwCtrlTask/WiFi@WARN 形态仍计为真事件。
     real = [l for l in out.splitlines()
-            if not any(k in l for k in ("aee_aed", "_panic_", "ramoops", "panic_on_taint"))]
+            if not any(k in l for k in ("aee_aed", "_panic_", "ramoops", "panic_on_taint",
+                                        "WiFi@WARN.FW,UniCmdResultRsp"))]
     record(t_sys_kernel._test_name, "system", len(real) == 0,
            f"events={len(real)} (噪声已滤)" + (f" first={real[0][:80]}" if real else ""))
 
@@ -964,6 +985,23 @@ def t_sys_clock():
     out = dev("date +%Y").strip()
     ok = out.isdigit() and abs(int(out) - y) <= 1
     record(t_sys_clock._test_name, "system", ok, f"dev={out} pc={y}")
+
+
+@test("NTP 服务器自管配置生效 (defaults叠settings)")
+def t_sys_ntp():
+    # api.sh v2.59+: 树退役后 NTP 走自管 conf — API 必须回叠加持有效值
+    # (settings 覆盖 > defaults 出厂 > 内置兜底), 否则即僵尸读回归
+    tok = _token()
+    if tok is None:
+        record(t_sys_ntp._test_name, "system", True, "skip (no GUI_PASS)")
+        return
+    j = api("ntp", tok)
+    # cat settings 在前 defaults 在后, 取最后一条 NTP_SERVER = 叠加持有效值
+    srv = dev("cat /data/gw/settings.conf /data/gw/defaults.conf 2>/dev/null | "
+              "grep '^NTP_SERVER=' | tail -1 | cut -d= -f2-").strip() or "ntp.aliyun.com"
+    ok = bool(j.get("ntp_server")) and bool(j.get("date")) and j["ntp_server"] == srv
+    record(t_sys_ntp._test_name, "system", ok,
+           j["ntp_server"] if ok else f"api={j.get('ntp_server')!r} conf={srv!r}")
 
 
 # =================================================================

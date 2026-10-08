@@ -75,8 +75,8 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/udhcpc_wan.script` | **v1.0** | manifest | `/data/gw/udhcpc_wan.script` | WAN口 udhcpc 事件钩子(接口无关化) |
 | `gw/v2_access.sh` | **v6.1** | manifest | `/data/gw/v2_access.sh` | v2 极简访问层(串口/SSH/DHCP/防火墙22,零守护干涉) |
 | `gw/v3_babysit_v2.sh` | **v2.0** | manifest | `/data/gw/babysit_v2.sh` | 启动保姆(T1杀rcS/T2核爆回B) |
-| `gw/v3_rc10.extend.sh` | **v2.25** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2; v2.21: static档案开机重应用(MAC伪装/IP断电丢失实弹修复); v2.20: dnsmasq rebind防护+DHCP读settings; 历史见git |
-| `gw/wan_agg.sh` | **v2.24** | manifest | `/data/gw/wan_agg.sh` | 双上行聚合主管(v2.17: v4免插件配方(statistic插件缺libxtables.so.12/mac插件不存在——v4分流自精简启动以来从未生效): 源端口区间分流(v6同款)+钉死改源IP(邻居解析+漂移重建); v2.15: 聚合总开关ENABLE=0旁路/1参战, 热切+GUI agg_mode; 照抄原厂quecadp内核分流+fwmark路由; v1.7 to-LAN护盾规则自愈(全灭黑洞终根因) |
+| `gw/v3_rc10.extend.sh` | **v2.26** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2; v2.21: static档案开机重应用(MAC伪装/IP断电丢失实弹修复); v2.20: dnsmasq rebind防护+DHCP读settings; 历史见git |
+| `gw/wan_agg.sh` | **v2.25** | manifest | `/data/gw/wan_agg.sh` | 双上行聚合主管(v2.17: v4免插件配方(statistic插件缺libxtables.so.12/mac插件不存在——v4分流自精简启动以来从未生效): 源端口区间分流(v6同款)+钉死改源IP(邻居解析+漂移重建); v2.15: 聚合总开关ENABLE=0旁路/1参战, 热切+GUI agg_mode; 照抄原厂quecadp内核分流+fwmark路由; v1.7 to-LAN护盾规则自愈(全灭黑洞终根因) |
 | `gw/watchdog.sh` | **v1.4** | manifest | `/data/gw/watchdog.sh` | 持续不变量看门狗(L13: 17项不变量; v1.2/L14: +蜂窝控制面 atcid自愈+CFUN探针+注册态, airplane容忍) |
 | `gw/webs_revive.sh` | **v1.3** | manifest | `/data/gw/webs_revive.sh` | 原厂GUI复活器(自足nginx conf; 手动拉起) |
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
@@ -110,7 +110,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/health_check.py` | **v1.1** | tool | `-` | v4全系统体检器(SSH 18项; v1.1 fw_ver读/data/gw/VERSIONS: 身份/槽位/bootctrl/服务/WiFi/5G/外网/资源/温度/存储/数据/日志) |
 | `tools/identify2.py` | **v1.0** | tool | `-` | 残留终验取证器(user_data清单/p26纯净性挂载验证/proc-net快照) |
 | `tools/identify_fw.py` | **v1.0** | tool | `-` | 只读固件身份取证器(release/cmdline/v4标记/挂载表; 前置空格防tty首字符丢失) |
-| `tools/leak_check.py` | **v2.0** | tool | `-` | 敏感词零命中门禁; v2.0(P2/PC-M4): 个人PII模式外置_local/secrets/leak_patterns.py(源内仅留仓纪律词; 拼接构造可被人眼拼回=自泄); 历史见git |
+| `tools/leak_check.py` | **v2.1** | tool | `-` | 敏感词零命中门禁; v2.1: 修复 --history 全历史扫描(PAT_PARTS未定义NameError, 从未真正跑过); v2.0(P2/PC-M4): 个人PII模式外置_local/secrets/leak_patterns.py; 历史见git |
 | `tools/lgssh.py` | **v1.3** | tool | `-` | SSH助手(env/_local/secrets凭证; run()命令通道); v1.3: 主机密钥指纹钉死PinPolicy(HOST_KEY_FP/LG_HOST_KEY_FP, 认证前校验, 审计P0-5) |
 | `tools/lk_eth1_resume.py` | **v1.1** | tool | `-` | eth1续链器(LK控制台接管: kcmdline已注入态恢复; 含misc回退现场抓取; 补登记) |
 | `tools/lk_flash_v4.py` | **v1.1** | tool | `-` | v1.1路径随项目根迁移; 终版刷入器(LK陷阱→raw shell→/dev/null修复→curl送deploy2.sh→后台自驱+轮询deploy.log→重启监测; 修三雷: uclient罢工/&需/dev/null/串口前台等待吃首字符) |

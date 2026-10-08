@@ -1,5 +1,6 @@
 #!/bin/sh
-# wan_agg.sh v2.24 — 协议级检测(authd 会话信号, <=5s 故障转移) 双上行聚合主管 (vendor kernel engine + iptables fallback)
+# wan_agg.sh v2.25 — 协议级检测(authd 会话信号, <=5s 故障转移) 双上行聚合主管 (vendor kernel engine + iptables fallback)
+# v2.25: 中性命名清扫(注释去私有语境词, 零功能改动)
 # v2.19(2026-10-07, eth_prio 静态形态失灵根因): [键名断链] w2_alive 静态分支读
 #   UPLINK_PROBE_GW/UPLINK_GW, 而 api.sh uplink_set 与模板写的是 PROBE_GW/AUTH_GW
 #   — 有线侧探活恒空->永久判死->5G 全量接管(GUI"有线宽带优先"形同虚设, 实弹

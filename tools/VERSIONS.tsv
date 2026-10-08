@@ -1,9 +1,9 @@
 # VERSIONS.tsv (public export -- rows filtered to exported set)
 #VER-REGISTRY
 gw/rc.extend.sh	2.1	manifest	/data/rc.extend.sh	槽位调度器; v2.1(P3): shadow.override合法性校验+.bak回退自愈(坏文件不再锁死SSH+串口); v2.0: 开机清token; 历史见git
-gw/v3_rc10.extend.sh	2.25	manifest	/data/gw/rc19.sh	v3 启动编排 rc19v2; v2.21: static档案开机重应用(MAC伪装/IP断电丢失实弹修复); v2.20: dnsmasq rebind防护+DHCP读settings; 历史见git
+gw/v3_rc10.extend.sh	2.26	manifest	/data/gw/rc19.sh	v3 启动编排 rc19v2; v2.21: static档案开机重应用(MAC伪装/IP断电丢失实弹修复); v2.20: dnsmasq rebind防护+DHCP读settings; 历史见git
 gw/wifi_up.sh	1.26	manifest	/data/gw/wifi_up.sh	mt7992 AP 工厂配方(v1.26: 终端频段锁定band_pins.conf→对侧频段main BSS deny ACL(macaddr_acl=0+deny_mac_file, 指令支持已实证); 无pin时conf与v1.25逐字节一致; 历史版本见git)
-gw/wan_agg.sh	2.24	manifest	/data/gw/wan_agg.sh	双上行聚合主管(v2.17: v4免插件配方(statistic插件缺libxtables.so.12/mac插件不存在——v4分流自精简启动以来从未生效): 源端口区间分流(v6同款)+钉死改源IP(邻居解析+漂移重建); v2.15: 聚合总开关ENABLE=0旁路/1参战, 热切+GUI agg_mode; 照抄原厂quecadp内核分流+fwmark路由; v1.7 to-LAN护盾规则自愈(全灭黑洞终根因)
+gw/wan_agg.sh	2.25	manifest	/data/gw/wan_agg.sh	双上行聚合主管(v2.17: v4免插件配方(statistic插件缺libxtables.so.12/mac插件不存在——v4分流自精简启动以来从未生效): 源端口区间分流(v6同款)+钉死改源IP(邻居解析+漂移重建); v2.15: 聚合总开关ENABLE=0旁路/1参战, 热切+GUI agg_mode; 照抄原厂quecadp内核分流+fwmark路由; v1.7 to-LAN护盾规则自愈(全灭黑洞终根因)
 gw/traffic_logger.sh	1.1	manifest	/data/gw/traffic_logger.sh	蜂窝/以太网流量采样器(5min 增量落 /data/gw/traffic_hist.tsv; 漂移解析+回绕自洽+40天裁剪)
 gw/udhcpc_wan.script	1.0	manifest	/data/gw/udhcpc_wan.script	WAN口 udhcpc 事件钩子(接口无关化)
 gw/healthdog.sh	1.1	manifest	/data/gw/healthdog.sh	看门狗用户态心跳
@@ -74,7 +74,7 @@ gw/src/v3httpd.c	2.6	src	gw/bin/v3httpd	GUI HTTP服务源码; v2.6: 同产物
 gw/src/wpapmk.c	1.0	src	gw/bin/wpapmk	WPA PMK转换源码(纯C PBKDF2)
 gw/src/fhstub.c	1.0	src	gw/bin/fhstub.so	FH符号桩库源码
 gw/defaults.conf	1.3	manifest	/data/gw/defaults.conf	统一配置只读出厂基线(444); 消费方source叠加settings.conf稀疏覆盖
-tools/leak_check.py	2.0	tool	-	敏感词零命中门禁; v2.0(P2/PC-M4): 个人PII模式外置_local/secrets/leak_patterns.py(源内仅留仓纪律词; 拼接构造可被人眼拼回=自泄); 历史见git
+tools/leak_check.py	2.1	tool	-	敏感词零命中门禁; v2.1: 修复 --history 全历史扫描(PAT_PARTS未定义NameError, 从未真正跑过); v2.0(P2/PC-M4): 个人PII模式外置_local/secrets/leak_patterns.py; 历史见git
 docs/ARCHITECTURE.md	1.1	doc	-	架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针)
 docs/GUI_TERMINOLOGY.md	1.2	doc	-	GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git
 gw/watchdog.sh	1.4	manifest	/data/gw/watchdog.sh	持续不变量看门狗(L13: 17项不变量; v1.2/L14: +蜂窝控制面 atcid自愈+CFUN探针+注册态, airplane容忍)

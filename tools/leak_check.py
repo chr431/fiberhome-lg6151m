@@ -74,7 +74,9 @@ def scan_history(hits):
         scan_text("COMMIT-MSG " + line[:12], line, hits)
     revs = sh_out(["git", "rev-list", "--all"]).split()
     if revs:
-        out = sh_out(["git", "grep", "-l", "-i", "-E", "|".join(PAT_PARTS)] + revs)
+        # v2.1: 修 v2.0 重构遗留 — PAT_PARTS 未定义(NameError), --history 实际从未跑通过
+        out = sh_out(["git", "grep", "-l", "-i", "-E",
+                      "|".join(PAT_GENERIC + PERSONAL)] + revs)
         for line in out.splitlines():
             if line.strip():
                 hits.append("HISTORY: " + line[:200])

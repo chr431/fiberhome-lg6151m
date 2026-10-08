@@ -1,5 +1,6 @@
 #!/bin/sh
-# rc19.sh v2 (=local v3_rc10.extend.sh) v2.25 -- Frankenstein v3.1: br-lan world + WiFi.
+# rc19.sh v2 (=local v3_rc10.extend.sh) v2.26 -- Frankenstein v3.1: br-lan world + WiFi.
+# v2.26: 中性命名清扫(注释去私有语境词, 零功能改动)
 # v2.25: 流量采样器接线(traffic_logger.sh)
 # v2.22(P1): static 档案补写 /tmp/wan.gw — wan_agg 表200默认路由与 eth_prio
 #   主表切换以此为 BB_GW 源, 静态形态无人写 = 表200恒空(与 wan_agg v2.19 键链

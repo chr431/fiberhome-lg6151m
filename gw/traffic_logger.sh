@@ -1,5 +1,5 @@
 #!/bin/sh
-# traffic_logger.sh v1.0 — 蜂窝/以太网流量采样器(5 分钟粒度, /data 持久)
+# traffic_logger.sh v1.1 — 蜂窝/以太网流量采样器(5 分钟粒度, /data 持久)
 # 输出: /data/gw/traffic_hist.tsv  每行: epoch drx_c dtx_c drx_e dtx_e (字节增量)
 # 语义: 增量为"距上次采样"; 计数器回绕/接口重建(ccmni 漂移)/重启(新值<旧值)
 #       按新值计(=计数器自身纪元的累计, 自洽); prev 存 /tmp(重启后首拍即
@@ -18,7 +18,13 @@ while :; do
     ERC=$(cat /sys/class/net/eth0/statistics/rx_bytes 2>/dev/null || echo 0)
     ETC=$(cat /sys/class/net/eth0/statistics/tx_bytes 2>/dev/null || echo 0)
     PC=0; PT=0; PE=0; PF=0
-    [ -r $ST ] && . $ST
+    # v1.1: 首次(无 prev)只建基线不入账 — 否则首拍 = 计数器纪元总量, 3GB 级假尖峰
+    if [ ! -r $ST ]; then
+        echo "PC=$CRC; PT=$CTC; PE=$ERC; PF=$ETC" > $ST
+        sleep 300
+        continue
+    fi
+    . $ST
     DC=$((CRC-PC)); [ $DC -lt 0 ] && DC=$CRC
     DT=$((CTC-PT)); [ $DT -lt 0 ] && DT=$CTC
     DE=$((ERC-PE)); [ $DE -lt 0 ] && DE=$ERC

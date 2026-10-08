@@ -70,7 +70,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/radvd.conf` | **v1.0** | manifest | `/data/gw/radvd.conf` | IPv6 SLAAC+RDNSS通告(br-lan, ULA fd42:9ac1:7e50::/64) |
 | `gw/rc.extend.sh` | **v2.1** | manifest | `/data/rc.extend.sh` | 槽位调度器; v2.1(P3): shadow.override合法性校验+.bak回退自愈(坏文件不再锁死SSH+串口); v2.0: 开机清token; 历史见git |
 | `gw/rc_netfh.sh` | **v3.1** | manifest | `/data/gw/rc_netfh.sh` | 路线A: FH modem栈环境(最小army, MODE.fh门控; v2.1=atci对复活修L14回归) |
-| `gw/traffic_logger.sh` | **v1.0** | manifest | `/data/gw/traffic_logger.sh` | 蜂窝/以太网流量采样器(5min 增量落 /data/gw/traffic_hist.tsv; 漂移解析+回绕自洽+40天裁剪) |
+| `gw/traffic_logger.sh` | **v1.1** | manifest | `/data/gw/traffic_logger.sh` | 蜂窝/以太网流量采样器(5min 增量落 /data/gw/traffic_hist.tsv; 漂移解析+回绕自洽+40天裁剪) |
 | `gw/udhcpc_eth1.script` | **v1.0** | manifest | `/data/gw/udhcpc_eth1.script` | eth1口 udhcpc 事件钩子(补登记) |
 | `gw/udhcpc_wan.script` | **v1.0** | manifest | `/data/gw/udhcpc_wan.script` | WAN口 udhcpc 事件钩子(接口无关化) |
 | `gw/v2_access.sh` | **v6.1** | manifest | `/data/gw/v2_access.sh` | v2 极简访问层(串口/SSH/DHCP/防火墙22,零守护干涉) |

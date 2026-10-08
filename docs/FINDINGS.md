@@ -96,3 +96,40 @@
 - paramiko 对本机 dropbear 大块 stdin 会劣化断链：大文件走 HTTP depot（设备 wget）/ curl scp
 - 串口 tcpdump 抓不到桥成员口流量；adb pull 在 Git Bash 需 MSYS_NO_PATHCONV=1
 - 版本注册表（tools/VERSIONS.tsv）是唯一版本事实源，vercheck fail-closed
+
+## 10. 蜂窝组网模式（SA/NSA/SA+NSA）与 modem AT 语义（2026-10-08/09）
+
+- 官方固件有独立"组网模式"维度（RP103 备份 `/www/html/src/content/pages/networkSet.js`
+  明文源码）：ENDC 下拉 SA=1 / NSA=2 / SA+NSA=3，与"网络模式"（0=仅4G / 2=仅5G /
+  3=5G优先 / 4=仅3G）并列；联动规则：NetworkMode==2（仅5G）时强制 SA 并隐藏 NSA 选项
+  （NSA 需 LTE 锚点），仅4G/3G 整行隐藏。树键
+  `InternetGatewayDevice.X_FH_MobileNetwork.NetworkSettings.ENDC`。
+- 下发通道**不走 AT**：mobilenetwork `fh_set_endc`@0x40a8bc 调 libqlril
+  **`ql_nw_set_nr_disable_mode(3|5|7)`**（SA→3 / NSA→5 / SA+NSA→7；非 7 目标先 restore 7；
+  位掩码 bit0 恒 1、bit1=SA、bit2=NSA —— 位切分推断，值集有实证）。
+  libqlril 同时导出 `ql_nw_get_nr_disable_mode`（读回校验用）。自研复刻：
+  `mipc_cellular endc get|set`（同库同 dlopen 闭包通道，v0.8）+ api.sh `netmode` 增
+  `endc` 字段 + GUI"组网模式"下拉（联动规则照抄）+ 变更自动重附。 <!--CLM:CLM-ENDC-NRMODE-->
+- **ECNCFG 陷阱**：`AT+ECNCFG=1,1,0,0,0,0` / `=1,0,...` 字符串在 mobilenetwork 里与
+  endc 代码相邻，极易误读为 ENDC；md1img 格式串
+  `update ECNCFG: data_en, data_roam_en, domestic, international` 实证它是**漫游/数据
+  开关**（由 RoamingEnable 树键驱动）。AT 表面语义以 modem 镜像串/调用点为准。
+- **E5GOPT ≡ 同一旋钮的 AT 层镜像**：modem 侧 `l5ath_e5gopt_cmd_handle` → 内部消息
+  `SET_CACHE_ENDC_CONNECT_MODE_REQ/CNF` → SASE `vg_option` 通路 → NAS/nwsel 异步传播。
+  双观测互证：ql API 写 3 时 E5GOPT 读数同步 7→3；值集 {3,5,7} 与 SDK 完全一致。
+  **缓存型配置**（消息名即 CACHE）：写回只改缓存，在下一次连接决策才消费 ——
+  LTE 驻留时改组网模式/制式，**不会自发重选回 NR-SA**（重发 AT+ERAT 也不触发），
+  必须重附（CFUN 循环，厂商飞行同款）。产品化：api.sh netmode_set 检测实际变更后
+  自动后台重附（幂等重应用不打扰，keeper 约 40s 重拨）。
+- **ERAT 字段语义**（md1img 解析串 `parse_erat` + 范围串）：响应
+  `<act>,<gprs>,<rat_mode>,<pref_rat>,<lock>` 5 字段；act=当前服务 RAT（3GPP AcT：
+  7=LTE、11=NR；255 为写入后瞬态）；rat_mode 为配置值（本机恒 19,0；位分解推断
+  GSM1+NR2+LTE16，20/21 亦被接受）；带 retry timer 且写 NVRAM（持久化）。
+- 模组身份：**Quectel RG620T-EG**（MTK MT6990 平台）——高通系 `QNWPREFCFG` 直接
+  CME ERROR 4，勿套用高通手册。SA/NSA 只读判别（固件内证实存在的查询）：
+  `AT+C5GREG?`（5GS 注册态）、`AT+C5GPNSSAI?`（5GC 注册才下发 = SA 指纹）、
+  `AT+QNWCFG="lte_rsrp"` + `"nr5g_ssb_rsrp"` 并存 = NSA 锚点指纹、`AT+ECELLMEAS`
+  （带 rat 字段的小区实测）。
+- 三档实弹（产品路径 netmode_set）：SA→持续 NR（N41/N79）；NSA→回落 LTE（本网
+  未观测到 NSA 承载，符合锚点语义）；SA+NSA→NR。每档 conf/API/模组读回三层一致
+  （selftest `t_cel_endc`）；变更自动重附后 75s 内新态生效。

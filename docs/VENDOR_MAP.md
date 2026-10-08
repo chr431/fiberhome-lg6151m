@@ -132,6 +132,9 @@ fhrom 之外另有 usr/lib 的 Quectel SDK 层：libqlril(133K, ql_nw_* 55+/ql_s
 | SIM/PIN | ql_ril_service | MIPC TLV (ubus ril ril_request) |
 | 信号上报 | ql_ril_service→ril.unsol.nw.signal | MIPC IND→ubus notify |
 | 制式切换 | mobilenetwork | **AT+erat=n** |
+| **组网模式(SA/NSA/双)** | mobilenetwork fh_set_endc | **libqlril ql_nw_set_nr_disable_mode（纯 MIPC 无 AT；3=SA/5=NSA/7=双，非 7 值先 restore 7）** |
+| 漫游开关 | mobilenetwork | **AT+ECNCFG=1,{0\|1},0,0,0,0**（data_en/roam_en —— 与 ENDC 无关，勿混淆） |
+| 组网选项 AT 镜像 | （modem 内部 l5ath→SET_CACHE_ENDC_CONNECT_MODE） | **AT+E5GOPT=n**（值域同上 3/5/7；缓存型，写回需重附生效） |
 | 飞行模式 | mobilenetwork ql_dm_set_air_plane_mode | MIPC + AT+CFUN 恢复链 |
 | **锁频段** | mobilenetwork fh_process_lock_band | **libqlril ql_nw_set_band_mode（纯 MIPC，无 AT）** |
 | 锁小区 | mobilenetwork | **AT+EMMCHLCK**（另有 ql_nw_set_cell_arfcn_lock 原生路）|

@@ -74,6 +74,7 @@
 | 短信 | 收(MIPC IND→树)+发(mn_send_sms) | 收(AT+CMGL 只读)；发禁用(CMGS 交互毒死承载) | `▼` 只收不发是工程取舍 |
 | 流量统计/限额 | mobilenetwork 轮询 /proc/net/dev | ubus traffic_statistics+自管日/月限额+GUI | `=` |
 | 制式/飞行 | 树→AT+erat / ql_dm | 同链 | `=` |
+| 组网模式 SA/NSA/双 | 树 ENDC→fh_set_endc→ql_nw_set_nr_disable_mode | 同款 API（mipc_cellular endc）+变更自动重附+GUI 下拉 | `=` |
 | PLMN 扫描 | RIL_NW_NETWORK_SCAN | ubus start_search_network | `=` |
 | 信号事件流 | ril.unsol.nw.signal 推送 | 轮询 | `▼` `⏳` |
 

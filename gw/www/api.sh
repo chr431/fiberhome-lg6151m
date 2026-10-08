@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.55 (wifiscan 补采 40M 方向 dir; 运营商映射修正 46015/46016=中国广电; status 增 m5 五模式字段; CMGL→CMGR 逐条读: ql_ril CMGL 未读列表路径段错误; CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.56 (流量双网分别统计(erx/etx) + traffic_hist 周/月聚合端点; wifiscan 补采 40M 方向 dir; 运营商映射修正 46015/46016=中国广电; status 增 m5 五模式字段; CMGL→CMGR 逐条读: ql_ril CMGL 未读列表路径段错误; CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -365,17 +365,45 @@ END{
 }
 
 # -- 流量统计 (ubus 活方法; 限额自管) --
+# v2.56: 蜂窝+以太网分别统计(erx/etx); 历史由 traffic_logger.sh 落盘
 get_traffic() {
     # v2.34: /proc/net/dev 直读(与 mobilenetwork 同源做法) — 蜂窝口字节数
     IF=$(ip -o -4 addr show 2>/dev/null | grep -m1 'ccmni.*inet' | awk '{print $2}')
-    RX=0; TX=0
+    RX=0; TX=0; ERX=0; ETX=0
     if [ -n "$IF" ]; then
         RX=$(cat /sys/class/net/$IF/statistics/rx_bytes 2>/dev/null)
         TX=$(cat /sys/class/net/$IF/statistics/tx_bytes 2>/dev/null)
     fi
+    ERX=$(cat /sys/class/net/eth0/statistics/rx_bytes 2>/dev/null)
+    ETX=$(cat /sys/class/net/eth0/statistics/tx_bytes 2>/dev/null)
     [ -r $GWDATA/traffic.conf ] && . $GWDATA/traffic.conf
-    printf '{"rx":"%s","tx":"%s","day_limit_mb":"%s","month_limit_mb":"%s","ts":%d}' \
-        "${RX:-0}" "${TX:-0}" "${DAY_LIMIT_MB:-0}" "${MONTH_LIMIT_MB:-0}" "$(date +%s)"
+    printf '{"rx":"%s","tx":"%s","erx":"%s","etx":"%s","day_limit_mb":"%s","month_limit_mb":"%s","ts":%d}' \
+        "${RX:-0}" "${TX:-0}" "${ERX:-0}" "${ETX:-0}" "${DAY_LIMIT_MB:-0}" "${MONTH_LIMIT_MB:-0}" "$(date +%s)"
+}
+# v2.56: 流量历史聚合 — span=week(168 小时桶)/month(30 天桶), 本地时区(+8)对齐
+# 数据源 /data/gw/traffic_hist.tsv (epoch drx_c dtx_c drx_e dtx_e, 5min 增量)
+# 输出 {"span","step","buckets":[{"t","c","e"}...],"today":{"c","e"}} (c=蜂窝 e=以太, 字节)
+get_traffic_hist() {
+    SPAN=$(form_kv span)
+    case "$SPAN" in month) STEP=86400; N=30 ;; *) SPAN=week; STEP=3600; N=168 ;; esac
+    NOW=$(date +%s)
+    if [ ! -r $GWDATA/traffic_hist.tsv ]; then
+        printf '{"span":"%s","step":%s,"buckets":[],"today":{"c":0,"e":0}}' "$SPAN" "$STEP"
+        return
+    fi
+    awk -v step=$STEP -v n=$N -v now=$NOW -v span=$SPAN '
+        { tl = int(($1 + 28800) / step) * step
+          c[tl] += $2 + $3; e[tl] += $4 + $5
+          if (tl > mx) mx = tl
+          tod0 = int((now + 28800) / 86400) * 86400
+          if (tl >= tod0) { tc += $2 + $3; te += $4 + $5 } }
+        END {
+          start = mx - step * (n - 1)
+          printf "{\"span\":\"%s\",\"step\":%d,\"buckets\":[", span, step
+          for (t = start; t <= mx; t += step)
+              printf "%s{\"t\":%d,\"c\":%d,\"e\":%d}", (t > start ? "," : ""), t - 28800, c[t] + 0, e[t] + 0
+          printf "],\"today\":{\"c\":%d,\"e\":%d}}", tc + 0, te + 0
+        }' $GWDATA/traffic_hist.tsv
 }
 apply_traffic_limit() {
     D=$(form_kv day); M=$(form_kv month)
@@ -1304,6 +1332,7 @@ case "$EP" in
     sms)       need_tok; get_sms ;;
     sms_send)  need_tok; apply_sms_send ;;
     traffic)   need_tok; get_traffic ;;
+    traffic_hist) need_tok; get_traffic_hist ;;
     sim)       need_tok; get_sim ;;
     netmode)   need_tok; get_netmode ;;
     fan)       need_tok; get_fan ;;

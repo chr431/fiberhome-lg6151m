@@ -1,9 +1,10 @@
 # VERSIONS.tsv (public export -- rows filtered to exported set)
 #VER-REGISTRY
 gw/rc.extend.sh	2.1	manifest	/data/rc.extend.sh	槽位调度器; v2.1(P3): shadow.override合法性校验+.bak回退自愈(坏文件不再锁死SSH+串口); v2.0: 开机清token; 历史见git
-gw/v3_rc10.extend.sh	2.22	manifest	/data/gw/rc19.sh	v3 启动编排 rc19v2; v2.21: static档案开机重应用(MAC伪装/IP断电丢失实弹修复); v2.20: dnsmasq rebind防护+DHCP读settings; 历史见git
+gw/v3_rc10.extend.sh	2.25	manifest	/data/gw/rc19.sh	v3 启动编排 rc19v2; v2.21: static档案开机重应用(MAC伪装/IP断电丢失实弹修复); v2.20: dnsmasq rebind防护+DHCP读settings; 历史见git
 gw/wifi_up.sh	1.26	manifest	/data/gw/wifi_up.sh	mt7992 AP 工厂配方(v1.26: 终端频段锁定band_pins.conf→对侧频段main BSS deny ACL(macaddr_acl=0+deny_mac_file, 指令支持已实证); 无pin时conf与v1.25逐字节一致; 历史版本见git)
 gw/wan_agg.sh	2.24	manifest	/data/gw/wan_agg.sh	双上行聚合主管(v2.17: v4免插件配方(statistic插件缺libxtables.so.12/mac插件不存在——v4分流自精简启动以来从未生效): 源端口区间分流(v6同款)+钉死改源IP(邻居解析+漂移重建); v2.15: 聚合总开关ENABLE=0旁路/1参战, 热切+GUI agg_mode; 照抄原厂quecadp内核分流+fwmark路由; v1.7 to-LAN护盾规则自愈(全灭黑洞终根因)
+gw/traffic_logger.sh	1.0	manifest	/data/gw/traffic_logger.sh	蜂窝/以太网流量采样器(5min 增量落 /data/gw/traffic_hist.tsv; 漂移解析+回绕自洽+40天裁剪)
 gw/udhcpc_wan.script	1.0	manifest	/data/gw/udhcpc_wan.script	WAN口 udhcpc 事件钩子(接口无关化)
 gw/healthdog.sh	1.1	manifest	/data/gw/healthdog.sh	看门狗用户态心跳
 gw/v3_babysit_v2.sh	2.0	manifest	/data/gw/babysit_v2.sh	启动保姆(T1杀rcS/T2核爆回B)
@@ -35,10 +36,10 @@ gw/bin/multiwan_ctl	1.1	manifest	/data/gw/multiwan_ctl	原厂multiwan引擎ioctl
 gw/bin/fhstub.so	1.0	manifest	/data/gw/fhstub.so	FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径)
 gw/led_mgr.sh	1.7	manifest	/data/gw/led_mgr.sh	原厂风格LED守护(v1.7: 信标看门狗vif枚举动态化适配访客双频; v1.4传输层改sysfs gpio; v1.6 配置统一overlay+信标看门狗)
 gw/bin/v3httpd	2.6	manifest	/data/gw/v3httpd	网关GUI HTTP服务; v2.6(P2): 静态面拒*.sh(免认证源码泄露)+Host头校验(根治DNS rebinding)
-gw/www/api.sh	2.55	manifest	/data/gw/www/api.sh	GUI JSON端点; v2.49(P2): 严格IP/MAC校验(ip_ok/mac_ok)+dnsmasq失败回落默认参(rebind防护同源)+settings.conf 600; 历史见git
-gw/www/index.html	2.18	manifest	/data/gw/www/index.html	v3控制台页面(v2.18: 缓存v52)
+gw/www/api.sh	2.56	manifest	/data/gw/www/api.sh	GUI JSON端点; v2.49(P2): 严格IP/MAC校验(ip_ok/mac_ok)+dnsmasq失败回落默认参(rebind防护同源)+settings.conf 600; 历史见git
+gw/www/index.html	2.19	manifest	/data/gw/www/index.html	v3控制台页面(v2.18: 缓存v52)
 gw/www/style.css	2.1	manifest	/data/gw/www/style.css	控制台主题
-gw/www/app.js	3.36	manifest	/data/gw/www/app.js	控制台SPA; v3.32(P2): WPA3虚假选项移除(hostapd仅WPA2-PSK)+plmnScan XSS修复(textContent); 历史见git
+gw/www/app.js	3.37	manifest	/data/gw/www/app.js	控制台SPA; v3.32(P2): WPA3虚假选项移除(hostapd仅WPA2-PSK)+plmnScan XSS修复(textContent); 历史见git
 tools/agg_pins.conf.example	1.1	tool	-	MAC钉死表模板(真实表设备侧自管, 含个人MAC不入库)
 gw/fan_mgr.sh	1.3	manifest	/data/gw/fan_mgr.sh	原厂梯度温控风扇(v1.3: 配置统一overlay+修复v1.2双/data/gw路径bug——GUI静音切换从未生效的根因)
 gw/fan_mode.conf	1.0	manifest	/data/gw/fan_mode.conf	风扇模式:performance|silent(静音+6°C偏移)

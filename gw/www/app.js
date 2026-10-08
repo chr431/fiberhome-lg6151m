@@ -415,7 +415,7 @@ window.waStop = () => {
     if (WA.timer) { clearInterval(WA.timer); WA.timer = null; }
     const cb = $("wa-auto"); if (cb) cb.checked = false;
 };
-window.addEventListener("resize", () => { if ($("wa-cv") && WA.aps.length) waRender(); });
+window.addEventListener("resize", () => { if ($("wa-cv") && WA.aps.length) waRender(); if ($("tr-cv")) trDraw(); });
 
 const waBandAps = () => WA.band === 2 ? WA.aps.filter(a => a.fr < 4000) : WA.aps.filter(a => a.fr >= 4000);
 function waCanvas() {
@@ -815,13 +815,6 @@ PAGES.cellular = {
         </div>
         <button class="ghost" onclick="pinDo()">执行 PIN 操作</button>
         <span class="hint">连续输错 3 次将锁定 SIM 卡（需 PUK 解锁）</span>`)}
-      ${card("流量统计", kv("下行（累计）", "tr-rx") + kv("上行（累计）", "tr-tx") + `
-        <div class="row3" style="margin-top:8px">
-          <div class="frm"><label>日限额（MB）</label><input id="tr-day" class="mono"></div>
-          <div class="frm"><label>月限额（MB）</label><input id="tr-month" class="mono"></div>
-        </div>
-        <button class="ghost" onclick="trSave()">保存限额</button>
-        <span class="hint">0 = 不限</span>`)}
       ${card('实时小区列表 (<b id="ce-n">0</b>)', '<table><thead><tr><th></th><th>频段</th><th>ARFCN</th><th>PCI</th><th>RSRP</th><th>SINR</th></tr></thead><tbody id="ce-tb"></tbody></table>', 1)}
     </div>`,
     async tick() {
@@ -842,8 +835,6 @@ PAGES.cellular = {
         const sim = await api("sim");
         T("sim-imsi", sim.imsi); T("sim-iccid", sim.iccid); T("sim-carrier", sim.carrier);
         T("sim-phone", sim.phone); T("sim-imei", sim.imei);
-        const tr = await api("traffic").catch(() => null);
-        if (tr) { T("tr-rx", fmtB(tr.rx)); T("tr-tx", fmtB(tr.tx)); F("tr-day", tr.day_limit_mb); F("tr-month", tr.month_limit_mb); }
     }
 };
 window.cbSave = async () => {
@@ -861,6 +852,95 @@ window.ceDel = async (i) => {
 window.ceClear = async () => {
     const j = await api("cell_lock", `op=clear`).catch(e => ({ error: e.message }));
     j.ok ? toast("已清空") : toast(eMsg(j.error), 1);
+};
+
+/* ================ 流量 (v3.37: 双网分别统计 + 周/月图表) ================ */
+const TR = { span: "week", buckets: [], step: 3600 };
+const TR_COL_E = "hsl(205,80%,60%)";   // 以太网
+const TR_COL_C = "hsl(32,85%,58%)";    // 蜂窝
+window.trSpan = s => {
+    TR.span = s;
+    document.querySelectorAll("#tr-tabs button").forEach(b => b.classList.toggle("act", b.dataset.s === s));
+    PAGES.traffic.tick();
+};
+function trDraw() {
+    const cv = $("tr-cv"); if (!cv) return;
+    const dpr = window.devicePixelRatio || 1;
+    const W = cv.clientWidth || 640, H = cv.clientHeight || 300;
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    const x = cv.getContext("2d");
+    x.setTransform(dpr, 0, 0, dpr, 0, 0); x.clearRect(0, 0, W, H);
+    const bs = TR.buckets;
+    if (!bs.length) {
+        x.fillStyle = "#7fa3c4"; x.font = "13px sans-serif"; x.textAlign = "center";
+        x.fillText("暂无数据 — 采样器每 5 分钟记录一次，图表随数据积累生成", W / 2, H / 2);
+        return;
+    }
+    const padL = 46, padR = 10, padT = 12, padB = 22;
+    let mx = 1;
+    for (const b of bs) { if (b.c > mx) mx = b.c; if (b.e > mx) mx = b.e; }
+    for (const u of [1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12]) if (mx <= u) { mx = u; break; }
+    const xOf = i => padL + (i + 0.5) / bs.length * (W - padL - padR);
+    const yOf = v => padT + (1 - v / mx) * (H - padT - padB);
+    x.font = "10px sans-serif";
+    for (let g = 0; g <= 4; g++) {
+        const v = mx * g / 4, y = yOf(v);
+        x.strokeStyle = g === 0 ? "#3a5270" : "#1f3451";
+        x.beginPath(); x.moveTo(padL, y); x.lineTo(W - padR, y); x.stroke();
+        x.fillStyle = "#7fa3c4"; x.textAlign = "right"; x.fillText(fmtB(v), padL - 5, y + 3);
+    }
+    const series = (key, color) => {
+        x.beginPath(); x.moveTo(xOf(0), yOf(bs[0][key]));
+        for (let i = 1; i < bs.length; i++) x.lineTo(xOf(i), yOf(bs[i][key]));
+        x.strokeStyle = color; x.lineWidth = 1.5; x.stroke();
+        x.lineTo(xOf(bs.length - 1), yOf(0)); x.lineTo(xOf(0), yOf(0)); x.closePath();
+        x.globalAlpha = 0.28; x.fillStyle = color; x.fill(); x.globalAlpha = 1;
+    };
+    series("e", TR_COL_E);   // 以太网先画(下沉)
+    series("c", TR_COL_C);
+    x.textAlign = "center"; x.fillStyle = "#7fa3c4";
+    const stepLab = TR.span === "week" ? 24 : 5;
+    for (let i = 0; i < bs.length; i += stepLab) {
+        const d = new Date(bs[i].t * 1000);
+        x.fillText(`${d.getMonth() + 1}/${d.getDate()}`, xOf(i), H - 7);
+    }
+}
+PAGES.traffic = {
+    html: `<div>
+      ${card("流量图表", `
+        <div style="display:flex;gap:6px;margin-bottom:8px" id="tr-tabs">
+          <button class="tb act" data-s="week" onclick="trSpan('week')">周</button>
+          <button class="tb" data-s="month" onclick="trSpan('month')">月</button>
+        </div>
+        <canvas id="tr-cv" style="width:100%;height:300px"></canvas>
+        <div style="display:flex;gap:16px;margin-top:6px;font-size:12px">
+          <span><i style="display:inline-block;width:10px;height:10px;background:${TR_COL_C};border-radius:2px;vertical-align:-1px"></i> 蜂窝</span>
+          <span><i style="display:inline-block;width:10px;height:10px;background:${TR_COL_E};border-radius:2px;vertical-align:-1px"></i> 以太网</span>
+        </div>`, 1)}
+      ${card("汇总", kv("今日 · 蜂窝", "trd-c") + kv("今日 · 以太网", "trd-e") + kv("本期合计 · 蜂窝", "trs-c") + kv("本期合计 · 以太网", "trs-e"))}
+      ${card("计数器现值（下行 / 上行，自计数器纪元）", kv("蜂窝", "trc-rx") + kv("以太网", "tre-rx"))}
+      ${card("限额", `
+        <div class="row3">
+          <div class="frm"><label>日限额（MB）</label><input id="tr-day" class="mono"></div>
+          <div class="frm"><label>月限额（MB）</label><input id="tr-month" class="mono"></div>
+        </div>
+        <button class="ghost" onclick="trSave()">保存限额</button>
+        <span class="hint">0 = 不限</span>`)}
+    </div>`,
+    async tick() {
+        const j = await api("traffic_hist", `span=${TR.span}`).catch(() => ({ buckets: [] }));
+        TR.buckets = j.buckets || [];
+        const tc = TR.buckets.reduce((s, b) => s + b.c, 0), te = TR.buckets.reduce((s, b) => s + b.e, 0);
+        T("trs-c", fmtB(tc)); T("trs-e", fmtB(te));
+        T("trd-c", fmtB(j.today ? j.today.c : 0)); T("trd-e", fmtB(j.today ? j.today.e : 0));
+        const tr = await api("traffic").catch(() => null);
+        if (tr) {
+            T("trc-rx", `${fmtB(tr.rx)} / ${fmtB(tr.tx)}`);
+            T("tre-rx", `${fmtB(tr.erx)} / ${fmtB(tr.etx)}`);
+            F("tr-day", tr.day_limit_mb); F("tr-month", tr.month_limit_mb);
+        }
+        trDraw();
+    }
 };
 window.nmSave = async () => {
     const j = await api("netmode_set", `mode=${$("nm-mode").value}`).catch(e => ({ error: e.message }));

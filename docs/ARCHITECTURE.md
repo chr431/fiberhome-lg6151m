@@ -70,20 +70,21 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/radvd.conf` | **v1.0** | manifest | `/data/gw/radvd.conf` | IPv6 SLAAC+RDNSS通告(br-lan, ULA fd42:9ac1:7e50::/64) |
 | `gw/rc.extend.sh` | **v2.1** | manifest | `/data/rc.extend.sh` | 槽位调度器; v2.1(P3): shadow.override合法性校验+.bak回退自愈(坏文件不再锁死SSH+串口); v2.0: 开机清token; 历史见git |
 | `gw/rc_netfh.sh` | **v3.1** | manifest | `/data/gw/rc_netfh.sh` | 路线A: FH modem栈环境(最小army, MODE.fh门控; v2.1=atci对复活修L14回归) |
+| `gw/traffic_logger.sh` | **v1.0** | manifest | `/data/gw/traffic_logger.sh` | 蜂窝/以太网流量采样器(5min 增量落 /data/gw/traffic_hist.tsv; 漂移解析+回绕自洽+40天裁剪) |
 | `gw/udhcpc_eth1.script` | **v1.0** | manifest | `/data/gw/udhcpc_eth1.script` | eth1口 udhcpc 事件钩子(补登记) |
 | `gw/udhcpc_wan.script` | **v1.0** | manifest | `/data/gw/udhcpc_wan.script` | WAN口 udhcpc 事件钩子(接口无关化) |
 | `gw/v2_access.sh` | **v6.1** | manifest | `/data/gw/v2_access.sh` | v2 极简访问层(串口/SSH/DHCP/防火墙22,零守护干涉) |
 | `gw/v3_babysit_v2.sh` | **v2.0** | manifest | `/data/gw/babysit_v2.sh` | 启动保姆(T1杀rcS/T2核爆回B) |
-| `gw/v3_rc10.extend.sh` | **v2.22** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2; v2.21: static档案开机重应用(MAC伪装/IP断电丢失实弹修复); v2.20: dnsmasq rebind防护+DHCP读settings; 历史见git |
+| `gw/v3_rc10.extend.sh` | **v2.25** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2; v2.21: static档案开机重应用(MAC伪装/IP断电丢失实弹修复); v2.20: dnsmasq rebind防护+DHCP读settings; 历史见git |
 | `gw/wan_agg.sh` | **v2.24** | manifest | `/data/gw/wan_agg.sh` | 双上行聚合主管(v2.17: v4免插件配方(statistic插件缺libxtables.so.12/mac插件不存在——v4分流自精简启动以来从未生效): 源端口区间分流(v6同款)+钉死改源IP(邻居解析+漂移重建); v2.15: 聚合总开关ENABLE=0旁路/1参战, 热切+GUI agg_mode; 照抄原厂quecadp内核分流+fwmark路由; v1.7 to-LAN护盾规则自愈(全灭黑洞终根因) |
 | `gw/watchdog.sh` | **v1.4** | manifest | `/data/gw/watchdog.sh` | 持续不变量看门狗(L13: 17项不变量; v1.2/L14: +蜂窝控制面 atcid自愈+CFUN探针+注册态, airplane容忍) |
 | `gw/webs_revive.sh` | **v1.3** | manifest | `/data/gw/webs_revive.sh` | 原厂GUI复活器(自足nginx conf; 手动拉起) |
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
 | `gw/wifi_up.sh` | **v1.26** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.26: 终端频段锁定band_pins.conf→对侧频段main BSS deny ACL(macaddr_acl=0+deny_mac_file, 指令支持已实证); 无pin时conf与v1.25逐字节一致; 历史版本见git) |
-| `gw/www/api.sh` | **v2.55** | manifest | `/data/gw/www/api.sh` | GUI JSON端点; v2.49(P2): 严格IP/MAC校验(ip_ok/mac_ok)+dnsmasq失败回落默认参(rebind防护同源)+settings.conf 600; 历史见git |
-| `gw/www/app.js` | **v3.36** | manifest | `/data/gw/www/app.js` | 控制台SPA; v3.32(P2): WPA3虚假选项移除(hostapd仅WPA2-PSK)+plmnScan XSS修复(textContent); 历史见git |
-| `gw/www/index.html` | **v2.18** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.18: 缓存v52) |
+| `gw/www/api.sh` | **v2.56** | manifest | `/data/gw/www/api.sh` | GUI JSON端点; v2.49(P2): 严格IP/MAC校验(ip_ok/mac_ok)+dnsmasq失败回落默认参(rebind防护同源)+settings.conf 600; 历史见git |
+| `gw/www/app.js` | **v3.37** | manifest | `/data/gw/www/app.js` | 控制台SPA; v3.32(P2): WPA3虚假选项移除(hostapd仅WPA2-PSK)+plmnScan XSS修复(textContent); 历史见git |
+| `gw/www/index.html` | **v2.19** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.18: 缓存v52) |
 | `gw/www/style.css` | **v2.1** | manifest | `/data/gw/www/style.css` | 控制台主题 |
 | `gw/zz_data_hook` | **v1.1** | manifest | `/data/build/rootfs/etc/init.d/zz_data_hook` | S98数据钩子(v1.1: plain sh——原厂无/etc/rc.common, rc.common式shebang致开机栈全灭; 回归实测发现) |
 | `gw/src/fhstub.c` | **v1.0** | src | `gw/bin/fhstub.so` | FH符号桩库源码 |

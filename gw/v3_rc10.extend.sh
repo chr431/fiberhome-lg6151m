@@ -1,5 +1,6 @@
 #!/bin/sh
-# rc19.sh v2 (=local v3_rc10.extend.sh) v2.22 -- Frankenstein v3.1: br-lan world + WiFi.
+# rc19.sh v2 (=local v3_rc10.extend.sh) v2.25 -- Frankenstein v3.1: br-lan world + WiFi.
+# v2.25: 流量采样器接线(traffic_logger.sh)
 # v2.22(P1): static 档案补写 /tmp/wan.gw — wan_agg 表200默认路由与 eth_prio
 #   主表切换以此为 BB_GW 源, 静态形态无人写 = 表200恒空(与 wan_agg v2.19 键链
 #   修复配套, "有线宽带优先"对静态上行形同虚设的第二天键)。
@@ -126,6 +127,8 @@ pgrep -x dropbear >/dev/null || {
 #        需要烽火终端App时手动: sh /data/gw/webs_revive.sh
 pgrep -f fan_mgr.sh >/dev/null || nohup sh /data/gw/fan_mgr.sh >/dev/null 2>&1 &
 pgrep -f ntp_keeper >/dev/null || nohup sh /data/gw/ntp_keeper.sh >/dev/null 2>&1 &
+# v2.25: 流量采样器(5min 粒度, 蜂窝/以太网分别, /data 持久供周/月图表)
+pgrep -f traffic_logger >/dev/null || nohup sh /data/gw/traffic_logger.sh >/dev/null 2>&1 &
 # v2.19: 持续不变量看门狗 (L13: 部署后静默失效问题制度化对策)
 pgrep -f watchdog.sh >/dev/null || nohup sh /data/gw/watchdog.sh >/dev/null 2>&1 &
 

@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.58 (wifiscan 中文 SSID: iw \xNN 转义解码为原始 UTF-8 字节 — 原样透传+tr去反斜杠=页面显示 xe8xbf... 垃圾; 历史: traffic_hist 空库边界修复; 流量双网分别统计(erx/etx) + traffic_hist 周/月聚合端点; wifiscan 补采 40M 方向 dir; 运营商映射修正 46015/46016=中国广电; status 增 m5 五模式字段; CMGL→CMGR 逐条读: ql_ril CMGL 未读列表路径段错误; CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.59 (NTP 僵尸路径修复: 配置树 v3.1 已退役 -> cfg_cmd 全键恒失败(实测 shm_attach rc=-1), 时间同步卡片服务器字段改自管配置 NTP_SERVER(defaults 默认叠 settings 覆盖; 留空=gw_del 回退默认), 同步链全源失败显性 jerr sync_fail(原链式失败照报 synced:true=假成功); v2.58: wifiscan 中文 SSID: iw \xNN 转义解码为原始 UTF-8 字节 — 原样透传+tr去反斜杠=页面显示 xe8xbf... 垃圾; 历史: traffic_hist 空库边界修复; 流量双网分别统计(erx/etx) + traffic_hist 周/月聚合端点; wifiscan 补采 40M 方向 dir; 运营商映射修正 46015/46016=中国广电; status 增 m5 五模式字段; CMGL→CMGR 逐条读: ql_ril CMGL 未读列表路径段错误; CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -627,23 +627,36 @@ dhcp_static_apply() {
     return 0
 }
 
-# -- NTP/时区/定时重启 --
+# -- NTP/时区 --
 get_ntp() {
-    printf '{"date":"%s","tz":"%s","ntp_server":"%s","timed_reboot":"%s","ts":%d}' \
+    # v2.59: 树退役(KEEP_TREE=0; cfg_cmd 恒 shm_attach rc=-1)后原 cfgget(NTPServer1) 恒空
+    #   = "手动设置过, 页面永远空白"的根因; 改自管配置: defaults.conf 叠 settings.conf
+    #   (与 WiFi 族同源)。timed_reboot 死读删除(树键, 无消费方)。
+    cfg_load
+    printf '{"date":"%s","tz":"%s","ntp_server":"%s","ts":%d}' \
         "$(date "+%Y-%m-%d %H:%M:%S")" "$(cat /etc/TZ 2>/dev/null)" \
-        "$(cfgget InternetGatewayDevice.Time.NTPServer1)" \
-        "$(cfgget InternetGatewayDevice.X_FH_MobileNetwork.TimedReboot.1.Time 2>/dev/null)" "$(date +%s)"
+        "${NTP_SERVER:-ntp.aliyun.com}" "$(date +%s)"
 }
 apply_ntp() {
     SRV=$(form_kv server); TZV=$(form_kv tz)
     echo "$SRV" | grep -qE '[^A-Za-z0-9.:_-]' && jerr bad_srv
     echo "$TZV" | grep -qE '[^A-Za-z0-9+\-:/]' && jerr bad_tz
-    cfgset_ok InternetGatewayDevice.Time.NTPServer1 "$SRV" 2>/dev/null
+    # v2.59: 写自管配置(树退役后原 cfgset_ok 恒败且被 2>/dev/null 吞掉 = 设置了也存不下来);
+    #   留空 = gw_del 回退出厂默认(gw_del 语义: 删除键=回退派生值)
+    if [ -n "$SRV" ]; then gw_set NTP_SERVER "$SRV"; EFF=$SRV
+    else gw_del NTP_SERVER; cfg_load; EFF=${NTP_SERVER:-ntp.aliyun.com}
+    fi
     echo "$TZV" > /etc/TZ
     [ -s /etc/resolv.conf ] || echo "nameserver 223.5.5.5" > /etc/resolv.conf
     # v2.3: 同步对时+真实校验(ntpd -qn 曾静默失败致时钟错3天, 用户实弹抓获)
+    # v2.59: 全源失败显性报错(原链失败后照报 synced:true = 假成功); 设置已先落盘,
+    #   服务器暂时不可达不清除用户设置, keeper 每小时自动重试
     BEFORE=$(date +%s)
-    ntpclient -h "$SRV" -c 1 -s >/dev/null 2>&1 ||         ntpclient -h 203.107.6.88 -c 1 -s >/dev/null 2>&1 ||         ntpclient -h 119.28.63.197 -c 1 -s >/dev/null 2>&1
+    OK=0
+    for S in "$EFF" 203.107.6.88 119.28.63.197; do
+        ntpclient -h "$S" -c 1 -s >/dev/null 2>&1 && { OK=1; break; }
+    done
+    [ $OK -eq 1 ] || jerr sync_fail
     AFTER=$(date +%s)
     DELTA=$((AFTER - BEFORE))
     if [ $DELTA -gt 5 ]; then

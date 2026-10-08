@@ -1,4 +1,5 @@
-/* app.js v3.39 (WiFi 分析仪 4 视图改进: 信道图邻居SSID标注+避让+文字光晕; 评级修复不可见信道号/徽标重叠+经典道同口径+本机标记+干扰计数; 列表可排序/色标/带宽/信号条; 时间图图例+数据点+历史本地持久) -- v3 gateway console SPA
+/* app.js v3.40 (NTP 时间同步卡片修复: 服务器字段改自管配置回显(树退役后 cfgget 恒空)+留空回退默认+时区下拉回显+同步全败显性报错) -- v3 gateway console SPA
+ * v3.39 (WiFi 分析仪 4 视图改进: 信道图邻居SSID标注+避让+文字光晕; 评级修复不可见信道号/徽标重叠+经典道同口径+本机标记+干扰计数; 列表可排序/色标/带宽/信号条; 时间图图例+数据点+历史本地持久)
  * v3.32(P2): WPA3虚假选项移除(hostapd仅WPA2-PSK); plmnScan XSS修复(textContent); v3.31: sse带token
  * v3.28: 聚合五模式选择; v3.27: SSE 实时信号; v3.26: 聚合滑块应用后回读同步
  * v3.4: WiFi 分析仪(信道图v3.34 频率域:真实占用频段+防越界钳位/信道评级/AP列表/时间图 canvas多视图) + 信道下拉统一(2.4G补select, 双频加"自动"档)
@@ -53,6 +54,7 @@ const ERR = {
     mipc_fail: "模组设置失败", tree_fail: "配置写入失败", at_fail: "模组无响应，请稍后重试",
     ioctl_fail: "硬件接口调用失败", pin_fail: "PIN 操作失败", bad_pin: "PIN 码只能为数字",
     bad_name: "主机名含不支持的字符", bad_srv: "服务器地址格式不正确", bad_tz: "时区格式不正确",
+    sync_fail: "同步失败：NTP 服务器均不可达",
     bad_ucs2: "短信编码格式不正确", empty_text: "短信内容不能为空", too_long: "内容过长",
     need_ucs2: "暂不支持中文短信（仅英文/数字）", send_fail: "短信发送失败",
     scan_failed: "扫描失败，请重试", tool_missing: "扫描组件缺失，请重试",
@@ -1120,7 +1122,8 @@ PAGES.sys = {
           <div class="frm"><label>时区</label><select id="nt-tz"><option value="CST-8">北京时间（UTC+8）</option><option value="UTC">UTC</option></select></div>
           <div class="frm"><label>NTP 服务器</label><input id="nt-srv" class="mono"></div>
         </div>
-        <button class="ghost" onclick="ntSync()">应用并立即同步</button>`)}
+        <button class="ghost" onclick="ntSync()">应用并立即同步</button>
+        <span class="hint">留空 = 恢复默认服务器；保存后每小时自动同步优先使用它</span>`)}
       ${card("管理密码", `
         <div class="row3">
           <div class="frm"><label>当前密码</label><input id="pw-old" type="password"></div>
@@ -1151,6 +1154,7 @@ PAGES.sys = {
         const ntp = await api("ntp");
         T("ntp-date", ntp.date); T("ntp-tz", TZ_TXT[ntp.tz] || ntp.tz || "--"); T("ntp-srv", ntp.ntp_server);
         F("nt-srv", ntp.ntp_server);
+        const tzs = $("nt-tz"); if (tzs && [...tzs.options].some(o => o.value === ntp.tz)) tzs.value = ntp.tz;
         const l = await api("logs");
         H("log-agg", esc((l.wan_agg || "").replace(/\\n/g, "\n")));
         H("log-wifi", esc((l.wifi || "").replace(/\\n/g, "\n")));
@@ -1168,7 +1172,8 @@ window.ledTgl = async () => {
 };
 window.ntSync = async () => {
     const j = await api("ntp_set", `tz=${$("nt-tz").value}&server=${encodeURIComponent($("nt-srv").value)}`).catch(e => ({ error: e.message }));
-    j.ok ? toast("已应用，正在同步时间") : toast(eMsg(j.error), 1);
+    if (j.ok) { toast("已应用，正在同步时间"); PAGES.sys.tick(); }
+    else toast(eMsg(j.error), 1);
 };
 window.pwDo = async () => {
     if (!confirm("确认修改管理密码?")) return;

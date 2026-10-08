@@ -405,8 +405,8 @@ get_traffic_hist() {
           start = mx - step * (n - 1)
           printf "{\"span\":\"%s\",\"step\":%d,\"buckets\":[", span, step
           for (t = start; t <= mx; t += step)
-              printf "%s{\"t\":%d,\"c\":%d,\"e\":%d}", (t > start ? "," : ""), t - 28800, c[t] + 0, e[t] + 0
-          printf "],\"today\":{\"c\":%d,\"e\":%d}}", tc + 0, te + 0
+              printf "%s{\"t\":%d,\"c\":%.6g,\"e\":%.6g}", (t > start ? "," : ""), t - 28800, c[t] + 0, e[t] + 0
+          printf "],\"today\":{\"c\":%.6g,\"e\":%.6g}}", tc + 0, te + 0
         }' $GWDATA/traffic_hist.tsv
 }
 apply_traffic_limit() {

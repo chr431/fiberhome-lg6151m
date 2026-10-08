@@ -1,4 +1,4 @@
-/* app.js v3.41 (NTP 卡片: 应用成功清脏标 => 留空回退默认即时回显; 历史: v3.40 服务器字段自管配置回显+时区下拉回显+同步全败显性报错) -- v3 gateway console SPA
+/* app.js v3.42 (蜂窝页新增"组网模式"SA/NSA/SA+NSA — 官方 networkSet.js 联动规则照抄: 仅4G/3G隐藏整行, 仅5G只留SA并强制; netmode_set 随制式一并下发) -- v3 gateway console SPA
  * v3.39 (WiFi 分析仪 4 视图改进: 信道图邻居SSID标注+避让+文字光晕; 评级修复不可见信道号/徽标重叠+经典道同口径+本机标记+干扰计数; 列表可排序/色标/带宽/信号条; 时间图图例+数据点+历史本地持久)
  * v3.32(P2): WPA3虚假选项移除(hostapd仅WPA2-PSK); plmnScan XSS修复(textContent); v3.31: sse带token
  * v3.28: 聚合五模式选择; v3.27: SSE 实时信号; v3.26: 聚合滑块应用后回读同步
@@ -912,9 +912,11 @@ PAGES.cellular = {
          <button class="ghost" onclick="ceClear()">清空全部</button>`, 1)}
       ${card("网络制式", `
         <div class="row3">
-          <div class="frm"><label>制式</label><select id="nm-mode"><option value="0">仅 4G</option><option value="1">4G 优先</option><option value="2">仅 5G</option><option value="3" selected>5G 优先（自动）</option></select></div>
+          <div class="frm"><label>制式</label><select id="nm-mode" onchange="nmEndcSync()"><option value="0">仅 4G</option><option value="1">4G 优先</option><option value="2">仅 5G</option><option value="3" selected>5G 优先（自动）</option></select></div>
+          <div class="frm"><label>组网模式</label><select id="nm-endc"><option value="1">SA（独立组网）</option><option value="2">NSA（非独立）</option><option value="3">SA+NSA</option></select></div>
           <div class="frm"><label>飞行模式</label><select id="nm-air"><option value="0">关闭</option><option value="1">开启（将断网）</option></select></div>
         </div>
+        <span class="hint">组网模式：SA=独立组网，NSA=非独立（需 LTE 锚点）；仅 5G 时固定 SA</span>
         <button class="pri" onclick="nmSave()">应用制式</button>
         <button class="ghost" onclick="nmAir()">应用飞行模式</button>
         <button class="ghost" onclick="plmnScan()">扫描可用网络（10-60s）</button>
@@ -945,7 +947,7 @@ PAGES.cellular = {
         T("ce-n", j.n != null ? j.n : rows.length);
         H("ce-tb", rows.map((c, i) => `<tr><td>${i === 0 ? `<span class="tag on">服务</span>` : ""}</td><td><b>${esc(fmtBand(c.band))}</b></td><td class="mono">${esc(c.arfcn)}</td><td class="mono">${esc(c.pci)}</td><td>${esc(c.rsrp)}</td><td>${esc(c.sinr)}</td></tr>`).join(""));
         const nm = await api("netmode");
-        F("nm-mode", nm.mode); F("nm-air", nm.airplane || "0");
+        F("nm-mode", nm.mode); F("nm-air", nm.airplane || "0"); F("nm-endc", nm.endc || "3"); nmEndcSync();
         const sim = await api("sim");
         T("sim-imsi", sim.imsi); T("sim-iccid", sim.iccid); T("sim-carrier", sim.carrier);
         T("sim-phone", sim.phone); T("sim-imei", sim.imei);
@@ -1056,8 +1058,16 @@ PAGES.traffic = {
         trDraw();
     }
 };
+/* v3.42: 组网模式可见性 — 官方 networkSet.js 联动规则照抄:
+ *   仅4G/3G(mode 0/4)隐藏整行; 仅5G(mode 2)只留 SA 并强制选中(官方 watch 同款) */
+window.nmEndcSync = () => {
+    const m = $("nm-mode").value, s = $("nm-endc");
+    s.closest(".frm").style.display = (m === "0" || m === "4") ? "none" : "";
+    [...s.options].forEach(o => { o.hidden = (m === "2" && o.value !== "1"); });
+    if (m === "2") s.value = "1";
+};
 window.nmSave = async () => {
-    const j = await api("netmode_set", `mode=${$("nm-mode").value}`).catch(e => ({ error: e.message }));
+    const j = await api("netmode_set", `mode=${$("nm-mode").value}&endc=${$("nm-endc").value}`).catch(e => ({ error: e.message }));
     j.ok ? toast("已应用") : toast(eMsg(j.error), 1);
 };
 window.plmnScan = async () => {

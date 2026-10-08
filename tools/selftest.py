@@ -11,6 +11,8 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
+v2.14 (2026-10-08): 蜂窝 conf 白名单 +ENDC_MODE(组网模式, api.sh v2.62); +t_cel_endc
+  跨层一致断言(conf=API=模组读回, mipc_cellular v0.8 endc 通道); WiFi FW WARN 继续排除。
 v2.13 (2026-10-08): 蜂窝 conf 多写方 schema 适配(锁键∪NM_MODE, api.sh v2.60 cell_set
   upsert 后纯制式态不再误判"无 BAND_EN"); +NTP 自管配置生效断言(defaults叠settings,
   僵尸读回归护栏); +WiFi 固件 WARN 中继(WiFi@WARN.FW,UniCmdResultRsp, 字面 BUG::)
@@ -742,7 +744,7 @@ def t_cel_lockcons():
         if dup:
             mism.append("重复键:" + ",".join(dup))
         bad = [l for l in lines if "=" not in l or not re.match(
-            r"^(BAND_EN|LTE_MASK|NR_MASK|CELL_EN|NM_MODE|CELL_[0-9]+)=", l)]
+            r"^(BAND_EN|LTE_MASK|NR_MASK|CELL_EN|NM_MODE|ENDC_MODE|CELL_[0-9]+)=", l)]
         if bad:
             mism.append("conf 非法行:" + bad[0][:24])
         be = re.search(r"^BAND_EN=([01])$", conf, re.M)
@@ -798,6 +800,39 @@ def t_cel_apisim():
     ok = bool(imei_at) and imei_api == imei_at.group(1)
     record(t_cel_apisim._test_name, "cellular", ok,
            f"api={imei_api[:6]}.. at={imei_at.group(1)[:6] if imei_at else '?'}..")
+
+
+@test("组网模式 ENDC conf=API=模组读回一致")
+def t_cel_endc():
+    # api.sh v2.62 + mipc_cellular v0.8: ENDC(1=SA 2=NSA 3=SA+NSA) 三层一致
+    tok = _token()
+    if tok is None:
+        record(t_cel_endc._test_name, "cellular", True, "skip (no GUI_PASS)")
+        return
+    j = api("netmode", tok)
+    api_e = str(j.get("endc", ""))
+    conf = dev("cat /data/gw/cellular.conf 2>/dev/null")
+    m = re.search(r"^ENDC_MODE=([123])$", conf, re.M)
+    raw = dev("/data/gw/mipc_cellular endc get 2>/dev/null")
+    rm = re.search(r'"nr_disable_mode":(-?\d+)', raw)
+    mism = []
+    if api_e not in ("1", "2", "3"):
+        mism.append(f"api endc={api_e!r}")
+    # conf 无 ENDC_MODE = 出厂未设过, 此时 API 应为默认 3(SA+NSA, 与模组出厂一致)
+    if not m:
+        if api_e != "3":
+            mism.append("conf 无 ENDC_MODE 且 api≠默认3")
+    elif m.group(1) != api_e:
+        mism.append(f"conf={m.group(1)} api={api_e}")
+    if not rm:
+        mism.append("modem 读回失败")
+    elif m:
+        rawmap = {"3": "1", "5": "2", "7": "3"}
+        want = rawmap.get(rm.group(1))
+        if want != m.group(1):
+            mism.append(f"modem raw={rm.group(1)}(={want}) conf={m.group(1)}")
+    record(t_cel_endc._test_name, "cellular", not mism,
+           "ok" if not mism else "; ".join(mism)[:90])
 
 
 @test("拨号兜底守护存活 (P2)")

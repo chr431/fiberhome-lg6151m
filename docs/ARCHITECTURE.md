@@ -82,9 +82,9 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
 | `gw/wifi_up.sh` | **v1.26** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.26: 终端频段锁定band_pins.conf→对侧频段main BSS deny ACL(macaddr_acl=0+deny_mac_file, 指令支持已实证); 无pin时conf与v1.25逐字节一致; 历史版本见git) |
-| `gw/www/api.sh` | **v2.61** | manifest | `/data/gw/www/api.sh` | GUI JSON端点; v2.61: sim reg 改 COPS 推导(本模组 CEREG 恒 0,0); v2.60: 蜂窝conf统一upsert+sim迁活源; 历史见git |
-| `gw/www/app.js` | **v3.41** | manifest | `/data/gw/www/app.js` | 控制台SPA; v3.41: NTP卡片应用后清脏标即时回显; 历史见git |
-| `gw/www/index.html` | **v2.23** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.23: 缓存v57) |
+| `gw/www/api.sh` | **v2.62** | manifest | `/data/gw/www/api.sh` | GUI JSON端点; v2.62: netmode增组网模式endc(SA/NSA/SA+NSA, mipc_cellular endc 下发+conf持久化); 历史见git |
+| `gw/www/app.js` | **v3.42** | manifest | `/data/gw/www/app.js` | 控制台SPA; v3.42: 蜂窝页组网模式SA/NSA/SA+NSA(官方联动规则照抄); 历史见git |
+| `gw/www/index.html` | **v2.24** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.24: 缓存v58) |
 | `gw/www/style.css` | **v2.1** | manifest | `/data/gw/www/style.css` | 控制台主题 |
 | `gw/zz_data_hook` | **v1.1** | manifest | `/data/build/rootfs/etc/init.d/zz_data_hook` | S98数据钩子(v1.1: plain sh——原厂无/etc/rc.common, rc.common式shebang致开机栈全灭; 回归实测发现) |
 | `gw/src/fhstub.c` | **v1.0** | src | `gw/bin/fhstub.so` | FH符号桩库源码 |
@@ -120,7 +120,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/rescue_shadow.py` | **v1.0** | tool | `-` | shadow.override未bind网络救援(getpass旧口令→只读探针: 文件md5/grep行为单测/部署钩子sh -x跟踪→从.bak恢复+重bind; 依赖rc.extend v2.1) |
 | `tools/rotate_toor.py` | **v1.4** | tool | `-` | toor口令轮换器; v1.4: 轮换前存档.bak(rc.extend v2.1回退源); 历史见git |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
-| `tools/selftest.py` | **v2.13** | tool | `-` | 断言式全功能测试; v2.13: 蜂窝conf schema适配+NTP自管断言+WiFi FW WARN中继排除; 历史见git |
+| `tools/selftest.py` | **v2.14** | tool | `-` | 断言式全功能测试; v2.14: +t_cel_endc 组网模式跨层一致(conf=API=模组读回); 历史见git |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |
 | `tools/serial_server.py` | **v1.7** | tool | `-` | 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets) |
 | `tools/upgrade_slot.py` | **v1.0** | tool | `-` | SSH整槽升级器(P3第一档: vercheck/槽位/空间预检→md5门禁→dd备份旧p26→写新镜像→挂载sanity断言(toor/rcS/#v3:/procd)→失败自动整槽还原不重启→清TRY_A→reboot; PC侧轮询日志+回连终检; --dry-run) |

@@ -398,7 +398,7 @@ get_traffic_hist() {
           tod0 = int((now + 28800) / 86400) * 86400
           if (tl >= tod0) { tc += $2 + $3; te += $4 + $5 } }
         END {
-          if (mx <= 0) {   /* v2.57: 空文件/尚无数据 — 否则负 epoch 垃圾桶 */
+          if (mx <= 0) {   # v2.57: 空文件/尚无数据 — 否则负 epoch 垃圾桶(awk 注释只认 #)
               printf "{\"span\":\"%s\",\"step\":%d,\"buckets\":[],\"today\":{\"c\":0,\"e\":0}}", span, step
               exit
           }

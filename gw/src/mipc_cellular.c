@@ -1,9 +1,19 @@
-/* mipc_cellular.c v0.2 -- 蜂窝 MIPC 直连工具 (ROADMAP P1 引擎底层)
+/* mipc_cellular.c v0.8 -- 蜂窝 MIPC 直连工具 (ROADMAP P1 引擎底层)
  *
  * 通道 (2026-10-05 实证): 本进程 dlopen libqlril.so 闭包(RTLD_GLOBAL 预载
  * libql_uinf 等 -- libqlril 不在 DT_NEEDED 声明它, 宿主供给模式) -> ql_nw_init(0)
  * -> ql_nw_set/get_band_mode -> ubus ril -> ql_ril_service -> MIPC TLV -> modem。
  * 全程不经 fhrom mobilenetwork / cfgmgr。
+ *
+ * v0.8 新增 endc (组网模式 SA/NSA/SA+NSA) — 证据链 (2026-10-08 逆向官方 RP103):
+ *   1) 官方 GUI networkSet.js: 独立"组网模式"ENDC 下拉 SA=1/NSA=2/SA+NSA=3,
+ *      NetworkMode==2(仅5G) 时强制 SA; 经树键 ...NetworkSettings.ENDC 下发。
+ *   2) mobilenetwork 逆向 (0x40a8bc fh_set_endc): 不经 AT, 调
+ *      ql_nw_set_nr_disable_mode(3|5|7) — SA→3, NSA→5, SA+NSA→7, 且 1/2 先 restore 7;
+ *      同二进制确认 ql_nw_set_nr_disable_mode 全库仅此一处调用。
+ *   3) libqlril.so 导出对照: ql_nw_set_nr_disable_mode@0xa72c (入参指针→u32)
+ *      + ql_nw_get_nr_disable_mode@0xd13c (读回) 均在 (readelf 实证)。
+ *   本工具与厂商走同一 libqlril 通道, 序列逐条照抄 fh_set_endc。
  *
  * 168B 请求结构 (capstone 逆向 mobilenetwork 0x4108d4-0x410fa8 + 实弹验证):
  *   u32@0x00 mode (3=应用频段锁)
@@ -21,6 +31,7 @@
  *   mipc_cellular setlock lte=1,3,38,40,41 nr=41,79 [umts=all|1,8]
  *   mipc_cellular unlock
  *   mipc_cellular setbands <hex336>   (原始 blob, 调试用)
+ *   mipc_cellular endc get | endc set <1|2|3> | endc raw <n>
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,6 +53,9 @@ static int (*p_sms_get_store_number)(void);
 static int (*p_nw_scan)(void *, void (*)(int, void *));
 static int (*p_scan_busy)(void);
 static int (*p_get_cell_info)(void *);
+/* v0.8: 组网模式 (ENDC) — 官方 mobilenetwork 同款 API (libqlril.so 导出) */
+static int (*p_set_nr_disable_mode)(const int *);
+static int (*p_get_nr_disable_mode)(int *);
 
 static int load_lib(const char *path)
 {
@@ -78,6 +92,9 @@ static int load_lib(const char *path)
     p_nw_scan = (int (*)(void *, void (*)(int, void *)))dlsym(h, "ql_nw_network_scan");
     p_scan_busy = (int (*)(void))dlsym(h, "ql_nw_net_scan_async_f");
     p_get_cell_info = (int (*)(void *))dlsym(h, "ql_nw_get_cell_info");
+    /* v0.8: 组网模式读写 (可选装载 — 老库无此导出时 endc 子命令单独报错) */
+    p_set_nr_disable_mode = (int (*)(const int *))dlsym(h, "ql_nw_set_nr_disable_mode");
+    p_get_nr_disable_mode = (int (*)(int *))dlsym(h, "ql_nw_get_nr_disable_mode");
     if (!p_get_band_info || !p_set_band_mode || !p_nw_init ||
         !p_sms_init || !p_sms_send_msg || !p_nw_scan) {
         fprintf(stderr, "dlsym: %s\n", dlerror());
@@ -313,6 +330,41 @@ static int do_scan(int timeout_s)
     return 0;
 }
 
+/* v0.8: 组网模式 (ENDC) — 序列逐条照抄厂商 fh_set_endc (mobilenetwork 0x40a8bc):
+ *   endc=3 (SA+NSA) -> set(7)
+ *   endc=1 (SA)     -> 先 set(7) [restore] 再 set(3)
+ *   endc=2 (NSA)    -> 先 set(7) [restore] 再 set(5)
+ * 参数是"允许位掩码"语义(厂商实测值 3/5/7; bit0 恒 1, bit1=SA 允许, bit2=NSA 允许 —
+ * 位切分是推断, 值本身有实证)。写后读回 ql_nw_get_nr_disable_mode 校验。 */
+static int do_endc(int argc, char **argv)
+{
+    if (!p_set_nr_disable_mode) { puts("{\"error\":\"no_set_sym\"}"); return 2; }
+    if (argc < 3) { puts("usage: mipc_cellular endc get | endc set <1|2|3>"); return 2; }
+    if (!strcmp(argv[2], "get")) {
+        if (!p_get_nr_disable_mode) { puts("{\"error\":\"no_get_sym\"}"); return 2; }
+        int v = -1;
+        int r = p_get_nr_disable_mode(&v);
+        printf("{\"ret\":%d,\"nr_disable_mode\":%d,\"endc\":%d}\n", r, v,
+               v == 3 ? 1 : v == 5 ? 2 : v == 7 ? 3 : -1);
+        return r ? 3 : 0;
+    }
+    if (!strcmp(argv[2], "set") && argc >= 4) {
+        int e = atoi(argv[3]);
+        int target = (e == 1) ? 3 : (e == 2) ? 5 : (e == 3) ? 7 : -1;
+        if (target < 0) { puts("bad endc (1=SA 2=NSA 3=SA+NSA)"); return 1; }
+        int r1 = 0;
+        if (target != 7) { int seven = 7; r1 = p_set_nr_disable_mode(&seven); }
+        int r2 = p_set_nr_disable_mode(&target);
+        int v = -1;
+        if (p_get_nr_disable_mode) p_get_nr_disable_mode(&v);
+        printf("{\"ret\":%d,\"restore_ret\":%d,\"set\":%d,\"readback\":%d}\n",
+               r2, r1, target, v);
+        return r2 ? 3 : 0;
+    }
+    puts("usage: mipc_cellular endc get | endc set <1|2|3>");
+    return 2;
+}
+
 static int do_send(int format, const char *num, const char *payload, int payload_is_hex)
 {
     struct sms_msg m;
@@ -394,10 +446,13 @@ int main(int argc, char **argv)
         return do_send(2, argv[2], argv[3], 1);
     if (argc >= 2 && !strcmp(argv[1], "smswatch"))       /* v0.7: 入信消费者 */
         return do_smswatch();
+    if (argc >= 2 && !strcmp(argv[1], "endc"))           /* v0.8: 组网模式 SA/NSA/SA+NSA */
+        return do_endc(argc, argv);
     puts("usage: mipc_cellular getbands | unlock | smswatch\n"
          "                setlock lte=<list|all> nr=<list|all> [umts=<list|all>]\n"
          "                setbands <hexblob>\n"
          "                sendsms <num> <ascii-text> | senducs2 <num> <ucs2-be-hex>\n"
+         "                endc get | endc set <1=SA|2=NSA|3=SA+NSA>\n"
          "                scan [timeout_s]");
     return 1;
 }

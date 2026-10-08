@@ -74,7 +74,7 @@ gw/src/v3httpd.c	2.6	src	gw/bin/v3httpd	GUI HTTP服务源码; v2.6: 同产物
 gw/src/wpapmk.c	1.0	src	gw/bin/wpapmk	WPA PMK转换源码(纯C PBKDF2)
 gw/src/fhstub.c	1.0	src	gw/bin/fhstub.so	FH符号桩库源码
 gw/defaults.conf	1.3	manifest	/data/gw/defaults.conf	统一配置只读出厂基线(444); 消费方source叠加settings.conf稀疏覆盖
-tools/leak_check.py	2.1	tool	-	敏感词零命中门禁; v2.1: 修复 --history 全历史扫描(PAT_PARTS未定义NameError, 从未真正跑过); v2.0(P2/PC-M4): 个人PII模式外置_local/secrets/leak_patterns.py; 历史见git
+tools/leak_check.py	2.2	tool	-	敏感词零命中门禁; v2.2: --history 全量扫提交正文(%B, 原仅扫标题%s可漏检消息体); v2.1: 修复 PAT_PARTS NameError; 历史见git
 docs/ARCHITECTURE.md	1.1	doc	-	架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针)
 docs/GUI_TERMINOLOGY.md	1.2	doc	-	GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git
 gw/watchdog.sh	1.4	manifest	/data/gw/watchdog.sh	持续不变量看门狗(L13: 17项不变量; v1.2/L14: +蜂窝控制面 atcid自愈+CFUN探针+注册态, airplane容忍)

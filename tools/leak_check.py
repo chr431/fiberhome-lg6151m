@@ -70,9 +70,11 @@ def sh_out(args):
 
 
 def scan_history(hits):
-    for line in sh_out(["git", "log", "--all", "--format=%H %s"]).splitlines():
-        scan_text("COMMIT-MSG " + line[:12], line, hits)
     revs = sh_out(["git", "rev-list", "--all"]).split()
+    # v2.2: 提交信息全量扫描(正文 %B) — 原仅扫标题 %s, 消息体泄露可漏检(2026-10-08 实证)
+    for h in revs:
+        scan_text("COMMIT-MSG " + h[:12],
+                  sh_out(["git", "log", "-1", "--format=%B", h]), hits)
     if revs:
         # v2.1: 修 v2.0 重构遗留 — PAT_PARTS 未定义(NameError), --history 实际从未跑通过
         out = sh_out(["git", "grep", "-l", "-i", "-E",

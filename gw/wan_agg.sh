@@ -1,5 +1,5 @@
 #!/bin/sh
-# wan_agg.sh v2.21 — 硬截止故障转移 + 安全启动 双上行聚合主管 (vendor kernel engine + iptables fallback)
+# wan_agg.sh v2.22 — 故障转移提速(42s->~30s) 双上行聚合主管 (vendor kernel engine + iptables fallback)
 # v2.19(2026-10-07, eth_prio 静态形态失灵根因): [键名断链] w2_alive 静态分支读
 #   UPLINK_PROBE_GW/UPLINK_GW, 而 api.sh uplink_set 与模板写的是 PROBE_GW/AUTH_GW
 #   — 有线侧探活恒空->永久判死->5G 全量接管(GUI"有线宽带优先"形同虚设, 实弹
@@ -294,7 +294,7 @@ ensure_rules() {  # v2.5: fwmark策略规则存在性看门狗 — 只补活侧�
 
 # ---------- 探活 (mobilenetwork 原版配方) ----------
 probe() {  # $1=iface $2=dst
-    ping -4 -I $1 -c1 -W3 -s1 "$2" 2>/dev/null | grep -q ttl
+    ping -4 -I $1 -c1 -W2 -s1 "$2" 2>/dev/null | grep -q ttl
 }
 w1_alive() { probe $W1_IF 223.5.5.5 || probe $W1_IF 120.53.53.53; }
 w2_alive() {
@@ -480,8 +480,8 @@ while :; do
     #   v4gw/v4net/v6 三死, v6watch 30s 采样实证), 3连击机制却拖到 00:12:56 才
     #   完成转移(6.5min) = 断网扩大的根因。计数制可被迟滞/饥饿模式饿死; 时间
     #   截止不可 — 无论探测序列怎样, 故障转移上界 = 60s + 一个环循周期。
-    [ $S1 -eq 1 ] && [ $((now - W1_OK)) -gt 60 ] && { NS1=0; D1=99; }
-    [ $S2 -eq 1 ] && [ $((now - W2_OK)) -gt 60 ] && { NS2=0; D2=99; }
+    [ $S1 -eq 1 ] && [ $((now - W1_OK)) -gt 25 ] && { NS1=0; D1=99; }
+    [ $S2 -eq 1 ] && [ $((now - W2_OK)) -gt 25 ] && { NS2=0; D2=99; }
     # v2.0: 确定性信号瞬时降级 — 无载波/无IP是"确定"而非"疑似"(重租约窗口被hash到
     #       家宽的新流全灭=恢复期粗糙窗口的根因), 跳过3连击立即全量切5G
     W2_READY=0
@@ -545,5 +545,8 @@ while :; do
         S1=$E1; S2=$E2
         echo "agg:$S1:$S2" > $MODE_FILE
     fi
-    sleep 5
+    # v2.22: 自适应节奏 — 任一侧有失败记录时加快环循(5s->2s), 死亡确认提速
+    SLP=5
+    [ $D1 -gt 0 ] || [ $D2 -gt 0 ] && SLP=2
+    sleep $SLP
 done

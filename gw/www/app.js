@@ -1,4 +1,4 @@
-/* app.js v3.38 (WiFi 分析仪 4 视图改进: 信道图邻居SSID标注+避让; 评级修复不可见信道号/徽标重叠+经典道同口径+本机标记+干扰计数; 列表可排序/色标/带宽/信号条; 时间图图例+数据点+历史本地持久) -- v3 gateway console SPA
+/* app.js v3.39 (WiFi 分析仪 4 视图改进: 信道图邻居SSID标注+避让+文字光晕; 评级修复不可见信道号/徽标重叠+经典道同口径+本机标记+干扰计数; 列表可排序/色标/带宽/信号条; 时间图图例+数据点+历史本地持久) -- v3 gateway console SPA
  * v3.32(P2): WPA3虚假选项移除(hostapd仅WPA2-PSK); plmnScan XSS修复(textContent); v3.31: sse带token
  * v3.28: 聚合五模式选择; v3.27: SSE 实时信号; v3.26: 聚合滑块应用后回读同步
  * v3.4: WiFi 分析仪(信道图v3.34 频率域:真实占用频段+防越界钳位/信道评级/AP列表/时间图 canvas多视图) + 信道下拉统一(2.4G补select, 双频加"自动"档)
@@ -440,6 +440,12 @@ window.waStop = () => {
 window.addEventListener("resize", () => { if ($("wa-cv") && WA.aps.length) waRender(); if ($("tr-cv")) trDraw(); });
 
 const waBandAps = () => WA.band === 2 ? WA.aps.filter(a => a.fr < 4000) : WA.aps.filter(a => a.fr >= 4000);
+/* v3.38: 画布文字描边(深色光晕) — 标签叠在同色柱上仍可读 */
+function waText(x, s, cx, cy, col) {
+    x.lineWidth = 3; x.strokeStyle = "#0c1a29";
+    x.strokeText(s, cx, cy);
+    x.fillStyle = col; x.fillText(s, cx, cy);
+}
 function waCanvas() {
     const cv = $("wa-cv"), dpr = window.devicePixelRatio || 1;
     const w = cv.clientWidth || 640, h = cv.clientHeight || 340;
@@ -558,9 +564,8 @@ function waDrawChGraph() {
         x.strokeRect(x0 + 1, yTop + 1, x1 - x0 - 2, h - 2);
         x.font = "bold 11px sans-serif";
         x.textAlign = "center";
-        x.fillStyle = "#dbe9f6";
         const lx = Math.min(W - padR - 44, Math.max(padL + 44, (x0 + x1) / 2));
-        x.fillText(ownSsid, lx, yTop - 6);
+        waText(x, ownSsid, lx, yTop - 6, "#dbe9f6");
         labelSlots.push([lx - 46, lx + 46, yTop - 17, yTop - 3]);
     }
     /* v3.38: 邻居 AP 名称标注 — 前 5 强, 顶部居中; 与已占标签/轴冲突则下移让位 */
@@ -583,8 +588,7 @@ function waDrawChGraph() {
         }
         ly = Math.max(padT + 10, ly);
         labelSlots.push([cx - tw, cx + tw, ly - 11, ly + 3]);
-        x.fillStyle = waColor(a.mac);
-        x.fillText(label, cx, ly);
+        waText(x, label, cx, ly, waColor(a.mac));
     }
 }
 /* 视图2: 信道评级 v3.38 — 与设备端 wifi_up 自动选道严格同口径(线性功率和:

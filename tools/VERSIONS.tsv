@@ -37,9 +37,9 @@ gw/bin/fhstub.so	1.0	manifest	/data/gw/fhstub.so	FH符号桩库(顶掉vendor api
 gw/led_mgr.sh	1.7	manifest	/data/gw/led_mgr.sh	原厂风格LED守护(v1.7: 信标看门狗vif枚举动态化适配访客双频; v1.4传输层改sysfs gpio; v1.6 配置统一overlay+信标看门狗)
 gw/bin/v3httpd	2.6	manifest	/data/gw/v3httpd	网关GUI HTTP服务; v2.6(P2): 静态面拒*.sh(免认证源码泄露)+Host头校验(根治DNS rebinding)
 gw/www/api.sh	2.58	manifest	/data/gw/www/api.sh	GUI JSON端点; v2.58: wifiscan 中文SSID(\xNN解码回UTF-8); 历史见git
-gw/www/index.html	2.20	manifest	/data/gw/www/index.html	v3控制台页面(v2.20: 缓存v54)
+gw/www/index.html	2.21	manifest	/data/gw/www/index.html	v3控制台页面(v2.21: 缓存v55)
 gw/www/style.css	2.1	manifest	/data/gw/www/style.css	控制台主题
-gw/www/app.js	3.38	manifest	/data/gw/www/app.js	控制台SPA; v3.38: WiFi分析仪四视图改进(信道图邻居SSID标注/评级修复+同口径/列表排序/时间图图例+历史持久); 历史见git
+gw/www/app.js	3.39	manifest	/data/gw/www/app.js	控制台SPA; v3.39: WiFi分析仪四视图改进+标注文字光晕; 历史见git
 tools/agg_pins.conf.example	1.1	tool	-	MAC钉死表模板(真实表设备侧自管, 含个人MAC不入库)
 gw/fan_mgr.sh	1.3	manifest	/data/gw/fan_mgr.sh	原厂梯度温控风扇(v1.3: 配置统一overlay+修复v1.2双/data/gw路径bug——GUI静音切换从未生效的根因)
 gw/fan_mode.conf	1.0	manifest	/data/gw/fan_mode.conf	风扇模式:performance|silent(静音+6°C偏移)

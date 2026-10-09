@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.63 (netmode_set 变更时后台自动重附(cfun循环) — 实弹实证 LTE→NR-SA 不自发重选, 重发 nwmode 也不触发, 不重附则改完驻留 LTE 不生效; 幂等重应用不重附; v2.62: 组网模式 ENDC: netmode 增 endc 字段(1=SA 2=NSA 3=SA+NSA, 存 cellular.conf ENDC_MODE), apply_netmode 照抄官方联动规则(仅5G强制SA/仅4G-3G不下发)经 mipc_cellular endc 下发; v2.61: sim reg 推导修正: 本模组 AT CEREG?/CREG? 恒 0,0(数据畅通仍报未注册, 实测) — 改由 COPS 是否返回 PLMN 推导; v2.60: 蜂窝 conf 写方统一 upsert(cell_set): 原频段锁整文件覆盖冲掉 NM_MODE/CELL_i、celllock del 压实丢 NM_MODE、clear 重复键 — 同文件多写方互毁全消; get_sim phone/reg 迁活源 AT CNUM/CEREG 并删死树回退(树退役后恒空, 与 NTP 同族); cell_persist 仅 tree 引擎调用+shm 缺席跳过快照; v2.59: NTP 僵尸路径修复: 配置树 v3.1 已退役 -> cfg_cmd 全键恒失败(实测 shm_attach rc=-1), 时间同步卡片服务器字段改自管配置 NTP_SERVER(defaults 默认叠 settings 覆盖; 留空=gw_del 回退默认), 同步链全源失败显性 jerr sync_fail(原链式失败照报 synced:true=假成功); v2.58: wifiscan 中文 SSID: iw \xNN 转义解码为原始 UTF-8 字节 — 原样透传+tr去反斜杠=页面显示 xe8xbf... 垃圾; 历史: traffic_hist 空库边界修复; 流量双网分别统计(erx/etx) + traffic_hist 周/月聚合端点; wifiscan 补采 40M 方向 dir; 运营商映射修正 46015/46016=中国广电; status 增 m5 五模式字段; CMGL→CMGR 逐条读: ql_ril CMGL 未读列表路径段错误; CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.64 (status 增数据面实测 home.dp/wan5g.dp — carrier=1 只说明物理层在; 21:30 实弹"载波在而数据面死"时 GUI 照常显示=误导; 判据与 wan_agg v2.26/led_mgr v1.8 同源; v2.63: netmode_set 变更时后台自动重附(cfun循环) — 实弹实证 LTE→NR-SA 不自发重选, 重发 nwmode 也不触发, 不重附则改完驻留 LTE 不生效; 幂等重应用不重附; v2.62: 组网模式 ENDC: netmode 增 endc 字段(1=SA 2=NSA 3=SA+NSA, 存 cellular.conf ENDC_MODE), apply_netmode 照抄官方联动规则(仅5G强制SA/仅4G-3G不下发)经 mipc_cellular endc 下发; v2.61: sim reg 推导修正: 本模组 AT CEREG?/CREG? 恒 0,0(数据畅通仍报未注册, 实测) — 改由 COPS 是否返回 PLMN 推导; v2.60: 蜂窝 conf 写方统一 upsert(cell_set): 原频段锁整文件覆盖冲掉 NM_MODE/CELL_i、celllock del 压实丢 NM_MODE、clear 重复键 — 同文件多写方互毁全消; get_sim phone/reg 迁活源 AT CNUM/CEREG 并删死树回退(树退役后恒空, 与 NTP 同族); cell_persist 仅 tree 引擎调用+shm 缺席跳过快照; v2.59: NTP 僵尸路径修复: 配置树 v3.1 已退役 -> cfg_cmd 全键恒失败(实测 shm_attach rc=-1), 时间同步卡片服务器字段改自管配置 NTP_SERVER(defaults 默认叠 settings 覆盖; 留空=gw_del 回退默认), 同步链全源失败显性 jerr sync_fail(原链式失败照报 synced:true=假成功); v2.58: wifiscan 中文 SSID: iw \xNN 转义解码为原始 UTF-8 字节 — 原样透传+tr去反斜杠=页面显示 xe8xbf... 垃圾; 历史: traffic_hist 空库边界修复; 流量双网分别统计(erx/etx) + traffic_hist 周/月聚合端点; wifiscan 补采 40M 方向 dir; 运营商映射修正 46015/46016=中国广电; status 增 m5 五模式字段; CMGL→CMGR 逐条读: ql_ril CMGL 未读列表路径段错误; CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -1212,6 +1212,23 @@ get_status() {
     ETH_IP=$(ip -o -4 addr show eth0 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
     ETH_V6=$(ip -o -6 addr show eth0 2>/dev/null | grep -m1 global | awk '{print $4}' | cut -d/ -f1)
     ETH_C=$(cat /sys/class/net/eth0/carrier 2>/dev/null); ETH_C=${ETH_C:-0}
+    # v2.64: 数据面实测(与 wan_agg v2.26 / led_mgr v1.8 同判据同键链) ——
+    #   carrier=1 只说明"物理层在", 21:30 实弹: 载波在而数据面死数分钟, GUI/灯
+    #   照常显示=误导。home.dp / wan5g.dp 反映实际能否出网。
+    BB_GW=""
+    if [ -r $GWDATA/uplink.conf ] && grep -q '^FORM=static' $GWDATA/uplink.conf 2>/dev/null; then
+        BB_GW=$(grep -m1 '^PROBE_GW=' $GWDATA/uplink.conf 2>/dev/null | cut -d= -f2)
+        [ -z "$BB_GW" ] && BB_GW=$(grep -m1 '^AUTH_GW=' $GWDATA/uplink.conf 2>/dev/null | cut -d= -f2)
+    fi
+    [ -z "$BB_GW" ] && BB_GW=$(head -1 /tmp/wan.gw 2>/dev/null)
+    ETH_DP=0
+    if [ -n "$BB_GW" ]; then
+        ping -4 -I eth0 -c1 -W2 -s1 "$BB_GW" 2>/dev/null | grep -q ttl && ETH_DP=1
+    fi
+    [ "$ETH_DP" = 0 ] && { ping -4 -I eth0 -c1 -W2 -s1 223.5.5.5 2>/dev/null | grep -q ttl && ETH_DP=1; }
+    [ "$ETH_DP" = 0 ] && { ping -4 -I eth0 -c1 -W2 -s1 120.53.53.53 2>/dev/null | grep -q ttl && ETH_DP=1; }
+    C5G_DP=0
+    [ -n "$W5G_IF" ] && ping -4 -I $W5G_IF -c1 -W2 -s1 223.5.5.5 2>/dev/null | grep -q ttl && C5G_DP=1
     AGG_M=$(grep -m1 "Current mode" /proc/multi_wan/mode 2>/dev/null | grep -oE "[0-9]+$")
     # v2.42: w1pct 三级回退 — iptables 引擎态 /proc/multi_wan/* 不存在(quecadp 专属),
     # 旧读法永远"?"致 GUI 滑块停在中间不与实配同步。顺序: agg.conf(权威,即写即读)
@@ -1233,8 +1250,8 @@ get_status() {
     RXE=$(cat /sys/class/net/eth0/statistics/rx_bytes 2>/dev/null); RXE=${RXE:-0}
     cat <<EOF2
 {"uptime":"${UP_D}天${UP_H}时${UP_M}分","load":"$LOAD","mem":{"total":${MEM%% *},"avail":${MEM##* }},
-"wan5g":{"if":"$W5G_IF","ip":"${W5G_IP:-无}","v6":"${W5G_V6:-无}"},
-"home":{"ip":"${ETH_IP:-无}","v6":"${ETH_V6:-无}","carrier":"$ETH_C"},
+"wan5g":{"if":"$W5G_IF","ip":"${W5G_IP:-无}","v6":"${W5G_V6:-无}","dp":"$C5G_DP"},
+"home":{"ip":"${ETH_IP:-无}","v6":"${ETH_V6:-无}","carrier":"$ETH_C","dp":"$ETH_DP"},
 "agg":{"m5":"$(grep -m1 '^MODE=' $GWDATA/agg.conf 2>/dev/null | cut -d= -f2)","mode":"${AGG_M:-0}","engine":"$(cat /tmp/wan_engine 2>/dev/null)","on":"$(grep -q '^off' /tmp/wan_mode 2>/dev/null && echo 0 || echo 1)","w1pct":"${AGG_W:-?}","state":"$(tail -1 /tmp/wan_agg.log 2>/dev/null | sed 's/"/\\"/g')","wanmode":"$WAN_MODE"},
 "wifi":{$(wifi_state)},
 "temps":{$TEMPS},

@@ -1,4 +1,4 @@
-/* app.js v3.43 (组网模式提示更新: 变更后模组自动重附约1分钟 — 服务端 v2.63 变更即重附) -- v3 gateway console SPA
+/* app.js v3.44 (状态页线路状态改数据面实测: 有线/蜂窝各增"线路状态"行+标签按 dp 而非 carrier — 21:30 实弹"载波在而断网"全程显示已连接=误导) -- v3 gateway console SPA
  * v3.39 (WiFi 分析仪 4 视图改进: 信道图邻居SSID标注+避让+文字光晕; 评级修复不可见信道号/徽标重叠+经典道同口径+本机标记+干扰计数; 列表可排序/色标/带宽/信号条; 时间图图例+数据点+历史本地持久)
  * v3.32(P2): WPA3虚假选项移除(hostapd仅WPA2-PSK); plmnScan XSS修复(textContent); v3.31: sse带token
  * v3.28: 聚合五模式选择; v3.27: SSE 实时信号; v3.26: 聚合滑块应用后回读同步
@@ -132,10 +132,10 @@ PAGES.status = {
     html: `<div class="grid">
       ${card("系统", kv("运行时间", "up-up") + kv("负载", "up-load") + kv("内存", "up-mem") + kv("LAN", "up-lan"))}
       ${card("上网线路 · 蜂窝（5G/4G） " + tag("tg-5g", "已连接", "未连接"),
-        kv("接口", "w5-if") + kv("IPv4", "w5-ip", 1) + kv("IPv6", "w5-v6", 1) +
+        kv("接口", "w5-if") + kv("IPv4", "w5-ip", 1) + kv("IPv6", "w5-v6", 1) + kv("线路状态", "w5-dp", 1) +
         `<div class="rate"><span>下行 <b id="w5-rx">…</b></span><span>上行 <b id="w5-tx">…</b></span></div>`)}
       ${card("上网线路 · 有线宽带 " + tag("tg-home", "已连接", "未连接"),
-        kv("IPv4", "ho-ip", 1) + kv("IPv6", "ho-v6", 1) +
+        kv("IPv4", "ho-ip", 1) + kv("IPv6", "ho-v6", 1) + kv("线路状态", "ho-dp") +
         `<div class="rate"><span>下行 <b id="ho-rx">…</b></span><span>上行 <b id="ho-tx">…</b></span></div>`)}
       ${card("蜂窝 " + tag("tg-cel", "已驻网", "无服务"),
         kv("运营商", "cel-op") + kv("服务小区", "cel-cell", 1) + kv("信号强度", "cel-sig") + kv("小区数", "cel-n"))}
@@ -154,12 +154,19 @@ PAGES.status = {
         T("up-up", j.uptime); T("up-load", j.load);
         T("up-mem", `${((1 - j.mem.avail / j.mem.total) * 100).toFixed(0)}% (${fmtB(j.mem.avail * 1024)} 可用)`);
         T("up-lan", "192.168.9.1/24");
-        setTag("tg-5g", j.wan5g.ip !== "无");
+        /* v3.44: 有线/蜂窝标签按数据面实测 dp (carrier/IP 存在≠能上网) */
+        setTag("tg-5g", j.wan5g.dp === "1" || j.wan5g.dp === 1);
         T("w5-if", j.wan5g.if || "--"); T("w5-ip", j.wan5g.ip); T("w5-v6", j.wan5g.v6);
+        T("w5-dp", (j.wan5g.dp === "1" || j.wan5g.dp === 1) ? "正常（可上网）" : "异常（未出网）");
         T("w5-rx", lastCounters ? rate(+j.counters.rx5g, +lastCounters.rx5g) : "…");
         T("w5-tx", lastCounters ? rate(+j.counters.tx5g, +lastCounters.tx5g) : "…");
-        setTag("tg-home", j.home.carrier === "1");
+        /* v3.44: 标签与线路状态按**数据面实测**(dp), 不再按 carrier/IP —
+           21:30 实弹: 载波在而数据面死数分钟, 旧显示全程"已连接"=误导。
+           三态: 数据面通=已连接; 载波在但不通=未连接(行内注明物理在); 无载波=未连接 */
+        setTag("tg-home", j.home.dp === "1" || j.home.dp === 1);
         T("ho-ip", j.home.ip); T("ho-v6", j.home.v6);
+        T("ho-dp", j.home.dp === "1" || j.home.dp === 1 ? "正常（可上网）"
+            : (j.home.carrier === "1" || j.home.carrier === 1 ? "异常（网线在，未连通）" : "异常（未接网线）"));
         T("ho-rx", lastCounters ? rate(+j.counters.rxeth, +lastCounters.rxeth) : "…");
         T("ho-tx", lastCounters ? rate(+j.counters.txeth, +lastCounters.txeth) : "…");
         if (cel && cel.serving) {

@@ -171,5 +171,6 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `CLM-P5-CLOSED`@ROADMAP.md | ✅实证 | `tools/selftest.py>=2.9` | SSE 信号事件流 (v3httpd v2.5 + api.sh sse token 门) | ecb2e20@2026-10-06 | P5关闭: 实测传输期CPU空转,瓶颈在上游非引擎; quecadp复活=高风险零收益; 重开条件=>500Mbps上游+softirq饱和 |
 | `CLM-AGG-MODES`@ROADMAP.md | ✅实证 | `gw/wan_agg.sh>=2.18` | 聚合模式配置合法且一致 (v2.18 五模式) | 3aaf20b@2026-10-06 | 聚合五模式(对齐原厂): weight/cell_prio/eth_prio/cell_only/eth_only; 仅模式=E1/E2强制注入(无failover); MODE热载+旧格式迁移(100/0映射优先模式); 滑块5-95钳制(极端值语义归显式模式); GUI权重卡条件显示; 五模式API实弹循环切换全过 |
 | `CLM-ENDC-NRMODE`@FINDINGS.md | ✅实证 | `gw/src/mipc_cellular.c>=0.8` | 组网模式 ENDC conf=API=模组读回一致 | ddee9bb@2026-10-09 | 官方ENDC: SA=1/NSA=2/双=3→ql_nw_set_nr_disable_mode(3/5/7)非先restore7; ECNCFG=漫游勿混淆; E5GOPT=同旋钮AT镜像(SET_CACHE_ENDC_CONNECT_MODE缓存型,写回需重附生效); LTE→NR-SA不自发重选 |
+| `CLM-AUTHD-PROBE`@FINDINGS.md | ✅实证 | `gw/wan_agg.sh>=2.26` | 有线侧探活语义护栏 (up 必叠加数据面 ICMP) | 6d137b6@2026-10-09 | 21:30实弹: authd succ永不复位+Req-Identity持续刷up → 上层把"up"当充分活证据 → eth_prio下5G待命侧15h无接班(06:02→21:32); 修复=up必叠加数据面ICMP(w2.26)+authd up只认认证证据(v2.2); 实弹down 8s转移 |
 
 <!--CLMAUDIT:END-->

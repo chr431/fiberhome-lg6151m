@@ -1,4 +1,4 @@
-/* app.js v3.44 (状态页线路状态改数据面实测: 有线/蜂窝各增"线路状态"行+标签按 dp 而非 carrier — 21:30 实弹"载波在而断网"全程显示已连接=误导) -- v3 gateway console SPA
+/* app.js v3.45 (字体统一: 线路状态值去 mono(中文文案误用等宽, 与有线卡不一致) + mono 输入框 placeholder 全 ASCII 化) -- v3.44 状态页线路状态改数据面实测: 有线/蜂窝各增"线路状态"行+标签按 dp 而非 carrier — 21:30 实弹"载波在而断网"全程显示已连接=误导) -- v3 gateway console SPA
  * v3.39 (WiFi 分析仪 4 视图改进: 信道图邻居SSID标注+避让+文字光晕; 评级修复不可见信道号/徽标重叠+经典道同口径+本机标记+干扰计数; 列表可排序/色标/带宽/信号条; 时间图图例+数据点+历史本地持久)
  * v3.32(P2): WPA3虚假选项移除(hostapd仅WPA2-PSK); plmnScan XSS修复(textContent); v3.31: sse带token
  * v3.28: 聚合五模式选择; v3.27: SSE 实时信号; v3.26: 聚合滑块应用后回读同步
@@ -132,7 +132,7 @@ PAGES.status = {
     html: `<div class="grid">
       ${card("系统", kv("运行时间", "up-up") + kv("负载", "up-load") + kv("内存", "up-mem") + kv("LAN", "up-lan"))}
       ${card("上网线路 · 蜂窝（5G/4G） " + tag("tg-5g", "已连接", "未连接"),
-        kv("接口", "w5-if") + kv("IPv4", "w5-ip", 1) + kv("IPv6", "w5-v6", 1) + kv("线路状态", "w5-dp", 1) +
+        kv("接口", "w5-if") + kv("IPv4", "w5-ip", 1) + kv("IPv6", "w5-v6", 1) + kv("线路状态", "w5-dp") +
         `<div class="rate"><span>下行 <b id="w5-rx">…</b></span><span>上行 <b id="w5-tx">…</b></span></div>`)}
       ${card("上网线路 · 有线宽带 " + tag("tg-home", "已连接", "未连接"),
         kv("IPv4", "ho-ip", 1) + kv("IPv6", "ho-v6", 1) + kv("线路状态", "ho-dp") +
@@ -291,7 +291,7 @@ PAGES.wifi = {
         <span class="hint">名称、频段、密码独立于主 WiFi；访客仅可上网，与内网隔离</span>`)}
       ${card("终端频段锁定", `
         <div class="row3">
-          <div class="frm"><label>MAC 地址</label><input id="bp-mac" placeholder="例如 aa:bb:cc:dd:ee:ff" class="mono"></div>
+          <div class="frm"><label>MAC 地址</label><input id="bp-mac" placeholder="aa:bb:cc:dd:ee:ff" class="mono"></div>
           <div class="frm"><label>锁定频段</label><select id="bp-band"><option value="2g">2.4GHz</option><option value="5g">5GHz</option></select></div>
           <div class="frm" style="align-self:end"><button class="pri mini" onclick="bpAdd()">添加</button></div>
         </div>
@@ -912,8 +912,8 @@ PAGES.cellular = {
       ${card("小区锁定 " + tag("tg-cl", "已开启", "已关闭"), `<table><thead><tr><th>#</th><th>制式</th><th>ARFCN</th><th>PCI</th><th></th></tr></thead><tbody id="ce-lock-tb"></tbody></table>
          <div class="row3" style="margin-top:8px">
            <div class="frm"><label>制式</label><select id="ce-act"><option value="nr">5G（NR）</option><option value="lte">4G（LTE）</option></select></div>
-           <div class="frm"><label>频点（ARFCN 0-875000）</label><input id="ce-arf" class="mono" placeholder="504990（示例）"></div>
-           <div class="frm"><label>PCI（0-2000）</label><input id="ce-pci" class="mono" placeholder="341（示例）"></div>
+           <div class="frm"><label>频点（ARFCN 0-875000）</label><input id="ce-arf" class="mono" placeholder="504990"></div>
+           <div class="frm"><label>PCI（0-2000）</label><input id="ce-pci" class="mono" placeholder="341"></div>
          </div>
          <button class="pri" onclick="ceAdd()">添加锁定小区</button>
          <button class="ghost" onclick="ceClear()">清空全部</button>`, 1)}

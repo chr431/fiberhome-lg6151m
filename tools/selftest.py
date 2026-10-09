@@ -11,6 +11,9 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
+v2.15 (2026-10-09): 有线侧探活语义护栏 — authd "up" 不得单独构成活证据
+  (v2.26 数据面 ICMP 必叠加: 认证帧在途+数据面已死时 up 永新鲜 = 21:30 实弹
+  eth_prio 15h 不转移); authd_state 新鲜度须与数据面一致。
 v2.14 (2026-10-08): 蜂窝 conf 白名单 +ENDC_MODE(组网模式, api.sh v2.62); +t_cel_endc
   跨层一致断言(conf=API=模组读回, mipc_cellular v0.8 endc 通道); WiFi FW WARN 继续排除。
 v2.13 (2026-10-08): 蜂窝 conf 多写方 schema 适配(锁键∪NM_MODE, api.sh v2.60 cell_set
@@ -580,6 +583,34 @@ def t_agg_5g_dp():
     ok = m is not None and int(m.group(1)) >= 1
     record(t_agg_5g_dp._test_name, "agg", ok,
            m.group(0) if m else out.strip().replace("\n", " ")[:50])
+
+
+@test("有线侧探活语义护栏 (up 必叠加数据面 ICMP)")
+def t_agg_w2_probe_guard():
+    # 2026-10-09 21:30 实弹回归护栏: authd "up" 曾被当作充分活证据 ——
+    # succ 永不复位 + 服务器周期性 Req-Identity 持续刷新 up, 认证帧在途而数据面
+    # 已死时 wan_agg 恒判活, eth_prio 下 5G 待命侧 15h 无接班机会。断言两处:
+    #   1) 设备端脚本语义: w2_alive 不得出现"up 直接 return 0"的裸判活
+    #   2) 状态一致: authd_state=up 时数据面(eth0 ICMP)必须通(否则 = 假活态)
+    src = dev("grep -n 'AUTHD_UP' /data/gw/wan_agg.sh 2>/dev/null")
+    bare = re.search(r'AUTHD_UP.*return 0\s*$', src, re.M) and \
+        not re.search(r'AUTHD_UP.*w2_data_alive', src)
+    mism = []
+    if bare:
+        mism.append("w2_alive: up 仍是裸判活(未叠加数据面)")
+    st = dev("cat /tmp/authd_state 2>/dev/null").split()
+    if st and st[0] == "up":
+        try:
+            age = int(time.time()) - int(st[1])
+        except (IndexError, ValueError):
+            age = 999
+        if age <= 60:
+            dp = dev("ping -4 -I eth0 -c2 -W2 -s1 223.5.5.5 2>&1 | grep -c 'packets received'")
+            rx = re.search(r"(\d+) packets received", dp or "")
+            if rx is None or int(rx.group(1)) == 0:
+                mism.append(f"authd up({age}s) 但 eth0 数据面不通 = 假活态")
+    record(t_agg_w2_probe_guard._test_name, "agg", not mism,
+           "ok" if not mism else "; ".join(mism)[:90])
 
 
 # =================================================================

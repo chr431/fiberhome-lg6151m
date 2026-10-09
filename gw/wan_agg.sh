@@ -1,5 +1,11 @@
 #!/bin/sh
-# wan_agg.sh v2.25 — 协议级检测(authd 会话信号, <=5s 故障转移) 双上行聚合主管 (vendor kernel engine + iptables fallback)
+# wan_agg.sh v2.26 — 协议级检测(authd 会话信号, <=5s 故障转移) 双上行聚合主管 (vendor kernel engine + iptables fallback)
+# v2.26(2026-10-09 21:30 实弹: 以太断链数分钟不转移): w2_alive 的"新鲜 up 免 ping"改判
+#   —— up 不再是充分的活证据, 必须叠加数据面 ICMP 实证(w2_data_alive)。根因在 authd:
+#   succ 一旦置位永不复位, 收到任何 EAPOL 帧(含服务器周期性 Req-Identity)即
+#   state_write("up"); 认证帧在途而数据面已死时 up 永远新鲜 → 以太恒判活 →
+#   eth_prio 下 5G 待命侧永无接班机会(实测 06:02 起 5g=0 持续 15h, 21:32 才因
+#   以太自愈而翻转)。down 仍保留协议级零延迟快路径。转移上界不变(25s 硬截止+环循)。
 # v2.25: 中性命名清扫(注释去私有语境词, 零功能改动)
 # v2.19(2026-10-07, eth_prio 静态形态失灵根因): [键名断链] w2_alive 静态分支读
 #   UPLINK_PROBE_GW/UPLINK_GW, 而 api.sh uplink_set 与模板写的是 PROBE_GW/AUTH_GW
@@ -298,32 +304,30 @@ probe() {  # $1=iface $2=dst
     ping -4 -I $1 -c1 -W2 -s1 "$2" 2>/dev/null | grep -q ttl
 }
 w1_alive() { probe $W1_IF 223.5.5.5 || probe $W1_IF 120.53.53.53; }
-w2_alive() {
-    # v2.24: 协议级信号优先 — authd 会话状态文件(/tmp/authd_state: up|down+epoch,
-    #   由 EAP-Success/重询问/Failure 实时刷新)。新鲜 up=活(免 ping); 新鲜 down=死
-    #   (00:06 型事件的服务器 EAP-Failure 即刻可见, 检测延迟=0)。陈旧/缺失回退 ICMP。
-    [ "$AUTHD_UP" = 1 ] && return 0
-    [ "$AUTHD_DOWN" = 1 ] && return 1
-    # v2.13: 通用探活 — conf 的 UPLINK_PROBE_GW 优先(与认证程序解耦, 可插拔)
-    # v2.19: 键链回退 — api.sh/模板实际写 PROBE_GW(注释明言"供 wan_agg 探活"),
-    #   AUTH_GW 为静态档案固有键; 旧字段 UPLINK_GW 兜底。原只认 UPLINK_* 前缀
-    #   = 键名断链, 有线侧永久判死(eth_prio 形同虚设)。
+w2_data_alive() {  # 以太数据面实证 — 网关优先(v2.20) + 公网兜底, 与认证程序解耦
     BB_GW=$(head -1 $GW_FILE 2>/dev/null)
     if [ -r /data/gw/uplink.conf ] && grep -q '^FORM=static' /data/gw/uplink.conf; then
-        BB_GW=$(grep -m1 '^UPLINK_PROBE_GW=' /data/gw/uplink.conf | cut -d= -f2)
         [ -z "$BB_GW" ] && BB_GW=$(grep -m1 '^PROBE_GW=' /data/gw/uplink.conf | cut -d= -f2)
         [ -z "$BB_GW" ] && BB_GW=$(grep -m1 '^AUTH_GW=' /data/gw/uplink.conf | cut -d= -f2)
-        [ -z "$BB_GW" ] && BB_GW=$(grep -m1 '^UPLINK_GW=' /data/gw/uplink.conf | cut -d= -f2)
-        [ -z "$BB_GW" ] && return 1
-        # v2.20: 公网兜底 — 网关应答但上游断(00:06 型会话拆卸前的窗口/白天上游
-        # 故障)也要能触发转移; 网关探测放首位(最本地最廉价)。
-        probe $W2_IF "$BB_GW" && return 0
-        probe $W2_IF 223.5.5.5 && return 0
-        probe $W2_IF 120.53.53.53 && return 0
-        return 1
     fi
-    [ -z "$BB_GW" ] && return 1
-    probe $W2_IF "$BB_GW" || probe $W2_IF 223.5.5.5
+    [ -n "$BB_GW" ] && probe $W2_IF "$BB_GW" && return 0
+    probe $W2_IF 223.5.5.5 && return 0
+    probe $W2_IF 120.53.53.53 && return 0
+    return 1
+}
+w2_alive() {
+    # v2.24: 协议级信号优先 — authd 会话状态文件(/tmp/authd_state: up|down+epoch,
+    #   由 EAP-Success/重询问/Failure 实时刷新)。新鲜 down=死(00:06 型事件的服务器
+    #   EAP-Failure 即刻可见, 检测延迟=0), 保留零延迟快路径。
+    # v2.26(2026-10-09 21:30 实弹, 以太断链数分钟不转移): 新鲜 up 不再单独构成"活"。
+    #   根因: authd 侧 succ 一旦置位即永不复位, 只要收到任何 EAPOL 帧(含服务器周期性
+    #   Req-Identity)就 state_write("up") —— 认证帧在途而**数据面已死**时, up 永远新鲜,
+    #   w2_alive 恒返 0 → eth_prio 下 5G 待命侧永无接班机会(实测 15h: 06:02 起 5g=0)。
+    #   新语义: up 只作为"免长探测"的加速项, 必须叠加数据面 ICMP 实证才判活;
+    #   down 仍是协议级零延迟判死。转移上界不变(硬截止 25s + 一个环循)。
+    [ "$AUTHD_DOWN" = 1 ] && return 1
+    [ "$AUTHD_UP" = 1 ] && w2_data_alive && return 0
+    w2_data_alive
 }
 
 # v2.15: 旁路模式 — 拆全部分流装置(mangle 链 + fwmark 策略规则 v4/v6 高/低

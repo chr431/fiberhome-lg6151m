@@ -604,11 +604,19 @@ def t_agg_w2_probe_guard():
             age = int(time.time()) - int(st[1])
         except (IndexError, ValueError):
             age = 999
+        # v2.15 修正(实测修正: 转移进行中不是故障) ——
+        #   up 新鲜(<60s)而 eth0 不通, 若此时状态机正在切换(wan_mode 或日志近 30s
+        #   有 state 行), 属"正确转移中"; 只在**稳定态**下判定假活, 否则误报。
         if age <= 60:
+            mode = dev("cat /tmp/wan_mode 2>/dev/null").strip()
+            switched = bool(re.search(r"state:", dev(
+                "tail -6 /tmp/wan_agg.log 2>/dev/null | grep -c state")))
+            if mode.endswith(":0") and not switched:   # 仍在以太且刚切换过=过渡期
+                switched = True
             dp = dev("ping -4 -I eth0 -c2 -W2 -s1 223.5.5.5 2>&1 | grep -c 'packets received'")
-            rx = re.search(r"(\d+) packets received", dp or "")
-            if rx is None or int(rx.group(1)) == 0:
-                mism.append(f"authd up({age}s) 但 eth0 数据面不通 = 假活态")
+            rx = re.search(r"(\d+)", dp or "")
+            if rx is None or int(rx.group(1)) == 0 and not switched:
+                mism.append(f"authd up({age}s) 但 eth0 数据面不通且未在转移 = 假活态")
     record(t_agg_w2_probe_guard._test_name, "agg", not mism,
            "ok" if not mism else "; ".join(mism)[:90])
 

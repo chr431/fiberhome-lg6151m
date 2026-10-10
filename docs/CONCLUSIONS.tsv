@@ -46,3 +46,4 @@ CLM-TZ-TMPFS	docs/FINDINGS.md	verified	gw/ntp_keeper.sh>=1.2	NTP 服务器自管
 CLM-IDC-SAFECH	docs/FINDINGS.md	verified	gw/wifi_up.sh>=1.27	AP 信道配置==实况 (IDC 漂移护栏)	cece8c5	2026-10-10	RE: 驱动IDC(LTE共存避让)bEnabled=1每秒轮询掩码自行搬道; 实测mask=1fe→cand2g{1..8}; wifi_up仅安全集选道+watchdog漂移回写; 周期"切换"事件=wifiscan假象(ChnSwitchCnt=0)
 CLM-MLO-LIVE	docs/FINDINGS.md	verified	gw/www/api.sh>=2.68	MLO 状态与 dat 键一致 (v1.19)	013a7ce	2026-10-10	mwctl dump ap_mld stdout直读(RE: dump段干净/show段进dmesg); 实测组1双链路STR; api/app/selftest三处接线(BSSID集合==ra0/rai0 MAC)
 CLM-LOGKEEP	docs/FINDINGS.md	verified	gw/log_keeper.sh>=1.0	日志持久化守护活着且镜像新鲜	8c0fedf	2026-10-10	实测300条洪泛300/300精确捕获+21快照+诊断包90KB脱敏0泄漏; watchdog自愈+ql_wifi_sample卡死清除; GUI/SSH/开机三入口
+CLM-ETHFLAP	docs/FINDINGS.md	verified	gw/wan_agg.sh>=2.27	有线侧探活语义护栏 (up 必叠加数据面 ICMP)	dd01765	2026-10-11	载波flap98次/4.3h+1G→100M降速=上游物理层; EAP重认证与d2=99一一对应; 修: 首败同轮复核+探测-W1, 实弹死亡确认≈1s(原25s级)

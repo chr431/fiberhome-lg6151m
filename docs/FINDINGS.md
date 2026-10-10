@@ -154,3 +154,31 @@
   自动转移（对比修复前：永不转移）；2s 后 rc19 链路看门狗把 eth0 拉起、自愈回切。
   回归护栏 `t_agg_w2_probe_guard`（脚本语义断言 + 稳定态下 up/数据面假活态检测，
   转移进行中不算故障）。
+
+## 12. 定时重启与 /etc/TZ 重启即失（2026-10-10 实弹）
+
+- **定时重启功能**：`gw/reboot_sched.sh`（出厂默认每日 04:00，GUI 系统页可改/可停；
+  配置 = defaults 叠 settings 自管三件套）。五重护栏：REBOOT_EN=1 / 年份>=2024
+  （无 RTC，防 1970 假命中循环）/ 开机 >=300s（重启后窗口内不复触发）/ 命中窗口
+  [目标, +5min)（容 30s 轮询抖动）/ 当日未执行（`/data/gw/reboot_sched.last` 跨重启
+  去重）。实弹：API 设 now+2min → 守护窗口内触发 → **76s 回升**；rc19 开机自动拉起、
+  settings 配置保持、bootctrl TRY_A 开机自清（`0f 00`）、服务面全恢复（63/0 全绿）。
+- **连带发现（既有缺陷）**：`/etc/TZ` 是指向 `/tmp/TZ` 的**符号链接（tmpfs）**——
+  用户时区只存在于运行态，**重启即回落 UTC**（实弹：重启前 `+0800` → 重启后 `+0000`）。
+  影响：时钟显示偏移 8h；**定时重启窗口随 TZ 整体平移**（04:00 会变成 UTC 04:00 =
+  北京时间 12:00）。
+- **修复（自管配置范式）**：`TZ=CST-8` 入 defaults.conf 出厂基线；`apply_ntp` 落
+  `gw_set TZ`（空=gw_del 回退默认）；`get_ntp` 读持有效值（原读 /etc/TZ 运行态）；
+  ntp_keeper v1.2 与 reboot_sched v1.1 **每轮重应用 /etc/TZ**（幂等双保险，不依赖
+  彼此时序）。实弹：守护重启后数秒内 `TZ applied: CST-8`，`date` 回 `+0800`，
+  日志时间戳 UTC→本地切换。回归护栏并入 selftest `t_sys_ntp`（tz 运行态==持有效值）。
+- **selftest 同族修复**（暴露于用户 10:43 经 GUI 关闭访客网络后）：
+  - **配置优先级盲读**：`sort -u + 任意命中`（defaults 的 GUEST=1 恒被找到）与
+    `cat settings defaults | tail -1`（恒取默认值）两类写法在用户覆盖设置后必误报
+    （4 个 WiFi 测试齐红 + NTP 测试潜伏）；收敛到 `eff_conf()`（settings 覆盖
+    defaults，与设备侧 cfg_load 同序）。设备行为本身正确，是测试读错。
+  - **token 缺席降级**：SSE 测试 `tok.encode()` 在登录不可用时直接 AttributeError； <!--CLM:CLM-TZ-TMPFS-->
+    改记因 skip；且登录前查 `/tmp/gui_auth.fails`，>=8/10 不再尝试（工具不把设备
+    推向登录锁定）。用户已改 GUI 管理口令（本地 `_local/secrets` 已同步）。
+  - **MLO 证据源**：GUI 在线重应用会把 `/tmp/mld_boot.log` 重写为空（dmesg 已刷屏），
+    ML 组创建证据只落在 `/tmp/wifi_up.log` 的 stdout 捕获；补为第三证据源。

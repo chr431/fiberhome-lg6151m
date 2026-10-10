@@ -132,6 +132,7 @@
 | VPN 服务器 | IPSec/L2TP/PPTP 全家(strongSwan+xl2tpd) | ✗ | `✗` 如需再评估 |
 | USB 功能 | RNDIS+ADB+双 ACM+USB 升级验签 | ✗(adbd 未启用) | `✗` |
 | NTP | sysntpd(禁用!)+scd 体系+ntpdate | ntp_keeper 多服务器+跳变实测校验 | `▲`（原厂 sysntpd 竟是禁用的）|
+| 定时重启 | 无（仅手动重启）| reboot_sched 每日定时(默认04:00)+GUI 可改/可停+五重护栏 | `+`（实弹 76s 回升）| <!--CLM:CLM-REBOOT-SCHED-->
 | 温控 | thermal_core(MIPC 联动)+风扇 | thermal_zone 读+fan_mgr 双模式 | `=` |
 | LED | peripheral+libLedState 体系 | led_mgr+夜间模式 | `=` |
 | 工厂产测 | META 模式+slt2+load_cli 全层 | ✗（保留 LK 串口进入能力）| `✗` |

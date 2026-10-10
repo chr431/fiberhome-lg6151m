@@ -173,5 +173,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `CLM-AGG-MODES`@ROADMAP.md | ✅实证 | `gw/wan_agg.sh>=2.18` | 聚合模式配置合法且一致 (v2.18 五模式) | 3aaf20b@2026-10-06 | 聚合五模式(对齐原厂): weight/cell_prio/eth_prio/cell_only/eth_only; 仅模式=E1/E2强制注入(无failover); MODE热载+旧格式迁移(100/0映射优先模式); 滑块5-95钳制(极端值语义归显式模式); GUI权重卡条件显示; 五模式API实弹循环切换全过 |
 | `CLM-ENDC-NRMODE`@FINDINGS.md | ✅实证 | `gw/src/mipc_cellular.c>=0.8` | 组网模式 ENDC conf=API=模组读回一致 | ddee9bb@2026-10-09 | 官方ENDC: SA=1/NSA=2/双=3→ql_nw_set_nr_disable_mode(3/5/7)非先restore7; ECNCFG=漫游勿混淆; E5GOPT=同旋钮AT镜像(SET_CACHE_ENDC_CONNECT_MODE缓存型,写回需重附生效); LTE→NR-SA不自发重选 |
 | `CLM-AUTHD-PROBE`@FINDINGS.md | ✅实证 | `gw/wan_agg.sh>=2.26` | 有线侧探活语义护栏 (up 必叠加数据面 ICMP) | 6d137b6@2026-10-09 | 21:30实弹: authd succ永不复位+Req-Identity持续刷up → 上层把"up"当充分活证据 → eth_prio下5G待命侧15h无接班(06:02→21:32); 修复=up必叠加数据面ICMP(w2.26)+authd up只认认证证据(v2.2); 实弹down 8s转移 |
+| `CLM-REBOOT-SCHED`@FEATURE_MATRIX.md | ✅实证 | `gw/reboot_sched.sh>=1.1` | 定时重启守护单实例且与配置同源 (默认每日 04:00) | c16f42e@2026-10-10 | 实弹: API设now+2min→窗口内触发→76s回升; rc19开机自拉/配置保持/TRY_A自清; 护栏: 时钟可信+开机300s+5min窗+当日去重 |
+| `CLM-TZ-TMPFS`@FINDINGS.md | ✅实证 | `gw/ntp_keeper.sh>=1.2` | NTP 服务器自管配置生效 (defaults叠settings) | ac47aa2@2026-10-10 | /etc/TZ→/tmp/TZ符号链接(tmpfs)重启即失回落UTC(实弹+0800→+0000); 修: TZ入自管配置+双守护每轮自愈; 连带修selftest优先级盲读(4 WiFi测试误报)与token缺席降级 |
 
 <!--CLMAUDIT:END-->

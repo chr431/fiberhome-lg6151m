@@ -36,7 +36,7 @@ gw/bin/multiwan_ctl	1.1	manifest	/data/gw/multiwan_ctl	原厂multiwan引擎ioctl
 gw/bin/fhstub.so	1.0	manifest	/data/gw/fhstub.so	FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径)
 gw/led_mgr.sh	1.8	manifest	/data/gw/led_mgr.sh	原厂风格LED守护(v1.8: WAN灯判据 carrier→数据面实测ICMP — 21:30实弹"载波在而断网"灯照亮=误导; 信标看门狗vif枚举动态化)
 gw/bin/v3httpd	2.6	manifest	/data/gw/v3httpd	网关GUI HTTP服务; v2.6(P2): 静态面拒*.sh(免认证源码泄露)+Host头校验(根治DNS rebinding)
-gw/www/api.sh	2.67	manifest	/data/gw/www/api.sh	GUI JSON端点; v2.67: wifi_state增MLO实况(mwctl dump ap_mld直读组号/链路数); 历史见git
+gw/www/api.sh	2.68	manifest	/data/gw/www/api.sh	GUI JSON端点; v2.68: MLO链路计数按索引去重修正; 历史见git
 gw/www/index.html	2.29	manifest	/data/gw/www/index.html	v3控制台页面(v2.29: 缓存v63)
 gw/www/style.css	2.1	manifest	/data/gw/www/style.css	控制台主题
 gw/www/app.js	3.47	manifest	/data/gw/www/app.js	控制台SPA; v3.47: WiFi卡片+MLO实况行(双链路/降级/未建立); 历史见git

@@ -83,7 +83,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
 | `gw/wifi_up.sh` | **v1.27** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.27: auto-channel接入驱动IDC安全掩码(仅在SafeChnBitmask集内选道, 防驱动自行搬道致配置≠实况); 历史版本见git) |
-| `gw/www/api.sh` | **v2.67** | manifest | `/data/gw/www/api.sh` | GUI JSON端点; v2.67: wifi_state增MLO实况(mwctl dump ap_mld直读组号/链路数); 历史见git |
+| `gw/www/api.sh` | **v2.68** | manifest | `/data/gw/www/api.sh` | GUI JSON端点; v2.68: MLO链路计数按索引去重修正; 历史见git |
 | `gw/www/app.js` | **v3.47** | manifest | `/data/gw/www/app.js` | 控制台SPA; v3.47: WiFi卡片+MLO实况行(双链路/降级/未建立); 历史见git |
 | `gw/www/index.html` | **v2.29** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.29: 缓存v63) |
 | `gw/www/style.css` | **v2.1** | manifest | `/data/gw/www/style.css` | 控制台主题 |

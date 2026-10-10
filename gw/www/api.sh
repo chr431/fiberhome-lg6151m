@@ -1434,7 +1434,7 @@ get_logs() {
     L=$(tail -20 /tmp/wan_agg.log 2>/dev/null | esc)
     W=$(tail -10 /tmp/wifi_up.log 2>/dev/null | esc)
     # v2.69: +diag — 诊断包尾部(日志改善轮; 脱敏: token/pass/凭据键)
-    D=$(tail -c 12000 /data/gw/logs/diag_last.txt 2>/dev/null \
+    D=$(tail -c 12000 /data/gw/logs/diag_last.txt 2>/dev/null | tail -n +2 \
         | sed -e 's/token=[0-9a-f]*/token=<redacted>/g' \
               -e 's/pass=[^& ]*/pass=<redacted>/g' \
               -e 's/^\(WPAPSK\)=.*/\1=<redacted>/' \

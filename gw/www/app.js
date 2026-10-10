@@ -1206,10 +1206,11 @@ PAGES.sys = {
         const l = await api("logs");
         H("log-agg", esc((l.wan_agg || "").replace(/\\n/g, "\n")));
         H("log-wifi", esc((l.wifi || "").replace(/\\n/g, "\n")));
-        /* v3.48: 诊断包尾部(get_logs diag 字段, 已脱敏) */
+        /* v3.48: 诊断包尾部(get_logs diag 字段, 已脱敏); 时间从头行正则提取 */
         const dg = (l.diag || "").replace(/\\n/g, "\n");
         H("log-diag", esc(dg));
-        T("dg-time", dg ? dg.split("\n")[0].replace(/=*$/, "").replace(/^===== LG6151M 诊断包 */, "") : "尚未生成");
+        const mh = dg.match(/===== LG6151M 诊断包 (.+?) =====/);
+        T("dg-time", mh ? mh[1] : (dg ? "（尾部展示）" : "尚未生成"));
     }
 };
 window.dgGen = async () => {

@@ -182,3 +182,35 @@
     推向登录锁定）。用户已改 GUI 管理口令（本地 `_local/secrets` 已同步）。
   - **MLO 证据源**：GUI 在线重应用会把 `/tmp/mld_boot.log` 重写为空（dmesg 已刷屏），
     ML 组创建证据只落在 `/tmp/wifi_up.log` 的 stdout 捕获；补为第三证据源。
+
+## 13. 2.4G 信道"配置≠实况"根因与 MLO 实时观测面（2026-10-10 逆向）
+
+- **信道问题根因（RE 实证）**：运行期唯一武装的自动切换主体是**驱动内 IDC
+  （LTE 共存避让）**——`bEnabled=1`，每秒轮询模组 safe/power 掩码（`mwctl dev ra0
+  show unsafeinfo`：`SafeChnBitmask=1fe-…` → **ch1–8 安全 / ch9–10 降功率 /
+  ch11–14 需 TDM/FDM 避让**，随模组频段变化），必要时驱动自行 `rtmp_set_channel`
+  搬道并触发 CH_SWITCH_NOTIFY（hostapd 只负责打印 "driver had channel switch"）。
+  驱动 ACS 已关（`AutoChannelSelect=0`，AcsInfo 计数全零）；mtk_netagent 是纯 modem
+  数据面代理（二进制无任何 wifi 字符串）；厂商 wapp/mapd 未运行。**结构性隐患**：
+  我们的 auto-channel 只对 1/6/11 轻惩罚，**可能选出 ch9–13**（IDC 避让区）→ 必然
+  出现"配置写 ch1 而实况被搬走"。 <!--CLM:CLM-IDC-SAFECH-->
+- **修复**：wifi_up v1.27 选道前读 `SafeChnBitmask`（mwctl show 输出进 dmesg，取首段
+  bit=信道号），候选集只在安全集内（读不到=模组未起 → 回退全量）；watchdog v1.5 加
+  "生成配置 channel= == 实况"不变量：漂移时以实况回写 hap_*.conf + 记警（实况为
+  权威，不闪 LED）；selftest `t_wifi_chcons` 同判据护栏。设备实测：mask=1fe →
+  cand2g={1..8}；当前 conf=live=ch1。
+- **开机后周期性同频 "channel switch" 成簇事件 = 假象**：`ChnSwitchCnt=0`、ACS 计数
+  全零——实为 GUI wifiscan（apcli0/apclii0 up + 两轮 scan）与 no_bcn 重装产生的
+  同频重报（每射频 3 条/簇，与 api.sh wifiscan 代码逐条同构），非信道管理。
+- **MLO 实时观测面（RE 实证）**：`mwctl ra0 dump ap_mld all` **stdout 干净**（dump 段
+  走 MTK vendor netlink 封装；show 段输出进 dmesg 不可脚本化）。实测输出：组号 1、
+  两个 Affiliated AP（BSSID …:90/LinkID 0、BSSID …:98/LinkID 1、均 STR）→ **双链路
+  健康**（此前"ml_link_num=1"只是首条 join 日志，rai0 随后加入无日志行）。纯 debugfs
+  备选：`/sys/kernel/debug/mtk_hwifi/wsys/mld_bss/mld_bss1`（ref_cnt=2）。已接线：
+  api.sh v2.68（wifi_state 增 mlo_grp/mlo_links，按索引去重计数）+ app.js v3.47
+  （WiFi 卡片"MLO: 双链路正常（2 条）"）+ selftest v2.17（BSSID 集合=={ra0,rai0} MAC、
+  LinkID 集合=={0,1} 强断言，旧日志证据链降为回退）。 <!--CLM:CLM-MLO-LIVE-->
+- **工具陷阱（本轮踩到）**：`ql_wifi_sample` 交互程序在 stdin EOF 后**死循环**（两
+  实例以 ~3700 行/秒刷 syslog，日志环被冲至 18 秒深 = 全部取证困难的元凶）；已清理，
+  脚本化一律用 `mwctl`，勿用 ql_wifi_sample。另：`mwctl <dev> show X` 退出码 0 但
+  stdout 为空，内容在 dmesg；`dump` 段才有干净 stdout。

@@ -1,5 +1,6 @@
 #!/bin/sh
-# wan_agg.sh v2.26 — 协议级检测(authd 会话信号, <=5s 故障转移) 双上行聚合主管 (vendor kernel engine + iptables fallback)
+# wan_agg.sh v2.27 — 协议级检测(authd 会话信号, <=5s 故障转移) 双上行聚合主管 (vendor kernel engine + iptables fallback)
+# v2.27(2026-10-11 实弹: 上游 EAP 重启窗口漏拦截页给手机): 探测 -W1 + 首败同轮复核 — 死亡确认 25s 级→<=8s
 # v2.26(2026-10-09 21:30 实弹: 以太断链数分钟不转移): w2_alive 的"新鲜 up 免 ping"改判
 #   —— up 不再是充分的活证据, 必须叠加数据面 ICMP 实证(w2_data_alive)。根因在 authd:
 #   succ 一旦置位永不复位, 收到任何 EAPOL 帧(含服务器周期性 Req-Identity)即
@@ -301,7 +302,9 @@ ensure_rules() {  # v2.5: fwmark策略规则存在性看门狗 — 只补活侧�
 
 # ---------- 探活 (mobilenetwork 原版配方) ----------
 probe() {  # $1=iface $2=dst
-    ping -4 -I $1 -c1 -W2 -s1 "$2" 2>/dev/null | grep -q ttl
+    # v2.27: -W2→-W1 — 探测最坏耗时减半(w2_alive 3 目标×超时), 死亡确认窗口
+    #   相应收窄; 双路 RTT 均 <<1s, 1s 超时余量充足。
+    ping -4 -I $1 -c1 -W1 -s1 "$2" 2>/dev/null | grep -q ttl
 }
 w1_alive() { probe $W1_IF 223.5.5.5 || probe $W1_IF 120.53.53.53; }
 w2_data_alive() {  # 以太数据面实证 — 网关优先(v2.20) + 公网兜底, 与认证程序解耦
@@ -494,6 +497,15 @@ while :; do
     [ "$AS" = down ] && [ $ASAGE -le 60 ] && AUTHD_DOWN=1
     if w1_alive; then U1=$((U1+1)); D1=0; W1_OK=$(date +%s); else D1=$((D1+1)); U1=0; fi
     if w2_alive; then U2=$((U2+1)); D2=0; W2_OK=$(date +%s); else D2=$((D2+1)); U2=0; fi
+    # v2.27: 首败同轮复核 — 家宽首败立即复探, 再败即确认(D2=3)。背景(2026-10-11
+    #   实弹): 上游交换机 EAP 重启窗口内"载波在/数据死"最长 25s(硬截止)才转移,
+    #   LAN 探测流量漏出 eth0 被上游拦截页 302 → 手机把 SSID 标"需要认证"转投
+    #   移动网络。3 击×最坏 6s 探测≈20s+ 窗口; 复核后 2 击≈一个环循(≤8s)收敛,
+    #   单包丢失在复探中自愈不误切。authd 会话重启(交换机 EAP restart)由此
+    #   最快 ~5s 摘除 eth0 出口。
+    if [ $S2 -eq 1 ] && [ $D2 -eq 1 ]; then
+        if w2_alive; then U2=$((U2+1)); D2=0; W2_OK=$(date +%s); else D2=3; fi
+    fi
     now=$(date +%s)
     NS1=$S1; NS2=$S2
     # v2.20: 硬截止判死 — 活侧距上次成功探活 >60s 即判死, 跳过3连击。

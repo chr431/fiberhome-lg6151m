@@ -3,7 +3,7 @@
 gw/rc.extend.sh	2.1	manifest	/data/rc.extend.sh	槽位调度器; v2.1(P3): shadow.override合法性校验+.bak回退自愈(坏文件不再锁死SSH+串口); v2.0: 开机清token; 历史见git
 gw/v3_rc10.extend.sh	2.28	manifest	/data/gw/rc19.sh	v3 启动编排 rc19v2; v2.28: +log_keeper 接线; 历史见git
 gw/wifi_up.sh	1.27	manifest	/data/gw/wifi_up.sh	mt7992 AP 工厂配方(v1.27: auto-channel接入驱动IDC安全掩码(仅在SafeChnBitmask集内选道, 防驱动自行搬道致配置≠实况); 历史版本见git)
-gw/wan_agg.sh	2.26	manifest	/data/gw/wan_agg.sh	双上行聚合主管(v2.26: 有线探活"up"必叠加数据面ICMP实证 — 21:30实弹eth_prio 15h不转移根因(authd succ永不复位+Req-Identity持续刷新up); 历史见git)
+gw/wan_agg.sh	2.27	manifest	/data/gw/wan_agg.sh	双上行聚合主管(v2.27: 探测-W1+首败同轮复核 — 死亡确认25s级→<=8s, 缩上游EAP重启拦截窗; 历史见git)
 gw/traffic_logger.sh	1.1	manifest	/data/gw/traffic_logger.sh	蜂窝/以太网流量采样器(5min 增量落 /data/gw/traffic_hist.tsv; 漂移解析+回绕自洽+40天裁剪)
 gw/udhcpc_wan.script	1.0	manifest	/data/gw/udhcpc_wan.script	WAN口 udhcpc 事件钩子(接口无关化)
 gw/healthdog.sh	1.1	manifest	/data/gw/healthdog.sh	看门狗用户态心跳

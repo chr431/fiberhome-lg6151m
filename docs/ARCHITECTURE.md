@@ -79,7 +79,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/v2_access.sh` | **v6.1** | manifest | `/data/gw/v2_access.sh` | v2 极简访问层(串口/SSH/DHCP/防火墙22,零守护干涉) |
 | `gw/v3_babysit_v2.sh` | **v2.0** | manifest | `/data/gw/babysit_v2.sh` | 启动保姆(T1杀rcS/T2核爆回B) |
 | `gw/v3_rc10.extend.sh` | **v2.28** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2; v2.28: +log_keeper 接线; 历史见git |
-| `gw/wan_agg.sh` | **v2.26** | manifest | `/data/gw/wan_agg.sh` | 双上行聚合主管(v2.26: 有线探活"up"必叠加数据面ICMP实证 — 21:30实弹eth_prio 15h不转移根因(authd succ永不复位+Req-Identity持续刷新up); 历史见git) |
+| `gw/wan_agg.sh` | **v2.27** | manifest | `/data/gw/wan_agg.sh` | 双上行聚合主管(v2.27: 探测-W1+首败同轮复核 — 死亡确认25s级→<=8s, 缩上游EAP重启拦截窗; 历史见git) |
 | `gw/watchdog.sh` | **v1.6** | manifest | `/data/gw/watchdog.sh` | 持续不变量看门狗(L13: 17项不变量; v1.6: +log_keeper自愈+ql_wifi_sample卡死清除; v1.5: 信道漂移回写) |
 | `gw/webs_revive.sh` | **v1.3** | manifest | `/data/gw/webs_revive.sh` | 原厂GUI复活器(自足nginx conf; 手动拉起) |
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |

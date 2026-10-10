@@ -79,7 +79,7 @@ tools/leak_check.py	2.2	tool	-	敏感词零命中门禁; v2.2: --history 全量�
 docs/ARCHITECTURE.md	1.1	doc	-	架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针)
 docs/GUI_TERMINOLOGY.md	1.2	doc	-	GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git
 gw/watchdog.sh	1.4	manifest	/data/gw/watchdog.sh	持续不变量看门狗(L13: 17项不变量; v1.2/L14: +蜂窝控制面 atcid自愈+CFUN探针+注册态, airplane容忍)
-tools/selftest.py	2.16	tool	-	断言式全功能测试; v2.16: +定时重启护栏(守护单实例+API/conf同源+值域); 历史见git
+tools/selftest.py	2.16	tool	-	断言式全功能测试; v2.16: +定时重启护栏 + 配置优先级盲读同族修复(eff_conf) + token缺席降级(不撞登录锁定); 历史见git
 tools/doc_audit.py	1.1	tool	-	台账↔文档内联标记双向审计(v1.1: 标记扫描纳入台账引用的docs/外文档如install/README.md; v1.0: 版本绑定+TEST-MISSING/STALE-CODE/UNREGISTERED-CLAIM)
 gw/src/mipc_cellular.c	0.8	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源(P1): dlopen闭包预载+ql_nw_init; v0.8: +endc 组网模式(厂商 fh_set_endc 同款 ql_nw_set_nr_disable_mode 序列, 写后读回校验)
 gw/bin/mipc_cellular	0.8	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI(getbands/setlock/unlock/endc; 锁NR41+79实弹验证零扰动)

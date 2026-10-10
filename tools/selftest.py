@@ -11,8 +11,11 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
-v2.16 (2026-10-10): +定时重启护栏 — reboot_sched 单实例([d] 防自匹配) + API/conf
-  同源一致 + HH:MM 值域(坏值静默回退默认 = 用户设置白设)。
+v2.16 (2026-10-10): +定时重启护栏(reboot_sched 单实例/API-conf 同源/值域) +
+  配置读取同族修复: 'sort -u 任意命中'与'cat settings defaults|tail -1'两类优先级
+  盲读收敛到 eff_conf()(settings 覆盖 defaults; 用户 GUI 改 GUEST=0/NTP 后不再误报)
+  + token 缺席降级: bad_login/接近锁定(>=8/10)记因 skip, SSE 不再 None.encode() 崩,
+  且工具不再把设备推向登录锁定。
 v2.15 (2026-10-09): 有线侧探活语义护栏 — authd "up" 不得单独构成活证据
   (v2.26 数据面 ICMP 必叠加: 认证帧在途+数据面已死时 up 永新鲜 = 21:30 实弹
   eth_prio 15h 不转移); authd_state 新鲜度须与数据面一致。
@@ -113,25 +116,34 @@ def api_post(endpoint, body, token):
 
 
 def get_token(password):
-    """Login to gateway API, return token."""
+    """Login to gateway API, return the full JSON response
+    ({"token":...} on success, {"error":"bad_login"/"locked"/...} otherwise).
+    v2.16b: 原只回 token -- 失败与"服务器拒绝"无法区分, 调用方拿到 None 无处归因。"""
     import urllib.parse
     data = f"pass={urllib.parse.quote(password)}".encode()
     req = urllib.request.Request(
         f"http://{lgssh.HOST}/api/login", data=data,
         headers={"Content-Type": "application/x-www-form-urlencoded"})
     r = urllib.request.urlopen(req, timeout=10)
-    j = json.loads(r.read())
-    return j.get("token")
+    return json.loads(r.read())
 
 
 _TOKEN = ["<unset>"]
+_TOKEN_NOTE = [""]   # v2.16b: token 缺席原因, 供 skip 文案(不再裸 "no GUI_PASS")
+
+
+def _skip_note():
+    return _TOKEN_NOTE[0] or "no GUI_PASS"
 
 
 def _token():
-    """Cached GUI token, or None when no password is configured.
+    """Cached GUI token, or None when login is unavailable.
 
     Mirrors lgssh's secrets resolution (LG_GUI_PASS env or device_local.py;
     v3 GUI key is GW_PASS -- WEB_PASS is the vendor web password).
+    v2.16b: 登录失败(bad_login=本地 GW_PASS 与设备不符, 用户改口令后必现)与
+    接近锁定阈值(>=8/10)时返回 None 并记因 — 调用方以 skip 呈现, 同时避免
+    把设备推向 10次/15min 登录锁定(工具自伤用户登录)。
     """
     if _TOKEN[0] != "<unset>":
         return _TOKEN[0]
@@ -142,9 +154,38 @@ def _token():
             pw = getattr(device_local, "GW_PASS", "")
         except ImportError:
             pw = ""
-    tok = get_token(pw) if pw else None
+    tok = None
+    if pw:
+        fc = dev("cat /tmp/gui_auth.fails 2>/dev/null").strip().split()
+        n = int(fc[0]) if fc and fc[0].isdigit() else 0
+        if n >= 8:
+            _TOKEN_NOTE[0] = f"设备登录失败计数 {n}/10 接近锁定, 跳过登录"
+        else:
+            j = get_token(pw)
+            tok = j.get("token")
+            if tok is None:
+                _TOKEN_NOTE[0] = f"login {j.get('error', '?')}: 本地 GW_PASS 与设备不符(用户已改口令?)"
     _TOKEN[0] = tok
     return tok
+
+
+def eff_conf(keys):
+    """持有效配置 (defaults 叠 settings, settings 覆盖) — 与设备侧 cfg_load 同序:
+    同键取 settings 中的值, 缺省回退 defaults。返回 {KEY: value}。
+    v2.16b: 修同族优先级盲读 — 原 'sort -u + 任意命中'(t_wifi_bss/guest/mlo/cross
+    见 defaults 的 GUEST=1 即判访客开, 用户在 GUI 改 GUEST=0 后 4 测试齐红)与
+    'cat settings defaults | tail -1'(恒取默认值, settings 覆盖被无视)均误报;
+    语义与 t_wifi_bwcons 的 head -1 对齐。"""
+    out = dev("cat /data/gw/settings.conf /data/gw/defaults.conf 2>/dev/null | "
+              "grep -E '^(%s)='" % "|".join(keys))
+    eff = {}
+    for line in out.splitlines():
+        if "=" in line:
+            k, v = line.split("=", 1)
+            k = k.strip()
+            if k not in eff:          # settings 文件在前: 首次出现 = 持有效值
+                eff[k] = v.strip()
+    return eff
 
 
 def at(cmd, timeout=15):
@@ -168,11 +209,11 @@ category("wifi")
 def t_wifi_bss():
     # v2.2: 访客可开在 ra1(2g)/rai1(5g)/双频(both)或关闭 — 期望集合由 settings 推出,
     # 并断言"该在的在、不该在的不在"(防残留 iface 与漏建)
-    conf = dev("cat /data/gw/settings.conf /data/gw/defaults.conf 2>/dev/null | "
-               "grep -E '^(GUEST|GUEST_BAND|GUEST_PASS)=' | sort -u")
-    guest = re.search(r"^GUEST=1$", conf, re.M)
-    gband = (re.search(r"^GUEST_BAND=(\w+)", conf, re.M) or [None, "5g"])[1]
-    has_pass = bool(re.search(r"^GUEST_PASS=..+", conf, re.M))
+    # v2.16b: 持有效值读取(settings 覆盖 defaults) — 原 union 盲读在 GUEST=0 后误报
+    eff = eff_conf(["GUEST", "GUEST_BAND", "GUEST_PASS"])
+    guest = eff.get("GUEST") == "1"
+    gband = eff.get("GUEST_BAND") or "5g"
+    has_pass = len(eff.get("GUEST_PASS", "")) >= 2
     want = {"ra0", "rai0"}
     if guest and has_pass:
         if gband in ("2g", "both"):
@@ -189,10 +230,10 @@ def t_wifi_bss():
 
 @test("访客 BSS 配置/隔离防火墙一致 (guest_fw)")
 def t_wifi_guest():
-    conf = dev("cat /data/gw/settings.conf /data/gw/defaults.conf 2>/dev/null | "
-               "grep -E '^(GUEST|GUEST_BAND|GUEST_SSID|GUEST_PASS)=' | sort -u")
+    # v2.16b: 持有效值读取(原 union 盲读 GUEST=1 在用户关闭访客后误报)
+    eff = eff_conf(["GUEST", "GUEST_BAND", "GUEST_SSID", "GUEST_PASS"])
     # v2.8: guest 有效 = GUEST=1 且有密码(无密码时 wifi_up 不建访客BSS — 首刷默认态即此)
-    guest = bool(re.search(r"^GUEST=1$", conf, re.M)) and bool(re.search(r"^GUEST_PASS=..+", conf, re.M))
+    guest = eff.get("GUEST") == "1" and len(eff.get("GUEST_PASS", "")) >= 2
     hap2 = dev("grep -c '^bss=' /var/wlan/hap_2g.conf 2>/dev/null").strip() or "0"
     hap5 = dev("grep -c '^bss=' /var/wlan/hap_5g.conf 2>/dev/null").strip() or "0"
     fw = dev("ebtables -L 2>/dev/null | grep -c 'Bridge chain: WIFI_GUEST_'").strip()  # v1.2: filter表(不再用broute)
@@ -210,7 +251,7 @@ def t_wifi_guest():
         # v2.5: 访客iface必须在br-lan里(hostapd动态BSS不自动入桥 — 不入桥则帧死在
         # 无IP接口, dnsmasq收不到DISCOVER, 手机卡获取IP; v1.22起wifi_up显式入桥)
         brports = dev("brctl show br-lan 2>/dev/null | awk '{print $NF}' | grep -E '^ra' | sort | tr '\\n' ' '")
-        conf2 = dev("cat /data/gw/settings.conf /data/gw/defaults.conf 2>/dev/null | grep '^GUEST_BAND=' | tail -1 | cut -d= -f2").strip() or "5g"
+        conf2 = eff.get("GUEST_BAND") or "5g"
         want_ports = set(["ra0", "rai0"])
         if conf2 in ("2g", "both"):
             want_ports.add("ra1")
@@ -238,9 +279,7 @@ def t_wifi_guest():
 def t_wifi_mlo():
     # v2.4: MLO=1 -> 两带 dat 各有 1基组表(stock形态) + 驱动/hostapd MLD 建立日志;
     # MLO=0 -> 键必须整体缺失(键存在但全零=v1.15事故形态, 当场红)
-    conf = dev("cat /data/gw/settings.conf /data/gw/defaults.conf 2>/dev/null | "
-               "grep -E '^(MLO|INONE)=' | sort -u")
-    mlo = bool(re.search(r"^MLO=1$", conf, re.M))
+    mlo = eff_conf(["MLO"]).get("MLO") == "1"   # v2.16b: 持有效值(原 union 盲读)
     g2 = dev("grep -h '^MldGroup=' /var/wlan/apcfg 2>/dev/null").strip()
     g5 = dev("grep -h '^MldGroup=' /var/wlan/apcfg_5 2>/dev/null").strip()
     notes = f"mlo={int(mlo)} apcfg='{g2}' apcfg_5='{g5}'"
@@ -252,11 +291,17 @@ def t_wifi_mlo():
              re.fullmatch(r"1;(18|0);0;0;0;0;0;0", t5) is not None
         if ok:
             # v2.5: 优先读 wifi_up 落的快照(ccmni 刷屏会把 MLD 行挤出环形缓冲)
+            # v2.16b: +/tmp/wifi_up.log — GUI 在线重应用会把 mld_boot.log 重写为空
+            # (此时 dmesg 已刷屏), ML 组创建证据只落在 wifi_up 的 stdout 捕获
             mld = dev("cat /tmp/mld_boot.log 2>/dev/null | wc -l").strip()
+            if int(mld or 0) == 0:
+                mld = dev("grep -cE 'Create AP MLD|join MLD|Alloc ML Group|hostapd_event_bss_mlo_info' "
+                          "/tmp/wifi_up.log 2>/dev/null").strip()
             if int(mld or 0) == 0:
                 mld = dev("dmesg | grep -cE 'Create AP MLD|join MLD|Alloc ML Group|hostapd_event_bss_mlo_info'").strip()
             bad = dev("dmesg | grep -c 'Create AP MLD, grp(0)'").strip()
-            snap_bad = dev("grep -c 'Create AP MLD, grp(0)' /tmp/mld_boot.log 2>/dev/null").strip() or "0"
+            snap_bad = str(sum(int(dev(f"grep -c 'Create AP MLD, grp(0)' {f} 2>/dev/null").strip() or 0)
+                               for f in ("/tmp/mld_boot.log", "/tmp/wifi_up.log")))
             notes += f" mld_logs={mld} grp0={bad}/{snap_bad}"
             ok = int(mld.strip() or 0) >= 1 and bad == "0" and snap_bad == "0"
     else:
@@ -283,11 +328,11 @@ def t_wifi_beacon():
 def t_wifi_cross():
     kern = dev("iw dev 2>/dev/null | grep -c 'type AP'").strip()
     # v2.2: 期望数配置感知 (主双BSS + 访客按频段开关)
-    conf = dev("cat /data/gw/settings.conf /data/gw/defaults.conf 2>/dev/null | "
-               "grep -E '^(GUEST|GUEST_BAND|GUEST_PASS)=' | sort -u")
-    guest = re.search(r"^GUEST=1$", conf, re.M)
-    gband = (re.search(r"^GUEST_BAND=(\w+)", conf, re.M) or [None, "5g"])[1]
-    has_pass = bool(re.search(r"^GUEST_PASS=..+", conf, re.M))
+    # v2.16b: 持有效值读取(原 union 盲读 GUEST=1 在用户关闭访客后误报 want=4)
+    eff = eff_conf(["GUEST", "GUEST_BAND", "GUEST_PASS"])
+    guest = eff.get("GUEST") == "1"
+    gband = eff.get("GUEST_BAND") or "5g"
+    has_pass = len(eff.get("GUEST_PASS", "")) >= 2
     want = 2
     if guest and has_pass:
         want += 2 if gband == "both" else 1
@@ -396,6 +441,12 @@ def t_gui_sse():
         s.close()
         no_tok_ok = b"need_login" in head   # 头之后跟 need_login JSON(SSE 头由 v3httpd 先行)
         tok = _token()
+        if tok is None:
+            # v2.16b: 原 tok.encode() 直接崩(AttributeError)记红 — 无 token 时
+            # 无 token 拒绝断言已成立, 带 token 流出部分降级为 skip
+            record(t_gui_sse._test_name, "gui", no_tok_ok,
+                   f"无token拒绝={'ok' if no_tok_ok else 'FAIL'} (skip 带token流: {_skip_note()})")
+            return
         s = sk.create_connection((lgssh.HOST, 80), timeout=5)
         s.settimeout(6)
         s.send(b"GET /api/sse?token=" + tok.encode() + b" HTTP/1.0\r\nHost: 192.168.9.1\r\n\r\n")
@@ -457,7 +508,7 @@ def t_gui_endpoints():
     }
     tok = _token()
     if tok is None:
-        record(t_gui_endpoints._test_name, "gui", True, "skip (no GUI_PASS)")
+        record(t_gui_endpoints._test_name, "gui", True, f"skip ({_skip_note()})")
         return
     bad = []
     for ep, keys in req_keys.items():
@@ -833,7 +884,7 @@ def t_cel_lockcons():
 def t_cel_apisim():
     tok = _token()
     if tok is None:
-        record(t_cel_apisim._test_name, "cellular", True, "skip (no GUI_PASS)")
+        record(t_cel_apisim._test_name, "cellular", True, f"skip ({_skip_note()})")
         return
     j = api("sim", tok)
     imei_api = str(j.get("imei", ""))
@@ -848,7 +899,7 @@ def t_cel_endc():
     # api.sh v2.62 + mipc_cellular v0.8: ENDC(1=SA 2=NSA 3=SA+NSA) 三层一致
     tok = _token()
     if tok is None:
-        record(t_cel_endc._test_name, "cellular", True, "skip (no GUI_PASS)")
+        record(t_cel_endc._test_name, "cellular", True, f"skip ({_skip_note()})")
         return
     j = api("netmode", tok)
     api_e = str(j.get("endc", ""))
@@ -896,7 +947,7 @@ def t_cel_smstool():
 def t_cel_apisms():
     tok = _token()
     if tok is None:
-        record(t_cel_apisms._test_name, "cellular", True, "skip (no GUI_PASS)")
+        record(t_cel_apisms._test_name, "cellular", True, f"skip ({_skip_note()})")
         return
     j = api("sms", tok, timeout=20)
     ok = isinstance(j.get("count"), int) and "msgs" in j
@@ -1069,12 +1120,12 @@ def t_sys_ntp():
     # (settings 覆盖 > defaults 出厂 > 内置兜底), 否则即僵尸读回归
     tok = _token()
     if tok is None:
-        record(t_sys_ntp._test_name, "system", True, "skip (no GUI_PASS)")
+        record(t_sys_ntp._test_name, "system", True, f"skip ({_skip_note()})")
         return
     j = api("ntp", tok)
-    # cat settings 在前 defaults 在后, 取最后一条 NTP_SERVER = 叠加持有效值
-    srv = dev("cat /data/gw/settings.conf /data/gw/defaults.conf 2>/dev/null | "
-              "grep '^NTP_SERVER=' | tail -1 | cut -d= -f2-").strip() or "ntp.aliyun.com"
+    # v2.16b: 持有效值(settings 覆盖 defaults) — 原 'cat settings defaults | tail -1'
+    # 恒取 defaults 行, 用户设置过 NTP_SERVER 即误报
+    srv = eff_conf(["NTP_SERVER"]).get("NTP_SERVER") or "ntp.aliyun.com"
     ok = bool(j.get("ntp_server")) and bool(j.get("date")) and j["ntp_server"] == srv
     record(t_sys_ntp._test_name, "system", ok,
            j["ntp_server"] if ok else f"api={j.get('ntp_server')!r} conf={srv!r}")
@@ -1086,12 +1137,11 @@ def t_sys_reboot_sched():
     # API 回值 = conf 叠加持有效值(僵尸读回归护栏, 与 NTP 同族);
     # 值域 HH:MM 强校验(坏值会让守护静默回退默认, 用户设置白设)
     n = dev("pgrep -f 'reboot_sche[d].sh' | wc -l").strip()
-    conf = dev("cat /data/gw/settings.conf /data/gw/defaults.conf 2>/dev/null | "
-               "grep '^REBOOT_TIME=' | tail -1 | cut -d= -f2-").strip() or "04:00"
+    conf = eff_conf(["REBOOT_TIME"]).get("REBOOT_TIME") or "04:00"
     tok = _token()
     if tok is None:
         record(t_sys_reboot_sched._test_name, "system", n == "1",
-               f"daemon={n} (skip api: no GUI_PASS)")
+               f"daemon={n} (skip api: {_skip_note()})")
         return
     j = api("reboot_sched", tok)
     ok = (n == "1" and re.match(r"^([01]\d|2[0-3]):[0-5]\d$", j.get("time", "") or "")

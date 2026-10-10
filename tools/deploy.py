@@ -91,6 +91,8 @@ MANIFEST = [
     ("gw/udhcpc_eth1.script", "/data/gw/udhcpc_eth1.script"),
     ("gw/defaults.conf", "/data/gw/defaults.conf"),
     ("gw/watchdog.sh", "/data/gw/watchdog.sh"),  # L13: continuous invariant monitor
+    ("gw/log_keeper.sh", "/data/gw/log_keeper.sh"),  # log persistence daemon (syslog/dmesg mirror + /tmp snapshots)
+    ("gw/diag_dump.sh", "/data/gw/diag_dump.sh"),  # one-shot redacted diagnostics bundle
     ("gw/wedge_watch.sh", "/data/gw/wedge_watch.sh"),
     ("gw/zz_data_hook", "/data/build/rootfs/etc/init.d/zz_data_hook"),     # hook-slot watchdog (stethoscope)
 ]

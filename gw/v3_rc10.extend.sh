@@ -1,6 +1,6 @@
 #!/bin/sh
-# rc19.sh v2 (=local v3_rc10.extend.sh) v2.26 -- Frankenstein v3.1: br-lan world + WiFi.
-# v2.26: 中性命名清扫(注释去私有语境词, 零功能改动)
+# rc19.sh v2 (=local v3_rc10.extend.sh) v2.28 -- Frankenstein v3.1: br-lan world + WiFi.
+# v2.28: +log_keeper 日志持久化守护接线; v2.26: 中性命名清扫(注释去私有语境词, 零功能改动)
 # v2.25: 流量采样器接线(traffic_logger.sh)
 # v2.22(P1): static 档案补写 /tmp/wan.gw — wan_agg 表200默认路由与 eth_prio
 #   主表切换以此为 BB_GW 源, 静态形态无人写 = 表200恒空(与 wan_agg v2.19 键链
@@ -134,6 +134,9 @@ pgrep -f reboot_sched.sh >/dev/null || nohup sh /data/gw/reboot_sched.sh >/dev/n
 pgrep -f traffic_logger >/dev/null || nohup sh /data/gw/traffic_logger.sh >/dev/null 2>&1 &
 # v2.19: 持续不变量看门狗 (L13: 部署后静默失效问题制度化对策)
 pgrep -f watchdog.sh >/dev/null || nohup sh /data/gw/watchdog.sh >/dev/null 2>&1 &
+# v2.28: 日志持久化守护(专项轮: /tmp 重启即失 + logread/dmesg 环被刷爆 →
+#   syslog/dmesg 增量镜像落 /data/gw/logs + /tmp 快照 + 开机诊断包)
+pgrep -f log_keeper.sh >/dev/null || nohup sh /data/gw/log_keeper.sh >/dev/null 2>&1 &
 
 # --- dual-uplink aggregation last (v2.8: wan_agg supersedes wan_policy2;
 #     vendor quecadp kernel split via /proc/multi_wan + fwmark policy routing;

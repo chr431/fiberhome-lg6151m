@@ -1,4 +1,4 @@
-/* app.js v3.47 (WiFi 卡片增 MLO 实况行: 双链路/单链路降级/未建立 — api 直读 mwctl dump ap_mld) -- v3.46 (定时重启卡片: 系统页开关+时间设置, 默认每日 04:00; 下次执行按设备侧 now/today/last 推导) -- v3.45 字体统一: 线路状态值去 mono(中文文案误用等宽, 与有线卡不一致) + mono 输入框 placeholder 全 ASCII 化) -- v3.44 状态页线路状态改数据面实测: 有线/蜂窝各增"线路状态"行+标签按 dp 而非 carrier — 21:30 实弹"载波在而断网"全程显示已连接=误导) -- v3 gateway console SPA
+/* app.js v3.48 (系统页诊断日志卡片: 生成按钮+诊断包尾部展示 — 日志改善专项轮) -- v3.47 (WiFi 卡片增 MLO 实况行: 双链路/单链路降级/未建立 — api 直读 mwctl dump ap_mld) -- v3.46 (定时重启卡片: 系统页开关+时间设置, 默认每日 04:00; 下次执行按设备侧 now/today/last 推导) -- v3.45 字体统一: 线路状态值去 mono(中文文案误用等宽, 与有线卡不一致) + mono 输入框 placeholder 全 ASCII 化) -- v3.44 状态页线路状态改数据面实测: 有线/蜂窝各增"线路状态"行+标签按 dp 而非 carrier — 21:30 实弹"载波在而断网"全程显示已连接=误导) -- v3 gateway console SPA
  * v3.39 (WiFi 分析仪 4 视图改进: 信道图邻居SSID标注+避让+文字光晕; 评级修复不可见信道号/徽标重叠+经典道同口径+本机标记+干扰计数; 列表可排序/色标/带宽/信号条; 时间图图例+数据点+历史本地持久)
  * v3.32(P2): WPA3虚假选项移除(hostapd仅WPA2-PSK); plmnScan XSS修复(textContent); v3.31: sse带token
  * v3.28: 聚合五模式选择; v3.27: SSE 实时信号; v3.26: 聚合滑块应用后回读同步
@@ -1166,6 +1166,10 @@ PAGES.sys = {
         <span class="hint">重启约 3 分钟；全部服务自动恢复</span>`)}
       ${card("聚合日志", '<pre class="log" id="log-agg"></pre>', 1)}
       ${card("WiFi 日志", '<pre class="log" id="log-wifi"></pre>', 1)}
+      ${card("诊断日志", kv("上次生成", "dg-time") + `
+        <button class="ghost" onclick="dgGen()">生成诊断包</button>
+        <pre class="log" id="log-diag" style="max-height:220px"></pre>
+        <span class="hint">脱敏采集: 配置/无线(MLO/掩码)/网络/全量日志现场; 每次开机自动存一份; SSH 亦可: sh /data/gw/diag_dump.sh</span>`, 1)}
     </div>`,
     async tick() {
         const s = await api("sys").catch(() => ({ uptime: 0 }));
@@ -1202,7 +1206,16 @@ PAGES.sys = {
         const l = await api("logs");
         H("log-agg", esc((l.wan_agg || "").replace(/\\n/g, "\n")));
         H("log-wifi", esc((l.wifi || "").replace(/\\n/g, "\n")));
+        /* v3.48: 诊断包尾部(get_logs diag 字段, 已脱敏) */
+        const dg = (l.diag || "").replace(/\\n/g, "\n");
+        H("log-diag", esc(dg));
+        T("dg-time", dg ? dg.split("\n")[0].replace(/=*$/, "").replace(/^===== LG6151M 诊断包 */, "") : "尚未生成");
     }
+};
+window.dgGen = async () => {
+    toast("正在生成诊断包…");
+    await api("diag_gen").catch(e => ({ error: e.message }));
+    setTimeout(async () => { await PAGES.sys.tick(); toast("诊断包已生成"); }, 3000);
 };
 window.fanTgl = async () => {
     const f = await api("fan");

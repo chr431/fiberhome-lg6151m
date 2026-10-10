@@ -11,6 +11,8 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
+v2.18 (2026-10-10): +日志持久化护栏 — log_keeper 单实例/镜像新鲜(<120s)/boot
+  分隔行在位(重启取证分界)。
 v2.17 (2026-10-10): MLO 实况直读(mwctl dump ap_mld: 组号+双链路 BSSID/LinkID 断言,
   旧日志证据链降为回退) + AP 信道配置==实况护栏(驱动 IDC 漂移, watchdog v1.3 同判据)。
 v2.16 (2026-10-10): +定时重启护栏(reboot_sched 单实例/API-conf 同源/值域) +
@@ -1122,6 +1124,19 @@ def t_sys_wd2():
     ok = bool(alive) and not state.strip()
     det = f"pid={alive}" + (f" FAILing={state.strip().splitlines()[0]}" if state.strip() else "")
     record(t_sys_wd2._test_name, "system", ok, det)
+
+
+@test("日志持久化守护活着且镜像新鲜")
+def t_sys_logk():
+    # v2.18: log_keeper(专项轮)单实例(防自匹配) + syslog 镜像存在/新鲜(<120s)
+    # + boot 分隔行在位(重启后取证的分界依据)
+    alive = dev("pgrep -f 'log_keepe[r].sh' | wc -l").strip()
+    fresh = dev("test -f /data/gw/logs/syslog.log && "
+                "[ $(( $(date +%s) - $(date -r /data/gw/logs/syslog.log +%s) )) -lt 120 ] && echo y").strip()
+    sep = dev("grep -c '^===== BOOT' /data/gw/logs/syslog.log 2>/dev/null").strip()
+    ok = alive == "1" and fresh == "y" and sep.isdigit() and int(sep) >= 1
+    record(t_sys_logk._test_name, "system", ok,
+           f"daemon={alive} fresh={fresh} boot_marks={sep}")
 
 
 @test("SoC 温度在合理区间")

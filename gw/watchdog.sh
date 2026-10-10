@@ -1,8 +1,9 @@
 #!/bin/sh
-# watchdog.sh v1.5 -- on-device continuous invariant monitor.
+# watchdog.sh v1.6 -- on-device continuous invariant monitor.
 # L13: "feature silently broken until manual inspection" countermeasure.
 # Runs every 30s; failures log + WAN LED flash; recovers silently.
 # Started by rc19.sh (pgrep guard); single instance.
+# v1.6: +log_keeper 自愈 + ql_wifi_sample 卡死清除(L28 死循环刷 syslog 冲垮日志环)。
 # v1.5: +wifi 信道一致性(驱动 IDC 可自行搬道 → 生成配置漂移时以实况回写+记警)。
 # v1.4: agg 规则检查模式无关(weight/优先/仅模式); v1.3: +dial_keeper 兜底自愈。
 # v1.2 (L14): +cellular control plane -- atcid 自愈, AT 通道(CFUN/CSQ),
@@ -76,6 +77,24 @@ run_cycle() {
         export PATH=/usr/sbin:/usr/bin:/sbin:/bin:/fhrom/bin:/fhrom/fhshell
         nohup sh /data/gw/dial_keeper.sh >/dev/null 2>&1 &
     fi
+    # log_keeper: 日志持久化(专项轮); 死则拉起 — 日志连续性=诊断生命线
+    if pgrep -f log_keeper.sh >/dev/null 2>&1; then
+        set_state logk 0 "log keeper"
+    else
+        set_state logk 1 "log keeper"
+        FAILS=$((FAILS+1))
+        nohup sh /data/gw/log_keeper.sh >/dev/null 2>&1 &
+    fi
+    # ql_wifi_sample 卡死清除(L28): stdin EOF 后死循环刷 syslog(实测 3700 行/s,
+    #   日志环被冲至 18s 深)。CPU 累计 >=120s 即杀(交互等待不耗 CPU, 不误伤;
+    #   stat 14+15=utime+stime tick, busybox HZ 按 100 计, 阈值语义随 HZ 平移无害)
+    for _p in $(pgrep -f ql_wifi_sampl[e] 2>/dev/null); do
+        _cpu=$(awk '{print int(($14 + $15) / 100)}' /proc/$_p/stat 2>/dev/null)
+        if [ -n "$_cpu" ] && [ "$_cpu" -ge 120 ]; then
+            kill $_p 2>/dev/null
+            log "WARN  killed stuck ql_wifi_sample pid=$_p (cpu=${_cpu}s)"
+        fi
+    done
     # atcid: AT 通道本体; 死则拉起 (替代厂商 procd respawn)
     if pidof atcid >/dev/null 2>&1; then
         set_state atcid 0 "atcid daemon"
@@ -152,7 +171,7 @@ run_cycle() {
 
 # ---- main ----
 touch $LOG $STATE
-log "===== watchdog v1.5 start ====="
+log "===== watchdog v1.6 start ====="
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

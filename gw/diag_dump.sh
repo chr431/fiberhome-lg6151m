@@ -1,5 +1,5 @@
 #!/bin/sh
-# diag_dump.sh v1.0 -- 一键诊断包（日志改善专项轮）
+# diag_dump.sh v1.1 -- 一键诊断包（日志改善专项轮; v1.1: 结束行带生成时刻 — 尾部展示时"上次生成"可读)
 # 用途: 问题诊断所需现场一次收集, 输出 stdout(GUI/SSH 重定向归档均可)。
 #   log_keeper 每次开机 +180s 落 diag_boot.txt; api diag_gen 落 diag_last.txt。
 # 脱敏(凭证红线): WPAPSK/GUEST_PASS/AUTHD_CMD/wpa_psk 等凭据行与 URL token
@@ -51,4 +51,4 @@ echo "-- 持久镜像 syslog.log(tail 120)"
 tail -120 /data/gw/logs/syslog.log 2>/dev/null | RED
 echo "-- 上次开机 /tmp 快照"
 ls -la /data/gw/logs/tmp/ 2>/dev/null
-echo "===== 诊断包结束 ====="
+echo "===== 诊断包结束 $(date '+%F %T %z') up=$(cut -d. -f1 /proc/uptime)s ====="

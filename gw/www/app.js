@@ -1,4 +1,4 @@
-/* app.js v3.48 (系统页诊断日志卡片: 生成按钮+诊断包尾部展示 — 日志改善专项轮) -- v3.47 (WiFi 卡片增 MLO 实况行: 双链路/单链路降级/未建立 — api 直读 mwctl dump ap_mld) -- v3.46 (定时重启卡片: 系统页开关+时间设置, 默认每日 04:00; 下次执行按设备侧 now/today/last 推导) -- v3.45 字体统一: 线路状态值去 mono(中文文案误用等宽, 与有线卡不一致) + mono 输入框 placeholder 全 ASCII 化) -- v3.44 状态页线路状态改数据面实测: 有线/蜂窝各增"线路状态"行+标签按 dp 而非 carrier — 21:30 实弹"载波在而断网"全程显示已连接=误导) -- v3 gateway console SPA
+/* app.js v3.49 (诊断卡片时间取自包尾行(尾部必含); v3.48 系统页诊断日志卡片: 生成按钮+诊断包尾部展示 — 日志改善专项轮) -- v3.47 (WiFi 卡片增 MLO 实况行: 双链路/单链路降级/未建立 — api 直读 mwctl dump ap_mld) -- v3.46 (定时重启卡片: 系统页开关+时间设置, 默认每日 04:00; 下次执行按设备侧 now/today/last 推导) -- v3.45 字体统一: 线路状态值去 mono(中文文案误用等宽, 与有线卡不一致) + mono 输入框 placeholder 全 ASCII 化) -- v3.44 状态页线路状态改数据面实测: 有线/蜂窝各增"线路状态"行+标签按 dp 而非 carrier — 21:30 实弹"载波在而断网"全程显示已连接=误导) -- v3 gateway console SPA
  * v3.39 (WiFi 分析仪 4 视图改进: 信道图邻居SSID标注+避让+文字光晕; 评级修复不可见信道号/徽标重叠+经典道同口径+本机标记+干扰计数; 列表可排序/色标/带宽/信号条; 时间图图例+数据点+历史本地持久)
  * v3.32(P2): WPA3虚假选项移除(hostapd仅WPA2-PSK); plmnScan XSS修复(textContent); v3.31: sse带token
  * v3.28: 聚合五模式选择; v3.27: SSE 实时信号; v3.26: 聚合滑块应用后回读同步
@@ -1209,8 +1209,9 @@ PAGES.sys = {
         /* v3.48: 诊断包尾部(get_logs diag 字段, 已脱敏); 时间从头行正则提取 */
         const dg = (l.diag || "").replace(/\\n/g, "\n");
         H("log-diag", esc(dg));
+        const me = dg.match(/===== 诊断包结束 (.+?) =====/);
         const mh = dg.match(/===== LG6151M 诊断包 (.+?) =====/);
-        T("dg-time", mh ? mh[1] : (dg ? "（尾部展示）" : "尚未生成"));
+        T("dg-time", (me || mh) ? (me || mh)[1] : (dg ? "（尾部展示）" : "尚未生成"));
     }
 };
 window.dgGen = async () => {

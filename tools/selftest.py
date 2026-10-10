@@ -11,6 +11,8 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
+v2.16 (2026-10-10): +定时重启护栏 — reboot_sched 单实例([d] 防自匹配) + API/conf
+  同源一致 + HH:MM 值域(坏值静默回退默认 = 用户设置白设)。
 v2.15 (2026-10-09): 有线侧探活语义护栏 — authd "up" 不得单独构成活证据
   (v2.26 数据面 ICMP 必叠加: 认证帧在途+数据面已死时 up 永新鲜 = 21:30 实弹
   eth_prio 15h 不转移); authd_state 新鲜度须与数据面一致。
@@ -1076,6 +1078,26 @@ def t_sys_ntp():
     ok = bool(j.get("ntp_server")) and bool(j.get("date")) and j["ntp_server"] == srv
     record(t_sys_ntp._test_name, "system", ok,
            j["ntp_server"] if ok else f"api={j.get('ntp_server')!r} conf={srv!r}")
+
+
+@test("定时重启守护单实例且与配置同源 (默认每日 04:00)")
+def t_sys_reboot_sched():
+    # 守护单实例(防自匹配: [d] 技巧, 原命令含本模式串会自计);
+    # API 回值 = conf 叠加持有效值(僵尸读回归护栏, 与 NTP 同族);
+    # 值域 HH:MM 强校验(坏值会让守护静默回退默认, 用户设置白设)
+    n = dev("pgrep -f 'reboot_sche[d].sh' | wc -l").strip()
+    conf = dev("cat /data/gw/settings.conf /data/gw/defaults.conf 2>/dev/null | "
+               "grep '^REBOOT_TIME=' | tail -1 | cut -d= -f2-").strip() or "04:00"
+    tok = _token()
+    if tok is None:
+        record(t_sys_reboot_sched._test_name, "system", n == "1",
+               f"daemon={n} (skip api: no GUI_PASS)")
+        return
+    j = api("reboot_sched", tok)
+    ok = (n == "1" and re.match(r"^([01]\d|2[0-3]):[0-5]\d$", j.get("time", "") or "")
+          and j.get("time") == conf)
+    record(t_sys_reboot_sched._test_name, "system", ok,
+           f"daemon={n} api={j.get('time')} conf={conf}")
 
 
 # =================================================================

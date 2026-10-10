@@ -1,4 +1,4 @@
-/* app.js v3.45 (字体统一: 线路状态值去 mono(中文文案误用等宽, 与有线卡不一致) + mono 输入框 placeholder 全 ASCII 化) -- v3.44 状态页线路状态改数据面实测: 有线/蜂窝各增"线路状态"行+标签按 dp 而非 carrier — 21:30 实弹"载波在而断网"全程显示已连接=误导) -- v3 gateway console SPA
+/* app.js v3.46 (定时重启卡片: 系统页开关+时间设置, 默认每日 04:00; 下次执行按设备侧 now/today/last 推导) -- v3.45 字体统一: 线路状态值去 mono(中文文案误用等宽, 与有线卡不一致) + mono 输入框 placeholder 全 ASCII 化) -- v3.44 状态页线路状态改数据面实测: 有线/蜂窝各增"线路状态"行+标签按 dp 而非 carrier — 21:30 实弹"载波在而断网"全程显示已连接=误导) -- v3 gateway console SPA
  * v3.39 (WiFi 分析仪 4 视图改进: 信道图邻居SSID标注+避让+文字光晕; 评级修复不可见信道号/徽标重叠+经典道同口径+本机标记+干扰计数; 列表可排序/色标/带宽/信号条; 时间图图例+数据点+历史本地持久)
  * v3.32(P2): WPA3虚假选项移除(hostapd仅WPA2-PSK); plmnScan XSS修复(textContent); v3.31: sse带token
  * v3.28: 聚合五模式选择; v3.27: SSE 实时信号; v3.26: 聚合滑块应用后回读同步
@@ -54,6 +54,7 @@ const ERR = {
     mipc_fail: "模组设置失败", tree_fail: "配置写入失败", at_fail: "模组无响应，请稍后重试",
     ioctl_fail: "硬件接口调用失败", pin_fail: "PIN 操作失败", bad_pin: "PIN 码只能为数字",
     bad_name: "主机名含不支持的字符", bad_srv: "服务器地址格式不正确", bad_tz: "时区格式不正确",
+    bad_val: "取值无效", bad_time: "时间格式不正确（HH:MM）",
     sync_fail: "同步失败：NTP 服务器均不可达",
     bad_ucs2: "短信编码格式不正确", empty_text: "短信内容不能为空", too_long: "内容过长",
     need_ucs2: "暂不支持中文短信（仅英文/数字）", send_fail: "短信发送失败",
@@ -1141,6 +1142,13 @@ PAGES.sys = {
         </div>
         <button class="ghost" onclick="ntSync()">应用并立即同步</button>
         <span class="hint">留空 = 恢复默认服务器；保存后每小时自动同步优先使用它</span>`)}
+      ${card("定时重启", kv("状态", "rb-en") + kv("每日重启时间", "rb-time") + kv("上次执行", "rb-last") + kv("下次执行", "rb-next") + `
+        <div class="row3" style="margin-top:8px">
+          <div class="frm"><label>启用</label><select id="rb-en-sel"><option value="1">启用</option><option value="0">停用</option></select></div>
+          <div class="frm"><label>重启时间（HH:MM）</label><input id="rb-time-in" class="mono" placeholder="04:00"></div>
+        </div>
+        <button class="ghost" onclick="rbSave()">应用</button>
+        <span class="hint">出厂默认每日 04:00 自动重启；设定时刻起 5 分钟内执行；留空时间 = 恢复默认 04:00</span>`)}
       ${card("管理密码", `
         <div class="row3">
           <div class="frm"><label>当前密码</label><input id="pw-old" type="password"></div>
@@ -1172,6 +1180,22 @@ PAGES.sys = {
         T("ntp-date", ntp.date); T("ntp-tz", TZ_TXT[ntp.tz] || ntp.tz || "--"); T("ntp-srv", ntp.ntp_server);
         F("nt-srv", ntp.ntp_server);
         const tzs = $("nt-tz"); if (tzs && [...tzs.options].some(o => o.value === ntp.tz)) tzs.value = ntp.tz;
+        /* v3.46: 定时重启卡片 — 下次执行由设备侧 now/today/last 推导(相对文案,
+           不用浏览器时区: 设备 CST-8 与 PC 未必同区) */
+        const rb = await api("reboot_sched").catch(() => null);
+        if (rb) {
+            const on = rb.en === "1" || rb.en === 1;
+            const m2n = s => { const [h, m] = String(s).split(":").map(Number); return h * 60 + m; };
+            const diff = m2n(rb.now) - m2n(rb.time);
+            const next = rb.last === rb.today ? `明日 ${rb.time}`
+                : (diff < 0 ? `今日 ${rb.time}` : (diff < 5 ? "即将执行" : `明日 ${rb.time}`));
+            T("rb-en", on ? "已启用" : "已停用");
+            T("rb-time", on ? `每日 ${rb.time}` : "--");
+            T("rb-last", rb.last || "尚未执行");
+            T("rb-next", on ? next : "--");
+            const sel = $("rb-en-sel"); if (sel) sel.value = on ? "1" : "0";
+            F("rb-time-in", rb.time);
+        }
         const l = await api("logs");
         H("log-agg", esc((l.wan_agg || "").replace(/\\n/g, "\n")));
         H("log-wifi", esc((l.wifi || "").replace(/\\n/g, "\n")));
@@ -1193,6 +1217,14 @@ window.ntSync = async () => {
         // 提交成功 = 服务器值即权威: 清脏标, 让 tick 把"留空=>默认"等结果立刻回显
         ["nt-srv", "nt-tz"].forEach(id => { DIRTY.delete(id); const e = $(id); if (e) e.classList.remove("dirty"); });
         toast("已应用，正在同步时间"); PAGES.sys.tick();
+    }
+    else toast(eMsg(j.error), 1);
+};
+window.rbSave = async () => {
+    const j = await api("reboot_sched_set", `en=${$("rb-en-sel").value}&time=${encodeURIComponent($("rb-time-in").value.trim())}`).catch(e => ({ error: e.message }));
+    if (j.ok) {
+        ["rb-time-in"].forEach(id => { DIRTY.delete(id); const e = $(id); if (e) e.classList.remove("dirty"); });
+        toast("已应用"); PAGES.sys.tick();
     }
     else toast(eMsg(j.error), 1);
 };

@@ -128,6 +128,8 @@ pgrep -x dropbear >/dev/null || {
 #        需要烽火终端App时手动: sh /data/gw/webs_revive.sh
 pgrep -f fan_mgr.sh >/dev/null || nohup sh /data/gw/fan_mgr.sh >/dev/null 2>&1 &
 pgrep -f ntp_keeper >/dev/null || nohup sh /data/gw/ntp_keeper.sh >/dev/null 2>&1 &
+# v2.27: 定时重启守护(出厂默认每日 04:00; 配置 defaults+settings, 改配置免重启)
+pgrep -f reboot_sched.sh >/dev/null || nohup sh /data/gw/reboot_sched.sh >/dev/null 2>&1 &
 # v2.25: 流量采样器(5min 粒度, 蜂窝/以太网分别, /data 持久供周/月图表)
 pgrep -f traffic_logger >/dev/null || nohup sh /data/gw/traffic_logger.sh >/dev/null 2>&1 &
 # v2.19: 持续不变量看门狗 (L13: 部署后静默失效问题制度化对策)

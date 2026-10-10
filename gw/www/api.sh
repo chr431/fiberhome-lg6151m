@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.64 (status 增数据面实测 home.dp/wan5g.dp — carrier=1 只说明物理层在; 21:30 实弹"载波在而数据面死"时 GUI 照常显示=误导; 判据与 wan_agg v2.26/led_mgr v1.8 同源; v2.63: netmode_set 变更时后台自动重附(cfun循环) — 实弹实证 LTE→NR-SA 不自发重选, 重发 nwmode 也不触发, 不重附则改完驻留 LTE 不生效; 幂等重应用不重附; v2.62: 组网模式 ENDC: netmode 增 endc 字段(1=SA 2=NSA 3=SA+NSA, 存 cellular.conf ENDC_MODE), apply_netmode 照抄官方联动规则(仅5G强制SA/仅4G-3G不下发)经 mipc_cellular endc 下发; v2.61: sim reg 推导修正: 本模组 AT CEREG?/CREG? 恒 0,0(数据畅通仍报未注册, 实测) — 改由 COPS 是否返回 PLMN 推导; v2.60: 蜂窝 conf 写方统一 upsert(cell_set): 原频段锁整文件覆盖冲掉 NM_MODE/CELL_i、celllock del 压实丢 NM_MODE、clear 重复键 — 同文件多写方互毁全消; get_sim phone/reg 迁活源 AT CNUM/CEREG 并删死树回退(树退役后恒空, 与 NTP 同族); cell_persist 仅 tree 引擎调用+shm 缺席跳过快照; v2.59: NTP 僵尸路径修复: 配置树 v3.1 已退役 -> cfg_cmd 全键恒失败(实测 shm_attach rc=-1), 时间同步卡片服务器字段改自管配置 NTP_SERVER(defaults 默认叠 settings 覆盖; 留空=gw_del 回退默认), 同步链全源失败显性 jerr sync_fail(原链式失败照报 synced:true=假成功); v2.58: wifiscan 中文 SSID: iw \xNN 转义解码为原始 UTF-8 字节 — 原样透传+tr去反斜杠=页面显示 xe8xbf... 垃圾; 历史: traffic_hist 空库边界修复; 流量双网分别统计(erx/etx) + traffic_hist 周/月聚合端点; wifiscan 补采 40M 方向 dir; 运营商映射修正 46015/46016=中国广电; status 增 m5 五模式字段; CMGL→CMGR 逐条读: ql_ril CMGL 未读列表路径段错误; CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.65 (定时重启端点: reboot_sched 读 defaults 叠 settings + last 落盘日期; reboot_sched_set 校验 HH:MM, 留空=gw_del 回退默认 04:00; 守护 reboot_sched.sh v1.0 同源消费; v2.64: status 增数据面实测 home.dp/wan5g.dp — carrier=1 只说明物理层在; 21:30 实弹"载波在而数据面死"时 GUI 照常显示=误导; 判据与 wan_agg v2.26/led_mgr v1.8 同源; v2.63: netmode_set 变更时后台自动重附(cfun循环) — 实弹实证 LTE→NR-SA 不自发重选, 重发 nwmode 也不触发, 不重附则改完驻留 LTE 不生效; 幂等重应用不重附; v2.62: 组网模式 ENDC: netmode 增 endc 字段(1=SA 2=NSA 3=SA+NSA, 存 cellular.conf ENDC_MODE), apply_netmode 照抄官方联动规则(仅5G强制SA/仅4G-3G不下发)经 mipc_cellular endc 下发; v2.61: sim reg 推导修正: 本模组 AT CEREG?/CREG? 恒 0,0(数据畅通仍报未注册, 实测) — 改由 COPS 是否返回 PLMN 推导; v2.60: 蜂窝 conf 写方统一 upsert(cell_set): 原频段锁整文件覆盖冲掉 NM_MODE/CELL_i、celllock del 压实丢 NM_MODE、clear 重复键 — 同文件多写方互毁全消; get_sim phone/reg 迁活源 AT CNUM/CEREG 并删死树回退(树退役后恒空, 与 NTP 同族); cell_persist 仅 tree 引擎调用+shm 缺席跳过快照; v2.59: NTP 僵尸路径修复: 配置树 v3.1 已退役 -> cfg_cmd 全键恒失败(实测 shm_attach rc=-1), 时间同步卡片服务器字段改自管配置 NTP_SERVER(defaults 默认叠 settings 覆盖; 留空=gw_del 回退默认), 同步链全源失败显性 jerr sync_fail(原链式失败照报 synced:true=假成功); v2.58: wifiscan 中文 SSID: iw \xNN 转义解码为原始 UTF-8 字节 — 原样透传+tr去反斜杠=页面显示 xe8xbf... 垃圾; 历史: traffic_hist 空库边界修复; 流量双网分别统计(erx/etx) + traffic_hist 周/月聚合端点; wifiscan 补采 40M 方向 dir; 运营商映射修正 46015/46016=中国广电; status 增 m5 五模式字段; CMGL→CMGR 逐条读: ql_ril CMGL 未读列表路径段错误; CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -704,6 +704,27 @@ apply_ntp() {
     else
         ok_json "\"synced\":true,\"note\":\"already-in-sync\""
     fi
+}
+
+# -- 定时重启 (v2.65) --
+get_reboot() {
+    # 与 reboot_sched 守护同源: defaults 叠 settings; last=守护落盘的执行日期
+    # (跨重启持久); 下次执行时刻由 GUI 侧按 today/last 推导显示。
+    cfg_load
+    RT="${REBOOT_TIME:-04:00}"
+    case "$RT" in [0-2][0-9]:[0-5][0-9]) ;; *) RT=04:00 ;; esac
+    printf '{"en":"%s","time":"%s","last":"%s","today":"%s","now":"%s"}' \
+        "${REBOOT_EN:-1}" "$RT" "$(cat /data/gw/reboot_sched.last 2>/dev/null)" "$(date +%F)" "$(date +%H:%M)"
+}
+apply_reboot() {
+    EN=$(form_kv en); RT=$(form_kv time)
+    case "$EN" in 0|1) ;; *) jerr bad_val ;; esac
+    # 留空时间 = gw_del 回退出厂默认 04:00 (与 NTP 端点同语义)
+    [ -z "$RT" ] || echo "$RT" | grep -qE '^([01][0-9]|2[0-3]):[0-5][0-9]$' || jerr bad_time
+    gw_set REBOOT_EN "$EN"
+    if [ -n "$RT" ]; then gw_set REBOOT_TIME "$RT"; else gw_del REBOOT_TIME; fi
+    cfg_load
+    ok_json "\"en\":\"${REBOOT_EN:-1}\",\"time\":\"${REBOOT_TIME:-04:00}\""
 }
 
 # -- 管理密码修改 --
@@ -1433,6 +1454,7 @@ case "$EP" in
     led)       need_tok; cfg_load; get_led ;;
     dhcp_static) need_tok; get_dhcp_static ;;
     ntp)       need_tok; get_ntp ;;
+    reboot_sched) need_tok; get_reboot ;;
     wifiscan)  need_tok; get_wifiscan ;;
     wifi_adv)  need_tok; get_wifi_adv ;;
     # auth POST
@@ -1493,6 +1515,7 @@ case "$EP" in
     led_set)       need_tok; apply_led ;;
     dhcp_static_set) need_tok; apply_dhcp_static ;;
     ntp_set)       need_tok; apply_ntp ;;
+    reboot_sched_set) need_tok; apply_reboot ;;
     wifi_adv_set)  need_tok; apply_wifi_adv ;;
     pass_set)      need_tok; apply_pass_set ;;
     sys_reboot)

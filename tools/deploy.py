@@ -80,6 +80,7 @@ MANIFEST = [
     ("gw/dial_keeper.sh", "/data/gw/dial_keeper.sh"),        # P2: fallback dial keeper (mobilenetwork-independent)
     ("gw/bin/shmsnap", "/data/gw/shmsnap"),          # cfgmgr tree shm snapshot tool
     ("gw/ntp_keeper.sh", "/data/gw/ntp_keeper.sh"),    # hourly NTP keeper (no RTC battery)
+    ("gw/reboot_sched.sh", "/data/gw/reboot_sched.sh"),  # scheduled reboot (default daily 04:00)
     ("gw/traffic_logger.sh", "/data/gw/traffic_logger.sh"),  # 流量采样器(5min 增量, 周/月图表数据源)
     ("gw/webs_revive.sh", "/data/gw/webs_revive.sh"),   # stock GUI revival (manual, self-contained)
     ("gw/fan_mgr.sh", "/data/gw/fan_mgr.sh"),        # stock-ladder thermal fan supervisor

@@ -214,3 +214,27 @@
   实例以 ~3700 行/秒刷 syslog，日志环被冲至 18 秒深 = 全部取证困难的元凶）；已清理，
   脚本化一律用 `mwctl`，勿用 ql_wifi_sample。另：`mwctl <dev> show X` 退出码 0 但
   stdout 为空，内容在 dmesg；`dump` 段才有干净 stdout。
+
+## 14. 日志改善专项：持久化镜像与一键诊断包（2026-10-10）
+
+- **痛点（本轮实战全部踩过）**：/tmp 日志重启即失（§13 信道取证丢失）；logread 环
+  被刷爆（L28 实测 18 秒深）；dmesg 被蜂窝噪声淹没；日志散落 22 处无统一现场。
+- **log_keeper v1.0（守护，rc19 拉起 + watchdog 自愈）**：每 30s 一轮，增量为零
+  不落盘。syslog/dmesg **增量镜像** → /data/gw/logs/{syslog,dmesg}.log（锚行法：
+  以上次镜像末行在环内定位，只追加新增；环溢出记 resync 标记 + tail 400 重同步；
+  容量 4MB/2MB 轮转 .1，单轮限流 512K）；**/tmp 快照** → logs/tmp/<name>（tail 32K
+  变化才写，重启后即上一个 boot 的最后现场）；**BOOT 分隔行**（wall+uptime+slot+kern）
+  写入两个镜像；每次开机 +180s 自动生成 diag_boot.txt。
+- **diag_dump v1.1（一键诊断包）**：基础(uptime/slot/TRY_A/内存/磁盘) + 配置(脱敏)
+  + 无线(iw/MLO dump/IDC 掩码) + 网络(addr/rule/route/NAT) + 全量日志现场
+  (logread/dmesg tail + 22 个 /tmp 日志 tail) + 持久镜像尾部。**脱敏**：WPAPSK/
+  GUEST_PASS/AUTHD_CMD/wpa_psk 行与 URL token/pass 一律 <redacted>（实测 0 泄漏）；
+  结束行带生成时刻（尾部展示时"上次生成"可读）。入口：GUI 系统页"生成诊断包"
+  （diag_gen 端点 + logs.diag 尾部展示）/ 每次开机自动 / SSH `sh /data/gw/diag_dump.sh`。
+- **实弹**：300 条 logger 洪泛注入 → 镜像 300/300 精确捕获；21 个 /tmp 快照就位；
+  诊断包 90KB 脱敏审计 0 泄漏；selftest `t_sys_logk` 护栏（单实例/镜像新鲜<120s/
+  BOOT 分隔在位）；watchdog 对 log_keeper 自愈、对 ql_wifi_sample 卡死进程
+  （CPU>=120s）自动清除。 <!--CLM:CLM-LOGKEEP-->
+- **已知边界**：开机早期（模组未起）IDC 掩码读取可能为空（diag 如实记录）；
+  镜像为轮转单代(.1)，更早历史不留（防 flash 膨胀）；洪泛期间镜像可能丢环头部
+  （resync 机制保证继续）。

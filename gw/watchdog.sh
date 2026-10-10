@@ -1,8 +1,10 @@
 #!/bin/sh
-# watchdog.sh v1.2 -- on-device continuous invariant monitor.
+# watchdog.sh v1.5 -- on-device continuous invariant monitor.
 # L13: "feature silently broken until manual inspection" countermeasure.
 # Runs every 30s; failures log + WAN LED flash; recovers silently.
 # Started by rc19.sh (pgrep guard); single instance.
+# v1.5: +wifi 信道一致性(驱动 IDC 可自行搬道 → 生成配置漂移时以实况回写+记警)。
+# v1.4: agg 规则检查模式无关(weight/优先/仅模式); v1.3: +dial_keeper 兜底自愈。
 # v1.2 (L14): +cellular control plane -- atcid 自愈, AT 通道(CFUN/CSQ),
 #       模组注册态。第一阶段裁剪曾杀 atcid 而 3 天无人知晓 (数据面测试全绿)。
 
@@ -117,6 +119,22 @@ run_cycle() {
     echo "beacon=$BCN" >> $STATE.tmp
     mv $STATE.tmp $STATE
 
+    # ---- wifi channel consistency (v1.5) ----
+    # 驱动 IDC(LTE 共存避让)可在运行期自行搬道(实测), hostapd 生成配置的 channel=
+    # 会与实况脱节("配置写 ch1 而实况 ch11")。实况为权威: 漂移时回写生成配置
+    # (hostapd 下次重启读到的即真相)并记警; 不闪 LED(非服务性故障)。
+    for _b in 2g 5g; do
+        [ "$_b" = 2g ] && _vif=ra0 || _vif=rai0
+        _cfc=/var/wlan/hap_$_b.conf
+        [ -r "$_cfc" ] || continue
+        _lc=$(iw dev $_vif info 2>/dev/null | awk '/channel/{print $2}')
+        _cc=$(grep -m1 '^channel=' $_cfc 2>/dev/null | cut -d= -f2)
+        if [ -n "$_lc" ] && [ -n "$_cc" ] && [ "$_lc" != "$_cc" ]; then
+            sed -i "s/^channel=.*/channel=$_lc/" $_cfc 2>/dev/null
+            log "WARN  wifi $_b channel drift: conf=$_cc live=$_lc -> adopted live"
+        fi
+    done
+
     # ---- visual alert ----
     if [ "$FAILS" -gt 0 ]; then
         for i in 1 2 3; do
@@ -134,7 +152,7 @@ run_cycle() {
 
 # ---- main ----
 touch $LOG $STATE
-log "===== watchdog v1.2 start ====="
+log "===== watchdog v1.5 start ====="
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

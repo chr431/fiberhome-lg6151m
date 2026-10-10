@@ -11,6 +11,8 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
+v2.17 (2026-10-10): MLO 实况直读(mwctl dump ap_mld: 组号+双链路 BSSID/LinkID 断言,
+  旧日志证据链降为回退) + AP 信道配置==实况护栏(驱动 IDC 漂移, watchdog v1.3 同判据)。
 v2.16 (2026-10-10): +定时重启护栏(reboot_sched 单实例/API-conf 同源/值域) +
   配置读取同族修复: 'sort -u 任意命中'与'cat settings defaults|tail -1'两类优先级
   盲读收敛到 eff_conf()(settings 覆盖 defaults; 用户 GUI 改 GUEST=0/NTP 后不再误报)
@@ -277,22 +279,33 @@ def t_wifi_guest():
 
 @test("MLO 状态与 dat 键一致 (v1.19)")
 def t_wifi_mlo():
-    # v2.4: MLO=1 -> 两带 dat 各有 1基组表(stock形态) + 驱动/hostapd MLD 建立日志;
-    # MLO=0 -> 键必须整体缺失(键存在但全零=v1.15事故形态, 当场红)
+    # v2.4: MLO=1 -> 两带 dat 各有 1基组表(stock形态); MLO=0 -> 键必须整体缺失
+    #   (键存在但全零=v1.15事故形态, 当场红)
+    # v2.17: 实况直读 — mwctl dump ap_mld 的 stdout(RE 实证: dump 段走 MTK vendor
+    #   netlink 封装输出干净; show 段输出进 dmesg 不可脚本化)。断言: 组号 1 +
+    #   恰好 2 个 Affiliated AP, BSSID 集合=={ra0,rai0} MAC, LinkID 集合=={0,1}。
+    #   旧日志证据链保留为 mwctl 不可用时的回退(不误红)。
     mlo = eff_conf(["MLO"]).get("MLO") == "1"   # v2.16b: 持有效值(原 union 盲读)
     g2 = dev("grep -h '^MldGroup=' /var/wlan/apcfg 2>/dev/null").strip()
     g5 = dev("grep -h '^MldGroup=' /var/wlan/apcfg_5 2>/dev/null").strip()
+    out = dev("/usr/sbin/mwctl ra0 dump ap_mld all 2>&1")
+    grp = re.search(r"AP MLD group id:(\d+)", out)
+    bssids = [b.lower() for b in re.findall(r"BSSID ([0-9a-fA-F:]{17})", out)]
+    links = re.findall(r"Link ID (\d+)", out)
     notes = f"mlo={int(mlo)} apcfg='{g2}' apcfg_5='{g5}'"
     if mlo:
         # v1.21: 访客BSS静态单链路组(2.4G访客token=17, 5G=18), 主BSS恒为组1
         t2 = g2.removeprefix("MldGroup=")
         t5 = g5.removeprefix("MldGroup=")
-        ok = re.fullmatch(r"1;(17|0);0;0;0;0;0;0", t2) is not None and \
-             re.fullmatch(r"1;(18|0);0;0;0;0;0;0", t5) is not None
-        if ok:
-            # v2.5: 优先读 wifi_up 落的快照(ccmni 刷屏会把 MLD 行挤出环形缓冲)
-            # v2.16b: +/tmp/wifi_up.log — GUI 在线重应用会把 mld_boot.log 重写为空
-            # (此时 dmesg 已刷屏), ML 组创建证据只落在 wifi_up 的 stdout 捕获
+        cfg_ok = re.fullmatch(r"1;(17|0);0;0;0;0;0;0", t2) is not None and \
+                 re.fullmatch(r"1;(18|0);0;0;0;0;0;0", t5) is not None
+        mac0 = dev("cat /sys/class/net/ra0/address 2>/dev/null").strip().lower()
+        mac5 = dev("cat /sys/class/net/rai0/address 2>/dev/null").strip().lower()
+        live_ok = (grp is not None and grp.group(1) == "1" and len(bssids) == 2
+                   and set(bssids) == {mac0, mac5} and sorted(links) == ["0", "1"])
+        notes += f" live_grp={grp.group(1) if grp else '-'} links={links} bssids={len(bssids)}"
+        if grp is None:
+            # 回退: mwctl 不可用/无输出 → 日志证据链(同 v2.16b)
             mld = dev("cat /tmp/mld_boot.log 2>/dev/null | wc -l").strip()
             if int(mld or 0) == 0:
                 mld = dev("grep -cE 'Create AP MLD|join MLD|Alloc ML Group|hostapd_event_bss_mlo_info' "
@@ -302,10 +315,12 @@ def t_wifi_mlo():
             bad = dev("dmesg | grep -c 'Create AP MLD, grp(0)'").strip()
             snap_bad = str(sum(int(dev(f"grep -c 'Create AP MLD, grp(0)' {f} 2>/dev/null").strip() or 0)
                                for f in ("/tmp/mld_boot.log", "/tmp/wifi_up.log")))
-            notes += f" mld_logs={mld} grp0={bad}/{snap_bad}"
-            ok = int(mld.strip() or 0) >= 1 and bad == "0" and snap_bad == "0"
+            notes += f" fallback mld_logs={mld} grp0={bad}/{snap_bad}"
+            live_ok = int(mld.strip() or 0) >= 1 and bad == "0" and snap_bad == "0"
+        ok = cfg_ok and live_ok
     else:
-        ok = g2 == "" and g5 == ""
+        ok = g2 == "" and g5 == "" and grp is None
+        notes += f" live_mld={'present!' if grp else 'none'}"
     record(t_wifi_mlo._test_name, "wifi", ok, notes)
 
 
@@ -360,6 +375,21 @@ def t_wifi_bwcons():
     ok = expect is not None and iw in expect
     record(t_wifi_bwcons._test_name, "wifi", ok,
            f"BW5G={conf} iw={iw}MHz" + ("" if ok else f" (期望 {expect})"))
+
+
+@test("AP 信道配置==实况 (IDC 漂移护栏)")
+def t_wifi_chcons():
+    # v2.17: 驱动 IDC(LTE 共存避让)可在运行期自行搬道(实测), 生成配置的
+    #   channel= 必须与实况一致(watchdog v1.3 同判据, 不一致会被它回写+记警)
+    ok = True
+    notes = []
+    for b, vif in (("2g", "ra0"), ("5g", "rai0")):
+        live = dev(f"iw dev {vif} info 2>/dev/null | awk '/channel/{{print $2}}'").strip()
+        conf = dev(f"grep -m1 '^channel=' /var/wlan/hap_{b}.conf 2>/dev/null | cut -d= -f2").strip()
+        notes.append(f"{b}:conf={conf or '?'}/live={live or '?'}")
+        if not live or not conf or live != conf:
+            ok = False
+    record(t_wifi_chcons._test_name, "wifi", ok, " ".join(notes))
 
 
 # =================================================================

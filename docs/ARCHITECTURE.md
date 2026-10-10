@@ -78,14 +78,14 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/v3_babysit_v2.sh` | **v2.0** | manifest | `/data/gw/babysit_v2.sh` | 启动保姆(T1杀rcS/T2核爆回B) |
 | `gw/v3_rc10.extend.sh` | **v2.27** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2; v2.27: +reboot_sched 守护接线(定时重启); v2.21: static档案开机重应用(MAC伪装/IP断电丢失实弹修复); 历史见git |
 | `gw/wan_agg.sh` | **v2.26** | manifest | `/data/gw/wan_agg.sh` | 双上行聚合主管(v2.26: 有线探活"up"必叠加数据面ICMP实证 — 21:30实弹eth_prio 15h不转移根因(authd succ永不复位+Req-Identity持续刷新up); 历史见git) |
-| `gw/watchdog.sh` | **v1.4** | manifest | `/data/gw/watchdog.sh` | 持续不变量看门狗(L13: 17项不变量; v1.2/L14: +蜂窝控制面 atcid自愈+CFUN探针+注册态, airplane容忍) |
+| `gw/watchdog.sh` | **v1.5** | manifest | `/data/gw/watchdog.sh` | 持续不变量看门狗(L13: 17项不变量; v1.5: +wifi信道一致性(配置漂移→实况回写+记警); v1.2/L14: 蜂窝控制面自愈) |
 | `gw/webs_revive.sh` | **v1.3** | manifest | `/data/gw/webs_revive.sh` | 原厂GUI复活器(自足nginx conf; 手动拉起) |
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
-| `gw/wifi_up.sh` | **v1.26** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.26: 终端频段锁定band_pins.conf→对侧频段main BSS deny ACL(macaddr_acl=0+deny_mac_file, 指令支持已实证); 无pin时conf与v1.25逐字节一致; 历史版本见git) |
-| `gw/www/api.sh` | **v2.66** | manifest | `/data/gw/www/api.sh` | GUI JSON端点; v2.66: 时区入自管配置(apply_ntp gw_set TZ + get_ntp 读持有效值 — 修重启回落UTC); 历史见git |
-| `gw/www/app.js` | **v3.46** | manifest | `/data/gw/www/app.js` | 控制台SPA; v3.46: +定时重启卡片(默认每日04:00); 历史见git |
-| `gw/www/index.html` | **v2.28** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.28: 缓存v62) |
+| `gw/wifi_up.sh` | **v1.27** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.27: auto-channel接入驱动IDC安全掩码(仅在SafeChnBitmask集内选道, 防驱动自行搬道致配置≠实况); 历史版本见git) |
+| `gw/www/api.sh` | **v2.67** | manifest | `/data/gw/www/api.sh` | GUI JSON端点; v2.67: wifi_state增MLO实况(mwctl dump ap_mld直读组号/链路数); 历史见git |
+| `gw/www/app.js` | **v3.47** | manifest | `/data/gw/www/app.js` | 控制台SPA; v3.47: WiFi卡片+MLO实况行(双链路/降级/未建立); 历史见git |
+| `gw/www/index.html` | **v2.29** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.29: 缓存v63) |
 | `gw/www/style.css` | **v2.1** | manifest | `/data/gw/www/style.css` | 控制台主题 |
 | `gw/zz_data_hook` | **v1.1** | manifest | `/data/build/rootfs/etc/init.d/zz_data_hook` | S98数据钩子(v1.1: plain sh——原厂无/etc/rc.common, rc.common式shebang致开机栈全灭; 回归实测发现) |
 | `gw/src/fhstub.c` | **v1.0** | src | `gw/bin/fhstub.so` | FH符号桩库源码 |
@@ -121,7 +121,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/rescue_shadow.py` | **v1.0** | tool | `-` | shadow.override未bind网络救援(getpass旧口令→只读探针: 文件md5/grep行为单测/部署钩子sh -x跟踪→从.bak恢复+重bind; 依赖rc.extend v2.1) |
 | `tools/rotate_toor.py` | **v1.4** | tool | `-` | toor口令轮换器; v1.4: 轮换前存档.bak(rc.extend v2.1回退源); 历史见git |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
-| `tools/selftest.py` | **v2.16** | tool | `-` | 断言式全功能测试; v2.16: +定时重启护栏 + 配置优先级盲读同族修复(eff_conf) + token缺席降级(不撞登录锁定); 历史见git |
+| `tools/selftest.py` | **v2.17** | tool | `-` | 断言式全功能测试; v2.17: MLO实况直读(mwctl dump ap_mld)+信道配置==实况护栏; 历史见git |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |
 | `tools/serial_server.py` | **v1.7** | tool | `-` | 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets) |
 | `tools/upgrade_slot.py` | **v1.0** | tool | `-` | SSH整槽升级器(P3第一档: vercheck/槽位/空间预检→md5门禁→dd备份旧p26→写新镜像→挂载sanity断言(toor/rcS/#v3:/procd)→失败自动整槽还原不重启→清TRY_A→reboot; PC侧轮询日志+回连终检; --dry-run) |

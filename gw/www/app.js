@@ -1,4 +1,4 @@
-/* app.js v3.46 (定时重启卡片: 系统页开关+时间设置, 默认每日 04:00; 下次执行按设备侧 now/today/last 推导) -- v3.45 字体统一: 线路状态值去 mono(中文文案误用等宽, 与有线卡不一致) + mono 输入框 placeholder 全 ASCII 化) -- v3.44 状态页线路状态改数据面实测: 有线/蜂窝各增"线路状态"行+标签按 dp 而非 carrier — 21:30 实弹"载波在而断网"全程显示已连接=误导) -- v3 gateway console SPA
+/* app.js v3.47 (WiFi 卡片增 MLO 实况行: 双链路/单链路降级/未建立 — api 直读 mwctl dump ap_mld) -- v3.46 (定时重启卡片: 系统页开关+时间设置, 默认每日 04:00; 下次执行按设备侧 now/today/last 推导) -- v3.45 字体统一: 线路状态值去 mono(中文文案误用等宽, 与有线卡不一致) + mono 输入框 placeholder 全 ASCII 化) -- v3.44 状态页线路状态改数据面实测: 有线/蜂窝各增"线路状态"行+标签按 dp 而非 carrier — 21:30 实弹"载波在而断网"全程显示已连接=误导) -- v3 gateway console SPA
  * v3.39 (WiFi 分析仪 4 视图改进: 信道图邻居SSID标注+避让+文字光晕; 评级修复不可见信道号/徽标重叠+经典道同口径+本机标记+干扰计数; 列表可排序/色标/带宽/信号条; 时间图图例+数据点+历史本地持久)
  * v3.32(P2): WPA3虚假选项移除(hostapd仅WPA2-PSK); plmnScan XSS修复(textContent); v3.31: sse带token
  * v3.28: 聚合五模式选择; v3.27: SSE 实时信号; v3.26: 聚合滑块应用后回读同步
@@ -143,7 +143,7 @@ PAGES.status = {
       ${card("聚合 " + tag("tg-agg", "运行中", "已停用"),
         kv("转发引擎", "agg-eng") + kv("聚合模式", "agg-mode") + kv("分流权重 蜂窝/有线宽带", "agg-w") + kv("运行状态", "agg-st"))}
       ${card("WiFi " + tag("tg-wifi", "正常", "异常"),
-        kv("2.4GHz", "wf-2g") + kv("5GHz", "wf-5g") + kv("无线服务", "wf-hap"))}
+        kv("2.4GHz", "wf-2g") + kv("5GHz", "wf-5g") + kv("MLO", "wf-mlo") + kv("无线服务", "wf-hap"))}
       ${card("温度", '<div id="tp-body"></div>')}
       ${card("IPv6 LAN", kv("ULA", "v6-ula", 1) + kv("方式", "v6-mode"))}
     </div>`,
@@ -189,6 +189,9 @@ PAGES.status = {
         setTag("tg-wifi", (w.hostapd2g > 0) && (w.hostapd5g > 0));
         T("wf-2g", `${w.ssid2g || "?"} · ${w.secured ? "已加密" : "开放"} · ch${w.ch2g}`);
         T("wf-5g", `${w.ssid5g || "?"} · ${w.secured ? "已加密" : "开放"} · ch${w.ch5g}`);
+        /* v3.47: MLO 实况 — api 直读 mwctl dump ap_mld(链路数); 0=未启用/未建立 */
+        const mll = +(w.mlo_links != null ? w.mlo_links : 0) || 0;
+        T("wf-mlo", mll >= 2 ? `双链路正常（${mll} 条）` : (mll === 1 ? "单链路（降级）" : "未建立"));
         T("wf-hap", `${w.hostapd2g > 0 ? "2.4GHz 正常" : "2.4GHz 异常"} · ${w.hostapd5g > 0 ? "5GHz 正常" : "5GHz 异常"}`);
         H("tp-body", Object.entries(j.temps || {}).map(([k, v]) => `<div class="kv"><span>${k}</span><b>${(v / 1000).toFixed(1)} °C</b></div>`).join(""));
         T("v6-ula", "fd42:9ac1:7e50::/64"); T("v6-mode", "自动分配 + NAT 兼容");

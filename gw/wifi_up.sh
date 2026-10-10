@@ -1,5 +1,5 @@
 #!/bin/sh
-# wifi_up.sh — v3 WiFi bring-up (v1.26: 终端频段锁定 band_pins.conf→对侧频段deny ACL; v1.25: v1.19 块过期 reboot 注释修正(v1.23 已撤销); v1.24: MLD快照按uptime过滤; v1.23: MLO在线重应用先下电回冷启动等价态, 撤销需重启纪律; v1.22: 访客iface显式入桥; v1.20: MLO单次AP启动; v1.19: MLO真双链路 — 两带 dat 各写 MldGroup=1;0;x6
+# wifi_up.sh — v3 WiFi bring-up (v1.27: auto-channel 接入驱动 IDC 安全掩码(mwctl show unsafeinfo 的 SafeChnBitmask), 只在安全集内选道 — 防选出驱动会自行搬走的道致"配置≠实况"; v1.26: 终端频段锁定 band_pins.conf→对侧频段deny ACL; v1.25: v1.19 块过期 reboot 注释修正(v1.23 已撤销); v1.24: MLD快照按uptime过滤; v1.23: MLO在线重应用先下电回冷启动等价态, 撤销需重启纪律; v1.22: 访客iface显式入桥; v1.20: MLO单次AP启动; v1.19: MLO真双链路 — 两带 dat 各写 MldGroup=1;0;x6
 #   (RE实证: stock be_init_wlan_apcfg_file 同款形态, 1基组号配对成MLD; 全零表=v1.15
 #   事故形态禁写; MldAddr/ApcliMloDisable 勿写; MLD生效需冷启动(FW锁存); 纯MLO不需wapp);
 #   v1.18: 访客独立配置; v1.16: F3单进程hostapd; v1.10: 自动信道扫描选道),
@@ -104,10 +104,27 @@ HT2=""
 rm -f /tmp/wifi_autoch; RCH2G=""; RCH5G=""
 if [ "$CH2G" = 0 ] || [ "$CH5G" = 0 ]; then
     echo "== auto-channel: scan for best channel (CH2G=$CH2G CH5G=$CH5G) =="
+    # v1.27: IDC(LTE 共存避让)安全掩码 — 驱动 IDC 武装时(bEnabled=1, 每秒轮询模组
+    #   频段)会把 AP 从"不安全"信道自行搬走(实测 n41@2644: ch1-8 安全/9-10 降功率/
+    #   11-14 避让)。选道必须只在安全集内, 否则必然出现"配置道≠实况道"。
+    #   掩码源: mwctl show 输出进内核日志; SafeChnBitmask 首段 bit=信道号(1fe=ch1-8)。
+    #   读不到(模组未起/命令不支持) → 回退全量候选(现行为), 由 watchdog 漂移护栏兜底。
+    IDC_SAFE=""
+    /usr/sbin/mwctl dev ra0 show unsafeinfo >/dev/null 2>&1
+    _M=$(dmesg 2>/dev/null | tail -60 | grep -o 'SafeChnBitmask=[0-9a-f]*' | tail -1 | cut -d= -f2)
+    [ -n "$_M" ] && IDC_SAFE=$((0x$_M))
+    CAND2=""
+    if [ -n "$IDC_SAFE" ] && [ "$IDC_SAFE" -gt 0 ] 2>/dev/null; then
+        for c in 1 2 3 4 5 6 7 8 9 10 11 12 13; do
+            [ $(( (IDC_SAFE >> c) & 1 )) = 1 ] && CAND2="$CAND2 $c"
+        done
+    fi
+    [ -z "$CAND2" ] && CAND2="1 2 3 4 5 6 7 8 9 10 11 12 13"
+    echo "== IDC safe mask: ${_M:-unavailable} cand2g=$CAND2 =="
     ifconfig apcli0 up 2>/dev/null; ifconfig apclii0 up 2>/dev/null; sleep 3
     ASCAN=$(iw apcli0 scan 2>/dev/null; iw apclii0 scan 2>/dev/null)
     ifconfig apcli0 down 2>/dev/null; ifconfig apclii0 down 2>/dev/null
-    echo "$ASCAN" | awk -v want2="$CH2G" -v want5="$CH5G" -v bw5="$BW5G" '
+    echo "$ASCAN" | awk -v want2="$CH2G" -v want5="$CH5G" -v bw5="$BW5G" -v cand2="$CAND2" '
         function ch_of(f) {
             if (f == 2484) return 14
             if (f < 4000)  return int((f - 2407 + 2) / 5)
@@ -129,7 +146,9 @@ if [ "$CH2G" = 0 ] || [ "$CH5G" = 0 ]; then
             store()
             if (want2 == 0) {
                 best = 1; bs = 1e30
-                for (c = 1; c <= 13; c++) {
+                n = split(cand2, CA, " ")   # v1.27: 候选=IDC 安全集(无掩码时=全量 1-13)
+                for (i = 1; i <= n; i++) {
+                    c = CA[i] + 0
                     s = 0
                     for (d = 1; d <= 13; d++) if (abs(d - c) <= 4) s += p24[d]
                     if (c != 1 && c != 6 && c != 11) s *= 1.15   # 非经典道轻惩罚

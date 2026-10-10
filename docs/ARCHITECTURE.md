@@ -175,7 +175,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `CLM-AUTHD-PROBE`@FINDINGS.md | ✅实证 | `gw/wan_agg.sh>=2.26` | 有线侧探活语义护栏 (up 必叠加数据面 ICMP) | 6d137b6@2026-10-09 | 21:30实弹: authd succ永不复位+Req-Identity持续刷up → 上层把"up"当充分活证据 → eth_prio下5G待命侧15h无接班(06:02→21:32); 修复=up必叠加数据面ICMP(w2.26)+authd up只认认证证据(v2.2); 实弹down 8s转移 |
 | `CLM-REBOOT-SCHED`@FEATURE_MATRIX.md | ✅实证 | `gw/reboot_sched.sh>=1.1` | 定时重启守护单实例且与配置同源 (默认每日 04:00) | c16f42e@2026-10-10 | 实弹: API设now+2min→窗口内触发→76s回升; rc19开机自拉/配置保持/TRY_A自清; 护栏: 时钟可信+开机300s+5min窗+当日去重 |
 | `CLM-TZ-TMPFS`@FINDINGS.md | ✅实证 | `gw/ntp_keeper.sh>=1.2` | NTP 服务器自管配置生效 (defaults叠settings) | ac47aa2@2026-10-10 | /etc/TZ→/tmp/TZ符号链接(tmpfs)重启即失回落UTC(实弹+0800→+0000); 修: TZ入自管配置+双守护每轮自愈; 连带修selftest优先级盲读(4 WiFi测试误报)与token缺席降级 |
-| `CLM-IDC-SAFECH`@FINDINGS.md | ✅实证 | `gw/wifi_up.sh>=1.27` | AP 信道配置==实况 (IDC 漂移护栏) | c4a2d15@2026-10-10 | RE: 驱动IDC(LTE共存避让)bEnabled=1每秒轮询掩码自行搬道; 实测mask=1fe→cand2g{1..8}; wifi_up仅安全集选道+watchdog漂移回写; 周期"切换"事件=wifiscan假象(ChnSwitchCnt=0) |
-| `CLM-MLO-LIVE`@FINDINGS.md | ✅实证 | `gw/www/api.sh>=2.68` | MLO 状态与 dat 键一致 (v1.19) | c4a2d15@2026-10-10 | mwctl dump ap_mld stdout直读(RE: dump段干净/show段进dmesg); 实测组1双链路STR; api/app/selftest三处接线(BSSID集合==ra0/rai0 MAC) |
+| `CLM-IDC-SAFECH`@FINDINGS.md | ✅实证 | `gw/wifi_up.sh>=1.27` | AP 信道配置==实况 (IDC 漂移护栏) | cece8c5@2026-10-10 | RE: 驱动IDC(LTE共存避让)bEnabled=1每秒轮询掩码自行搬道; 实测mask=1fe→cand2g{1..8}; wifi_up仅安全集选道+watchdog漂移回写; 周期"切换"事件=wifiscan假象(ChnSwitchCnt=0) |
+| `CLM-MLO-LIVE`@FINDINGS.md | ✅实证 | `gw/www/api.sh>=2.68` | MLO 状态与 dat 键一致 (v1.19) | 013a7ce@2026-10-10 | mwctl dump ap_mld stdout直读(RE: dump段干净/show段进dmesg); 实测组1双链路STR; api/app/selftest三处接线(BSSID集合==ra0/rai0 MAC) |
 
 <!--CLMAUDIT:END-->

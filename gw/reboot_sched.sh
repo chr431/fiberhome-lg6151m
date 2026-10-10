@@ -1,7 +1,9 @@
 #!/bin/sh
-# reboot_sched.sh v1.0 -- 定时重启守护(出厂默认: 每日 04:00)
+# reboot_sched.sh v1.1 -- 定时重启守护(出厂默认: 每日 04:00)
 # 配置: defaults.conf(只读出厂) 叠 settings.conf(用户稀疏覆盖), 与 NTP/WiFi 族同源;
 #   每轮重读 → GUI 改配置无需重启本守护。
+# v1.1: 每轮先自应用时区(/etc/TZ→/tmp/TZ 重启即失) — 本守护按本地时间比对窗口,
+#   不能依赖别的守护的时序(ntp_keeper 也做, 幂等双保险)。
 # 护栏(缺一不发; 每一条都对应一种真实故障):
 #   1) REBOOT_EN=1                      -- 用户可停用
 #   2) 时钟可信: 年份 >= 2024           -- 设备无 RTC, 冷启动时钟可能停在 1970/2000,
@@ -16,10 +18,13 @@ LAST=/data/gw/reboot_sched.last
 rg() { echo "$(date '+%m-%d %H:%M:%S') $*" >> $LOG; }
 rg "start"
 while :; do
-    REBOOT_EN=0; REBOOT_TIME=04:00
+    REBOOT_EN=0; REBOOT_TIME=04:00; TZ=""
     [ -r /data/gw/defaults.conf ] && . /data/gw/defaults.conf
     [ -r /data/gw/settings.conf ] && . /data/gw/settings.conf
     case "${REBOOT_TIME:-}" in [0-2][0-9]:[0-5][0-9]) ;; *) REBOOT_TIME=04:00 ;; esac
+    if [ -n "${TZ:-}" ] && [ "$(cat /etc/TZ 2>/dev/null)" != "$TZ" ]; then
+        echo "$TZ" > /etc/TZ
+    fi
     if [ "${REBOOT_EN:-0}" = 1 ]; then
         Y=$(date +%Y); U=$(cut -d. -f1 /proc/uptime 2>/dev/null)
         H=$(date +%H); M=$(date +%M); D=$(date +%F)

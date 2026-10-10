@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.65 (定时重启端点: reboot_sched 读 defaults 叠 settings + last 落盘日期; reboot_sched_set 校验 HH:MM, 留空=gw_del 回退默认 04:00; 守护 reboot_sched.sh v1.0 同源消费; v2.64: status 增数据面实测 home.dp/wan5g.dp — carrier=1 只说明物理层在; 21:30 实弹"载波在而数据面死"时 GUI 照常显示=误导; 判据与 wan_agg v2.26/led_mgr v1.8 同源; v2.63: netmode_set 变更时后台自动重附(cfun循环) — 实弹实证 LTE→NR-SA 不自发重选, 重发 nwmode 也不触发, 不重附则改完驻留 LTE 不生效; 幂等重应用不重附; v2.62: 组网模式 ENDC: netmode 增 endc 字段(1=SA 2=NSA 3=SA+NSA, 存 cellular.conf ENDC_MODE), apply_netmode 照抄官方联动规则(仅5G强制SA/仅4G-3G不下发)经 mipc_cellular endc 下发; v2.61: sim reg 推导修正: 本模组 AT CEREG?/CREG? 恒 0,0(数据畅通仍报未注册, 实测) — 改由 COPS 是否返回 PLMN 推导; v2.60: 蜂窝 conf 写方统一 upsert(cell_set): 原频段锁整文件覆盖冲掉 NM_MODE/CELL_i、celllock del 压实丢 NM_MODE、clear 重复键 — 同文件多写方互毁全消; get_sim phone/reg 迁活源 AT CNUM/CEREG 并删死树回退(树退役后恒空, 与 NTP 同族); cell_persist 仅 tree 引擎调用+shm 缺席跳过快照; v2.59: NTP 僵尸路径修复: 配置树 v3.1 已退役 -> cfg_cmd 全键恒失败(实测 shm_attach rc=-1), 时间同步卡片服务器字段改自管配置 NTP_SERVER(defaults 默认叠 settings 覆盖; 留空=gw_del 回退默认), 同步链全源失败显性 jerr sync_fail(原链式失败照报 synced:true=假成功); v2.58: wifiscan 中文 SSID: iw \xNN 转义解码为原始 UTF-8 字节 — 原样透传+tr去反斜杠=页面显示 xe8xbf... 垃圾; 历史: traffic_hist 空库边界修复; 流量双网分别统计(erx/etx) + traffic_hist 周/月聚合端点; wifiscan 补采 40M 方向 dir; 运营商映射修正 46015/46016=中国广电; status 增 m5 五模式字段; CMGL→CMGR 逐条读: ql_ril CMGL 未读列表路径段错误; CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
+# api.sh v2.66 (时区入自管配置: apply_ntp gw_set TZ + get_ntp 读持有效值 — /etc/TZ→/tmp/TZ(tmpfs) 重启即失回落 UTC, 原仅写运行态 = 每次重启后时钟显示偏移且定时重启窗口随 TZ 偏移(ntp_keeper v1.2/reboot_sched v1.1 每轮重应用); 定时重启端点: reboot_sched 读 defaults 叠 settings + last 落盘日期; reboot_sched_set 校验 HH:MM, 留空=gw_del 回退默认 04:00; 守护 reboot_sched.sh 同源消费; v2.64: status 增数据面实测 home.dp/wan5g.dp — carrier=1 只说明物理层在; 21:30 实弹"载波在而数据面死"时 GUI 照常显示=误导; 判据与 wan_agg v2.26/led_mgr v1.8 同源; v2.63: netmode_set 变更时后台自动重附(cfun循环) — 实弹实证 LTE→NR-SA 不自发重选, 重发 nwmode 也不触发, 不重附则改完驻留 LTE 不生效; 幂等重应用不重附; v2.62: 组网模式 ENDC: netmode 增 endc 字段(1=SA 2=NSA 3=SA+NSA, 存 cellular.conf ENDC_MODE), apply_netmode 照抄官方联动规则(仅5G强制SA/仅4G-3G不下发)经 mipc_cellular endc 下发; v2.61: sim reg 推导修正: 本模组 AT CEREG?/CREG? 恒 0,0(数据畅通仍报未注册, 实测) — 改由 COPS 是否返回 PLMN 推导; v2.60: 蜂窝 conf 写方统一 upsert(cell_set): 原频段锁整文件覆盖冲掉 NM_MODE/CELL_i、celllock del 压实丢 NM_MODE、clear 重复键 — 同文件多写方互毁全消; get_sim phone/reg 迁活源 AT CNUM/CEREG 并删死树回退(树退役后恒空, 与 NTP 同族); cell_persist 仅 tree 引擎调用+shm 缺席跳过快照; v2.59: NTP 僵尸路径修复: 配置树 v3.1 已退役 -> cfg_cmd 全键恒失败(实测 shm_attach rc=-1), 时间同步卡片服务器字段改自管配置 NTP_SERVER(defaults 默认叠 settings 覆盖; 留空=gw_del 回退默认), 同步链全源失败显性 jerr sync_fail(原链式失败照报 synced:true=假成功); v2.58: wifiscan 中文 SSID: iw \xNN 转义解码为原始 UTF-8 字节 — 原样透传+tr去反斜杠=页面显示 xe8xbf... 垃圾; 历史: traffic_hist 空库边界修复; 流量双网分别统计(erx/etx) + traffic_hist 周/月聚合端点; wifiscan 补采 40M 方向 dir; 运营商映射修正 46015/46016=中国广电; status 增 m5 五模式字段; CMGL→CMGR 逐条读: ql_ril CMGL 未读列表路径段错误; CMGF 读后还原 0: 入信自动存储疑似 0 态才可靠; AUTHD_CMD 引号落盘: 裸 KEY=v1 v2 被 . conf 按 env 前缀赋值解析=赋值丢弃, 冷启动 authd 永不拉起; SMS 实弹修复: CMGF=1 文本模式前置(modem 出厂 PDU 态 CMGL 报 CME 100 = 页面恒空), UCS2-BE 十六进制正文解码 UTF-8 + UDH 多段合并; 历史版本见git) -- v3 gateway API router (busybox sh; v3httpd fork+exec, no shell in C)
 #   GET  /api/<ep>            read endpoints (open, LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
@@ -672,9 +672,11 @@ get_ntp() {
     # v2.59: 树退役(KEEP_TREE=0; cfg_cmd 恒 shm_attach rc=-1)后原 cfgget(NTPServer1) 恒空
     #   = "手动设置过, 页面永远空白"的根因; 改自管配置: defaults.conf 叠 settings.conf
     #   (与 WiFi 族同源)。timed_reboot 死读删除(树键, 无消费方)。
+    # v2.66: tz 读自管配置(原读 /etc/TZ→/tmp/TZ tmpfs, 重启即回落 UTC = 页面显示
+    #   UTC 且定时重启窗口随 TZ 偏移); /etc/TZ 仅作无配置时兜底。
     cfg_load
     printf '{"date":"%s","tz":"%s","ntp_server":"%s","ts":%d}' \
-        "$(date "+%Y-%m-%d %H:%M:%S")" "$(cat /etc/TZ 2>/dev/null)" \
+        "$(date "+%Y-%m-%d %H:%M:%S")" "${TZ:-$(cat /etc/TZ 2>/dev/null)}" \
         "${NTP_SERVER:-ntp.aliyun.com}" "$(date +%s)"
 }
 apply_ntp() {
@@ -686,7 +688,10 @@ apply_ntp() {
     if [ -n "$SRV" ]; then gw_set NTP_SERVER "$SRV"; EFF=$SRV
     else gw_del NTP_SERVER; cfg_load; EFF=${NTP_SERVER:-ntp.aliyun.com}
     fi
-    echo "$TZV" > /etc/TZ
+    # v2.66: 时区入自管配置 — /etc/TZ→/tmp/TZ(tmpfs) 重启即失, 原仅写运行态 =
+    #   每次重启后时钟显示回落 UTC(定时重启窗口随 TZ 偏移); 空=gw_del 回退出厂默认
+    if [ -n "$TZV" ]; then gw_set TZ "$TZV"; else gw_del TZ; cfg_load; fi
+    echo "${TZ:-CST-8}" > /etc/TZ
     [ -s /etc/resolv.conf ] || echo "nameserver 223.5.5.5" > /etc/resolv.conf
     # v2.3: 同步对时+真实校验(ntpd -qn 曾静默失败致时钟错3天, 用户实弹抓获)
     # v2.59: 全源失败显性报错(原链失败后照报 synced:true = 假成功); 设置已先落盘,

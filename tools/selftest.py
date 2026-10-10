@@ -1126,9 +1126,15 @@ def t_sys_ntp():
     # v2.16b: 持有效值(settings 覆盖 defaults) — 原 'cat settings defaults | tail -1'
     # 恒取 defaults 行, 用户设置过 NTP_SERVER 即误报
     srv = eff_conf(["NTP_SERVER"]).get("NTP_SERVER") or "ntp.aliyun.com"
-    ok = bool(j.get("ntp_server")) and bool(j.get("date")) and j["ntp_server"] == srv
+    # v2.16b: 时区运行态 == 持有效值(/etc/TZ→tmpfs 重启即失的回归护栏;
+    # 时区偏移会连带把定时重启窗口整体平移)
+    tz = eff_conf(["TZ"]).get("TZ") or "CST-8"
+    live = dev("cat /etc/TZ 2>/dev/null").strip()
+    ok = (bool(j.get("ntp_server")) and bool(j.get("date")) and j["ntp_server"] == srv
+          and live == tz and j.get("tz") == tz)
     record(t_sys_ntp._test_name, "system", ok,
-           j["ntp_server"] if ok else f"api={j.get('ntp_server')!r} conf={srv!r}")
+           f"ntp={j.get('ntp_server')} tz={j.get('tz')}/{live}" if ok else
+           f"api={j.get('ntp_server')!r} conf={srv!r} tz_api={j.get('tz')!r} tz_live={live!r} tz_conf={tz!r}")
 
 
 @test("定时重启守护单实例且与配置同源 (默认每日 04:00)")

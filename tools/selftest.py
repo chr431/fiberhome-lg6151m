@@ -384,16 +384,26 @@ def t_wifi_bwcons():
 @test("AP 信道配置==实况 (IDC 漂移护栏)")
 def t_wifi_chcons():
     # v2.17: 驱动 IDC(LTE 共存避让)可在运行期自行搬道(实测), 生成配置的
-    #   channel= 必须与实况一致(watchdog v1.3 同判据, 不一致会被它回写+记警)
+    #   channel= 必须与实况一致(watchdog v1.5 同判据, 不一致会被它回写+记警)
+    # v2.19b: 驱动搬道 → watchdog 回写存在 ≤30s 滞后, 期间读数天然不一致 —
+    #   不一致时隔一轮 watchdog 周期(35s)复核一次再判, 只拦持续漂移
     ok = True
     notes = []
-    for b, vif in (("2g", "ra0"), ("5g", "rai0")):
-        live = dev(f"iw dev {vif} info 2>/dev/null | awk '/channel/{{print $2}}'").strip()
-        conf = dev(f"grep -m1 '^channel=' /var/wlan/hap_{b}.conf 2>/dev/null | cut -d= -f2").strip()
-        notes.append(f"{b}:conf={conf or '?'}/live={live or '?'}")
-        if not live or not conf or live != conf:
-            ok = False
-    record(t_wifi_chcons._test_name, "wifi", ok, " ".join(notes))
+    attempt = 1
+    for attempt in (1, 2):
+        ok = True
+        notes = []
+        for b, vif in (("2g", "ra0"), ("5g", "rai0")):
+            live = dev(f"iw dev {vif} info 2>/dev/null | awk '/channel/{{print $2}}'").strip()
+            conf = dev(f"grep -m1 '^channel=' /var/wlan/hap_{b}.conf 2>/dev/null | cut -d= -f2").strip()
+            notes.append(f"{b}:conf={conf or '?'}/live={live or '?'}")
+            if not live or not conf or live != conf:
+                ok = False
+        if ok or attempt == 2:
+            break
+        time.sleep(35)
+    record(t_wifi_chcons._test_name, "wifi", ok,
+           " ".join(notes) + (f" attempt={attempt}" if attempt == 2 else ""))
 
 
 # =================================================================

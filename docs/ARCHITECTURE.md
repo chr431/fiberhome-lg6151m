@@ -84,7 +84,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/webs_revive.sh` | **v1.3** | manifest | `/data/gw/webs_revive.sh` | 原厂GUI复活器(自足nginx conf; 手动拉起) |
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
-| `gw/wifi_up.sh` | **v1.27** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.27: auto-channel接入驱动IDC安全掩码(仅在SafeChnBitmask集内选道, 防驱动自行搬道致配置≠实况); 历史版本见git) |
+| `gw/wifi_up.sh` | **v1.28** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.28: 候选收敛安全集深部{1,6}消边界振荡; v1.27: auto-channel接入驱动IDC安全掩码(仅在SafeChnBitmask集内选道, 防驱动自行搬道致配置≠实况); 历史版本见git) |
 | `gw/www/api.sh` | **v2.70** | manifest | `/data/gw/www/api.sh` | GUI JSON端点; v2.70: get_agg增curfew字段+curfew_set端点(宵断时段, wan_agg同源); 历史见git |
 | `gw/www/app.js` | **v3.50** | manifest | `/data/gw/www/app.js` | 控制台SPA; v3.50: 聚合页有线宵断卡片(启用/起止/窗口状态); 历史见git |
 | `gw/www/index.html` | **v2.31** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.31: 缓存v65) |

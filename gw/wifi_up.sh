@@ -1,5 +1,5 @@
 #!/bin/sh
-# wifi_up.sh — v3 WiFi bring-up (v1.27: auto-channel 接入驱动 IDC 安全掩码(mwctl show unsafeinfo 的 SafeChnBitmask), 只在安全集内选道 — 防选出驱动会自行搬走的道致"配置≠实况"; v1.26: 终端频段锁定 band_pins.conf→对侧频段deny ACL; v1.25: v1.19 块过期 reboot 注释修正(v1.23 已撤销); v1.24: MLD快照按uptime过滤; v1.23: MLO在线重应用先下电回冷启动等价态, 撤销需重启纪律; v1.22: 访客iface显式入桥; v1.20: MLO单次AP启动; v1.19: MLO真双链路 — 两带 dat 各写 MldGroup=1;0;x6
+# wifi_up.sh — v3 WiFi bring-up (v1.28: 候选收敛安全集深部{1,6} — 开机掩码不可用期回退选出边界道ch9被驱动IDC整晚搬运2↔3↔9; v1.27: auto-channel 接入驱动 IDC 安全掩码(mwctl show unsafeinfo 的 SafeChnBitmask), 只在安全集内选道 — 防选出驱动会自行搬走的道致"配置≠实况"; v1.26: 终端频段锁定 band_pins.conf→对侧频段deny ACL; v1.25: v1.19 块过期 reboot 注释修正(v1.23 已撤销); v1.24: MLD快照按uptime过滤; v1.23: MLO在线重应用先下电回冷启动等价态, 撤销需重启纪律; v1.22: 访客iface显式入桥; v1.20: MLO单次AP启动; v1.19: MLO真双链路 — 两带 dat 各写 MldGroup=1;0;x6
 #   (RE实证: stock be_init_wlan_apcfg_file 同款形态, 1基组号配对成MLD; 全零表=v1.15
 #   事故形态禁写; MldAddr/ApcliMloDisable 勿写; MLD生效需冷启动(FW锁存); 纯MLO不需wapp);
 #   v1.18: 访客独立配置; v1.16: F3单进程hostapd; v1.10: 自动信道扫描选道),
@@ -113,13 +113,20 @@ if [ "$CH2G" = 0 ] || [ "$CH5G" = 0 ]; then
     /usr/sbin/mwctl dev ra0 show unsafeinfo >/dev/null 2>&1
     _M=$(dmesg 2>/dev/null | tail -60 | grep -o 'SafeChnBitmask=[0-9a-f]*' | tail -1 | cut -d= -f2)
     [ -n "$_M" ] && IDC_SAFE=$((0x$_M))
+    # v1.28: 候选收敛到安全集深部 {1,6} — 实弹(2026-10-12): 开机模组未起时掩码
+    #   不可用, 回退全量候选选出边界道 ch9(功率压缩区), 驱动 IDC 整晚反复搬运
+    #   2↔3↔9(客户端每 30-60s 被踢一次)。{1,6} 是经典不重叠中心且在 n41 安全集
+    #   深部(掩码 1fe/1fc 两种形态下 ch6 恒安全), 从根上消除边界振荡。
     CAND2=""
     if [ -n "$IDC_SAFE" ] && [ "$IDC_SAFE" -gt 0 ] 2>/dev/null; then
-        for c in 1 2 3 4 5 6 7 8 9 10 11 12 13; do
+        for c in 1 6; do
+            [ $(( (IDC_SAFE >> c) & 1 )) = 1 ] && CAND2="$CAND2 $c"
+        done
+        [ -z "$CAND2" ] && for c in 1 2 3 4 5 6 7 8 9 10 11 12 13; do
             [ $(( (IDC_SAFE >> c) & 1 )) = 1 ] && CAND2="$CAND2 $c"
         done
     fi
-    [ -z "$CAND2" ] && CAND2="1 2 3 4 5 6 7 8 9 10 11 12 13"
+    [ -z "$CAND2" ] && CAND2="1 6"
     echo "== IDC safe mask: ${_M:-unavailable} cand2g=$CAND2 =="
     ifconfig apcli0 up 2>/dev/null; ifconfig apclii0 up 2>/dev/null; sleep 3
     ASCAN=$(iw apcli0 scan 2>/dev/null; iw apclii0 scan 2>/dev/null)

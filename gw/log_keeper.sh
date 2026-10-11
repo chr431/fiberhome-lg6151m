@@ -1,5 +1,5 @@
 #!/bin/sh
-# log_keeper.sh v1.0 -- 日志持久化守护（日志改善专项轮，L27/L28 教训制度化）
+# log_keeper.sh v1.1 -- 日志持久化守护（日志改善专项轮; v1.1: 轮转后重写 boot 上下文 — selftest 实弹抓获轮转后 BOOT 分隔丢失）
 # 痛点：/tmp 日志重启即失（信道取证丢失）；logread 环被刷爆（ql_wifi_sample 实测
 #   18 秒深）；dmesg 被蜂窝噪声淹没；日志散落二十余处无统一现场。
 # 机制（每 30s 一轮；增量为空不落盘，flash 友好）：
@@ -29,6 +29,10 @@ append_cap() { # stdin → $1 镜像, 单轮限流 512K, 容量轮转 $2
     if [ "${SZ:-0}" -gt "$2" ]; then
         mv "$1" "$1.1"
         : > "$1"
+        # v1.1: 轮转后重写 boot 上下文 — 否则新生代无 BOOT 分隔行(取证分界丢失;
+        #   selftest 护栏实弹抓获: syslog 4MB 轮转后 boot_marks=0)
+        echo "-- rotated ($SZ B → .1), boot context re-marked --" >> "$1"
+        bootmark
         lk "rotate $1 (${SZ}B)"
     fi
 }

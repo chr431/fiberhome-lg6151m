@@ -65,7 +65,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/guest_fw.sh` | **v1.6** | manifest | `/data/gw/guest_fw.sh` | 访客隔离防火墙v1.6(审计P0: GUEST_ISOLATE开关删除=强制隔离; 兼容需求改由主WiFi终端频段锁定承接; 历史版本见git) |
 | `gw/healthdog.sh` | **v1.1** | manifest | `/data/gw/healthdog.sh` | 看门狗用户态心跳 |
 | `gw/led_mgr.sh` | **v1.8** | manifest | `/data/gw/led_mgr.sh` | 原厂风格LED守护(v1.8: WAN灯判据 carrier→数据面实测ICMP — 21:30实弹"载波在而断网"灯照亮=误导; 信标看门狗vif枚举动态化) |
-| `gw/log_keeper.sh` | **v1.0** | manifest | `/data/gw/log_keeper.sh` | 日志持久化守护(syslog/dmesg增量镜像+/tmp快照+boot分隔+容量轮转; 每开机一份诊断包) |
+| `gw/log_keeper.sh` | **v1.1** | manifest | `/data/gw/log_keeper.sh` | 日志持久化守护(syslog/dmesg增量镜像+/tmp快照+boot分隔+容量轮转(轮转后重写boot上下文); 每开机一份诊断包) |
 | `gw/mipc_dial_trace.sh` | **v1.0** | manifest | `/data/gw/mipc_dial_trace.sh` | 5G 拨号取证(xtrace 抓真参) |
 | `gw/night_report.sh` | **v1.0** | manifest | `/data/gw/night_report.sh` | 夜间体检报告 |
 | `gw/ntp_keeper.sh` | **v1.2** | manifest | `/data/gw/ntp_keeper.sh` | 每小时NTP守时(多源; 设备无RTC; v1.2: +时区自愈(/etc/TZ→tmpfs重启即失, 每轮重应用); v1.1: 首选 NTP_SERVER 自管配置) |

@@ -1,4 +1,4 @@
-/* app.js v3.49 (诊断卡片时间取自包尾行(尾部必含); v3.48 系统页诊断日志卡片: 生成按钮+诊断包尾部展示 — 日志改善专项轮) -- v3.47 (WiFi 卡片增 MLO 实况行: 双链路/单链路降级/未建立 — api 直读 mwctl dump ap_mld) -- v3.46 (定时重启卡片: 系统页开关+时间设置, 默认每日 04:00; 下次执行按设备侧 now/today/last 推导) -- v3.45 字体统一: 线路状态值去 mono(中文文案误用等宽, 与有线卡不一致) + mono 输入框 placeholder 全 ASCII 化) -- v3.44 状态页线路状态改数据面实测: 有线/蜂窝各增"线路状态"行+标签按 dp 而非 carrier — 21:30 实弹"载波在而断网"全程显示已连接=误导) -- v3 gateway console SPA
+/* app.js v3.50 (聚合页有线宵断卡片: 启用/起止时间/窗口内状态 — wan_agg v2.28 同源) -- v3.49 (诊断卡片时间取自包尾行(尾部必含); v3.48 系统页诊断日志卡片: 生成按钮+诊断包尾部展示 — 日志改善专项轮) -- v3.47 (WiFi 卡片增 MLO 实况行: 双链路/单链路降级/未建立 — api 直读 mwctl dump ap_mld) -- v3.46 (定时重启卡片: 系统页开关+时间设置, 默认每日 04:00; 下次执行按设备侧 now/today/last 推导) -- v3.45 字体统一: 线路状态值去 mono(中文文案误用等宽, 与有线卡不一致) + mono 输入框 placeholder 全 ASCII 化) -- v3.44 状态页线路状态改数据面实测: 有线/蜂窝各增"线路状态"行+标签按 dp 而非 carrier — 21:30 实弹"载波在而断网"全程显示已连接=误导) -- v3 gateway console SPA
  * v3.39 (WiFi 分析仪 4 视图改进: 信道图邻居SSID标注+避让+文字光晕; 评级修复不可见信道号/徽标重叠+经典道同口径+本机标记+干扰计数; 列表可排序/色标/带宽/信号条; 时间图图例+数据点+历史本地持久)
  * v3.32(P2): WPA3虚假选项移除(hostapd仅WPA2-PSK); plmnScan XSS修复(textContent); v3.31: sse带token
  * v3.28: 聚合五模式选择; v3.27: SSE 实时信号; v3.26: 聚合滑块应用后回读同步
@@ -836,6 +836,14 @@ PAGES.agg = {
            <div class="frm"><label>出口线路</label><select id="ap-op"><option value="2">有线宽带</option><option value="1">蜂窝</option></select></div>
          </div><button class="pri" onclick="agPinAdd()">添加</button>
          <span class="hint">长时间保持连接的程序建议固定到单侧线路</span>`, 1)}
+      ${card("有线宵断时段 " + tag("ag-cf", "窗口内", "窗口外"), kv("运行判定", "ag-cfnow") + `
+        <div class="row3" style="margin-top:8px">
+          <div class="frm"><label>启用</label><select id="cf-en"><option value="1">启用</option><option value="0">停用</option></select></div>
+          <div class="frm"><label>开始（HH:MM）</label><input id="cf-from" class="mono" placeholder="00:06"></div>
+          <div class="frm"><label>结束（HH:MM）</label><input id="cf-to" class="mono" placeholder="06:00"></div>
+        </div>
+        <button class="ghost" onclick="cfSave()">应用</button>
+        <span class="hint">上行网络每晚定时断开的时段（默认 00:06–06:00）：窗口内立即用蜂窝承载，窗口结束自动切回有线；跨午夜时间支持</span>`)}
     </div>`,
     async tick() {
         const a = await api("agg");
@@ -853,7 +861,18 @@ PAGES.agg = {
         }
         const pins = (a.pins_conf || "").split(";").filter(Boolean);
         H("pin-tb", pins.map(p => { const [m, op] = p.trim().split(/\s+/); return `<tr><td class="mono">${m}</td><td>${op === "2" ? "有线宽带" : "蜂窝"}</td><td><button class="mini ghost" onclick="agPin('${m}',0)">删除</button></td></tr>`; }).join(""));
+        /* v3.50: 有线宵断卡片 — 窗口状态实时显示(ag.now 由设备侧判定) */
+        const cf = a.curfew || {};
+        setTag("ag-cf", cf.en === "1" && cf.now === 1);
+        T("ag-cfnow", cf.en !== "1" ? "已停用" : (cf.now === 1 ? "窗口内：蜂窝承载中" : "窗口外：按探针/认证判定"));
+        const sel = $("cf-en"); if (sel && !DIRTY.has(sel.id)) sel.value = cf.en === "1" ? "1" : "0";
+        F("cf-from", cf.from || "00:06"); F("cf-to", cf.to || "06:00");
     }
+};
+window.cfSave = async () => {
+    const j = await api("curfew_set", `en=${$("cf-en").value}&from=${encodeURIComponent($("cf-from").value.trim())}&to=${encodeURIComponent($("cf-to").value.trim())}`).catch(e => ({ error: e.message }));
+    if (j.ok) { ["cf-from", "cf-to"].forEach(id => { DIRTY.delete(id); const e = $(id); if (e) e.classList.remove("dirty"); }); toast("已应用（wan_agg 每轮自动重读）"); PAGES.agg.tick(); }
+    else toast(eMsg(j.error), 1);
 };
 window.agMode = async () => {   // v3.28: 五模式选择(替代旧总开关)
     const m = $("ag-mode").value;

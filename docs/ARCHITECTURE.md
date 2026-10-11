@@ -54,7 +54,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/capture_ubus.sh` | **v1.1** | manifest | `/data/gw/capture_ubus.sh` | stock拨号一次性捕获(ubus monitor+ccmni采样) |
 | `gw/cellular_replay.sh` | **v2.1** | manifest | `/data/gw/cellular_replay.sh` | 蜂窝锁定开机重放(频段/小区锁到cfgmgr树, 树每次开机由出厂档案重建) |
 | `gw/consfeed.sh` | **v1.0** | manifest | `/data/gw/consfeed.sh` | v2 控制台喂食器(无setsid,v2_access拉起) |
-| `gw/defaults.conf` | **v1.6** | manifest | `/data/gw/defaults.conf` | 统一配置只读出厂基线(444); 消费方source叠加settings.conf稀疏覆盖; v1.6: +TZ(时区入自管配置, 修重启后回落UTC); v1.5: +REBOOT_EN/REBOOT_TIME |
+| `gw/defaults.conf` | **v1.7** | manifest | `/data/gw/defaults.conf` | 统一配置只读出厂基线(444); 消费方source叠加settings.conf稀疏覆盖; v1.7: +ETH_CURFEW(有线宵断时段, wan_agg窗口内强制家宽判死); v1.6: +TZ |
 | `gw/diag_dump.sh` | **v1.1** | manifest | `/data/gw/diag_dump.sh` | 一键诊断包(脱敏: 配置/无线MLO掩码/网络/全量日志现场; v1.1: 结束行带生成时刻) |
 | `gw/dial_5g.sh` | **v1.2** | manifest | `/data/gw/dial_5g.sh` | 生产 5G 拨号器(check_ia+netagent补丁) |
 | `gw/dial_keeper.sh` | **v1.0** | manifest | `/data/gw/dial_keeper.sh` | 拨号自持兜底守护(P2): ccmni无IP超35s→MIPC直连重拨(deact_apn+act_type配方实测result:0);退避15-300s;不经mobilenetwork |
@@ -79,15 +79,15 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/v2_access.sh` | **v6.1** | manifest | `/data/gw/v2_access.sh` | v2 极简访问层(串口/SSH/DHCP/防火墙22,零守护干涉) |
 | `gw/v3_babysit_v2.sh` | **v2.0** | manifest | `/data/gw/babysit_v2.sh` | 启动保姆(T1杀rcS/T2核爆回B) |
 | `gw/v3_rc10.extend.sh` | **v2.28** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2; v2.28: +log_keeper 接线; 历史见git |
-| `gw/wan_agg.sh` | **v2.27** | manifest | `/data/gw/wan_agg.sh` | 双上行聚合主管(v2.27: 探测-W1+首败同轮复核 — 死亡确认25s级→<=8s, 缩上游EAP重启拦截窗; 历史见git) |
+| `gw/wan_agg.sh` | **v2.28** | manifest | `/data/gw/wan_agg.sh` | 双上行聚合主管(v2.28: 去网关探针短路(宽限期盲区)+ETH_CURFEW宵断时段确定性判死(weight/eth_prio); 历史见git) |
 | `gw/watchdog.sh` | **v1.6** | manifest | `/data/gw/watchdog.sh` | 持续不变量看门狗(L13: 17项不变量; v1.6: +log_keeper自愈+ql_wifi_sample卡死清除; v1.5: 信道漂移回写) |
 | `gw/webs_revive.sh` | **v1.3** | manifest | `/data/gw/webs_revive.sh` | 原厂GUI复活器(自足nginx conf; 手动拉起) |
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
 | `gw/wifi_up.sh` | **v1.27** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.27: auto-channel接入驱动IDC安全掩码(仅在SafeChnBitmask集内选道, 防驱动自行搬道致配置≠实况); 历史版本见git) |
-| `gw/www/api.sh` | **v2.69** | manifest | `/data/gw/www/api.sh` | GUI JSON端点; v2.69: get_logs增诊断包尾部(脱敏)+diag_gen端点; 历史见git |
-| `gw/www/app.js` | **v3.49** | manifest | `/data/gw/www/app.js` | 控制台SPA; v3.49: 诊断卡片时间取自包尾行; 历史见git |
-| `gw/www/index.html` | **v2.30** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.30: 缓存v64) |
+| `gw/www/api.sh` | **v2.70** | manifest | `/data/gw/www/api.sh` | GUI JSON端点; v2.70: get_agg增curfew字段+curfew_set端点(宵断时段, wan_agg同源); 历史见git |
+| `gw/www/app.js` | **v3.50** | manifest | `/data/gw/www/app.js` | 控制台SPA; v3.50: 聚合页有线宵断卡片(启用/起止/窗口状态); 历史见git |
+| `gw/www/index.html` | **v2.31** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.31: 缓存v65) |
 | `gw/www/style.css` | **v2.1** | manifest | `/data/gw/www/style.css` | 控制台主题 |
 | `gw/zz_data_hook` | **v1.1** | manifest | `/data/build/rootfs/etc/init.d/zz_data_hook` | S98数据钩子(v1.1: plain sh——原厂无/etc/rc.common, rc.common式shebang致开机栈全灭; 回归实测发现) |
 | `gw/src/fhstub.c` | **v1.0** | src | `gw/bin/fhstub.so` | FH符号桩库源码 |
@@ -123,7 +123,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/rescue_shadow.py` | **v1.0** | tool | `-` | shadow.override未bind网络救援(getpass旧口令→只读探针: 文件md5/grep行为单测/部署钩子sh -x跟踪→从.bak恢复+重bind; 依赖rc.extend v2.1) |
 | `tools/rotate_toor.py` | **v1.4** | tool | `-` | toor口令轮换器; v1.4: 轮换前存档.bak(rc.extend v2.1回退源); 历史见git |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
-| `tools/selftest.py` | **v2.18** | tool | `-` | 断言式全功能测试; v2.18: +日志持久化护栏(log_keeper单实例/镜像新鲜/boot分隔); 历史见git |
+| `tools/selftest.py` | **v2.19** | tool | `-` | 断言式全功能测试; v2.19: +宵断配置护栏(curfew conf/API同源+值域); 历史见git |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |
 | `tools/serial_server.py` | **v1.7** | tool | `-` | 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets) |
 | `tools/upgrade_slot.py` | **v1.0** | tool | `-` | SSH整槽升级器(P3第一档: vercheck/槽位/空间预检→md5门禁→dd备份旧p26→写新镜像→挂载sanity断言(toor/rcS/#v3:/procd)→失败自动整槽还原不重启→清TRY_A→reboot; PC侧轮询日志+回连终检; --dry-run) |

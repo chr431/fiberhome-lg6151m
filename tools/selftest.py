@@ -11,7 +11,8 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
-v2.19 (2026-10-12): +有线宵断护栏 — curfew 配置/API 同源 + HH:MM 值域
+v2.20 (2026-10-12): 移除宵断护栏(用户裁定判定不做先验, 先验时段方案整体下架);
+v2.19 (2026-10-12): 有线宵断护栏(已随先验方案下架移除) —
   (wan_agg v2.28 时段内强制家宽判死; 上行每晚定时断的确定性转移)。
 v2.18 (2026-10-10): +日志持久化护栏 — log_keeper 单实例/镜像新鲜(<120s)/boot
   分隔行在位(重启取证分界)。
@@ -1150,27 +1151,6 @@ def t_sys_logk():
     record(t_sys_logk._test_name, "system", ok,
            f"daemon={alive} fresh={fresh} boot_marks={sep}")
 
-
-@test("有线宵断配置合法且与 API 同源")
-def t_agg_curfew():
-    # v2.19: 宵断时段(宿舍上行每晚定时断) — conf 持有效值 == API 回值, 值域
-    # HH:MM 强校验; 窗口内标记(now)为布尔。wan_agg v2.28 每轮重读同源消费。
-    tok = _token()
-    if tok is None:
-        record(t_agg_curfew._test_name, "agg", True, f"skip ({_skip_note()})")
-        return
-    j = api("agg", tok)
-    cf = j.get("curfew") or {}
-    eff = lambda k, d: eff_conf([k]).get(k) or d
-    ok = (re.match(r"^([01]\d|2[0-3]):[0-5]\d$", cf.get("from", "") or "") is not None
-          and re.match(r"^([01]\d|2[0-3]):[0-5]\d$", cf.get("to", "") or "") is not None
-          and cf.get("en") in ("0", "1")
-          and cf.get("from") == eff("ETH_CURFEW_FROM", "00:06")
-          and cf.get("to") == eff("ETH_CURFEW_TO", "06:00")
-          and cf.get("en") == eff("ETH_CURFEW_EN", "1")
-          and cf.get("now") in (0, 1))
-    record(t_agg_curfew._test_name, "agg", ok,
-           f"api={cf.get('en')}/{cf.get('from')}-{cf.get('to')} now={cf.get('now')}")
 
 
 @test("SoC 温度在合理区间")

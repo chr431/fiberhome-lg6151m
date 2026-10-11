@@ -1,5 +1,6 @@
 #!/bin/sh
-# wan_agg.sh v2.28 — 协议级检测(authd 会话信号, <=5s 故障转移) 双上行聚合主管 (vendor kernel engine + iptables fallback)
+# wan_agg.sh v2.29 — 协议级检测(authd 会话信号, <=5s 故障转移) 双上行聚合主管 (vendor kernel engine + iptables fallback)
+# v2.29: 移除 ETH_CURFEW 先验时段(用户裁定: 判定不做先验) — 静默型切断由 authd v2.3 静默看门狗(>40s 无 EAP 帧判死)承接
 # v2.28(2026-10-12 实弹: 宵断 00:06 切断, 00:12 才转移): w2_data_alive 去网关短路(宽限期网关仍答 ICMP 的盲区) + ETH_CURFEW 宵断时段确定性判死(weight/eth_prio 模式)
 # v2.27(2026-10-11 实弹: 上游 EAP 重启窗口漏拦截页给手机): 探测 -W1 + 首败同轮复核 — 死亡确认 25s 级→<=8s
 # v2.26(2026-10-09 21:30 实弹: 以太断链数分钟不转移): w2_alive 的"新鲜 up 免 ping"改判
@@ -408,10 +409,6 @@ fi
 log "init: engine=$ENGINE agg_on=$AGG_ON weights=$W1_PCT/$W2_PCT s1=$S1 s2=$S2"
 
 while :; do
-    # v2.28: 宵断配置每轮重读(GUI 改动免重启; 键名与运行态变量零冲突已核对)
-    ETH_CURFEW_EN=0; ETH_CURFEW_FROM=00:06; ETH_CURFEW_TO=06:00
-    [ -r /data/gw/defaults.conf ] && . /data/gw/defaults.conf
-    [ -r /data/gw/settings.conf ] && . /data/gw/settings.conf
     # 5G 承载漂移检测: 活跃 ccmni 变了就刷新 表100/main/NAT/FORWARD (幂等)
     CW=$(ip -o addr show 2>/dev/null | grep ccmni | grep 'inet ' | awk '{print $2}' | head -1)
     if [ -n "$CW" ] && [ "$CW" != "$W1_IF" ]; then
@@ -533,38 +530,6 @@ while :; do
     [ $S1 -eq 0 ] && [ $U1 -ge 6 ] && NS1=1
     [ $S2 -eq 1 ] && [ $D2 -ge 3 ] && NS2=0
     [ $S2 -eq 0 ] && [ $U2 -ge 6 ] && NS2=1
-    # v2.28: 有线宵断时段 — 宿舍上行每晚定时断(实测 00:06-00:07 断至 06:00), 切断
-    #   后有 ~5min 宽限期探针仍过(00:07-00:11 实弹)且服务器 EAP 静默(authd 无信号),
-    #   探测类手段全部失明。时段内**确定性判死**(最终裁决, 压过上面一切恢复规则);
-    #   窗口外回归探针+authd 判定。配置 defaults 叠 settings, 每轮重读, GUI 可改/停。
-    #   仅作用于家宽参与承载的模式(weight=0 / eth_prio=2); 仅蜂窝/仅以太不适用。
-    CURFEW=0
-    if [ "${ETH_CURFEW_EN:-0}" = 1 ]; then
-        case "${ETH_CURFEW_FROM:-}:${ETH_CURFEW_TO:-}" in
-        [0-2][0-9]:[0-5][0-9]:[0-2][0-9]:[0-5][0-9])
-            _fh=${ETH_CURFEW_FROM%%:*}; _fm=${ETH_CURFEW_FROM#*:}
-            _th=${ETH_CURFEW_TO%%:*};   _tm=${ETH_CURFEW_TO#*:}
-            _nh=$(date +%H);            _nm=$(date +%M)
-            _fh=$(( ${_fh#0} + 0 )); _fm=$(( ${_fm#0} + 0 ))
-            _th=$(( ${_th#0} + 0 )); _tm=$(( ${_tm#0} + 0 ))
-            _nh=$(( ${_nh#0} + 0 )); _nm=$(( ${_nm#0} + 0 ))
-            FM=$((_fh * 60 + _fm)); TM=$((_th * 60 + _tm)); NM=$((_nh * 60 + _nm))
-            if [ $FM -le $TM ]; then
-                [ $NM -ge $FM ] && [ $NM -lt $TM ] && CURFEW=1
-            else
-                { [ $NM -ge $FM ] || [ $NM -lt $TM ]; } && CURFEW=1   # 跨午夜窗口
-            fi
-            ;;
-        esac
-    fi
-    if [ $CURFEW = 1 ] && [ "$AGG_ON" = 1 ] && { [ "$PMODE" = 0 ] || [ "$PMODE" = 2 ]; }; then
-        [ "${CURFEW_WAS:-0}" != 1 ] && log "curfew enter ($ETH_CURFEW_FROM-$ETH_CURFEW_TO): home forced down"
-        CURFEW_WAS=1
-        [ $S2 -eq 1 ] && { NS2=0; D2=99; }
-    else
-        [ "${CURFEW_WAS:-0}" = 1 ] && log "curfew exit: home judgment back to probes/auth"
-        CURFEW_WAS=0
-    fi
     # v2.12: 主备模式注入有效态 — 待命侧恒为逻辑down(NS 仅用于真实生死判定),
     # 主力死(E主力=0)时待命侧 NS 值透传 -> 全量接班; 主力恢复 -> 待命侧归零回切
     E1=$NS1; E2=$NS2

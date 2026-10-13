@@ -1,8 +1,13 @@
 #!/bin/sh
-# watchdog.sh v1.6 -- on-device continuous invariant monitor.
+# watchdog.sh v1.7 -- on-device continuous invariant monitor.
 # L13: "feature silently broken until manual inspection" countermeasure.
 # Runs every 30s; failures log + WAN LED flash; recovers silently.
 # Started by rc19.sh (pgrep guard); single instance.
+# v1.7 (2026-10-14 模组 EE 事故): ① 所有 mipc 探针过 mto() 硬超时(无 timeout
+#       命令的纯 shell 封装) — 探针本身卡死会让整个看门狗停摆(事故窗口里
+#       任何守护重启都不会发生); ② dial_keeper 心跳陈旧(>90s)判死重启 —
+#       "进程在而守护死"(卡在 mipc 调用里)旧判据看不见; ③ led_mgr 自愈拉
+#       (原只检不拉, LED 是"显示反映实际"的仪器, 静默死亡=无声谎报)。
 # v1.6: +log_keeper 自愈 + ql_wifi_sample 卡死清除(L28 死循环刷 syslog 冲垮日志环)。
 # v1.5: +wifi 信道一致性(驱动 IDC 可自行搬道 → 生成配置漂移时以实况回写+记警)。
 # v1.4: agg 规则检查模式无关(weight/优先/仅模式); v1.3: +dial_keeper 兜底自愈。
@@ -16,6 +21,27 @@ CYCLE=30
 MAX_LOG=200
 
 log() { echo "$(date '+%m-%d %H:%M:%S') $*" >> $LOG; }
+
+# v1.7: timeout 语义的 mipc 探针封装(设备无 timeout/coreutils; 输出经临时文件
+#   回显保 stdout 语义; 超时 SIGKILL 并记警, 返回 124)
+MTO=10
+mto() {
+    mipc_wan_cli "$@" >/tmp/mto.$$ 2>&1 & _mp=$!
+    _i=0
+    while [ "$_i" -lt "$MTO" ] && kill -0 $_mp 2>/dev/null; do
+        sleep 1; _i=$((_i + 1))
+    done
+    if kill -0 $_mp 2>/dev/null; then
+        kill -9 $_mp 2>/dev/null
+        rm -f /tmp/mto.$$
+        log "WARN  mipc probe timeout(${MTO}s): $1"
+        return 124
+    fi
+    wait $_mp; _rc=$?
+    cat /tmp/mto.$$ 2>/dev/null
+    rm -f /tmp/mto.$$
+    return $_rc
+}
 
 # state helpers (track transitions, not absolutes)
 set_state() {  # $1=key $2=0(ok)|1(fail) $3=label
@@ -52,7 +78,6 @@ run_cycle() {
     check dnsmasq   "pidof dnsmasq"                  "DHCP/DNS"
     check dropbear  "netstat -tln 2>/dev/null | grep -q ':22.*LISTEN'"  "SSH"
     check wan_agg   "pgrep -f wan_agg.sh"            "aggregation supervisor"
-    check led_mgr   "pgrep -f led_mgr.sh"            "LED manager"
     check fan_mgr   "pgrep -f fan_mgr.sh"            "fan manager"
 
     # ---- data plane invariants ----
@@ -68,11 +93,28 @@ run_cycle() {
 
     # ---- cellular control plane (L14) ----
     # dial_keeper: 拨号兜底守护 (P2); 死则带环境拉起
-    if pgrep -f dial_keeper.sh >/dev/null 2>&1; then
+    # v1.7: 进程在 ≠ 守护活 — 卡死在一次 mipc 调用里时进程仍存活(10-14 模组 EE
+    #   事故疑似形态)。心跳 /tmp/dial_keeper.hb(uptime 秒, 守护每 ≤5s 刷)陈旧
+    #   >90s 即杀+拉起; 无心跳文件且已过开机宽限(300s)同样判异常。
+    _dhb=$(cat /tmp/dial_keeper.hb 2>/dev/null)
+    _dup=$(cut -d. -f1 /proc/uptime)
+    _dstale=0
+    case "$_dhb" in
+    ''|*[!0-9]*) [ "${_dup:-0}" -gt 300 ] && _dstale=1 ;;
+    *) [ $((_dup - _dhb)) -gt 90 ] && _dstale=1 ;;
+    esac
+    if pgrep -f dial_keeper.sh >/dev/null 2>&1 && [ "$_dstale" = 0 ]; then
         set_state keeper 0 "dial keeper"
     else
+        if [ "$_dstale" = 1 ]; then
+            log "WARN  stale dial_keeper heartbeat (hb=${_dhb:-none} up=${_dup}) — restart"
+            logger -t watchdog "stale dial_keeper heartbeat (hb=${_dhb:-none}) — restart"
+        fi
         set_state keeper 1 "dial keeper"
         FAILS=$((FAILS+1))
+        for _dkp in $(pgrep -f dial_keeper.sh 2>/dev/null); do
+            kill -9 "$_dkp" 2>/dev/null
+        done
         export LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib
         export PATH=/usr/sbin:/usr/bin:/sbin:/bin:/fhrom/bin:/fhrom/fhshell
         nohup sh /data/gw/dial_keeper.sh >/dev/null 2>&1 &
@@ -84,6 +126,16 @@ run_cycle() {
         set_state logk 1 "log keeper"
         FAILS=$((FAILS+1))
         nohup sh /data/gw/log_keeper.sh >/dev/null 2>&1 &
+    fi
+    # led_mgr: 显示器守护(v1.7 自愈拉) — 静默死亡=指示灯无声谎报(10-14 事故
+    #   里用户对"灯还亮着"的判读是第一手症状, 灯不能哑)
+    if pgrep -f led_mgr.sh >/dev/null 2>&1; then
+        set_state led_mgr 0 "LED manager"
+    else
+        set_state led_mgr 1 "LED manager"
+        FAILS=$((FAILS+1))
+        nohup sh /data/gw/led_mgr.sh >/dev/null 2>&1 &
+        logger -t watchdog "restarted led_mgr"
     fi
     # ql_wifi_sample 卡死清除(L28): stdin EOF 后死循环刷 syslog(实测 3700 行/s,
     #   日志环被冲至 18s 深)。CPU 累计 >=120s 即杀(交互等待不耗 CPU, 不误伤;
@@ -104,7 +156,8 @@ run_cycle() {
         /usr/bin/atcid >/var/atcid.log 2>&1 &
     fi
     # CFUN 探测同时充当通道活性探针; airplane(CFUN:4)时跳过注册态断言
-    CFUNR=$(mipc_wan_cli --at_cmd 'AT+CFUN?' 2>/dev/null)
+    # v1.7: 探针过 mto() 硬超时 — 探针卡死不再让整轮看门狗停摆
+    CFUNR=$(mto --at_cmd 'AT+CFUN?' 2>/dev/null)
     case "$CFUNR" in
     *"CFUN: 4"*)
         set_state at_chan 0 "AT channel (airplane, probe-only)"
@@ -113,7 +166,7 @@ run_cycle() {
     *"CFUN: "*)
         set_state at_chan 0 "AT channel (CFUN responds)"
         # 注册态: +COPS: <mode>,<fmt>,"<numeric>"  -- 含引号即已注册
-        COPSR=$(mipc_wan_cli --at_cmd 'AT+COPS?' 2>/dev/null)
+        COPSR=$(mto --at_cmd 'AT+COPS?' 2>/dev/null)
         case "$COPSR" in
         *'"'*) set_state modem_reg 0 "modem registered" ;;
         *)     set_state modem_reg 1 "modem NOT registered"
@@ -171,7 +224,8 @@ run_cycle() {
 
 # ---- main ----
 touch $LOG $STATE
-log "===== watchdog v1.6 start ====="
+log "===== watchdog v1.7 start ====="
+logger -t watchdog "watchdog v1.7 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

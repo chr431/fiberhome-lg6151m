@@ -11,6 +11,10 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
+v2.21 (2026-10-14 模组 EE 事故轮): +5G 指示灯数据面一致性护栏(灯不得在无 5G
+  数据时点亮 — 事故里"灯还亮着"是第一手误判源); +拨号守护心跳/超时接线/单实例
+  护栏(事故断电窗口零重拨留痕的形态 = 进程在而守护死); +log_keeper 快照转存
+  标记(.snap_up)护栏。
 v2.20 (2026-10-12): 移除宵断护栏(用户裁定判定不做先验, 先验时段方案整体下架);
 v2.19 (2026-10-12): 有线宵断护栏(已随先验方案下架移除) —
   (wan_agg v2.28 时段内强制家宽判死; 上行每晚定时断的确定性转移)。
@@ -979,6 +983,29 @@ def t_cel_keeper():
     record(t_cel_keeper._test_name, "cellular", ok, f"pid={out.strip()}" if ok else "dial_keeper 未运行")
 
 
+@test("拨号守护心跳新鲜且 mipc 硬超时在线 (卡死可自愈)")
+def t_cel_keeper_hb():
+    # v2.21 (10-14 模组 EE 事故): 事故断电窗口零重拨留痕 — 疑似守护卡死在一次
+    # mipc 调用(进程在而守护死; 旧 watchdog 只查进程存活)。护栏三连:
+    # ① 心跳 /tmp/dial_keeper.hb 新鲜(≤90s, 与 watchdog v1.7 同判据; 开机 300s
+    #   宽限内缺席宽容); ② mipc 调用全部走 mto() 硬超时(脚本语义断言 — 设备无
+    #   timeout 命令, 裸调 = 可无限阻塞); ③ 单实例守护在位。
+    alive = dev("pgrep -f 'dial_keepe[r].sh' | wc -l").strip()
+    hb = dev("cat /tmp/dial_keeper.hb 2>/dev/null").strip()
+    up = dev("cut -d. -f1 /proc/uptime").strip()
+    age = (int(up) - int(hb)) if (hb.isdigit() and up.isdigit()) else -1
+    fresh = 0 <= age <= 90
+    if age < 0 and alive == "1" and up.isdigit() and int(up) < 300:
+        fresh = True   # 启动宽限(与 watchdog v1.7 同语义)
+    wrap = dev("grep -c 'mipc_to' /data/gw/dial_keeper.sh").strip()
+    guard = dev("grep -c 'single-instance guard' /data/gw/dial_keeper.sh").strip()
+    ok = (alive == "1" and fresh
+          and wrap.isdigit() and int(wrap) >= 4
+          and guard.isdigit() and int(guard) >= 1)
+    record(t_cel_keeper_hb._test_name, "cellular", ok,
+           f"alive={alive} hb_age={age}s mto={wrap} guard={guard}")
+
+
 @test("SMS 引擎二进制冒烟 (P4)")
 def t_cel_smstool():
     # ql_sms_send_msg 直发引擎: 二进制在位+可执行+用法出口正常
@@ -1147,9 +1174,47 @@ def t_sys_logk():
     fresh = dev("test -f /data/gw/logs/syslog.log && "
                 "[ $(( $(date +%s) - $(date -r /data/gw/logs/syslog.log +%s) )) -lt 120 ] && echo y").strip()
     sep = dev("grep -c '^===== BOOT' /data/gw/logs/syslog.log 2>/dev/null").strip()
-    ok = alive == "1" and fresh == "y" and sep.isdigit() and int(sep) >= 1
+    # v2.21: +上一 boot 快照转存标记 .snap_up 在位(tmp → tmp.prev 的归属判定;
+    #   10-14 事故里 /tmp 现场被新 boot 覆盖的教训)
+    snap = dev("cat /data/gw/logs/.snap_up 2>/dev/null").strip()
+    prev = dev("test -d /data/gw/logs/tmp.prev && echo y").strip()
+    ok = (alive == "1" and fresh == "y" and sep.isdigit() and int(sep) >= 1
+          and snap.isdigit())
     record(t_sys_logk._test_name, "system", ok,
-           f"daemon={alive} fresh={fresh} boot_marks={sep}")
+           f"daemon={alive} fresh={fresh} boot_marks={sep} snap_up={snap or '-'} prev={prev or '-'}")
+
+
+
+@test("5G 指示灯反映数据面 (无数据不得点亮)")
+def t_sys_led_dp():
+    # v2.21 (10-14 模组 EE 事故实弹): 旧语义"无承载=橙常亮"在模组崩溃离线期仍亮 =
+    #   谎报"5G 在"。护栏: ① led_mgr 单实例; ② 映射断言(--dry-state 干跑, 不点灯
+    #   不动现场): c0 → 三色全灭(本次修复的核心语义), c1 → 仅绿亮; ③ 实况引脚 ==
+    #   数据面推算值(状态刚变时容忍一拍: led_mgr 10s 轮询)。
+    n = dev("pgrep -f 'led_mg[r].sh' | wc -l").strip()
+    dry0 = dev("sh /data/gw/led_mgr.sh --dry-state 'w1 c0 b1 p1'").strip()
+    dry1 = dev("sh /data/gw/led_mgr.sh --dry-state 'w1 c1 b1 p1'").strip()
+    map0 = "g5g=0 g5o=0 g5r=0" in dry0
+    map1 = "g5g=1 g5o=0 g5r=0" in dry1
+    night = (eff_conf(["LED_NIGHT"]).get("LED_NIGHT") or "0") == "1"
+    ipv4 = dev("ip -4 addr show 2>/dev/null | grep ccmni | grep -c 'inet '").strip()
+    have_cell = ipv4.isdigit() and int(ipv4) > 0
+
+    def _trio():
+        return (dev("cat /sys/class/gpio/gpio475/value 2>/dev/null").strip(),
+                dev("cat /sys/class/gpio/gpio473/value 2>/dev/null").strip(),
+                dev("cat /sys/class/gpio/gpio474/value 2>/dev/null").strip())
+
+    want = ("1", "0", "0") if have_cell else ("0", "0", "0")
+    live = _trio()
+    if not night and live != want:
+        time.sleep(11)   # 状态刚变: 容忍一拍(led_mgr 轮询 10s)
+        live = _trio()
+    live_ok = night or live == want
+    ok = n == "1" and map0 and map1 and live_ok
+    record(t_sys_led_dp._test_name, "system", ok,
+           f"daemon={n} map(c0/c1)={int(map0)}/{int(map1)} cell={ipv4} "
+           f"live={''.join(live)} want={''.join(want)}" + (" night=skip" if night else ""))
 
 
 

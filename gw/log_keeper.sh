@@ -1,13 +1,16 @@
 #!/bin/sh
-# log_keeper.sh v1.1 -- 日志持久化守护（日志改善专项轮; v1.1: 轮转后重写 boot 上下文 — selftest 实弹抓获轮转后 BOOT 分隔丢失）
+# log_keeper.sh v1.2 -- 日志持久化守护（日志改善专项轮; v1.2: 上一 boot 的 /tmp 快照
+#   转存 logs/tmp.prev — v1.1"变化才写"会让新 boot 的守护日志在 +90s 内覆盖事故现场
+#   (10-14 模组 EE 事故: dial_keeper/watchdog 现场因此丢失); 心跳文件入快照清单。
+#   v1.1: 轮转后重写 boot 上下文 — selftest 实弹抓获轮转后 BOOT 分隔丢失）
 # 痛点：/tmp 日志重启即失（信道取证丢失）；logread 环被刷爆（ql_wifi_sample 实测
 #   18 秒深）；dmesg 被蜂窝噪声淹没；日志散落二十余处无统一现场。
 # 机制（每 30s 一轮；增量为空不落盘，flash 友好）：
 #   1) syslog 镜像  → /data/gw/logs/syslog.log（增量：以 .syslog.last 为锚，
 #      只追加环内新增行；环溢出找不到锚 → 记 resync 标记 + tail 400 重同步）
 #   2) dmesg 镜像   → /data/gw/logs/dmesg.log（同算法）
-#   3) /tmp 快照    → /data/gw/logs/tmp/<name>（tail 32K，cmp 变化才写；重启后
-#      这里就是上一个 boot 的最后现场）
+#   3) /tmp 快照    → /data/gw/logs/tmp/<name>（tail 32K，cmp 变化才写）；新 boot
+#      首轮把上一 boot 的整目录转存 → logs/tmp.prev（单代，事故现场不再被覆盖）
 #   4) boot 分隔    → 启动时与检出 uptime 回退时，向两个镜像写 BOOT 分隔行
 #   5) 容量护栏     → syslog 4MB / dmesg 2MB 触发轮转(.1，仅留一代)；单轮追加
 #      上限 512K（洪泛时限流，保 flash）
@@ -44,6 +47,20 @@ bootmark() {
 }
 mkdir -p $DIR/tmp
 touch $DIR/syslog.log $DIR/dmesg.log $DIR/.prevup
+# v1.2: 上一 boot 的 /tmp 快照转存 — 以 .snap_up(uptime 秒)记录快照归属的 boot;
+#   uptime 回退(或首跑无标记) = 新 boot → tmp → tmp.prev(单代, 覆盖旧代);
+#   同一 boot 内的 log_keeper 重启(看门狗自愈)不转存, 现场留在 tmp。
+U0=$(cut -d. -f1 /proc/uptime 2>/dev/null)
+PU0=$(cat $DIR/.snap_up 2>/dev/null)
+case "$PU0" in
+''|*[!0-9]*) _rot=1 ;;
+*) _rot=0; [ "${U0:-0}" -lt "$PU0" ] 2>/dev/null && _rot=1 ;;
+esac
+if [ "$_rot" = 1 ]; then
+    [ -d $DIR/tmp ] && { rm -rf $DIR/tmp.prev; mv $DIR/tmp $DIR/tmp.prev; }
+    mkdir -p $DIR/tmp
+fi
+echo "${U0:-0}" > $DIR/.snap_up
 lk "start"
 bootmark
 PREV_UP=$(cut -d. -f1 /proc/uptime)
@@ -93,7 +110,7 @@ while :; do
     fi
 
     # -- /tmp 快照(变化才写) --
-    for f in /tmp/*.log /tmp/*.out /tmp/wifi_autoch /tmp/watchdog_state; do
+    for f in /tmp/*.log /tmp/*.out /tmp/wifi_autoch /tmp/watchdog_state /tmp/dial_keeper.hb; do
         [ -s "$f" ] || continue
         b=$(basename "$f")
         tail -c 32768 "$f" > /tmp/lk_snap

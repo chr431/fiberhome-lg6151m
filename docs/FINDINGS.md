@@ -304,3 +304,51 @@
 - **验证状态**：authd v2.3 已部署运行（Failure→down 刷新实测 ✓）；静默路径待
   下次 00:06 切断实战检验（log_keeper 镜像将留全量现场）；06:00 恢复为
   重试循环自动完成。
+
+## 18. 模组 EE 致命异常事故：5G 断联、恢复缺口与指示灯谎报（2026-10-14 凌晨实弹）
+
+- **事故本体**：01:07:47 蜂窝模组固件致命异常（AEE 抛 `Externel (EE)`，类型 modem，
+  `md1:(MSONIC0) [Fatal error] err_code1:0x12 err_code2:0x71B3E53B err_code3:0`，
+  `MD Offender:DSPNR1s`；构建 `MOLY.NR16.R2.MD800.MP.V86.P56 / QUECTEL_2305MP2`）。
+  AP 侧零前兆：温度平直 47–52°C、无 OOM、无内核挂死。异常前 1s thermal_core 先丢
+  数据源（`mipc_sys_get_all_thermal_info error` + 五路 -274000 假值）——模组侧先死，
+  温度假值是果不是因。转储 `/data/log/aee_exp/db.03.EE`（6.2MB，内容加密，仅
+  ZZ_INTERNAL 可读；db_history 显示为 10-05 以来首个 EE = 低频偶发、厂商固件缺陷）。 <!--CLM:CLM-MD-EE-->
+- **后果链与恢复缺口**：`MD_STA_EV_STOP` → netagent `reset all telephony services` →
+  ccmni0–20 全 down（5G 数据口被拆）→ 模组重启（01:08:10 已重新注册）——**但数据呼叫
+  直到 01:13:17 用户断电都未恢复**：窗口内无任何 ccmni IPv4、无任何重拨留痕
+  （拨号动作有明确日志特征 `mipc_cli: data_call_act_type:...`，当窗口零命中）。
+  宿舍上行宵断期（00:06–06:00）5G 是唯一承载 → 用户全断网，手动断电收场。
+  缺口机理：守护现场只写 /tmp，重启即被新 boot 覆盖 → 无法分辨"死了还是卡死"；
+  疑因：模组 EE 后厂商重启 RIL/ql_netd 瞬间，mipc 调用可无限阻塞（设备无 `timeout`
+  命令，裸调无超时）。修复四件套：`mto()` 纯 shell 硬超时（实测 30s 卡死调用 3s
+  被杀 rc=124）/ 心跳 `/tmp/dial_keeper.hb`（≤5s 分片刷新；watchdog 判陈旧 >90s
+  杀+拉）/ **EE 转储增量 = 模组复位信号 → 强制重拨并重置退避**（不等被动 35s 宽限）/
+  关键事件 `logger` 落 syslog 经镜像持久化。 <!--CLM:CLM-DIAL-GAP-->
+- **指示灯谎报（用户第一手症状："5G 下线灯还亮着"）**：led_mgr 旧语义"无承载=橙
+  常亮"——模组崩溃/离线期橙灯照样点 = 谎报"5G 在"。v1.9 收敛数据面唯一：ccmni 有
+  IPv4=绿常亮，其余（未注册/无承载/模组离线）三色全灭；细分态只进日志
+  （`5g=reg_no_bearer` 等）。实弹验收（趁家宽在线主动 deact）：15s 内三灯全灭 →
+  dial_keeper 35s 宽限后自动重拨，42s 恢复 → 绿灯回（连带实测：重拨后数据口索引
+  会变——ccmni2→ccmni3，厂商分配行为，灯/拨号/聚合均接口无关化）。 <!--CLM:CLM-LED-LIE-->
+- **取证保全**：log_keeper v1.2 新 boot 首轮把上一 boot 的 /tmp 快照整目录转存
+  `logs/tmp.prev`（`.snap_up` 记录归属 boot，同 boot 内守护重启不转存）；旧"变化才写"
+  会在新 boot +90s 内覆盖事故现场（当晚 dial_keeper/watchdog 现场因此丢失）。实测
+  转存 10+ 份守护日志。 <!--CLM:CLM-SNAP-PREV-->
+- **守护定位（本轮新代码自暴露的两个坑，均已修）**：① watchdog 首见"无心跳文件且
+  已过开机宽限"误判陈旧杀+拉（部署重启新实例实测命中）→ dial_keeper v1.2 启动即写
+  心跳，窗口≈0；② 单实例判据用 `pgrep -f` 在"启动者 argv 含脚本路径"时自匹配
+  （SSH 一行式启动实测两次静默不启动），且"杀所有匹配"会误伤旁观 shell → v1.3 改
+  **PID 锁**（cmdline 复核防 PID 复用；watchdog v1.8 依锁精确定位实例）。 <!--CLM:CLM-KEEPER-LOCK-->
+- **启动耗时分解（串口取证暂缓）**：断电 01:13:17 → 内核启动 01:17:00（**3m43s
+  空白**，OS 侧日志无法归因）；此后 +23s 自研 rc、+70s 拨号成功、+89s WiFi 完成、
+  +150s 全绿。LK 自报 preloader 1.17s + LK 2.31s（cmdline bootprof 标签）；用户态
+  时间线与 04:00 例行重启同形 = 系统侧无异常。空白段只能串口分辨（LK 弹幕）。
+- **排除项（防误判）**：过热（全程 47–52°C；-274 系模组死后的假读）/ 内存压力
+  （无任何 oom 记录）/ "log_keeper 反复死亡"（syslog 五个 BOOT 行经核对全为 dmesg
+  2MB 轮转——轮转机制会往两个镜像写 BOOT 行，勿当重启）/ 内核 FORENSIC D 风暴
+  （基线打印，健康 boot 同样每 ~3s 一条、hang_detect status 0）/ 5GHz AP 故障
+  （无 beacon 异常，rai0 ch36 全程在发；客户端掉线为客户侧行为）。
+- **回归护栏**：selftest v2.21/v2.22 三条——5G 灯数据面一致性（`--dry-state` 映射
+  c0→全灭 + 实况引脚）、拨号守护心跳/`mto` 接线/PID 锁↔活进程跨层一致、快照转存
+  标记 `.snap_up`。全量 selftest 67 pass / 0 fail。

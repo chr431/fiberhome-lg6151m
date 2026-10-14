@@ -49,3 +49,9 @@ CLM-LOGKEEP	docs/FINDINGS.md	verified	gw/log_keeper.sh>=1.0	日志持久化守�
 CLM-ETHFLAP	docs/FINDINGS.md	verified	gw/wan_agg.sh>=2.27	有线侧探活语义护栏 (up 必叠加数据面 ICMP)	dd01765	2026-10-11	载波flap98次/4.3h+1G→100M降速=上游物理层; EAP重认证与d2=99一一对应; 修: 首败同轮复核+探测-W1, 实弹死亡确认≈1s(原25s级)
 CLM-IDC-BOUNCE	docs/FINDINGS.md	verified	gw/wifi_up.sh>=1.28	AP 信道配置==实况 (IDC 漂移护栏)	64e3a6e	2026-10-12	IDC掩码动态收缩(1fe→1fc→08)致驱动整晚搬运2↔3↔9; 修: wifi_up v1.28 候选收敛安全集深部{1,6}; 掩码不可用期回退{1,6}; 现场重应用conf=live=3
 CLM-AUTHD-SILENCE	docs/FINDINGS.md	verified	gw/wan_agg.sh>=2.29	有线侧探活语义护栏 (up 必叠加数据面 ICMP)	ec28b9d	2026-10-12	静默看门狗: 健康期30s重询问节拍, >40s无EAP帧=会话死(authd v2.3); 检测链四路: 载波≤3s/EAP Failure瞬时/静默≤43s/公网ICMP≤6s; curfew先验方案同日下架
+CLM-MD-EE	docs/FINDINGS.md	verified	-	-	12717c3	2026-10-14	01:07:47模组固件Fatal(AEE EE/modem/DSPNR1s; err 0x12/0x71B3E53B; P56构建)AP侧零前兆; 先兆=thermal_core丢MD数据源早1s(-274假读); 转储加密仅ZZ_INTERNAL可读; db_history 10-05以来首EE
+CLM-DIAL-GAP	docs/FINDINGS.md	verified	gw/dial_keeper.sh>=1.1, gw/watchdog.sh>=1.7	拨号守护心跳新鲜且 mipc 硬超时在线 (卡死可自愈)	12717c3	2026-10-14	MD offline后5.4min零重拨留痕(拨号动作有data_call_act_type日志特征, 零命中); 疑RIL重启瞬间mipc调用无限阻塞(设备无timeout命令); 修: mto()硬超时+心跳+EE转储增量强制重拨+logger落syslog
+CLM-LED-LIE	docs/FINDINGS.md	verified	gw/led_mgr.sh>=1.9	5G 指示灯反映数据面 (无数据不得点亮)	12717c3	2026-10-14	旧"无承载=橙常亮"模组崩溃期点亮=谎报"5G在"; v1.9数据面唯一(ccmni IPv4=绿, 余全灭, 细分态只进日志); 实弹deact→15s三灯全灭→自动重拨42s恢复→绿回
+CLM-LED-LIE-FM	docs/FEATURE_MATRIX.md	verified	gw/led_mgr.sh>=1.9	5G 指示灯反映数据面 (无数据不得点亮)	12717c3	2026-10-14	同上, 对比表行
+CLM-SNAP-PREV	docs/FINDINGS.md	verified	gw/log_keeper.sh>=1.2	日志持久化守护活着且镜像新鲜	12717c3	2026-10-14	新boot首轮tmp→tmp.prev整目录转存(.snap_up归属判定; 同boot守护重启不转存); 旧"变化才写"致新boot+90s覆盖事故现场(当晚dial_keeper/watchdog现场丢失); 实测转存10+份
+CLM-KEEPER-LOCK	docs/FINDINGS.md	verified	gw/watchdog.sh>=1.8, gw/dial_keeper.sh>=1.3	拨号守护心跳新鲜且 mipc 硬超时在线 (卡死可自愈)	661d4fe	2026-10-14	自暴露双坑: 首见无hb误判陈旧杀拉→v1.2启动即写心跳; pgrep -f判据启动者argv自匹配(实测两次静默不启动)+杀所有匹配误伤旁观→v1.3 PID锁+cmdline复核

@@ -1,5 +1,5 @@
 #!/bin/sh
-# dial_keeper.sh v1.2 -- 拨号自持守护 (ROADMAP P2, 2026-10-06)
+# dial_keeper.sh v1.3 -- 拨号自持守护 (ROADMAP P2, 2026-10-06)
 #
 # 背景(闸门A实证): mobilenetwork 是 PDN 生命周期持有者 — 杀掉后 ccmni IPv4
 # ≤10s 消失; 因此 P3 下架 cfgmgr/mobilenetwork 前必须有自研拨号能力。
@@ -14,6 +14,10 @@
 #   --data_call_deact_apn $APN → --data_call_act_type '{...vendor默认...}'
 #   成功判据: 响应含 "result": 0 且 3s 后 ccmni 有 IPv4
 #
+# v1.3 (2026-10-14 部署实测): 单实例守改 PID 锁(/tmp/dial_keeper.lock) — 原
+#   pgrep -f 判据在启动者 argv 含脚本路径时自匹配误判"重复"(SSH 一行式启动实测
+#   两次命中, 实例静默不启动); 锁定法无模式匹配, 且 cmdline 复核防 PID 复用,
+#   并供 watchdog 精确定位实例(避免"杀所有匹配"误伤旁观 shell)。
 # v1.2 (2026-10-14 部署实测): 启动即写心跳 — watchdog v1.7 首见"无心跳文件且已过
 #   开机宽限"会判陈旧杀+拉(部署重启新实例实测命中, 属误判); 提前到脚本入口写,
 #   窗口≈0。旧版本实例(无 hb 文件)该规则仍按设计触发 = 换代码自动重启。
@@ -30,6 +34,7 @@
 #   镜像持久化(事故当晚本守护只写 /tmp, 重启即失, 复盘缺一环)。
 LOG=/tmp/dial_keeper.log
 HB=/tmp/dial_keeper.hb
+LOCK=/tmp/dial_keeper.lock
 CONF=/data/gw/cellular_engine.conf
 GRACE=35      # PDN 掉线多少秒后才接管(避开 mobilenetwork 重拨窗口)
 POLL=5        # 探测周期
@@ -40,13 +45,14 @@ MTO=10        # 单次 mipc 调用硬超时(秒)
 log() { echo "$(date '+%m-%d %H:%M:%S') $*" >> $LOG; }
 [ -s $LOG ] && [ "$(wc -l < $LOG)" -gt 200 ] && { tail -100 $LOG > $LOG.tmp && mv $LOG.tmp $LOG; }
 
-# v1.1: 单实例守护 — rc19 与 watchdog 可能同时拉起(启动竞态), 发现同侪即退
-# (不杀戮: 正在运行的实例优先; watchdog 判陈旧时会先杀后拉, 不冲突)
-for _op in $(pgrep -f dial_keeper.sh 2>/dev/null); do
-    [ "$_op" = "$$" ] && continue
-    log "duplicate instance pid=$_op detected — exit (single-instance guard)"
+# v1.3: 单实例守 — PID 锁 + cmdline 复核(无模式匹配; 供 watchdog 精确取实例 PID)
+_lp=$(cat $LOCK 2>/dev/null)
+if [ -n "$_lp" ] && kill -0 "$_lp" 2>/dev/null \
+   && grep -qa dial_keeper /proc/$_lp/cmdline 2>/dev/null; then
+    log "duplicate instance pid=$_lp alive — exit (single-instance lock)"
     exit 0
-done
+fi
+echo $$ > $LOCK
 
 hb() { cut -d. -f1 /proc/uptime > $HB 2>/dev/null; }
 hb   # v1.2: 启动即写心跳 — 消 watchdog 首见"无心跳文件"窗口(deploy 重启实测命中:
@@ -107,8 +113,8 @@ ee_count() { ls -d /data/log/aee_exp/db.*.EE 2>/dev/null | wc -l; }
 
 DOWN=0; B=$MINB
 EE_N=$(ee_count)
-log "===== keeper v1.2 start (grace=${GRACE}s poll=${POLL}s mto=${MTO}s ee=${EE_N}) ====="
-logger -t dial_keeper "keeper v1.2 start (grace=${GRACE}s mto=${MTO}s ee=${EE_N})"
+log "===== keeper v1.3 start (grace=${GRACE}s poll=${POLL}s mto=${MTO}s ee=${EE_N}) ====="
+logger -t dial_keeper "keeper v1.3 start (grace=${GRACE}s mto=${MTO}s ee=${EE_N})"
 while :; do
     hb
     # v1.1: 模组 EE 事件 = 复位信号 → 强制重拨路径(不等被动宽限)

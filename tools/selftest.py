@@ -11,6 +11,8 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
+v2.22 (2026-10-14 同日): 拨号单实例判据随 dial_keeper v1.3 改 PID 锁 — 护栏同步为
+  锁 ↔ 活进程跨层一致断言(原脚本文本 grep 退役)。
 v2.21 (2026-10-14 模组 EE 事故轮): +5G 指示灯数据面一致性护栏(灯不得在无 5G
   数据时点亮 — 事故里"灯还亮着"是第一手误判源); +拨号守护心跳/超时接线/单实例
   护栏(事故断电窗口零重拨留痕的形态 = 进程在而守护死); +log_keeper 快照转存
@@ -998,12 +1000,16 @@ def t_cel_keeper_hb():
     if age < 0 and alive == "1" and up.isdigit() and int(up) < 300:
         fresh = True   # 启动宽限(与 watchdog v1.7 同语义)
     wrap = dev("grep -c 'mipc_to' /data/gw/dial_keeper.sh").strip()
-    guard = dev("grep -c 'single-instance guard' /data/gw/dial_keeper.sh").strip()
+    # v2.22: 单实例判据 v1.3 改 PID 锁 — 断言锁 ↔ 活进程跨层一致(替代原脚本文本 grep)
+    lock = dev("cat /tmp/dial_keeper.lock 2>/dev/null").strip()
+    lockok = (lock.isdigit() and dev(
+        f"grep -qa dial_keeper /proc/{lock}/cmdline 2>/dev/null && echo y").strip() == "y") \
+        if lock.isdigit() else False
     ok = (alive == "1" and fresh
           and wrap.isdigit() and int(wrap) >= 4
-          and guard.isdigit() and int(guard) >= 1)
+          and lockok)
     record(t_cel_keeper_hb._test_name, "cellular", ok,
-           f"alive={alive} hb_age={age}s mto={wrap} guard={guard}")
+           f"alive={alive} hb_age={age}s mto={wrap} lock={lock or '-'}")
 
 
 @test("SMS 引擎二进制冒烟 (P4)")

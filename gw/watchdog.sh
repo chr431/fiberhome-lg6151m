@@ -1,8 +1,11 @@
 #!/bin/sh
-# watchdog.sh v1.7 -- on-device continuous invariant monitor.
+# watchdog.sh v1.8 -- on-device continuous invariant monitor.
 # L13: "feature silently broken until manual inspection" countermeasure.
 # Runs every 30s; failures log + WAN LED flash; recovers silently.
 # Started by rc19.sh (pgrep guard); single instance.
+# v1.8 (2026-10-14 部署实测): dial_keeper 实例定位改 PID 锁(/tmp/dial_keeper.lock,
+#       cmdline 复核) — 旧 pgrep -f 判据与"杀所有匹配"在启动者 argv 含脚本路径时
+#       自匹配/误伤旁观 shell(实测两次)。
 # v1.7 (2026-10-14 模组 EE 事故): ① 所有 mipc 探针过 mto() 硬超时(无 timeout
 #       命令的纯 shell 封装) — 探针本身卡死会让整个看门狗停摆(事故窗口里
 #       任何守护重启都不会发生); ② dial_keeper 心跳陈旧(>90s)判死重启 —
@@ -96,6 +99,9 @@ run_cycle() {
     # v1.7: 进程在 ≠ 守护活 — 卡死在一次 mipc 调用里时进程仍存活(10-14 模组 EE
     #   事故疑似形态)。心跳 /tmp/dial_keeper.hb(uptime 秒, 守护每 ≤5s 刷)陈旧
     #   >90s 即杀+拉起; 无心跳文件且已过开机宽限(300s)同样判异常。
+    # v1.8: 实例定位改 PID 锁(/tmp/dial_keeper.lock; cmdline 复核防 PID 复用) —
+    #   旧 pgrep -f 判据在"启动者 argv 含脚本路径"时自匹配, 且"杀所有匹配"会
+    #   误伤旁观 shell(08:00 部署实测两次); 无锁文件时回退括号法 pgrep(旧版过渡)。
     _dhb=$(cat /tmp/dial_keeper.hb 2>/dev/null)
     _dup=$(cut -d. -f1 /proc/uptime)
     _dstale=0
@@ -103,7 +109,15 @@ run_cycle() {
     ''|*[!0-9]*) [ "${_dup:-0}" -gt 300 ] && _dstale=1 ;;
     *) [ $((_dup - _dhb)) -gt 90 ] && _dstale=1 ;;
     esac
-    if pgrep -f dial_keeper.sh >/dev/null 2>&1 && [ "$_dstale" = 0 ]; then
+    _kp=$(cat /tmp/dial_keeper.lock 2>/dev/null)
+    _kalive=0
+    if [ -n "$_kp" ] && kill -0 "$_kp" 2>/dev/null \
+       && grep -qa dial_keeper /proc/$_kp/cmdline 2>/dev/null; then
+        _kalive=1
+    elif pgrep -f 'dial_keepe[r].sh' >/dev/null 2>&1; then
+        _kalive=1   # 回退判据(旧版实例无锁文件)
+    fi
+    if [ "$_kalive" = 1 ] && [ "$_dstale" = 0 ]; then
         set_state keeper 0 "dial keeper"
     else
         if [ "$_dstale" = 1 ]; then
@@ -112,9 +126,11 @@ run_cycle() {
         fi
         set_state keeper 1 "dial keeper"
         FAILS=$((FAILS+1))
-        for _dkp in $(pgrep -f dial_keeper.sh 2>/dev/null); do
-            kill -9 "$_dkp" 2>/dev/null
-        done
+        # 只杀锁指向的实例(cmdline 复核) — 不打模式匹配, 防误伤旁观进程
+        if [ -n "$_kp" ] && kill -0 "$_kp" 2>/dev/null \
+           && grep -qa dial_keeper /proc/$_kp/cmdline 2>/dev/null; then
+            kill -9 "$_kp" 2>/dev/null
+        fi
         export LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib
         export PATH=/usr/sbin:/usr/bin:/sbin:/bin:/fhrom/bin:/fhrom/fhshell
         nohup sh /data/gw/dial_keeper.sh >/dev/null 2>&1 &
@@ -224,8 +240,8 @@ run_cycle() {
 
 # ---- main ----
 touch $LOG $STATE
-log "===== watchdog v1.7 start ====="
-logger -t watchdog "watchdog v1.7 start"
+log "===== watchdog v1.8 start ====="
+logger -t watchdog "watchdog v1.8 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

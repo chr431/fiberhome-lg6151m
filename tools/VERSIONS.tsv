@@ -80,13 +80,13 @@ gw/defaults.conf	1.8	manifest	/data/gw/defaults.conf	统一配置只读出厂基
 tools/leak_check.py	2.2	tool	-	敏感词零命中门禁; v2.2: --history 全量扫提交正文(%B, 原仅扫标题%s可漏检消息体); v2.1: 修复 PAT_PARTS NameError; 历史见git
 docs/ARCHITECTURE.md	1.1	doc	-	架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针)
 docs/GUI_TERMINOLOGY.md	1.2	doc	-	GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git
-gw/watchdog.sh	1.7	manifest	/data/gw/watchdog.sh	持续不变量看门狗(v1.7: mipc探针过硬超时(探针卡死=整轮停摆)+dial_keeper心跳陈旧>90s判死重启+led_mgr自愈拉; v1.6: +log_keeper自愈+ql_wifi_sample卡死清除; v1.5: 信道漂移回写)
-tools/selftest.py	2.21	tool	-	断言式全功能测试; v2.21: +5G灯数据面一致性/拨号守护心跳与硬超时接线/快照转存标记 护栏; v2.20: 移除宵断护栏; 历史见git
+gw/watchdog.sh	1.8	manifest	/data/gw/watchdog.sh	持续不变量看门狗(v1.8: 拨号守护实例定位改PID锁(cmdline复核, 防启动者argv自匹配/误伤旁观); v1.7: mipc探针过硬超时+dial_keeper心跳陈旧>90s判死重启+led_mgr自愈拉; v1.6: +log_keeper自愈+ql_wifi_sample卡死清除)
+tools/selftest.py	2.22	tool	-	断言式全功能测试; v2.22: 单实例判据改PID锁↔活进程跨层断言; v2.21: +5G灯数据面一致性/拨号心跳与硬超时接线/快照转存标记 护栏; 历史见git
 tools/doc_audit.py	1.1	tool	-	台账↔文档内联标记双向审计(v1.1: 标记扫描纳入台账引用的docs/外文档如install/README.md; v1.0: 版本绑定+TEST-MISSING/STALE-CODE/UNREGISTERED-CLAIM)
 gw/src/mipc_cellular.c	0.8	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源(P1): dlopen闭包预载+ql_nw_init; v0.8: +endc 组网模式(厂商 fh_set_endc 同款 ql_nw_set_nr_disable_mode 序列, 写后读回校验)
 gw/bin/mipc_cellular	0.8	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI(getbands/setlock/unlock/endc; 锁NR41+79实弹验证零扰动)
 tools/build_mipc_cellular.sh	1.0	tool	-	mipc_cellular构建(zig cc aarch64-musl动态)
-gw/dial_keeper.sh	1.2	manifest	/data/gw/dial_keeper.sh	拨号自持兜底守护(P2): ccmni无IP超35s→MIPC直连重拨(deact_apn+act_type配方); v1.2: 启动即写心跳(消watchdog首见无hb窗口); v1.1: mipc调用全走mto()硬超时(设备无timeout命令)+心跳判陈旧重启+EE转储增量强制重拨+logger落syslog+单实例守
+gw/dial_keeper.sh	1.3	manifest	/data/gw/dial_keeper.sh	拨号自持兜底守护(P2): ccmni无IP超35s→MIPC直连重拨(deact_apn+act_type配方); v1.3: 单实例守改PID锁(cmdline复核; 原pgrep判据在启动者argv含脚本路径时自匹配实测); v1.2: 启动即写心跳; v1.1: mipc调用全走mto()硬超时+心跳判陈旧重启+EE转储增量强制重拨+logger落syslog
 gw/guest_fw.sh	1.6	manifest	/data/gw/guest_fw.sh	访客隔离防火墙v1.6(审计P0: GUEST_ISOLATE开关删除=强制隔离; 兼容需求改由主WiFi终端频段锁定承接; 历史版本见git)
 install/run.sh	1.1	tool	-	raw shell自驱脚本(v1.1: 分区次设备号从/proc/partitions动态解析成布局门禁, RP102/RP103通用; v1.0硬编码259:7等)
 tools/build_v3httpd.sh	1.0	tool	-	v3httpd构建(zig cc aarch64-linux-musl全静态, 同mipc_cellular链)

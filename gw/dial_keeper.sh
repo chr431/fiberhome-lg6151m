@@ -1,5 +1,5 @@
 #!/bin/sh
-# dial_keeper.sh v1.1 -- 拨号自持守护 (ROADMAP P2, 2026-10-06)
+# dial_keeper.sh v1.2 -- 拨号自持守护 (ROADMAP P2, 2026-10-06)
 #
 # 背景(闸门A实证): mobilenetwork 是 PDN 生命周期持有者 — 杀掉后 ccmni IPv4
 # ≤10s 消失; 因此 P3 下架 cfgmgr/mobilenetwork 前必须有自研拨号能力。
@@ -14,6 +14,9 @@
 #   --data_call_deact_apn $APN → --data_call_act_type '{...vendor默认...}'
 #   成功判据: 响应含 "result": 0 且 3s 后 ccmni 有 IPv4
 #
+# v1.2 (2026-10-14 部署实测): 启动即写心跳 — watchdog v1.7 首见"无心跳文件且已过
+#   开机宽限"会判陈旧杀+拉(部署重启新实例实测命中, 属误判); 提前到脚本入口写,
+#   窗口≈0。旧版本实例(无 hb 文件)该规则仍按设计触发 = 换代码自动重启。
 # v1.1 (2026-10-14 模组 EE 事故实弹): 三处加固 —
 #   ① 全部 mipc_wan_cli 调用过 mto() 硬超时(纯 shell 实现: 本机无 timeout
 #      命令, busybox 也无此 applet)。事故复盘: 模组 Fatal(EE) 后厂商重启
@@ -46,6 +49,9 @@ for _op in $(pgrep -f dial_keeper.sh 2>/dev/null); do
 done
 
 hb() { cut -d. -f1 /proc/uptime > $HB 2>/dev/null; }
+hb   # v1.2: 启动即写心跳 — 消 watchdog 首见"无心跳文件"窗口(deploy 重启实测命中:
+     #   新实例起 ~2s 时 watchdog 判 stale(hb=none) 杀+拉, 属误判; 旧 v1.0 实例
+     #   无 hb 文件时该规则仍按设计触发 = 换代码后自动重启)
 # v1.1: 分片睡眠(每片刷心跳 — watchdog 阈值 90s 对 5s 分片有大余量)
 nap() {
     _n=$1
@@ -101,9 +107,8 @@ ee_count() { ls -d /data/log/aee_exp/db.*.EE 2>/dev/null | wc -l; }
 
 DOWN=0; B=$MINB
 EE_N=$(ee_count)
-hb
-log "===== keeper v1.1 start (grace=${GRACE}s poll=${POLL}s mto=${MTO}s ee=${EE_N}) ====="
-logger -t dial_keeper "keeper v1.1 start (grace=${GRACE}s mto=${MTO}s ee=${EE_N})"
+log "===== keeper v1.2 start (grace=${GRACE}s poll=${POLL}s mto=${MTO}s ee=${EE_N}) ====="
+logger -t dial_keeper "keeper v1.2 start (grace=${GRACE}s mto=${MTO}s ee=${EE_N})"
 while :; do
     hb
     # v1.1: 模组 EE 事件 = 复位信号 → 强制重拨路径(不等被动宽限)

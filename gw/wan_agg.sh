@@ -1,5 +1,9 @@
 #!/bin/sh
-# wan_agg.sh v2.29 — 协议级检测(authd 会话信号, <=5s 故障转移) 双上行聚合主管 (vendor kernel engine + iptables fallback)
+# wan_agg.sh v2.30 — 协议级检测(authd 会话信号, <=5s 故障转移) 双上行聚合主管 (vendor kernel engine + iptables fallback)
+# v2.30 (2026-10-15 A1): 蜂窝侧 main 表默认路由收敛为"纯探活"用途 —— metric
+#   50→250(劣于家宽备用 200), 家宽主力期不再往 main 写 metric 0/50; 补齐
+#   家宽主默认的存在性看门狗(原先只在状态迁移时装一次, 被冲刷后无人补 =
+#   未打标流量静默改走蜂窝的长期漏洞)。
 # v2.29: 移除 ETH_CURFEW 先验时段(用户裁定: 判定不做先验) — 静默型切断由 authd v2.3 静默看门狗(>40s 无 EAP 帧判死)承接
 # v2.28(2026-10-12 实弹: 宵断 00:06 切断, 00:12 才转移): w2_data_alive 去网关短路(宽限期网关仍答 ICMP 的盲区) + ETH_CURFEW 宵断时段确定性判死(weight/eth_prio 模式)
 # v2.27(2026-10-11 实弹: 上游 EAP 重启窗口漏拦截页给手机): 探测 -W1 + 首败同轮复核 — 死亡确认 25s 级→<=8s
@@ -56,6 +60,10 @@ LAN_NET=192.168.9.0/24
 W1_IF=ccmni2; W2_IF=eth0
 W1_MARK=0x4000000; W2_MARK=0x8000000; W_MASK=0xfc000000
 T1=100; T2=200
+# v2.30(A1): 蜂窝侧 main 表默认路由只作"探活可达"用途(ping -I 需该表有路),
+#   metric 必须劣于家宽备用默认(200)。旧值 50 插在家宽主默认(0)与备用(200)
+#   之间 —— 主默认被外力冲刷后, 未打标流量会静默改走蜂窝且长期滞留(实测复核)。
+W1_PRB_METRIC=250
 W1_PCT=40; W2_PCT=60
 GW_FILE=/tmp/wan.gw
 UDHCPC_PID=/tmp/udhcpc_wan.pid
@@ -257,13 +265,25 @@ ensure_lease() {
     #       原路弹回公网 = 全LAN黑洞; 原属wan_policy2, 退役后重启即蒸发)
     ip rule show | grep -q "to $LAN_NET lookup main" || \
         ip rule add to $LAN_NET lookup main priority 50
-    ip route show default | grep -q "dev $W1_IF" || \
-        ip route add default dev $W1_IF metric 50 2>/dev/null
+    # v2.30(A1): 蜂窝探活路由 — metric 250(劣于家宽备用 200)。先立新再拆旧,
+    #   避免探活路由空窗; 旧 metric 50 按精确匹配单条清除(自愈幂等)。
+    ip route show default | grep -q "dev $W1_IF metric $W1_PRB_METRIC" || \
+        ip route add default dev $W1_IF metric $W1_PRB_METRIC 2>/dev/null
+    ip route del default dev $W1_IF metric 50 2>/dev/null
     if [ -s $GW_FILE ]; then
         BB_GW=$(head -1 $GW_FILE)
         ip route replace default via $BB_GW dev $W2_IF table $T2 2>/dev/null
         ip route show default | grep -q "via $BB_GW dev $W2_IF" || \
             ip route add default via $BB_GW dev $W2_IF metric 200 2>/dev/null
+        # v2.30(A1): 家宽主默认(无 metric = 0)存在性看门狗。该路由原先只在状态
+        #   迁移时安装一次, 被外力(租约/认证刷新)冲刷后无人补 —— 届时未打标流量
+        #   (netagent/DNS/NTP + 丢标记的转发流)会落到家宽备用(200)之外, 甚至被
+        #   蜂窝探活路由抢走。仅当"家宽是唯一主力"(S1=0 且 S2=1)时维护, 避免与
+        #   蜂窝主力模式(ccmni2 metric 0)互抢默认。
+        if [ "$S1" = 0 ] && [ "$S2" = 1 ]; then
+            ip route show default | grep "via $BB_GW dev $W2_IF" | grep -qv metric || \
+                ip route replace default via $BB_GW dev $W2_IF 2>/dev/null
+        fi
     fi
     # v2.3: eth0 NAT/FORWARD 看门狗(真补上——v1.7提交曾虚报覆盖, 手工规则重启即蒸发,
     #       eth0裸源出公网=黑洞; 本块与路由看门狗同周期自愈)
@@ -415,9 +435,15 @@ while :; do
         log "5g iface moved: $W1_IF -> $CW"
         W1_IF=$CW
         ip route replace default dev $W1_IF table $T1 2>/dev/null
-        # v1.4: main 主默认也钉到活跃 ccmni(netagent 漂移后可能指着死口)
-        ip route replace default dev $W1_IF 2>/dev/null
-        ip route replace default dev $W1_IF metric 50 2>/dev/null
+        # v1.4: main 主默认也钉到活跃 ccmni(netagent 漂移后可能指着死口)。
+        # v2.30(A1): 仅当蜂窝当前就是主线默认(带 ccmni 且无 metric)时才重指;
+        #   家宽主力期不再往 main 写 metric 0/50, 只刷新探活路由 —— 否则会重新
+        #   制造"未打标流量偏好蜂窝"的地雷。
+        if ip route show default | grep 'dev ccmni' | grep -qv metric; then
+            ip route replace default dev $W1_IF 2>/dev/null
+        fi
+        ip route del default dev $W1_IF metric 50 2>/dev/null
+        ip route replace default dev $W1_IF metric $W1_PRB_METRIC 2>/dev/null
         iptables -t nat -C POSTROUTING -s $LAN_NET -o $W1_IF -j MASQUERADE 2>/dev/null || \
             iptables -t nat -A POSTROUTING -s $LAN_NET -o $W1_IF -j MASQUERADE
         iptables -C FORWARD -i br-lan -o $W1_IF -j ACCEPT 2>/dev/null || \

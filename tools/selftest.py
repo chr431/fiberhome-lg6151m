@@ -1261,6 +1261,65 @@ def t_sys_led_wan():
 
 
 
+@test("蜂窝侧不再抢 main 表默认 (聚合路由地雷)")
+def t_agg_route_landmine():
+    # v2.24 (2026-10-15 实测复核): 蜂窝侧 main 表默认路由只作"探活可达"用途, metric
+    #   必须劣于家宽备用默认(200)。旧值 50 插在家宽主默认(0)与备用(200)之间: 主默认
+    #   被外力(租约/认证刷新)冲刷后无看门狗补, 未打标流量(netagent/DNS/NTP + 丢标记
+    #   的转发流)会静默改走蜂窝并长期滞留 = 真实的"流量偏好蜂窝"路径。
+    #   wan_agg v2.30: metric 50→250 + 补家宽主默认存在性看门狗。
+    # 断言(不扰动现场): ① main 表不存在 metric<200 的 ccmni 默认(缺 metric 同样违规);
+    #   ② 探活路由(metric 250)在位; ③ 家宽主力模式下家宽主默认(dev eth0 无 metric)在位。
+    rts = dev("ip route show default 2>/dev/null").splitlines()
+    ccmni_lines = [l for l in rts if "ccmni" in l]
+    bad = []
+    for l in ccmni_lines:
+        m = re.search(r"metric (\d+)", l)
+        if not m or int(m.group(1)) < 200:
+            bad.append(l.strip())
+    probe = any("metric 250" in l for l in ccmni_lines)
+    mode = dev("grep -m1 '^MODE=' /data/gw/agg.conf 2>/dev/null | cut -d= -f2").strip()
+    eth_pri = [l for l in rts if "dev eth0" in l and "metric" not in l]
+    need_pri = mode in ("eth_prio", "eth_only")
+    prim = (not need_pri) or bool(eth_pri)
+    ok = (not bad) and probe and prim
+    record(t_agg_route_landmine._test_name, "system", ok,
+           f"mode={mode or '-'} ccmni_defaults={len(ccmni_lines)} landmine={len(bad)} "
+           f"probe250={int(probe)} eth0_primary={int(bool(eth_pri))}"
+           + (f" bad='{bad[0][:36]}'" if bad else ""))
+
+
+@test("流量统计口径 = Linux 发送路径 (非网卡报告值)")
+def t_traffic_source():
+    # v2.24 (2026-10-15 实弹): 蜂窝网卡 tx_bytes 会被厂商卸载路径的记账灌入无佐证的
+    #   批量增量(实测 1 秒 +1,221,373B/813 包, 而同期 qdisc 仅 +29B/1 包、ccmni2 抓包
+    #   只有 6 个探针包; 无 IP/无路由且 DOWN 的 ccmni1 也记了 47MB)。拿它当"蜂窝用量"
+    #   展示=长期高估。traffic_logger v1.2 / api v2.72 起蜂窝上行改用 qdisc(Linux 路径)。
+    # 断言: ① /api/traffic 的蜂窝 tx 等于 qdisc Sent 值(容差 8KB, 覆盖两次读取间的探针);
+    #   ② watchdog 存在偏差护栏(该信号必须可见而非静默); ③ 记录网卡与路径的当前差值。
+    tok = _token()
+    if tok is None:
+        record(t_traffic_source._test_name, "system", True,
+               "skip — 无 GUI token(" + (_TOKEN_NOTE[0] or "未配置") + ")")
+        return
+    j = api("traffic", tok)
+    cif = dev("ip -o -4 addr show 2>/dev/null | grep -m1 'ccmni.*inet' | awk '{print $2}'").strip()
+    nd = dev(f"cat /sys/class/net/{cif}/statistics/tx_bytes 2>/dev/null").strip()
+    qd = dev(f"tc -s qdisc show dev {cif} 2>/dev/null | awk '/Sent/{{print $2; exit}}'").strip()
+    guard = dev("grep -c 'cell stats divergence' /data/gw/watchdog.sh 2>/dev/null").strip()
+    api_tx = str(j.get("tx", ""))
+    try:
+        gap = int(nd) - int(qd)
+        near = abs(int(api_tx) - int(qd)) <= 8192
+    except ValueError:
+        gap = -1
+        near = False
+    ok = bool(cif) and nd.isdigit() and qd.isdigit() and near and guard not in ("", "0")
+    record(t_traffic_source._test_name, "system", ok,
+           f"if={cif} api_tx={api_tx} qdisc={qd} netdev={nd} netdev_minus_qdisc={gap} guard={guard}")
+
+
+
 @test("SoC 温度在合理区间")
 def t_sys_temp():
     out = dev("for zd in /sys/class/thermal/thermal_zone*; do "

@@ -106,8 +106,13 @@ if [ -n "$IF" ]; then
     sysctl -w net.ipv6.conf.all.forwarding=1 >/dev/null 2>&1
     # v1.5: 家宽口接受 RA(forwarding=1 下需 accept_ra=2; 不取默认路由护 NAT66 出向)
     sysctl -w net.ipv6.conf.eth0.accept_ra=2 >/dev/null 2>&1
-    # v1.6: 家宽RA默认路由做热备(metric 2048<ccmni的1024, 5G v6死自动顶上)
-    # 实测强绑ULA验证: 杀ccmni默认后LAN v6经eth0 NAT66无感切换(2026-10-05)
+    # v1.6: 蜂窝 v6 优先、家宽 v6 作热备 —— 这是**有意设计**(2026-10-05 强绑 ULA 实测:
+    #   杀掉 ccmni 默认路由后, LAN v6 经 eth0 NAT66 无感切换)。
+    # v1.9(2026-10-15): 修正原注释写反的不等号。实际 metric 关系是"越大越劣":
+    #   家宽 2048 劣于蜂窝的 1024, 故 main 表未打标的 v6 默认走**蜂窝**。影响面仅限
+    #   "未打标" v6(本机自身 v6 + 丢标记的转发流; 打标客户端走 table 200 → eth0,
+    #   实测 184 条 v6 conntrack 全为 0x66)。此为策略选择而非缺陷, 保留不动; 蜂窝
+    #   用量因此不应拿网卡计数解读, 见 traffic_logger v1.2 的统计口径修正。
     sysctl -w net.ipv6.conf.eth0.accept_ra_defrtr=1 >/dev/null 2>&1
     sysctl -w net.ipv6.conf.eth0.ra_defrtr_metric=2048 >/dev/null 2>&1
     # v1.6: LAN v6 经 WAN(eth0) 出口的 NAT66 + 转发(夜间v4断网场景刚需)

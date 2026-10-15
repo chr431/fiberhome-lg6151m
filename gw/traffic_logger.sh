@@ -1,9 +1,17 @@
 #!/bin/sh
-# traffic_logger.sh v1.1 — 蜂窝/以太网流量采样器(5 分钟粒度, /data 持久)
+# traffic_logger.sh v1.2 — 蜂窝/以太网流量采样器(5 分钟粒度, /data 持久)
 # 输出: /data/gw/traffic_hist.tsv  每行: epoch drx_c dtx_c drx_e dtx_e (字节增量)
 # 语义: 增量为"距上次采样"; 计数器回绕/接口重建(ccmni 漂移)/重启(新值<旧值)
 #       按新值计(=计数器自身纪元的累计, 自洽); prev 存 /tmp(重启后首拍即
 #       "自计数器归零以来", 语义连续)
+# v1.2(2026-10-15): 蜂窝**上行**数据源 netdev tx_bytes → qdisc(Linux 发送路径)。
+#   网卡计数会被厂商卸载路径的记账灌入无法佐证的批量增量(实测: 1 秒内 +1,221,373B
+#   /813 包, 同期 qdisc 仅 +29B/1 包、ccmni2 抓包只有 6 个探针包; 无 IP/无路由且
+#   DOWN 的 ccmni1 也记了 47MB), 用作流量统计会长期高估并把"蜂窝用量"变成假象。
+#   qdisc 对真实流量逐字节精确(已知量注入实测一致), 且不含该幻影; qdisc 缺失时
+#   回退 netdev。**下行**仍用 netdev rx(实测准确: 1MB 下载 → +1.08MB)。
+#   **口径切换点**: 本版之前的历史行是"网卡报告值"(被高估), 之后是"Linux 路径值"。
+#   历史不改写(留作设备当时报告的存证), 跨切换点的周/月聚合会混合两种口径。
 # 接口漂移: ccmni* 每拍动态解析(与 get_traffic 同法); eth0 固定
 # 尺寸守护: 超 40 天(~11520 行)裁剪保留 30 天
 LOG=/data/gw/traffic_hist.tsv
@@ -13,7 +21,8 @@ while :; do
     CRC=0; CTC=0
     [ -n "$CIF" ] && {
         CRC=$(cat /sys/class/net/$CIF/statistics/rx_bytes 2>/dev/null || echo 0)
-        CTC=$(cat /sys/class/net/$CIF/statistics/tx_bytes 2>/dev/null || echo 0)
+        CTC=$(tc -s qdisc show dev $CIF 2>/dev/null | awk '/Sent/{print $2; exit}')
+        [ -n "$CTC" ] || CTC=$(cat /sys/class/net/$CIF/statistics/tx_bytes 2>/dev/null || echo 0)
     }
     ERC=$(cat /sys/class/net/eth0/statistics/rx_bytes 2>/dev/null || echo 0)
     ETC=$(cat /sys/class/net/eth0/statistics/tx_bytes 2>/dev/null || echo 0)

@@ -71,21 +71,21 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/ntp_keeper.sh` | **v1.2** | manifest | `/data/gw/ntp_keeper.sh` | 每小时NTP守时(多源; 设备无RTC; v1.2: +时区自愈(/etc/TZ→tmpfs重启即失, 每轮重应用); v1.1: 首选 NTP_SERVER 自管配置) |
 | `gw/radvd.conf` | **v1.0** | manifest | `/data/gw/radvd.conf` | IPv6 SLAAC+RDNSS通告(br-lan, ULA fd42:9ac1:7e50::/64) |
 | `gw/rc.extend.sh` | **v2.1** | manifest | `/data/rc.extend.sh` | 槽位调度器; v2.1(P3): shadow.override合法性校验+.bak回退自愈(坏文件不再锁死SSH+串口); v2.0: 开机清token; 历史见git |
-| `gw/rc_netfh.sh` | **v3.2** | manifest | `/data/gw/rc_netfh.sh` | 路线A: FH modem栈环境(最小army, MODE.fh门控; v3.2: shm在位判$3perms→$4size修正) |
+| `gw/rc_netfh.sh` | **v3.3** | manifest | `/data/gw/rc_netfh.sh` | v3.3: 修正 v6 家宽热备注释写反的不等号(实为 2048>1024, 未打标 v6 默认走蜂窝)并写明影响面与结论: 策略有意保留; 零功能改动; 路线A: FH modem栈环境(最小army, MODE.fh门控; v3.2: shm在位判$3perms→$4size修正) |
 | `gw/reboot_sched.sh` | **v1.1** | manifest | `/data/gw/reboot_sched.sh` | 定时重启守护(默认每日04:00; 护栏: 时钟可信/开机300s/5min窗口/当日去重; v1.1: 每轮自应用时区(不依赖他守护时序)) |
-| `gw/traffic_logger.sh` | **v1.1** | manifest | `/data/gw/traffic_logger.sh` | 蜂窝/以太网流量采样器(5min 增量落 /data/gw/traffic_hist.tsv; 漂移解析+回绕自洽+40天裁剪) |
+| `gw/traffic_logger.sh` | **v1.2** | manifest | `/data/gw/traffic_logger.sh` | v1.2: 蜂窝上行数据源 netdev tx_bytes → qdisc(Linux 发送路径) — 网卡计数被厂商卸载记账灌入无佐证增量(1s +1.22MB/813 包而 qdisc/抓包为 0; ccmni1 DOWN 无 IP 却记 47MB), 用作统计=长期高估; qdisc 缺失回退 netdev, 下行仍用 netdev rx(实测准确); 蜂窝/以太网流量采样器(5min 增量落 /data/gw/traffic_hist.tsv; 漂移解析+回绕自洽+40天裁剪) |
 | `gw/udhcpc_eth1.script` | **v1.0** | manifest | `/data/gw/udhcpc_eth1.script` | eth1口 udhcpc 事件钩子(补登记) |
 | `gw/udhcpc_wan.script` | **v1.0** | manifest | `/data/gw/udhcpc_wan.script` | WAN口 udhcpc 事件钩子(接口无关化) |
 | `gw/v2_access.sh` | **v6.1** | manifest | `/data/gw/v2_access.sh` | v2 极简访问层(串口/SSH/DHCP/防火墙22,零守护干涉) |
 | `gw/v3_babysit_v2.sh` | **v2.0** | manifest | `/data/gw/babysit_v2.sh` | 启动保姆(T1杀rcS/T2核爆回B) |
 | `gw/v3_rc10.extend.sh` | **v2.28** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2; v2.28: +log_keeper 接线; 历史见git |
-| `gw/wan_agg.sh` | **v2.29** | manifest | `/data/gw/wan_agg.sh` | 双上行聚合主管(v2.29: 移除先验时段(判定不做先验), 静默型切断由 authd v2.3 静默看门狗承接; v2.28: 去网关探针短路); 历史见git |
-| `gw/watchdog.sh` | **v1.9** | manifest | `/data/gw/watchdog.sh` | 持续不变量看门狗(v1.9: 告警闪烁从WAN灯迁5G橙灯gpio473 — 两写方抢同一物理灯, watchdog闪完停在0而led_mgr边沿触发不纠回, 直接造成"eth0有网WAN灯不亮"; WAN灯写权单一化归led_mgr独占; v1.8: 拨号守护实例定位改PID锁(cmdline复核, 防启动者argv自匹配/误伤旁观); v1.7: mipc探针过硬超时+dial_keeper心跳陈旧>90s判死重启+led_mgr自愈拉; v1.6: +log_keeper自愈+ql_wifi_sample卡死清除) |
+| `gw/wan_agg.sh` | **v2.30** | manifest | `/data/gw/wan_agg.sh` | v2.30(A1): 蜂窝侧 main 表默认收敛为纯探活 — metric 50→250(劣于家宽备用 200), 家宽主力期不再写 metric 0/50, 并补家宽主默认存在性看门狗(原只在状态迁移时装一次, 被外力冲刷后未打标流量静默改走蜂窝且长期滞留); 双上行聚合主管(v2.29: 移除先验时段(判定不做先验), 静默型切断由 authd v2.3 静默看门狗承接; v2.28: 去网关探针短路); 历史见git |
+| `gw/watchdog.sh` | **v1.10** | manifest | `/data/gw/watchdog.sh` | v1.10: +蜂窝统计偏差护栏(netdev tx_bytes vs qdisc 增量逐周期比对, 超阈值记 WARN) — 把统计与实际不符变成可见信号而非静默污染流量账; 持续不变量看门狗(v1.9: 告警闪烁从WAN灯迁5G橙灯gpio473 — 两写方抢同一物理灯, watchdog闪完停在0而led_mgr边沿触发不纠回, 直接造成"eth0有网WAN灯不亮"; WAN灯写权单一化归led_mgr独占; v1.8: 拨号守护实例定位改PID锁(cmdline复核, 防启动者argv自匹配/误伤旁观); v1.7: mipc探针过硬超时+dial_keeper心跳陈旧>90s判死重启+led_mgr自愈拉; v1.6: +log_keeper自愈+ql_wifi_sample卡死清除) |
 | `gw/webs_revive.sh` | **v1.3** | manifest | `/data/gw/webs_revive.sh` | 原厂GUI复活器(自足nginx conf; 手动拉起) |
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
 | `gw/wifi_up.sh` | **v1.28** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.28: 候选收敛安全集深部{1,6}消边界振荡; v1.27: auto-channel接入驱动IDC安全掩码(仅在SafeChnBitmask集内选道, 防驱动自行搬道致配置≠实况); 历史版本见git) |
-| `gw/www/api.sh` | **v2.71** | manifest | `/data/gw/www/api.sh` | GUI JSON端点; v2.71: 移除宵断端点/字段(先验方案下架); 历史见git |
+| `gw/www/api.sh` | **v2.72** | manifest | `/data/gw/www/api.sh` | v2.72: get_traffic 蜂窝上行改取 qdisc(Linux 发送路径) — 与 traffic_logger v1.2 同口径, 网卡值作流量展示=假象; GUI JSON端点; v2.71: 移除宵断端点/字段(先验方案下架); 历史见git |
 | `gw/www/app.js` | **v3.51** | manifest | `/data/gw/www/app.js` | 控制台SPA; v3.51: 移除宵断卡片(先验方案下架); 历史见git |
 | `gw/www/index.html` | **v2.32** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.32: 缓存v66) |
 | `gw/www/style.css` | **v2.1** | manifest | `/data/gw/www/style.css` | 控制台主题 |
@@ -123,7 +123,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/rescue_shadow.py` | **v1.0** | tool | `-` | shadow.override未bind网络救援(getpass旧口令→只读探针: 文件md5/grep行为单测/部署钩子sh -x跟踪→从.bak恢复+重bind; 依赖rc.extend v2.1) |
 | `tools/rotate_toor.py` | **v1.4** | tool | `-` | toor口令轮换器; v1.4: 轮换前存档.bak(rc.extend v2.1回退源); 历史见git |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
-| `tools/selftest.py` | **v2.23** | tool | `-` | 断言式全功能测试; v2.23: +WAN灯数据面一致性+写权唯一化护栏(t_sys_led_wan) — 干跑映射b0/b1 + watchdog源码不得引用5g_evb_voice + 实况亮度无条件等于数据面推算值; 5G灯护栏去掉"容忍一拍"sleep(绝对电平驱动下等待即遮羞布); v2.22: 单实例判据改PID锁↔活进程跨层断言; v2.21: +5G灯数据面一致性; 历史见git |
+| `tools/selftest.py` | **v2.24** | tool | `-` | v2.24: +聚合路由地雷护栏(t_agg_route_landmine: main 表不得含 metric<200 的 ccmni 默认 + 探活路由在位 + 家宽主默认在位) + 流量口径护栏(t_traffic_source: /api/traffic 蜂窝 tx == qdisc 值 + watchdog 偏差护栏在位); 断言式全功能测试; v2.23: +WAN灯数据面一致性+写权唯一化护栏(t_sys_led_wan) — 干跑映射b0/b1 + watchdog源码不得引用5g_evb_voice + 实况亮度无条件等于数据面推算值; 5G灯护栏去掉"容忍一拍"sleep(绝对电平驱动下等待即遮羞布); v2.22: 单实例判据改PID锁↔活进程跨层断言; v2.21: +5G灯数据面一致性; 历史见git |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |
 | `tools/serial_server.py` | **v1.7** | tool | `-` | 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets) |
 | `tools/upgrade_slot.py` | **v1.0** | tool | `-` | SSH整槽升级器(P3第一档: vercheck/槽位/空间预检→md5门禁→dd备份旧p26→写新镜像→挂载sanity断言(toor/rcS/#v3:/procd)→失败自动整槽还原不重启→清TRY_A→reboot; PC侧轮询日志+回连终检; --dry-run) |

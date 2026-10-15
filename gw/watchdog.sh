@@ -1,8 +1,12 @@
 #!/bin/sh
-# watchdog.sh v1.9 -- on-device continuous invariant monitor.
+# watchdog.sh v1.10 -- on-device continuous invariant monitor.
 # L13: "feature silently broken until manual inspection" countermeasure.
 # Runs every 30s; failures log + ALERT LED flash (5G orange); recovers silently.
 # Started by rc19.sh (pgrep guard); single instance.
+# v1.10 (2026-10-15 流量口径实弹): +蜂窝统计偏差护栏 — 每周期比对 ccmni 网卡
+#       tx_bytes 与 qdisc(真实发送路径)增量, 超阈值记 WARN。价值在"可见化":
+#       网卡计数会被厂商卸载记账灌入无佐证增量(1s +1.22MB 而 qdisc/抓包为 0),
+#       该信号此前只能靠事后翻采样日志才看得见。
 # v1.9 (2026-10-15 WAN 灯不亮实弹): 告警闪烁从 WAN 灯(gpio292/5g_evb_voice)
 #       迁到 5G 橙灯(gpio473)。原实现的病灶不是"闪"而是"闪完停在 0":
 #       led_mgr v1.x 边沿触发(只写状态变化), watchdog 抢写后状态串不变 →
@@ -240,6 +244,29 @@ run_cycle() {
         fi
     done
 
+    # ---- cellular stats divergence guard (v1.10) ----
+    # ccmni 网卡 tx_bytes 会被厂商卸载路径的记账灌入无佐证的批量增量(实测:
+    #   1 秒 +1,221,373B/813 包, 而同期 qdisc 仅 +29B/1 包、ccmni2 抓包只有 6 个
+    #   探针包; 无 IP/无路由且 DOWN 的 ccmni1 也记了 47MB)。流量统计已改用 qdisc
+    #   口径(traffic_logger v1.2/api v2.72), 这里只做**可见化**: 每周期比对两者
+    #   增量, 超阈值记警。原则是不猜修、只取证 —— 信号出现即说明"统计与实际不符"
+    #   在持续发生, 而不是静默污染流量账。
+    CIF=$(ip -o -4 addr show 2>/dev/null | grep -m1 'ccmni.*inet' | awk '{print $2}')
+    if [ -n "$CIF" ]; then
+        CN=$(cat /sys/class/net/$CIF/statistics/tx_bytes 2>/dev/null || echo 0)
+        CQ=$(tc -s qdisc show dev $CIF 2>/dev/null | awk '/Sent/{print $2; exit}')
+        [ -n "$CQ" ] || CQ=$CN
+        if [ -r /tmp/cellstat_prev ]; then
+            . /tmp/cellstat_prev
+            DN=$((CN - PN)); [ $DN -lt 0 ] && DN=$CN
+            DQ=$((CQ - PQ)); [ $DQ -lt 0 ] && DQ=$CQ
+            GAP=$((DN - DQ))
+            [ "$GAP" -gt 2097152 ] && \
+                log "WARN  cell stats divergence on $CIF: netdev +${DN}B vs linux-path +${DQ}B (gap ${GAP}B, ${FAILS:+fails=$FAILS})"
+        fi
+        echo "PN=$CN; PQ=$CQ" > /tmp/cellstat_prev
+    fi
+
     # ---- visual alert ----
     # v1.9 (2026-10-15 实弹): 告警闪烁不再用 WAN 灯。两个写方抢同一物理灯是
     #   "灯不符实际"的直接成因: watchdog 闪 3 次后停在 0, 而 led_mgr v1.x 只在
@@ -268,8 +295,8 @@ run_cycle() {
 
 # ---- main ----
 touch $LOG $STATE
-log "===== watchdog v1.9 start (alert LED moved to 5G orange; WAN LED owned by led_mgr) ====="
-logger -t watchdog "watchdog v1.9 start"
+log "===== watchdog v1.10 start (alert LED 5G orange; WAN LED owned by led_mgr; +cell stats divergence guard) ====="
+logger -t watchdog "watchdog v1.10 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

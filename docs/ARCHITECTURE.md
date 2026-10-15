@@ -189,5 +189,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `CLM-LED-LIE-FM`@FEATURE_MATRIX.md | ✅实证 | `gw/led_mgr.sh>=1.9` | 5G 指示灯反映数据面 (无数据不得点亮) | 12717c3@2026-10-14 | 同上, 对比表行 |
 | `CLM-SNAP-PREV`@FINDINGS.md | ✅实证 | `gw/log_keeper.sh>=1.2` | 日志持久化守护活着且镜像新鲜 | 12717c3@2026-10-14 | 新boot首轮tmp→tmp.prev整目录转存(.snap_up归属判定; 同boot守护重启不转存); 旧"变化才写"致新boot+90s覆盖事故现场(当晚dial_keeper/watchdog现场丢失); 实测转存10+份 |
 | `CLM-KEEPER-LOCK`@FINDINGS.md | ✅实证 | `gw/watchdog.sh>=1.8, gw/dial_keeper.sh>=1.3` | 拨号守护心跳新鲜且 mipc 硬超时在线 (卡死可自愈) | 661d4fe@2026-10-14 | 自暴露双坑: 首见无hb误判陈旧杀拉→v1.2启动即写心跳; pgrep -f判据启动者argv自匹配(实测两次静默不启动)+杀所有匹配误伤旁观→v1.3 PID锁+cmdline复核 |
+| `CLM-LED-WRITE`@FINDINGS.md | ✅实证 | `gw/led_mgr.sh>=2.0, gw/watchdog.sh>=1.9` | WAN 指示灯反映家宽数据面 (绝对电平自愈) | 0e477f4@2026-10-15 | eth0有公网IP/数据面通而WAN灯不亮; 两层根因: 1)led_mgr v1.x边沿触发(状态串不变即不写)- 实弹状态b1起5h一次没写; 2)watchdog告警闪WAN灯后停0; 修: v2.0绝对电平驱动(2s轮询,外部扰动2s纠回)+watchdog告警迁5G橙灯gpio473, WAN写权单一化; 全灯彻查: sysfs 4类(WiFi467/5G三色475-473-474/WAN292)+class 4个PMIC RGB未接外壳不点 |
+| `CLM-LED-WRITE-FM`@FEATURE_MATRIX.md | ✅实证 | `gw/led_mgr.sh>=2.0, gw/watchdog.sh>=1.9` | WAN 指示灯反映家宽数据面 (绝对电平自愈) | 0e477f4@2026-10-15 | 同上, 对比表行; 实弹: 外部同时改错WAN/5G/WiFi三灯→2s内全纠回(旧版5h不纠); 告警闪烁全程不碰WAN灯; cfun=0真拆数据面→2s灭, cfun=1重拨→24s亮(22s为模组重注册固有耗时) |
 
 <!--CLMAUDIT:END-->

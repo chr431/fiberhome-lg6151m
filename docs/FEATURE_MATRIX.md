@@ -135,7 +135,7 @@
 | 定时重启 | 无（仅手动重启）| reboot_sched 每日定时(默认04:00)+GUI 可改/可停+五重护栏 | `+`（实弹 76s 回升）| <!--CLM:CLM-REBOOT-SCHED-->
 | 日志持久化/诊断包 | logread 内存环(易刷爆)+/tmp 日志重启即失 | log_keeper 增量镜像+/tmp快照+boot分隔 + diag_dump 脱敏诊断包(GUI/开机/SSH 三入口) | `+` | <!--CLM:CLM-LOGKEEP-->
 | 温控 | thermal_core(MIPC 联动)+风扇 | thermal_zone 读+fan_mgr 双模式 | `=` |
-| LED | peripheral+libLedState 体系 | led_mgr v1.9：数据面唯一判据（5G: ccmni IPv4=绿/其余全灭；WAN: 数据面实测）+夜间模式+信标看门狗 | `=` | <!--CLM:CLM-LED-LIE-FM-->
+| LED | peripheral+libLedState 体系 | led_mgr v2.0：数据面唯一判据（5G: ccmni IPv4=绿/其余全灭；WAN: 数据面实测）**+绝对电平驱动/自愈**（外部扰动 2s 纠回，轮询 10s→2s）+夜间模式+信标看门狗；告警闪烁移 5G 橙灯（gpio473），WAN 灯写权归 led_mgr 独占 | `▲` | <!--CLM:CLM-LED-LIE-FM--> <!--CLM:CLM-LED-WRITE-FM-->
 | 工厂产测 | META 模式+slt2+load_cli 全层 | ✗（保留 LK 串口进入能力）| `✗` |
 
 ## 3. 攻击面对比

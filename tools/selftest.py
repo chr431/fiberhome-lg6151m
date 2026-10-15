@@ -1261,6 +1261,29 @@ def t_sys_led_wan():
 
 
 
+def _agg_conf():
+    """读聚合配置(MODE/W1_PCT), 缺省回退。"""
+    mode = dev("grep -m1 '^MODE=' /data/gw/agg.conf 2>/dev/null | cut -d= -f2").strip() or "eth_prio"
+    pct = dev("grep -m1 '^W1_PCT=' /data/gw/agg.conf 2>/dev/null | cut -d= -f2").strip() or "30"
+    return mode, pct
+
+
+def _wan_alive_state():
+    """读 wan_agg 发布的判活结论(唯一权威): (home, cell, fresh)。"""
+    wa = dev("cat /tmp/wan_alive 2>/dev/null").strip()
+    m = re.search(r"home=([01]).*cell=([01]).*ts=(\d+)", wa)
+    if not m:
+        return None, None, False
+    return m.group(1), m.group(2), abs(int(time.time()) - int(m.group(3))) <= 30
+
+
+def _dry_primary(mode, a1, a2, pct=""):
+    """干跑主路推导(--dry-primary), 不碰现场。"""
+    out = dev(f"sh /data/gw/wan_agg.sh --dry-primary {mode} {a1} {a2} {pct}").strip()
+    m = re.search(r"primary=(\S+)", out)
+    return m.group(1) if m else "?"
+
+
 @test("蜂窝侧不再抢 main 表默认 (聚合路由地雷)")
 def t_agg_route_landmine():
     # v2.24 (2026-10-15 实测复核): 蜂窝侧 main 表默认路由只作"探活可达"用途, metric
@@ -1270,23 +1293,31 @@ def t_agg_route_landmine():
     #   wan_agg v2.30: metric 50→250 + 补家宽主默认存在性看门狗。
     # 断言(不扰动现场): ① main 表不存在 metric<200 的 ccmni 默认(缺 metric 同样违规);
     #   ② 探活路由(metric 250)在位; ③ 家宽主力模式下家宽主默认(dev eth0 无 metric)在位。
+    # v2.27: 状态感知 —— metric<200 的 ccmni 默认只有在"家宽是主路"时才是地雷;
+    #   蜂窝为主路时(宵断自动转移/仅蜂窝/权重偏蜂窝)它就是**预期的** metric-0 主默认。
     rts = dev("ip route show default 2>/dev/null").splitlines()
     ccmni_lines = [l for l in rts if "ccmni" in l]
-    bad = []
+    land = []
     for l in ccmni_lines:
         m = re.search(r"metric (\d+)", l)
         if not m or int(m.group(1)) < 200:
-            bad.append(l.strip())
+            land.append(l.strip())
     probe = any("metric 250" in l for l in ccmni_lines)
-    mode = dev("grep -m1 '^MODE=' /data/gw/agg.conf 2>/dev/null | cut -d= -f2").strip()
     eth_pri = [l for l in rts if "dev eth0" in l and "metric" not in l]
-    need_pri = mode in ("eth_prio", "eth_only")
-    prim = (not need_pri) or bool(eth_pri)
-    ok = (not bad) and probe and prim
+    mode, pct = _agg_conf()
+    home, cell, _fresh = _wan_alive_state()
+    exp = _dry_primary(mode, cell or "1", home or "1", pct)
+    if exp == "w2":      # 家宽主路: 不得有抢默认的蜂窝条目, 且家宽主默认须在位
+        ok = probe and not land and bool(eth_pri)
+    elif exp == "w1":    # 蜂窝主路: metric-0 蜂窝主默认是预期(地雷不成立)
+        ok = probe and bool(land)
+    else:                # 双死/未知: 只要求探活路由在位, 不猜
+        ok = probe
     record(t_agg_route_landmine._test_name, "system", ok,
-           f"mode={mode or '-'} ccmni_defaults={len(ccmni_lines)} landmine={len(bad)} "
+           f"mode={mode} exp={exp} alive={cell or '?'}/{home or '?'} "
+           f"ccmni_defaults={len(ccmni_lines)} landmine={len(land)} "
            f"probe250={int(probe)} eth0_primary={int(bool(eth_pri))}"
-           + (f" bad='{bad[0][:36]}'" if bad else ""))
+           + (f" bad='{land[0][:30]}'" if (land and exp == "w2") else ""))
 
 
 @test("流量统计口径 = Linux 发送路径 (非网卡报告值)")
@@ -1302,21 +1333,26 @@ def t_traffic_source():
         record(t_traffic_source._test_name, "system", True,
                "skip — 无 GUI token(" + (_TOKEN_NOTE[0] or "未配置") + ")")
         return
-    j = api("traffic", tok)
     cif = dev("ip -o -4 addr show 2>/dev/null | grep -m1 'ccmni.*inet' | awk '{print $2}'").strip()
     nd = dev(f"cat /sys/class/net/{cif}/statistics/tx_bytes 2>/dev/null").strip()
-    qd = dev(f"tc -s qdisc show dev {cif} 2>/dev/null | awk '/Sent/{{print $2; exit}}'").strip()
+    # 区间校验: API 取到的值必须落在**调用前后两次 qdisc 读数之间** —— 对任意流量
+    #   速率都成立(蜂窝承载客户端流量时, 两次读取间会有真实增量, 固定容差会误判)。
+    qd0 = dev(f"tc -s qdisc show dev {cif} 2>/dev/null | awk '/Sent/{{print $2; exit}}'").strip()
+    j = api("traffic", tok)
+    qd1 = dev(f"tc -s qdisc show dev {cif} 2>/dev/null | awk '/Sent/{{print $2; exit}}'").strip()
     guard = dev("grep -c 'cell stats divergence' /data/gw/watchdog.sh 2>/dev/null").strip()
     api_tx = str(j.get("tx", ""))
+    qd = qd1
     try:
-        gap = int(nd) - int(qd)
-        near = abs(int(api_tx) - int(qd)) <= 8192
+        a, b, c = int(qd0), int(qd1), int(api_tx)
+        gap = int(nd) - b
+        near = (a <= c <= b) if b >= a else abs(c - b) <= 65536   # 重置回退小容差
     except ValueError:
         gap = -1
         near = False
     ok = bool(cif) and nd.isdigit() and qd.isdigit() and near and guard not in ("", "0")
     record(t_traffic_source._test_name, "system", ok,
-           f"if={cif} api_tx={api_tx} qdisc={qd} netdev={nd} netdev_minus_qdisc={gap} guard={guard}")
+           f"if={cif} api_tx={api_tx} qdisc[{qd0},{qd}] netdev={nd} netdev_minus_qdisc={gap} guard={guard}")
 
 
 
@@ -1330,9 +1366,7 @@ def t_main_primary():
     #   ② 现场 v4 与 v6 的未打标选路指向**同一**接口;
     #   ③ 且等于现场"模式+真实存活"推导出的主路; ④ 无 metric<200 的 ccmni v4 默认。
     def want(mode, a1, a2, pct=""):
-        out = dev(f"sh /data/gw/wan_agg.sh --dry-primary {mode} {a1} {a2} {pct}").strip()
-        m = re.search(r"primary=(\S+)", out)
-        return m.group(1) if m else "?"
+        return _dry_primary(mode, a1, a2, pct)
     cases = [("eth_prio", "1", "1", "", "w2"), ("cell_prio", "1", "1", "", "w1"),
              ("cell_only", "1", "1", "", "w1"), ("eth_only", "1", "1", "", "w2"),
              ("weight", "1", "1", "30", "w2"), ("weight", "1", "1", "70", "w1"),
@@ -1340,22 +1374,49 @@ def t_main_primary():
              ("eth_prio", "0", "0", "", "none")]
     bad = [f"{m}/{a}{b}:{want(m, a, b, p)}!={e}" for m, a, b, p, e in cases
            if want(m, a, b, p) != e]
-    mode = dev("grep -m1 '^MODE=' /data/gw/agg.conf 2>/dev/null | cut -d= -f2").strip()
-    pct = dev("grep -m1 '^W1_PCT=' /data/gw/agg.conf 2>/dev/null | cut -d= -f2").strip() or "30"
-    a1 = "1" if dev("ping -4 -I ccmni2 -c1 -W2 -s1 223.5.5.5 2>/dev/null | grep -q ttl && echo 1").strip() == "1" else "0"
-    a2 = "1" if dev("ping -4 -I eth0 -c1 -W2 -s1 223.5.5.5 2>/dev/null | grep -q ttl && echo 1").strip() == "1" else "0"
-    exp = want(mode or "eth_prio", a1, a2, pct)
+    mode, pct = _agg_conf()
+    # 存活态取 wan_agg 发布的权威结论(不再各自探测, 与判活唯一权威一致)
+    home, cell, _fresh = _wan_alive_state()
+    a1 = cell or "1"
+    a2 = home or "1"
+    exp = want(mode, a1, a2, pct)
     v4 = dev("ip route get 223.5.5.5 2>/dev/null | head -1")
     v6 = dev("ip -6 route get 2400:3200::1 2>/dev/null | head -1")
     ifc4 = "eth0" if "dev eth0" in v4 else ("cell" if "ccmni" in v4 else "?")
     ifc6 = "eth0" if "dev eth0" in v6 else ("cell" if "ccmni" in v6 else "?")
     exp_ifc = {"w1": "cell", "w2": "eth0"}.get(exp, "?")
-    land = dev("ip route show default | grep ccmni | grep -vc 'metric [2-9][0-9][0-9]'").strip()
-    ok = (not bad) and ifc4 == ifc6 and ifc4 == exp_ifc and land == "0"
+    # 地雷断言由 t_agg_route_landmine(状态感知)负责, 此处只管映射与一致性
+    ok = (not bad) and ifc4 == ifc6 and ifc4 == exp_ifc
     record(t_main_primary._test_name, "system", ok,
-           f"map_bad={len(bad)} live={mode or '-'}/{pct} alive={a1}{a2} exp={exp} "
-           f"v4={ifc4} v6={ifc6} landmine={land}" + (f" {bad[0]}" if bad else ""))
+           f"map_bad={len(bad)} live={mode}/{pct} alive={a1}{a2} exp={exp} "
+           f"v4={ifc4} v6={ifc6}" + (f" {bad[0]}" if bad else ""))
 
+
+
+@test("数据面判活不落入白名单陷阱 (宵断可见/唯一权威)")
+def t_wan_alive_guard():
+    # v2.26 (2026-10-16 00:06 宵断实弹): 判活目标若落在"白名单式切断"仍放行的集合里
+    #   (运营商 DNS 223.5.5.5/120.53.53.53 + 接入网关), 就会出现"探测恒过而客户端全死"
+    #   → 灯/GUI/自动转移全部谎报家宽正常, 用户只能手动切"仅蜂窝"。实测同时段:
+    #   223.5.5.5/120.53.53.53/网关 全通, 180.76.76.76/119.29.29.29/8.8.8.8 全 100% 丢包。
+    # 断言: ① wan_agg 的探测目标 ≥3 个且**不含**白名单目标; ② 判活唯一权威 = /tmp/wan_alive
+    #   且新鲜(守护在跑); ③ led_mgr 与 api 已改为消费该文件(不再自带一套判据);
+    #   ④ 现场一致性: 多样目标经 eth0 的实测可达性 == 发布的 home 判活值。
+    src = dev("grep -m1 '^PROBE_V4=' /data/gw/wan_agg.sh 2>/dev/null").strip()
+    targets = src.split("=", 1)[1].strip().strip('"').split() if "=" in src else []
+    wl = {"223.5.5.5", "120.53.53.53"}
+    bad = [t for t in targets if t in wl]
+    reach = sum(1 for t in targets
+                if dev(f"ping -4 -I eth0 -c1 -W2 -s1 {t} 2>/dev/null | grep -q ttl && echo y").strip() == "y")
+    home, _cell, fresh = _wan_alive_state()
+    home = home or "?"
+    expect = "1" if reach > 0 else "0"
+    cons = [dev(f"grep -c 'wan_alive' /data/gw/{f} 2>/dev/null").strip() for f in ("led_mgr.sh", "www/api.sh")]
+    ok = (len(targets) >= 3 and not bad and fresh and home == expect
+          and all(c not in ("", "0") for c in cons))
+    record(t_wan_alive_guard._test_name, "system", ok,
+           f"targets={len(targets)} in_whitelist={len(bad)} reachable={reach} home={home} "
+           f"expect={expect} fresh={int(fresh)} consumers={cons}" + (f" bad={bad[0]}" if bad else ""))
 
 
 @test("SoC 温度在合理区间")

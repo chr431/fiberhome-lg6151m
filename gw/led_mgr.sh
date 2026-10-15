@@ -1,5 +1,9 @@
 #!/bin/sh
-# led_mgr.sh v2.0 — 原厂风格指示灯状态守护 (绝对电平驱动 + 自愈 + 全灯覆盖)
+# led_mgr.sh v2.1 — 原厂风格指示灯状态守护 (绝对电平驱动 + 自愈 + 全灯覆盖)
+# v2.1 (2026-10-16 宵断实弹): 家宽数据面判活改为消费 wan_agg 发布的 /tmp/wan_alive
+#   —— 原先三处(wan_agg/led_mgr/api)各一套判据且都探 223.5.5.5/120.53.53.53,
+#   本处还有"网关优先"短路; 上行接入网夜间切断的白名单恰好放行这些 → 灯照亮而客户端
+#   全死(用户实弹)。判活权威唯一化后此族谎报结构性消除。
 # 全部高电平点亮(1=亮 0=灭)。复刻原厂语义:
 #   WiFi(467)        : AP 在线常亮 (任一 ra* vif operstate != down)
 #   5G(475/473/474 = 绿/橙/红): 数据面唯一 — ccmni 有 IPv4=绿常亮,
@@ -79,17 +83,19 @@ set_4g_off() {
         set_led $_g 0
     done
 }
-# v1.8: 家宽数据面探活(与 wan_agg v2.26 w2_data_alive 同判据同键链)
+# v2.1(2026-10-16 宵断实弹): 家宽数据面判活改为**消费 wan_agg 的结论**
+#   (/tmp/wan_alive: home/cell/ts, wan_agg 每环循实测并发布, 是判活的唯一权威)。
+#   根因: 原先三处各有一套判据且都用 223.5.5.5/120.53.53.53, 而 led_mgr 还额外
+#   "网关优先"短路 —— 上行接入网夜间切断的白名单恰好放行这些目标, 于是灯照亮、客户端
+#   全死(用户实弹)。改为只消费, 不再自判, 判据不会再漂移。
+#   ts 过期(>30s, 守护异常)按"未知=不亮"处理 —— 宁可灭灯也不谎报"已连接"。
 bb_data_alive() {
-    BB_GW=$(head -1 /tmp/wan.gw 2>/dev/null)
-    if [ -r $B/uplink.conf ] && grep -q '^FORM=static' $B/uplink.conf 2>/dev/null; then
-        [ -z "$BB_GW" ] && BB_GW=$(grep -m1 '^PROBE_GW=' $B/uplink.conf | cut -d= -f2)
-        [ -z "$BB_GW" ] && BB_GW=$(grep -m1 '^AUTH_GW=' $B/uplink.conf | cut -d= -f2)
-    fi
-    [ -n "$BB_GW" ] && ping -4 -I eth0 -c1 -W2 -s1 "$BB_GW" 2>/dev/null | grep -q ttl && return 0
-    ping -4 -I eth0 -c1 -W2 -s1 223.5.5.5 2>/dev/null | grep -q ttl && return 0
-    ping -4 -I eth0 -c1 -W2 -s1 120.53.53.53 2>/dev/null | grep -q ttl && return 0
-    return 1
+    _wa=$(cat /tmp/wan_alive 2>/dev/null)
+    _h=$(printf '%s' "$_wa" | sed -n 's/.*home=\([01]\).*/\1/p')
+    _t=$(printf '%s' "$_wa" | sed -n 's/.*ts=\([0-9]*\).*/\1/p')
+    [ -n "$_t" ] || return 1
+    [ $(( $(date +%s) - _t )) -le 30 ] || return 1
+    [ "$_h" = 1 ]
 }
 
 # v2.0: 探测(全部判据的唯一来源; 干跑/一次性入口复用)

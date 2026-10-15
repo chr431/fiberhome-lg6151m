@@ -1,5 +1,9 @@
 #!/bin/sh
-# wan_agg.sh v2.31 — 协议级检测(authd 会话信号, <=5s 故障转移) 双上行聚合主管 (vendor kernel engine + iptables fallback)
+# wan_agg.sh v2.32 — 协议级检测(authd 会话信号, <=5s 故障转移) 双上行聚合主管 (vendor kernel engine + iptables fallback)
+# v2.32 (2026-10-16 00:06 宵断实弹): 判活目标多样化 —— 原目标(223.5.5.5/120.53.53.53)
+#   被上行接入网夜间切断的白名单放行, 探测恒过而客户端全死 → 永不转移。现取三个不同
+#   运营商/ASN 且不在白名单内的目标(任一通过即活) + ICMP 全灭时 TCP 握手兜底;
+#   并发布 /tmp/wan_alive 作为数据面判活的唯一权威, led_mgr/api 消费之。
 # v2.31 (2026-10-15 用户裁定): 未打标主路(v4 与 v6)不再写死优先级 —— 统一由
 #   "模式+权重+真实存活"推导(prim_want), 并由 main_primary_apply() 作为 main 表
 #   的**唯一写方**每周期复位(level-driven; 边沿触发会被外力冲刷后滞留)。
@@ -386,14 +390,30 @@ probe() {  # $1=iface $2=dst
     #   相应收窄; 双路 RTT 均 <<1s, 1s 超时余量充足。
     ping -4 -I $1 -c1 -W1 -s1 "$2" 2>/dev/null | grep -q ttl
 }
-w1_alive() { probe $W1_IF 223.5.5.5 || probe $W1_IF 120.53.53.53; }
-w2_data_alive() {  # 以太数据面实证 — 仅公网目标(v2.28), 与认证程序解耦
-    # v2.28: 移除网关探针短路 — 宿舍上行宵断(00:06-06:00)有 ~5min 宽限期网关仍答
-    #   ICMP(实弹 00:07-00:11 探针全过 → 00:12 才转移), 网关可达≠互联网可达,
-    #   它短路了公网探针。判活只认公网(断网期公网 ICMP 同样全灭, 实弹验证)。
-    probe $W2_IF 223.5.5.5 && return 0
-    probe $W2_IF 120.53.53.53 && return 0
+# v2.32(2026-10-16 00:06 宵断实弹): 判活目标必须**多样且排除白名单内目标**。
+#   原目标 223.5.5.5 / 120.53.53.53(运营商 DNS)恰好被上行接入网夜间切断的白名单放行 ——
+#   探测恒过而客户端流量全死, 于是永不转移(用户手动改"仅蜂窝"才恢复)。实弹同时段:
+#   223.5.5.5/120.53.53.53/网关 全通, 而 180.76.76.76/119.29.29.29/8.8.8.8 全 100%
+#   丢包 —— 后者才是"能上网"的判据。取三个不同运营商/ASN 且不在白名单内的目标,
+#   规则 = **任一通过即活**(单目标故障不致误判死)。
+PROBE_V4="180.76.76.76 119.29.29.29 8.8.8.8"
+# 兜底: 有的网络整段过滤 ICMP —— ICMP 全灭时再做一次 TCP 握手(按 IP, 不依赖 DNS),
+#   任一 HTTP 响应码(含 4xx/5xx)都证明 TCP 通。只在疑似死亡时才付这次代价。
+tcp_probe() {   # $1=iface
+    # 单目标 + -m3: 死亡态下每环循最多多花 ~3s(环循 3s+3s), 不拖垮状态机节奏。
+    _c=$(LD_LIBRARY_PATH=/fhrom/lib:/fhrom/usr/lib /fhrom/bin/curl -s -m 3 -o /dev/null \
+         -w '%{http_code}' --interface $1 http://180.76.76.76/ 2>/dev/null)
+    [ -n "$_c" ] && [ "$_c" != "000" ]
+}
+data_alive() {   # $1=iface — 数据面实证: 多样 ICMP → TCP 兜底
+    for _t in $PROBE_V4; do probe $1 $_t && return 0; done
+    tcp_probe $1 && return 0
     return 1
+}
+w1_alive() { data_alive $W1_IF; }
+w2_data_alive() {  # 以太数据面实证 — 仅公网目标, 与认证程序解耦
+    # v2.28: 移除网关探针短路(宵断宽限期网关仍答 ICMP)。v2.32: 目标多样化, 见上。
+    data_alive $W2_IF
 }
 w2_alive() {
     # v2.24: 协议级信号优先 — authd 会话状态文件(/tmp/authd_state: up|down+epoch,
@@ -444,7 +464,7 @@ case "$1" in
     exit 0 ;;
 esac
 
-log "===== wan_agg v2.31 start (main-primary 由模式推导, v4+v6 同源) ====="
+log "===== wan_agg v2.32 start (main-primary 由模式推导; 判活目标多样+发布 wan_alive) ====="
 # v1.8: MAC 钉死表重放(内核模块状态不跨重启, 游戏PC等需开机重新钉)
 while read -r MAC OP; do
     case "$MAC" in \#*|"") continue;; esac
@@ -641,6 +661,11 @@ while :; do
     #   与上面 E1/E2(标记/分流用)解耦: 标记面仍由模式决定经 fwmark 分流, 未打标
     #   面则统一走本函数推导的主路, 两侧地址族一致。
     main_primary_apply "$(prim_want "$NS1" "$NS2")"
+    # v2.32: 发布判活结论 —— 本进程是**数据面判活的唯一权威**(每环循实测),
+    #   led_mgr(WAN 灯)与 api.sh(状态页)消费本文件, 不再各自用一套判据
+    #   (2026-10-16 宵断实弹: 三处共用"223.5.5.5 通即通"的错判据 → 灯/状态页/
+    #   转移全部谎报家宽正常)。消费方须校验 ts 新鲜度, 过期回退自身探测。
+    echo "home=$NS2 cell=$NS1 ts=$(date +%s)" > /tmp/wan_alive
     if [ "$AGG_ON" = 1 ] && { [ "$E1$E2" != "$S1$S2" ] || [ "${FORCE:-0}" = 1 ]; }; then
         FORCE=0
         log "state: 5g $S1->$E1 (d1=$D1) home $S2->$E2 (d2=$D2) pmode=$PMODE"

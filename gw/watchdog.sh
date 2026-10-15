@@ -1,8 +1,13 @@
 #!/bin/sh
-# watchdog.sh v1.8 -- on-device continuous invariant monitor.
+# watchdog.sh v1.9 -- on-device continuous invariant monitor.
 # L13: "feature silently broken until manual inspection" countermeasure.
-# Runs every 30s; failures log + WAN LED flash; recovers silently.
+# Runs every 30s; failures log + ALERT LED flash (5G orange); recovers silently.
 # Started by rc19.sh (pgrep guard); single instance.
+# v1.9 (2026-10-15 WAN 灯不亮实弹): 告警闪烁从 WAN 灯(gpio292/5g_evb_voice)
+#       迁到 5G 橙灯(gpio473)。原实现的病灶不是"闪"而是"闪完停在 0":
+#       led_mgr v1.x 边沿触发(只写状态变化), watchdog 抢写后状态串不变 →
+#       WAN 灯被闪灭后永不纠回。家宽数据面通而灯灭 = "eth0 有网 WAN 灯不亮"。
+#       写权单一化后此族 bug 结构性消除; led_mgr v2.0 改绝对电平驱动兜底。
 # v1.8 (2026-10-14 部署实测): dial_keeper 实例定位改 PID 锁(/tmp/dial_keeper.lock,
 #       cmdline 复核) — 旧 pgrep -f 判据与"杀所有匹配"在启动者 argv 含脚本路径时
 #       自匹配/误伤旁观 shell(实测两次)。
@@ -19,11 +24,23 @@
 
 LOG=/tmp/watchdog.log
 STATE=/tmp/watchdog_state
-LED=/sys/class/leds/5g_evb_voice/brightness
+# v1.9: 告警灯 = 5G 橙灯(gpio473)。语义上恒灭(5G 无数据=全灭), 借它闪烁不
+#   误导数据面; WAN 灯(292/5g_evb_voice)写权归 led_mgr 独占, 本脚本不再碰。
+ALED=/sys/class/gpio/gpio473/value
 CYCLE=30
 MAX_LOG=200
 
 log() { echo "$(date '+%m-%d %H:%M:%S') $*" >> $LOG; }
+
+# v1.9: 告警灯自举 — gpio473 由 led_mgr 管(已 export+out); 若 watchdog 先跑
+#   (开机竞态), 这里补 export。写成 brightness 优先(class 节点不存在时回落 sysfs)。
+alert_led_set() {
+    if [ ! -d /sys/class/gpio/gpio473 ]; then
+        echo 473 > /sys/class/gpio/export 2>/dev/null
+    fi
+    echo out > /sys/class/gpio/gpio473/direction 2>/dev/null
+    echo "$1" > $ALED 2>/dev/null
+}
 
 # v1.7: timeout 语义的 mipc 探针封装(设备无 timeout/coreutils; 输出经临时文件
 #   回显保 stdout 语义; 超时 SIGKILL 并记警, 返回 124)
@@ -224,10 +241,17 @@ run_cycle() {
     done
 
     # ---- visual alert ----
+    # v1.9 (2026-10-15 实弹): 告警闪烁不再用 WAN 灯。两个写方抢同一物理灯是
+    #   "灯不符实际"的直接成因: watchdog 闪 3 次后停在 0, 而 led_mgr v1.x 只在
+    #   状态串变化时写灯 → 家宽数据面明明通着, WAN 灯被闪灭后永久停在误值
+    #   (实弹: 06:05 状态 b1 起 5 小时内 led_mgr 一次都没再写)。
+    #   改闪 5G 橙灯(gpio473): 该灯在 v1.9 语义下"无数据一律全灭", 恒为 0,
+    #   借它闪烁不误导任何数据面语义(led_mgr v2.0 绝对电平驱动每 2s 纠回, 闪
+    #   完即复原)。WAN 灯写权自此单一化 = led_mgr 独占。
     if [ "$FAILS" -gt 0 ]; then
         for i in 1 2 3; do
-            echo 1 > $LED 2>/dev/null; sleep 0.1
-            echo 0 > $LED 2>/dev/null; sleep 0.1
+            alert_led_set 1; sleep 0.1
+            alert_led_set 0; sleep 0.1
         done
     fi
 
@@ -240,8 +264,8 @@ run_cycle() {
 
 # ---- main ----
 touch $LOG $STATE
-log "===== watchdog v1.8 start ====="
-logger -t watchdog "watchdog v1.8 start"
+log "===== watchdog v1.9 start (alert LED moved to 5G orange; WAN LED owned by led_mgr) ====="
+logger -t watchdog "watchdog v1.9 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

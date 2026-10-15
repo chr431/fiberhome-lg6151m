@@ -64,7 +64,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/fw_apply.sh` | **v1.5** | manifest | `/data/gw/fw_apply.sh` | 端口映射/DMZ/禁网安装器(rc_netfh开机+api共用); v1.5(P1): v4 WAN面default-deny(icmp/DHCP客户端/established放行其余DROP, 含旧7端口黑名单语义)+V4WANGUARDF挡WAN->LAN新建转发(-A挂载保DNAT优先); v1.4: v6同构; 历史见git |
 | `gw/guest_fw.sh` | **v1.6** | manifest | `/data/gw/guest_fw.sh` | 访客隔离防火墙v1.6(审计P0: GUEST_ISOLATE开关删除=强制隔离; 兼容需求改由主WiFi终端频段锁定承接; 历史版本见git) |
 | `gw/healthdog.sh` | **v1.1** | manifest | `/data/gw/healthdog.sh` | 看门狗用户态心跳 |
-| `gw/led_mgr.sh` | **v1.9** | manifest | `/data/gw/led_mgr.sh` | 原厂风格LED守护(v1.9: 5G灯判据收敛数据面唯一 — "无承载=橙常亮"在模组崩溃期谎报"5G在"实弹下架, 无数据一律全灭+细分态只进日志; +--once/--dry-state 干跑入口; v1.8: WAN灯判据 carrier→数据面实测ICMP) |
+| `gw/led_mgr.sh` | **v2.0** | manifest | `/data/gw/led_mgr.sh` | 原厂风格LED守护(v2.0: 边沿触发→绝对电平驱动+自愈 — 外部写方改灯后旧版只在状态串变化时才写, 状态串不变即永不纠回(实弹: eth0数据面通b1起5h内一次没写), 每2s无条件把应为值写到每灯且已在正确值即跳过; 轮询10s→2s; WiFi判据双频ra0/rai0任一在线; +4G三色占位恒灭; v1.9: 5G灯判据收敛数据面唯一; +--once/--dry-state 干跑入口; v1.8: WAN灯判据 carrier→数据面实测ICMP) |
 | `gw/log_keeper.sh` | **v1.2** | manifest | `/data/gw/log_keeper.sh` | 日志持久化守护(syslog/dmesg增量镜像+/tmp快照+boot分隔+容量轮转; v1.2: 上一boot快照转存 logs/tmp.prev(.snap_up归属判定; 事故现场不再被新boot覆盖)+心跳入快照; v1.1: 轮转后重写boot上下文; 每开机一份诊断包) |
 | `gw/mipc_dial_trace.sh` | **v1.0** | manifest | `/data/gw/mipc_dial_trace.sh` | 5G 拨号取证(xtrace 抓真参) |
 | `gw/night_report.sh` | **v1.0** | manifest | `/data/gw/night_report.sh` | 夜间体检报告 |
@@ -80,7 +80,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/v3_babysit_v2.sh` | **v2.0** | manifest | `/data/gw/babysit_v2.sh` | 启动保姆(T1杀rcS/T2核爆回B) |
 | `gw/v3_rc10.extend.sh` | **v2.28** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2; v2.28: +log_keeper 接线; 历史见git |
 | `gw/wan_agg.sh` | **v2.29** | manifest | `/data/gw/wan_agg.sh` | 双上行聚合主管(v2.29: 移除先验时段(判定不做先验), 静默型切断由 authd v2.3 静默看门狗承接; v2.28: 去网关探针短路); 历史见git |
-| `gw/watchdog.sh` | **v1.8** | manifest | `/data/gw/watchdog.sh` | 持续不变量看门狗(v1.8: 拨号守护实例定位改PID锁(cmdline复核, 防启动者argv自匹配/误伤旁观); v1.7: mipc探针过硬超时+dial_keeper心跳陈旧>90s判死重启+led_mgr自愈拉; v1.6: +log_keeper自愈+ql_wifi_sample卡死清除) |
+| `gw/watchdog.sh` | **v1.9** | manifest | `/data/gw/watchdog.sh` | 持续不变量看门狗(v1.9: 告警闪烁从WAN灯迁5G橙灯gpio473 — 两写方抢同一物理灯, watchdog闪完停在0而led_mgr边沿触发不纠回, 直接造成"eth0有网WAN灯不亮"; WAN灯写权单一化归led_mgr独占; v1.8: 拨号守护实例定位改PID锁(cmdline复核, 防启动者argv自匹配/误伤旁观); v1.7: mipc探针过硬超时+dial_keeper心跳陈旧>90s判死重启+led_mgr自愈拉; v1.6: +log_keeper自愈+ql_wifi_sample卡死清除) |
 | `gw/webs_revive.sh` | **v1.3** | manifest | `/data/gw/webs_revive.sh` | 原厂GUI复活器(自足nginx conf; 手动拉起) |
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
@@ -123,7 +123,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/rescue_shadow.py` | **v1.0** | tool | `-` | shadow.override未bind网络救援(getpass旧口令→只读探针: 文件md5/grep行为单测/部署钩子sh -x跟踪→从.bak恢复+重bind; 依赖rc.extend v2.1) |
 | `tools/rotate_toor.py` | **v1.4** | tool | `-` | toor口令轮换器; v1.4: 轮换前存档.bak(rc.extend v2.1回退源); 历史见git |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
-| `tools/selftest.py` | **v2.22** | tool | `-` | 断言式全功能测试; v2.22: 单实例判据改PID锁↔活进程跨层断言; v2.21: +5G灯数据面一致性/拨号心跳与硬超时接线/快照转存标记 护栏; 历史见git |
+| `tools/selftest.py` | **v2.23** | tool | `-` | 断言式全功能测试; v2.23: +WAN灯数据面一致性+写权唯一化护栏(t_sys_led_wan) — 干跑映射b0/b1 + watchdog源码不得引用5g_evb_voice + 实况亮度无条件等于数据面推算值; 5G灯护栏去掉"容忍一拍"sleep(绝对电平驱动下等待即遮羞布); v2.22: 单实例判据改PID锁↔活进程跨层断言; v2.21: +5G灯数据面一致性; 历史见git |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |
 | `tools/serial_server.py` | **v1.7** | tool | `-` | 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets) |
 | `tools/upgrade_slot.py` | **v1.0** | tool | `-` | SSH整槽升级器(P3第一档: vercheck/槽位/空间预检→md5门禁→dd备份旧p26→写新镜像→挂载sanity断言(toor/rcS/#v3:/procd)→失败自动整槽还原不重启→清TRY_A→reboot; PC侧轮询日志+回连终检; --dry-run) |

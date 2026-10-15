@@ -1196,7 +1196,10 @@ def t_sys_led_dp():
     # v2.21 (10-14 模组 EE 事故实弹): 旧语义"无承载=橙常亮"在模组崩溃离线期仍亮 =
     #   谎报"5G 在"。护栏: ① led_mgr 单实例; ② 映射断言(--dry-state 干跑, 不点灯
     #   不动现场): c0 → 三色全灭(本次修复的核心语义), c1 → 仅绿亮; ③ 实况引脚 ==
-    #   数据面推算值(状态刚变时容忍一拍: led_mgr 10s 轮询)。
+    #   数据面推算值。
+    # v2.22 (10-15 WAN 灯不亮实弹): v2.0 改绝对电平驱动(每轮无条件写"应为值"),
+    #   外部扰动 2s 内自愈 → 不再需要"容忍一拍"的 sleep(轮询 2s)。断言收敛为
+    #   **无条件一致**: 不为一致而等待 = 等待本身就是边沿触发病灶的遮羞布。
     n = dev("pgrep -f 'led_mg[r].sh' | wc -l").strip()
     dry0 = dev("sh /data/gw/led_mgr.sh --dry-state 'w1 c0 b1 p1'").strip()
     dry1 = dev("sh /data/gw/led_mgr.sh --dry-state 'w1 c1 b1 p1'").strip()
@@ -1213,14 +1216,45 @@ def t_sys_led_dp():
 
     want = ("1", "0", "0") if have_cell else ("0", "0", "0")
     live = _trio()
-    if not night and live != want:
-        time.sleep(11)   # 状态刚变: 容忍一拍(led_mgr 轮询 10s)
-        live = _trio()
     live_ok = night or live == want
     ok = n == "1" and map0 and map1 and live_ok
     record(t_sys_led_dp._test_name, "system", ok,
            f"daemon={n} map(c0/c1)={int(map0)}/{int(map1)} cell={ipv4} "
            f"live={''.join(live)} want={''.join(want)}" + (" night=skip" if night else ""))
+
+
+@test("WAN 指示灯反映家宽数据面 (绝对电平自愈)")
+def t_sys_led_wan():
+    # v2.22 (10-15 实弹): eth0 有公网 IP/数据面通而 WAN 灯灭。根因两层:
+    #   ① 执行方式: led_mgr v1.x 边沿触发(if [ "$NS" != "$ST" ] 才写), 外部
+    #      写方改灯后状态串不变 → 永不纠回。实测: 状态 b1 起 5h 内一次没写。
+    #   ② 写方冲突: watchdog 告警闪 WAN 灯, 闪完停在 0 = 直接把灯留在误值。
+    #   v2.0 修复: 绝对电平驱动 + 写权单一化(watchdog 告警迁到 5G 橙灯)。
+    # 护栏(全都不扰动现场): ① 干跑映射 b0→wan=0 / b1→wan=1; ② watchdog 源码
+    #   不再引用 5g_evb_voice(写权唯一化), 且引用 gpio473(告警灯新家);
+    #   ③ 实况亮度 == 数据面推算值(绝对电平驱动下必须一致, 不等一拍)。
+    dry0 = dev("sh /data/gw/led_mgr.sh --dry-state 'w1 c1 b0 p0'").strip()
+    dry1 = dev("sh /data/gw/led_mgr.sh --dry-state 'w1 c1 b1 p1'").strip()
+    map0 = "wan=0" in dry0
+    map1 = "wan=1" in dry1
+    night = (eff_conf(["LED_NIGHT"]).get("LED_NIGHT") or "0") == "1"
+    # watchdog 写权已迁走 = 源码里不得再出现 WAN 灯节点
+    wd_wan = dev("grep -c '5g_evb_voice' /data/gw/watchdog.sh 2>/dev/null").strip()
+    wd_alert = dev("grep -c 'gpio473' /data/gw/watchdog.sh 2>/dev/null").strip()
+
+    # 家宽数据面实况(与 led_mgr 同源判据: 网关优先 + 公网兜底)
+    bb_gw = dev("head -1 /tmp/wan.gw 2>/dev/null").strip()
+    probe = "ping -4 -I eth0 -c1 -W2 -s1 %s" % (bb_gw or "223.5.5.5")
+    bb = dev("sh -c '%s >/dev/null 2>&1 && echo 1 || echo 0'" % probe).strip()
+    want = "1" if bb == "1" else "0"
+    # class 节点(5g_evb_voice)是主通道; gpio292 被 leds-gpio 占用(sysfs 路径
+    # 不存在, set_wan 已回落 class) —— 以 class 亮度为准, sysfs 缺席不判失败。
+    cls = dev("cat /sys/class/leds/5g_evb_voice/brightness 2>/dev/null").strip()
+    live_ok = night or cls == want
+    ok = map0 and map1 and wd_wan == "0" and wd_alert != "0" and live_ok
+    record(t_sys_led_wan._test_name, "system", ok,
+           f"map(b0/b1)={int(map0)}/{int(map1)} wd_wan_refs={wd_wan} wd_alert_refs={wd_alert} "
+           f"bb={bb} class_led={cls} want={want}" + (" night=skip" if night else ""))
 
 
 

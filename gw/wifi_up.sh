@@ -643,10 +643,13 @@ HGUEST
             echo "== fallback: F4 dual-instance serialized =="
             LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib hostapd -B -i ra0  /var/wlan/hap_2g.conf || WIFI_ERR=1
             # v1.14 F4: -B 在接口配置完成前就 daemonize 返回, 显式等 ENABLED
+            # v1.28b: sleep 0.5 是死代码 — busybox sleep 只吃整数秒(实测
+            #   "invalid number '0.5'"), 原写法等于零间隔空转 20 次后放弃,
+            #   hostapd 没就绪就往下走。改 1s × 10 次(总等待 10s 不变)。
             _sw=0
-            while [ $_sw -lt 20 ]; do
+            while [ $_sw -lt 10 ]; do
                 hostapd_cli -i ra0 status 2>/dev/null | grep -q state=ENABLED && break
-                sleep 0.5; _sw=$((_sw+1))
+                sleep 1; _sw=$((_sw+1))
             done
             if ! LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib hostapd -B -i rai0 /var/wlan/hap_5g.conf; then
                 if has_guest; then

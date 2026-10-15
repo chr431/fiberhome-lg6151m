@@ -248,11 +248,15 @@ run_cycle() {
     #   改闪 5G 橙灯(gpio473): 该灯在 v1.9 语义下"无数据一律全灭", 恒为 0,
     #   借它闪烁不误导任何数据面语义(led_mgr v2.0 绝对电平驱动每 2s 纠回, 闪
     #   完即复原)。WAN 灯写权自此单一化 = led_mgr 独占。
+    # v1.9b: 原 sleep 0.1 是死代码 —— busybox sleep 只吃整数秒(实测
+    #   "invalid number '0.1'"), 告警闪烁自 v1.x 起从未真的执行过。改用
+    #   1s 亮/1s 灭(肉眼可辨, 且不拖长 30s 周期)。
     if [ "$FAILS" -gt 0 ]; then
         for i in 1 2 3; do
-            alert_led_set 1; sleep 0.1
-            alert_led_set 0; sleep 0.1
+            alert_led_set 1; sleep 1
+            alert_led_set 0; sleep 1
         done
+        log "WARN  visual alert: $FAILS check(s) failing"
     fi
 
     # ---- log truncation ----

@@ -261,8 +261,11 @@ run_cycle() {
             DN=$((CN - PN)); [ $DN -lt 0 ] && DN=$CN
             DQ=$((CQ - PQ)); [ $DQ -lt 0 ] && DQ=$CQ
             GAP=$((DN - DQ))
-            [ "$GAP" -gt 2097152 ] && \
-                log "WARN  cell stats divergence on $CIF: netdev +${DN}B vs linux-path +${DQ}B (gap ${GAP}B, ${FAILS:+fails=$FAILS})"
+            # 阈值 256KB/30s: 真实流量下网卡与 Linux 路径增量**逐字节相等**(实测
+            #   已知量注入 gap=0), 故任何正差都属厂商侧记账异常; 取 256KB 既远高于
+            #   两次读取间的毫秒级错位, 也能抓住单次 1.22MB 的跳变(2MiB 阈值曾漏)。
+            [ "$GAP" -gt 262144 ] && \
+                log "WARN  cell stats divergence on $CIF: netdev +${DN}B vs linux-path +${DQ}B (gap ${GAP}B)"
         fi
         echo "PN=$CN; PQ=$CQ" > /tmp/cellstat_prev
     fi

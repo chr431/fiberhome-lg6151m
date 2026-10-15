@@ -12,24 +12,29 @@
 #   回退 netdev。**下行**仍用 netdev rx(实测准确: 1MB 下载 → +1.08MB)。
 #   **口径切换点**: 本版之前的历史行是"网卡报告值"(被高估), 之后是"Linux 路径值"。
 #   历史不改写(留作设备当时报告的存证), 跨切换点的周/月聚合会混合两种口径。
+# v1.2b: 基线文件带数据源标记(S=qdisc|netdev), 源变即重建基线 —— 否则切换源时
+#   "旧源基线 vs 新源现值"会把绝对差记成一行假增量(实弹: 切换瞬间记了 22MB 尖峰)。
 # 接口漂移: ccmni* 每拍动态解析(与 get_traffic 同法); eth0 固定
 # 尺寸守护: 超 40 天(~11520 行)裁剪保留 30 天
 LOG=/data/gw/traffic_hist.tsv
 ST=/tmp/traffic_prev
 while :; do
     CIF=$(ip -o -4 addr show 2>/dev/null | grep -m1 'ccmni.*inet' | awk '{print $2}')
-    CRC=0; CTC=0
+    CRC=0; CTC=0; SRC=none
     [ -n "$CIF" ] && {
         CRC=$(cat /sys/class/net/$CIF/statistics/rx_bytes 2>/dev/null || echo 0)
         CTC=$(tc -s qdisc show dev $CIF 2>/dev/null | awk '/Sent/{print $2; exit}')
-        [ -n "$CTC" ] || CTC=$(cat /sys/class/net/$CIF/statistics/tx_bytes 2>/dev/null || echo 0)
+        SRC=qdisc
+        [ -n "$CTC" ] || { CTC=$(cat /sys/class/net/$CIF/statistics/tx_bytes 2>/dev/null || echo 0); SRC=netdev; }
     }
     ERC=$(cat /sys/class/net/eth0/statistics/rx_bytes 2>/dev/null || echo 0)
     ETC=$(cat /sys/class/net/eth0/statistics/tx_bytes 2>/dev/null || echo 0)
     PC=0; PT=0; PE=0; PF=0
-    # v1.1: 首次(无 prev)只建基线不入账 — 否则首拍 = 计数器纪元总量, 3GB 级假尖峰
-    if [ ! -r $ST ]; then
-        echo "PC=$CRC; PT=$CTC; PE=$ERC; PF=$ETC" > $ST
+    # v1.2b: 首次(无 prev)只建基线不入账 — 否则首拍 = 计数器纪元总量, 3GB 级假尖峰。
+    #   基线文件带**数据源标记**(S=qdisc|netdev): 源变了(口径切换/升级)必须重建基线,
+    #   否则"旧源基线 vs 新源现值"会算出一行假增量(实测切换瞬间记了 22MB 假尖峰)。
+    if [ ! -r $ST ] || ! grep -q "^S=$SRC;" $ST 2>/dev/null; then
+        echo "S=$SRC; PC=$CRC; PT=$CTC; PE=$ERC; PF=$ETC" > $ST
         sleep 300
         continue
     fi
@@ -39,7 +44,7 @@ while :; do
     DE=$((ERC-PE)); [ $DE -lt 0 ] && DE=$ERC
     DF=$((ETC-PF)); [ $DF -lt 0 ] && DF=$ETC
     echo "$(date +%s) $DC $DT $DE $DF" >> $LOG
-    echo "PC=$CRC; PT=$CTC; PE=$ERC; PF=$ETC" > $ST
+    echo "S=$SRC; PC=$CRC; PT=$CTC; PE=$ERC; PF=$ETC" > $ST
     L=$(wc -l < $LOG 2>/dev/null || echo 0)
     [ "$L" -gt 11520 ] && { tail -8640 $LOG > $LOG.t 2>/dev/null && mv $LOG.t $LOG; }
     sleep 300

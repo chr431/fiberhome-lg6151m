@@ -1,8 +1,12 @@
 #!/bin/sh
-# watchdog.sh v1.10 -- on-device continuous invariant monitor.
+# watchdog.sh v1.11 -- on-device continuous invariant monitor.
 # L13: "feature silently broken until manual inspection" countermeasure.
 # Runs every 30s; failures log + ALERT LED flash (5G orange); recovers silently.
 # Started by rc19.sh (pgrep guard); single instance.
+# v1.11 (2026-10-15 蜂窝查询面失效实弹): +蜂窝查询路径活性告警 — 厂商 RIL 的
+#       ql_nw 子服务会静默失效(守护活着/数据面正常, 但 cells/endc 恒返
+#       -2147024889, GUI 小区与组网卡片静默报错)。告警不自动重启: 蜂窝为主力时
+#       重启 RIL 会打断数据面, 代价高于收益; 恢复路径已文档化。
 # v1.10 (2026-10-15 流量口径实弹): +蜂窝统计偏差护栏 — 每周期比对 ccmni 网卡
 #       tx_bytes 与 qdisc(真实发送路径)增量, 超阈值记 WARN。价值在"可见化":
 #       网卡计数会被厂商卸载记账灌入无佐证增量(1s +1.22MB 而 qdisc/抓包为 0),
@@ -270,6 +274,19 @@ run_cycle() {
         echo "PN=$CN; PQ=$CQ" > /tmp/cellstat_prev
     fi
 
+    # ---- cellular query path liveness (v1.11) ----
+    # 实弹(2026-10-15): ql_ril_service 活着、蜂窝数据面完全正常(有 IP/可 ping),
+    #   但 cells/endc 查询恒返 -2147024889 —— 厂商 RIL 的 ql_nw 子服务静默失效,
+    #   无任何守护察觉, GUI 的小区/邻区/组网模式卡片会静默报错(状态与实际不符)。
+    #   恢复 = 项目自身路径清栈重启 RIL(dial_5g/rc_netfh 同法)。
+    #   只**告警不自动重启**: 蜂窝是主力时重启 RIL 会打断数据面(需重拨 ~40s),
+    #   代价高于收益; 可见化 + 文档化手工恢复是当前最稳做法。每 10 环循(~5min)探一次。
+    CQ_TICK=$(( ${CQ_TICK:-0} + 1 ))
+    if [ $((CQ_TICK % 10)) -eq 1 ]; then
+        /data/gw/mipc_cellular cells 2>/dev/null | grep -q '"serving"' || \
+            log "WARN  cell query path dead (cells 无 serving 字段) — 厂商 RIL 查询面失效(数据面可能正常); 恢复: kill \$(pidof ql_netd ql_ril_service) 后按 dial_5g 路径重启两者, 见 docs/FINDINGS"
+    fi
+
     # ---- visual alert ----
     # v1.9 (2026-10-15 实弹): 告警闪烁不再用 WAN 灯。两个写方抢同一物理灯是
     #   "灯不符实际"的直接成因: watchdog 闪 3 次后停在 0, 而 led_mgr v1.x 只在
@@ -298,8 +315,8 @@ run_cycle() {
 
 # ---- main ----
 touch $LOG $STATE
-log "===== watchdog v1.10 start (alert LED 5G orange; WAN LED owned by led_mgr; +cell stats divergence guard) ====="
-logger -t watchdog "watchdog v1.10 start"
+log "===== watchdog v1.11 start (alert LED 5G orange; WAN LED owned by led_mgr; +cell stats divergence +cell query liveness) ====="
+logger -t watchdog "watchdog v1.11 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

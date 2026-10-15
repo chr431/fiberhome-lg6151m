@@ -339,8 +339,10 @@ main_primary_apply() {   # $1=w1|w2 (空=状态未知, 跳过)
     fi
     ip route show default | grep -q "dev $W1_IF metric $W1_PRB_METRIC" || \
         ip route add default dev $W1_IF metric $W1_PRB_METRIC 2>/dev/null
-    # --- v6(同一主路; 两侧 RA 下一跳各学一次) ---
-    _g1=$(ip -6 route show default 2>/dev/null | grep "dev $W1_IF" | grep -oE "via [0-9a-f:]+" | awk '{print $2}' | head -1)
+    # --- v6(与 v4 同一主路) ---
+    # 家宽侧需 RA 学到的下一跳(via 链路本地地址); 蜂窝侧用**设备路由**
+    #   (default dev ccmni2 —— 与 table 100 里已验证可用的同款形态), 不依赖
+    #   模组是否重发 RA(实测 RIL 重启后主表 RA 默认路由可能长期不再出现)。
     _g2=$(ip -6 route show default 2>/dev/null | grep "dev $W2_IF" | grep -oE "via [0-9a-f:]+" | awk '{print $2}' | head -1)
     if [ "$_p" = w2 ]; then
         ip -6 route del default dev $W1_IF metric $V6_PRI_METRIC 2>/dev/null
@@ -348,7 +350,7 @@ main_primary_apply() {   # $1=w1|w2 (空=状态未知, 跳过)
         [ -n "$_g2" ] && ip -6 route replace default via $_g2 dev $W2_IF metric $V6_PRI_METRIC 2>/dev/null
     else
         ip -6 route del default dev $W2_IF metric $V6_PRI_METRIC 2>/dev/null
-        [ -n "$_g1" ] && ip -6 route replace default via $_g1 dev $W1_IF metric $V6_PRI_METRIC 2>/dev/null
+        ip -6 route replace default dev $W1_IF metric $V6_PRI_METRIC 2>/dev/null
     fi
     [ "$_p" != "$P_LAST" ] && { log "main-primary: $_p (v4+v6 未打标主路; mode=$MODE w1=$W1_PCT% 存活=$NS1/$NS2)"; P_LAST=$_p; }
 }

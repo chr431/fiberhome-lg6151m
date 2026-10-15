@@ -56,7 +56,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/consfeed.sh` | **v1.0** | manifest | `/data/gw/consfeed.sh` | v2 控制台喂食器(无setsid,v2_access拉起) |
 | `gw/defaults.conf` | **v1.8** | manifest | `/data/gw/defaults.conf` | 统一配置只读出厂基线(444); 消费方source叠加settings.conf稀疏覆盖; v1.8: -ETH_CURFEW(先验时段下架); v1.6: +TZ(时区入自管配置) |
 | `gw/diag_dump.sh` | **v1.1** | manifest | `/data/gw/diag_dump.sh` | 一键诊断包(脱敏: 配置/无线MLO掩码/网络/全量日志现场; v1.1: 结束行带生成时刻) |
-| `gw/dial_5g.sh` | **v1.2** | manifest | `/data/gw/dial_5g.sh` | 生产 5G 拨号器(check_ia+netagent补丁) |
+| `gw/dial_5g.sh` | **v1.3** | manifest | `/data/gw/dial_5g.sh` | v1.3: 不再写 metric 50 主默认(会把蜂窝插进家宽主/备之间成为地雷), 只装探活 metric 250 — main 表主默认归 wan_agg 独占; 生产 5G 拨号器(check_ia+netagent补丁) |
 | `gw/dial_keeper.sh` | **v1.3** | manifest | `/data/gw/dial_keeper.sh` | 拨号自持兜底守护(P2): ccmni无IP超35s→MIPC直连重拨(deact_apn+act_type配方); v1.3: 单实例守改PID锁(cmdline复核; 原pgrep判据在启动者argv含脚本路径时自匹配实测); v1.2: 启动即写心跳; v1.1: mipc调用全走mto()硬超时+心跳判陈旧重启+EE转储增量强制重拨+logger落syslog |
 | `gw/dial_variant.sh` | **v1.1** | manifest | `/data/gw/dial_variant.sh` | 5G 拨号参数变体实验器(iptype/apn/plmn/roam) |
 | `gw/fan_mgr.sh` | **v1.3** | manifest | `/data/gw/fan_mgr.sh` | 原厂梯度温控风扇(v1.3: 配置统一overlay+修复v1.2双/data/gw路径bug——GUI静音切换从未生效的根因) |
@@ -71,7 +71,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/ntp_keeper.sh` | **v1.2** | manifest | `/data/gw/ntp_keeper.sh` | 每小时NTP守时(多源; 设备无RTC; v1.2: +时区自愈(/etc/TZ→tmpfs重启即失, 每轮重应用); v1.1: 首选 NTP_SERVER 自管配置) |
 | `gw/radvd.conf` | **v1.0** | manifest | `/data/gw/radvd.conf` | IPv6 SLAAC+RDNSS通告(br-lan, ULA fd42:9ac1:7e50::/64) |
 | `gw/rc.extend.sh` | **v2.1** | manifest | `/data/rc.extend.sh` | 槽位调度器; v2.1(P3): shadow.override合法性校验+.bak回退自愈(坏文件不再锁死SSH+串口); v2.0: 开机清token; 历史见git |
-| `gw/rc_netfh.sh` | **v3.3** | manifest | `/data/gw/rc_netfh.sh` | v3.3: 修正 v6 家宽热备注释写反的不等号(实为 2048>1024, 未打标 v6 默认走蜂窝)并写明影响面与结论: 策略有意保留; 零功能改动; 路线A: FH modem栈环境(最小army, MODE.fh门控; v3.2: shm在位判$3perms→$4size修正) |
+| `gw/rc_netfh.sh` | **v3.4** | manifest | `/data/gw/rc_netfh.sh` | v3.4: 启动时的蜂窝默认路由由无 metric(=0)改 metric 250 — 避免压过家宽主路(地雷另一来源); v3.3: 修正 v6 家宽热备注释写反的不等号(实为 2048>1024, 未打标 v6 默认走蜂窝)并写明影响面与结论: 策略有意保留; 零功能改动; 路线A: FH modem栈环境(最小army, MODE.fh门控; v3.2: shm在位判$3perms→$4size修正) |
 | `gw/reboot_sched.sh` | **v1.1** | manifest | `/data/gw/reboot_sched.sh` | 定时重启守护(默认每日04:00; 护栏: 时钟可信/开机300s/5min窗口/当日去重; v1.1: 每轮自应用时区(不依赖他守护时序)) |
 | `gw/traffic_logger.sh` | **v1.2** | manifest | `/data/gw/traffic_logger.sh` | v1.2b: 基线文件带源标记(S=qdisc|netdev), 源变即重建基线(否则切换源会记一行 22MB 假尖峰); v1.2: 蜂窝上行数据源 netdev tx_bytes → qdisc(Linux 发送路径) — 网卡计数被厂商卸载记账灌入无佐证增量(1s +1.22MB/813 包而 qdisc/抓包为 0; ccmni1 DOWN 无 IP 却记 47MB), 用作统计=长期高估; qdisc 缺失回退 netdev, 下行仍用 netdev rx(实测准确); 蜂窝/以太网流量采样器(5min 增量落 /data/gw/traffic_hist.tsv; 漂移解析+回绕自洽+40天裁剪) |
 | `gw/udhcpc_eth1.script` | **v1.0** | manifest | `/data/gw/udhcpc_eth1.script` | eth1口 udhcpc 事件钩子(补登记) |
@@ -79,7 +79,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/v2_access.sh` | **v6.1** | manifest | `/data/gw/v2_access.sh` | v2 极简访问层(串口/SSH/DHCP/防火墙22,零守护干涉) |
 | `gw/v3_babysit_v2.sh` | **v2.0** | manifest | `/data/gw/babysit_v2.sh` | 启动保姆(T1杀rcS/T2核爆回B) |
 | `gw/v3_rc10.extend.sh` | **v2.28** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2; v2.28: +log_keeper 接线; 历史见git |
-| `gw/wan_agg.sh` | **v2.30** | manifest | `/data/gw/wan_agg.sh` | v2.30(A1): 蜂窝侧 main 表默认收敛为纯探活 — metric 50→250(劣于家宽备用 200), 家宽主力期不再写 metric 0/50, 并补家宽主默认存在性看门狗(原只在状态迁移时装一次, 被外力冲刷后未打标流量静默改走蜂窝且长期滞留); 双上行聚合主管(v2.29: 移除先验时段(判定不做先验), 静默型切断由 authd v2.3 静默看门狗承接; v2.28: 去网关探针短路); 历史见git |
+| `gw/wan_agg.sh` | **v2.31** | manifest | `/data/gw/wan_agg.sh` | v2.31(用户裁定): 未打标主路(v4 与 v6)不再写死优先级 — 由模式+权重+真实存活推导(prim_want), main 表唯一写方 main_primary_apply() 每周期复位; weight 走权重大的一侧, 单侧存活即接班, 双死不猜; +--dry-primary/--set-primary 入口; v2.30(A1): 蜂窝侧 main 表默认收敛为纯探活 — metric 50→250(劣于家宽备用 200), 家宽主力期不再写 metric 0/50, 并补家宽主默认存在性看门狗(原只在状态迁移时装一次, 被外力冲刷后未打标流量静默改走蜂窝且长期滞留); 双上行聚合主管(v2.29: 移除先验时段(判定不做先验), 静默型切断由 authd v2.3 静默看门狗承接; v2.28: 去网关探针短路); 历史见git |
 | `gw/watchdog.sh` | **v1.11** | manifest | `/data/gw/watchdog.sh` | v1.11: +蜂窝查询路径活性告警(ql_nw 子服务静默失效: 守护活着/数据面正常但 cells/endc 恒返 -2147024889, GUI 小区与组网卡片静默报错; 只告警不自动重启 — 蜂窝主力时重启 RIL 会打断数据面, 恢复路径已文档化); v1.10: +蜂窝统计偏差护栏(netdev tx_bytes vs qdisc 增量逐周期比对, 阈值 256KB — 真实流量下两者逐字节相等, 实测 2MiB 阈值会漏掉单次 1.22MB 跳变) — 把统计与实际不符变成可见信号而非静默污染流量账; 持续不变量看门狗(v1.9: 告警闪烁从WAN灯迁5G橙灯gpio473 — 两写方抢同一物理灯, watchdog闪完停在0而led_mgr边沿触发不纠回, 直接造成"eth0有网WAN灯不亮"; WAN灯写权单一化归led_mgr独占; v1.8: 拨号守护实例定位改PID锁(cmdline复核, 防启动者argv自匹配/误伤旁观); v1.7: mipc探针过硬超时+dial_keeper心跳陈旧>90s判死重启+led_mgr自愈拉; v1.6: +log_keeper自愈+ql_wifi_sample卡死清除) |
 | `gw/webs_revive.sh` | **v1.3** | manifest | `/data/gw/webs_revive.sh` | 原厂GUI复活器(自足nginx conf; 手动拉起) |
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
@@ -123,7 +123,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/rescue_shadow.py` | **v1.0** | tool | `-` | shadow.override未bind网络救援(getpass旧口令→只读探针: 文件md5/grep行为单测/部署钩子sh -x跟踪→从.bak恢复+重bind; 依赖rc.extend v2.1) |
 | `tools/rotate_toor.py` | **v1.4** | tool | `-` | toor口令轮换器; v1.4: 轮换前存档.bak(rc.extend v2.1回退源); 历史见git |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
-| `tools/selftest.py` | **v2.24** | tool | `-` | v2.24: +聚合路由地雷护栏(t_agg_route_landmine: main 表不得含 metric<200 的 ccmni 默认 + 探活路由在位 + 家宽主默认在位) + 流量口径护栏(t_traffic_source: /api/traffic 蜂窝 tx == qdisc 值 + watchdog 偏差护栏在位); 断言式全功能测试; v2.23: +WAN灯数据面一致性+写权唯一化护栏(t_sys_led_wan) — 干跑映射b0/b1 + watchdog源码不得引用5g_evb_voice + 实况亮度无条件等于数据面推算值; 5G灯护栏去掉"容忍一拍"sleep(绝对电平驱动下等待即遮羞布); v2.22: 单实例判据改PID锁↔活进程跨层断言; v2.21: +5G灯数据面一致性; 历史见git |
+| `tools/selftest.py` | **v2.25** | tool | `-` | v2.25: +未打标主路护栏(t_main_primary: 五模式×存活映射干跑 + 现场 v4/v6 选路指向同一接口且等于模式推导值); v2.24: +聚合路由地雷护栏(t_agg_route_landmine: main 表不得含 metric<200 的 ccmni 默认 + 探活路由在位 + 家宽主默认在位) + 流量口径护栏(t_traffic_source: /api/traffic 蜂窝 tx == qdisc 值 + watchdog 偏差护栏在位); 断言式全功能测试; v2.23: +WAN灯数据面一致性+写权唯一化护栏(t_sys_led_wan) — 干跑映射b0/b1 + watchdog源码不得引用5g_evb_voice + 实况亮度无条件等于数据面推算值; 5G灯护栏去掉"容忍一拍"sleep(绝对电平驱动下等待即遮羞布); v2.22: 单实例判据改PID锁↔活进程跨层断言; v2.21: +5G灯数据面一致性; 历史见git |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |
 | `tools/serial_server.py` | **v1.7** | tool | `-` | 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets) |
 | `tools/upgrade_slot.py` | **v1.0** | tool | `-` | SSH整槽升级器(P3第一档: vercheck/槽位/空间预检→md5门禁→dd备份旧p26→写新镜像→挂载sanity断言(toor/rcS/#v3:/procd)→失败自动整槽还原不重启→清TRY_A→reboot; PC侧轮询日志+回连终检; --dry-run) |

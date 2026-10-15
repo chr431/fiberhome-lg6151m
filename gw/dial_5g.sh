@@ -78,11 +78,12 @@ fi
 KLOG "5G UP on $IF via $GW"
 
 # --- 4. routes + NAT + TTL masquerade ---
-if [ -n "$GW" ]; then
-    ip route replace default via $GW dev $IF metric 50
-else
-    ip route replace default dev $IF metric 50
-fi
+# v2.31: main 表默认路由由 wan_agg 的 main_primary_apply() **独占**维护(按聚合
+#   模式+权重+真实存活推导, v4/v6 同源)。本脚本不再写 metric 50 主默认 ——
+#   那会把蜂窝插进家宽主默认(0)与备用(200)之间, 一旦主默认被冲刷, 未打标流量
+#   会静默改走蜂窝(2026-10-15 实测复核的地雷)。此处只保证"可探活": 装一条劣于
+#   家宽备用的 metric 250。需要蜂窝当主路时由聚合模式决定, 不再写死。
+ip route replace default dev $IF metric 250 2>/dev/null
 iptables -t nat -C POSTROUTING -s $LAN_NET -o $IF -j MASQUERADE 2>/dev/null || \
     iptables -t nat -A POSTROUTING -s $LAN_NET -o $IF -j MASQUERADE
 # TTL masquerade follows the live data iface (was hardcoded ccmni2-era)

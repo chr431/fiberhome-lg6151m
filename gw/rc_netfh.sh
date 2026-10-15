@@ -89,7 +89,10 @@ if [ -n "$IF" ]; then
     # v1.2: stock's netagent didn't add the v4 default route in our env -- the
     # ONE thing we add ourselves. Verified live 2026-10-03: route+NAT =>
     # PC->br-lan->NAT->ccmni1->5G->internet (traceroute hop1=192.168.9.1, 0% loss).
-    ip route show default | grep -q "dev $IF" || ip route add default dev $IF
+    # v3.4: 只装"可探活"用的 metric 250 —— main 表主默认归 wan_agg 的
+    #   main_primary_apply() 独占(按聚合模式推导), 此处原先的无 metric(=0)默认
+    #   会压过家宽主路, 是"蜂窝抢 main 默认"地雷的另一个来源。
+    ip route show default | grep -q "dev $IF metric 250" || ip route replace default dev $IF metric 250 2>/dev/null
     iptables -t nat -C POSTROUTING -s 192.168.9.0/24 -o $IF -j MASQUERADE 2>/dev/null || \
         iptables -t nat -A POSTROUTING -s 192.168.9.0/24 -o $IF -j MASQUERADE
     iptables -C FORWARD -i br-lan -o $IF -j ACCEPT 2>/dev/null || \

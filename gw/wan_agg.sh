@@ -1,5 +1,11 @@
 #!/bin/sh
-# wan_agg.sh v2.30 — 协议级检测(authd 会话信号, <=5s 故障转移) 双上行聚合主管 (vendor kernel engine + iptables fallback)
+# wan_agg.sh v2.31 — 协议级检测(authd 会话信号, <=5s 故障转移) 双上行聚合主管 (vendor kernel engine + iptables fallback)
+# v2.31 (2026-10-15 用户裁定): 未打标主路(v4 与 v6)不再写死优先级 —— 统一由
+#   "模式+权重+真实存活"推导(prim_want), 并由 main_primary_apply() 作为 main 表
+#   的**唯一写方**每周期复位(level-driven; 边沿触发会被外力冲刷后滞留)。
+#   语义: 只一侧活→该侧; 双活→eth_prio/eth_only→家宽, cell_prio/cell_only→蜂窝,
+#   weight→权重大的一侧(平局取家宽); 都不活→不猜保持现状。
+#   同时清掉其它写方(dial_5g/rc_netfh 的 metric 50)造成的"蜂窝抢 main 默认"地雷。
 # v2.30 (2026-10-15 A1): 蜂窝侧 main 表默认路由收敛为"纯探活"用途 —— metric
 #   50→250(劣于家宽备用 200), 家宽主力期不再往 main 写 metric 0/50; 补齐
 #   家宽主默认的存在性看门狗(原先只在状态迁移时装一次, 被冲刷后无人补 =
@@ -64,6 +70,9 @@ T1=100; T2=200
 #   metric 必须劣于家宽备用默认(200)。旧值 50 插在家宽主默认(0)与备用(200)
 #   之间 —— 主默认被外力冲刷后, 未打标流量会静默改走蜂窝且长期滞留(实测复核)。
 W1_PRB_METRIC=250
+# v2.31: 未打标主路的 v6 显式条目 metric —— 优于两侧 RA 默认(蜂窝 RA 1024 /
+#   家宽 RA 2048), 使 v6 与 v4 走同一主路; 对侧的 RA 默认留作自动兜底。
+V6_PRI_METRIC=50
 W1_PCT=40; W2_PCT=60
 GW_FILE=/tmp/wan.gw
 UDHCPC_PID=/tmp/udhcpc_wan.pid
@@ -275,15 +284,8 @@ ensure_lease() {
         ip route replace default via $BB_GW dev $W2_IF table $T2 2>/dev/null
         ip route show default | grep -q "via $BB_GW dev $W2_IF" || \
             ip route add default via $BB_GW dev $W2_IF metric 200 2>/dev/null
-        # v2.30(A1): 家宽主默认(无 metric = 0)存在性看门狗。该路由原先只在状态
-        #   迁移时安装一次, 被外力(租约/认证刷新)冲刷后无人补 —— 届时未打标流量
-        #   (netagent/DNS/NTP + 丢标记的转发流)会落到家宽备用(200)之外, 甚至被
-        #   蜂窝探活路由抢走。仅当"家宽是唯一主力"(S1=0 且 S2=1)时维护, 避免与
-        #   蜂窝主力模式(ccmni2 metric 0)互抢默认。
-        if [ "$S1" = 0 ] && [ "$S2" = 1 ]; then
-            ip route show default | grep "via $BB_GW dev $W2_IF" | grep -qv metric || \
-                ip route replace default via $BB_GW dev $W2_IF 2>/dev/null
-        fi
+        # v2.31: main 表主默认由 main_primary_apply() 独占维护(每周期复位) ——
+        #   本处只保留探活路由与家宽备用, 不再写主默认, 避免多写方互抢。
     fi
     # v2.3: eth0 NAT/FORWARD 看门狗(真补上——v1.7提交曾虚报覆盖, 手工规则重启即蒸发,
     #       eth0裸源出公网=黑洞; 本块与路由看门狗同周期自愈)
@@ -297,6 +299,60 @@ ensure_lease() {
     V6GW=$(ip -6 route show default 2>/dev/null | grep "dev $W2_IF" | grep -oE "via [a-f0-9:]+ " | awk '{print $2}' | head -1)
     [ -n "$V6GW" ] && ip -6 route replace default via $V6GW dev $W2_IF table $T2 2>/dev/null
 }
+
+# ---------- v2.31: 未打标主路 = 聚合设定推导(不写死优先级) ----------
+# 未打标流量 = 本机自身(netagent/DNS/NTP/测速…)+ 丢标记的转发流。原先这一路
+# 只由状态机在**迁移瞬间**决定, 且 v6 完全没人管(靠两侧 RA metric 固定偏好蜂窝)
+# —— 等于把优先级写死。现统一为: 两侧地址族都由"真实存活 + 模式/权重"推导同一
+# 主路, 且**每周期无条件复位**(边沿触发会被外力冲刷后滞留, 与 led_mgr v2.0 同一课)。
+# 语义: 只一侧活 → 该侧; 双活 → 模式(eth_prio/eth_only→家宽, cell_prio/cell_only
+#   →蜂窝, weight→权重大的一侧, 平局取家宽); 都不活 → 不猜, 保持现状。
+prim_want() {   # $1=ns1(蜂窝真实存活 0/1) $2=ns2(家宽真实存活 0/1)
+    case "$1$2" in
+        10) echo w1 ;;
+        01) echo w2 ;;
+        00) echo "" ;;
+        *)
+            case "$MODE" in
+                cell_prio|cell_only) echo w1 ;;
+                eth_prio|eth_only)   echo w2 ;;
+                weight) [ "$W1_PCT" -gt "$W2_PCT" ] && echo w1 || echo w2 ;;
+                *) echo w2 ;;
+            esac ;;
+    esac
+}
+
+# main 表(未打标主路)的**唯一写方**。v4: 主路 metric 0(顺带挤掉对侧 metric-0);
+# v6: 主路我方显式条目 metric V6_PRI_METRIC, 对侧我方条目删除、RA 默认留作兜底。
+main_primary_apply() {   # $1=w1|w2 (空=状态未知, 跳过)
+    _p=$1; [ -n "$_p" ] || return 0
+    # --- v4 ---
+    ip route del default dev $W1_IF metric 50 2>/dev/null   # 清历史遗留(旧写方)
+    if [ "$_p" = w2 ]; then
+        if [ -n "$BB_GW" ]; then
+            ip route replace default via $BB_GW dev $W2_IF 2>/dev/null
+            ip route show default | grep -q "via $BB_GW dev $W2_IF metric 200" || \
+                ip route add default via $BB_GW dev $W2_IF metric 200 2>/dev/null
+        fi
+    else
+        ip route replace default dev $W1_IF 2>/dev/null
+    fi
+    ip route show default | grep -q "dev $W1_IF metric $W1_PRB_METRIC" || \
+        ip route add default dev $W1_IF metric $W1_PRB_METRIC 2>/dev/null
+    # --- v6(同一主路; 两侧 RA 下一跳各学一次) ---
+    _g1=$(ip -6 route show default 2>/dev/null | grep "dev $W1_IF" | grep -oE "via [0-9a-f:]+" | awk '{print $2}' | head -1)
+    _g2=$(ip -6 route show default 2>/dev/null | grep "dev $W2_IF" | grep -oE "via [0-9a-f:]+" | awk '{print $2}' | head -1)
+    if [ "$_p" = w2 ]; then
+        ip -6 route del default dev $W1_IF metric $V6_PRI_METRIC 2>/dev/null
+        ip -6 route del default dev $W1_IF metric 0 2>/dev/null   # 清 rc_netfh 遗留
+        [ -n "$_g2" ] && ip -6 route replace default via $_g2 dev $W2_IF metric $V6_PRI_METRIC 2>/dev/null
+    else
+        ip -6 route del default dev $W2_IF metric $V6_PRI_METRIC 2>/dev/null
+        [ -n "$_g1" ] && ip -6 route replace default via $_g1 dev $W1_IF metric $V6_PRI_METRIC 2>/dev/null
+    fi
+    [ "$_p" != "$P_LAST" ] && { log "main-primary: $_p (v4+v6 未打标主路; mode=$MODE w1=$W1_PCT% 存活=$NS1/$NS2)"; P_LAST=$_p; }
+}
+P_LAST=""
 
 ensure_rules() {  # v2.5: fwmark策略规则存在性看门狗 — 只补活侧缺失, 不动存量
     # 病例(2026-10-05): 高位v6规则在运行中被外力蒸发(boot期home瞬断恢复后消失),
@@ -367,7 +423,26 @@ agg_bypass() {
 }
 
 # ---------- 主循环 ----------
-log "===== wan_agg v2.12 start ====="
+# v2.31: 干跑入口(自检/回归用, 不碰现场): 打印给定模式与存活态下的未打标主路。
+#   usage: wan_agg.sh --dry-primary <mode> <ns1> <ns2> [w1_pct]
+case "$1" in
+--dry-primary)
+    MODE=${2:-weight}; W1_PCT=${5:-30}; W2_PCT=$((100 - W1_PCT))
+    _pw=$(prim_want "${3:-1}" "${4:-1}")
+    printf 'mode=%s w1pct=%s alive=%s/%s primary=%s\n' "$MODE" "$W1_PCT" "${3:-1}" "${4:-1}" "${_pw:-none}"
+    exit 0 ;;
+--set-primary)
+    # 维护/验证入口: 立即把未打标主路(v4+v6)设为 w1|w2 并回显结果。守护在跑时
+    #   下个环循会按模式复位 —— 手动覆盖是瞬态的(level-driven 的自然结果)。
+    [ -n "$2" ] || { echo "usage: wan_agg.sh --set-primary w1|w2"; exit 2; }
+    BB_GW=$(head -1 $GW_FILE 2>/dev/null)
+    main_primary_apply "$2"
+    echo "main-primary -> $2"
+    ip route show default; ip -6 route show default
+    exit 0 ;;
+esac
+
+log "===== wan_agg v2.31 start (main-primary 由模式推导, v4+v6 同源) ====="
 # v1.8: MAC 钉死表重放(内核模块状态不跨重启, 游戏PC等需开机重新钉)
 while read -r MAC OP; do
     case "$MAC" in \#*|"") continue;; esac
@@ -435,13 +510,9 @@ while :; do
         log "5g iface moved: $W1_IF -> $CW"
         W1_IF=$CW
         ip route replace default dev $W1_IF table $T1 2>/dev/null
-        # v1.4: main 主默认也钉到活跃 ccmni(netagent 漂移后可能指着死口)。
-        # v2.30(A1): 仅当蜂窝当前就是主线默认(带 ccmni 且无 metric)时才重指;
-        #   家宽主力期不再往 main 写 metric 0/50, 只刷新探活路由 —— 否则会重新
-        #   制造"未打标流量偏好蜂窝"的地雷。
-        if ip route show default | grep 'dev ccmni' | grep -qv metric; then
-            ip route replace default dev $W1_IF 2>/dev/null
-        fi
+        # v1.4: main 主默认需随活跃 ccmni 重指(netagent 漂移后可能指着死口)。
+        # v2.31: 该重指已由 main_primary_apply() 每周期统一完成(它用更新后的
+        #   $W1_IF), 本处不再写 main, 避免第二写方 —— 只保证探活路由指向新口。
         ip route del default dev $W1_IF metric 50 2>/dev/null
         ip route replace default dev $W1_IF metric $W1_PRB_METRIC 2>/dev/null
         iptables -t nat -C POSTROUTING -s $LAN_NET -o $W1_IF -j MASQUERADE 2>/dev/null || \
@@ -564,6 +635,10 @@ while :; do
     elif [ "$PMODE" = 1 ] && [ $NS1 -eq 1 ]; then E2=0
     elif [ "$PMODE" = 2 ] && [ $NS2 -eq 1 ]; then E1=0
     fi
+    # v2.31: 未打标主路(v4+v6)每周期按"模式+权重+真实存活"复位 —— 唯一写方,
+    #   与上面 E1/E2(标记/分流用)解耦: 标记面仍由模式决定经 fwmark 分流, 未打标
+    #   面则统一走本函数推导的主路, 两侧地址族一致。
+    main_primary_apply "$(prim_want "$NS1" "$NS2")"
     if [ "$AGG_ON" = 1 ] && { [ "$E1$E2" != "$S1$S2" ] || [ "${FORCE:-0}" = 1 ]; }; then
         FORCE=0
         log "state: 5g $S1->$E1 (d1=$D1) home $S2->$E2 (d2=$D2) pmode=$PMODE"
@@ -596,14 +671,13 @@ while :; do
             ip rule del fwmark $W1_MARK/$W_MASK table $T1 2>/dev/null
             ip -6 rule del fwmark $W1_MARK/$W_MASK table $T1 2>/dev/null
             ip -6 rule del fwmark $M6_LOW1/0xff table $T1 2>/dev/null
-            BB_GW=$(head -1 $GW_FILE 2>/dev/null)
-            [ -n "$BB_GW" ] && ip route replace default via $BB_GW dev $W2_IF 2>/dev/null
+            # v2.31: main 表主默认不在此写 —— 由 main_primary_apply() 每周期按
+            #   "模式+权重+真实存活"统一维护(唯一写方, level-driven)。
         else
             ip rule add fwmark $W1_MARK/$W_MASK table $T1 priority 101 2>/dev/null
             ip -6 rule add fwmark $W1_MARK/$W_MASK table $T1 priority 101 2>/dev/null
             ip -6 rule del fwmark $M6_LOW1/0xff table $T1 2>/dev/null
             ip -6 rule add fwmark $M6_LOW1/0xff table $T1 priority 90 2>/dev/null
-            ip route replace default dev $W1_IF 2>/dev/null   # main 表复位 5G
         fi
         S1=$E1; S2=$E2
         echo "agg:$S1:$S2" > $MODE_FILE

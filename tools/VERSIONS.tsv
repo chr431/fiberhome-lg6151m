@@ -3,7 +3,7 @@
 gw/rc.extend.sh	2.1	manifest	/data/rc.extend.sh	槽位调度器; v2.1(P3): shadow.override合法性校验+.bak回退自愈(坏文件不再锁死SSH+串口); v2.0: 开机清token; 历史见git
 gw/v3_rc10.extend.sh	2.28	manifest	/data/gw/rc19.sh	v3 启动编排 rc19v2; v2.28: +log_keeper 接线; 历史见git
 gw/wifi_up.sh	1.28	manifest	/data/gw/wifi_up.sh	mt7992 AP 工厂配方(v1.28: 候选收敛安全集深部{1,6}消边界振荡; v1.27: auto-channel接入驱动IDC安全掩码(仅在SafeChnBitmask集内选道, 防驱动自行搬道致配置≠实况); 历史版本见git)
-gw/wan_agg.sh	2.30	manifest	/data/gw/wan_agg.sh	v2.30(A1): 蜂窝侧 main 表默认收敛为纯探活 — metric 50→250(劣于家宽备用 200), 家宽主力期不再写 metric 0/50, 并补家宽主默认存在性看门狗(原只在状态迁移时装一次, 被外力冲刷后未打标流量静默改走蜂窝且长期滞留); 双上行聚合主管(v2.29: 移除先验时段(判定不做先验), 静默型切断由 authd v2.3 静默看门狗承接; v2.28: 去网关探针短路); 历史见git
+gw/wan_agg.sh	2.31	manifest	/data/gw/wan_agg.sh	v2.31(用户裁定): 未打标主路(v4 与 v6)不再写死优先级 — 由模式+权重+真实存活推导(prim_want), main 表唯一写方 main_primary_apply() 每周期复位; weight 走权重大的一侧, 单侧存活即接班, 双死不猜; +--dry-primary/--set-primary 入口; v2.30(A1): 蜂窝侧 main 表默认收敛为纯探活 — metric 50→250(劣于家宽备用 200), 家宽主力期不再写 metric 0/50, 并补家宽主默认存在性看门狗(原只在状态迁移时装一次, 被外力冲刷后未打标流量静默改走蜂窝且长期滞留); 双上行聚合主管(v2.29: 移除先验时段(判定不做先验), 静默型切断由 authd v2.3 静默看门狗承接; v2.28: 去网关探针短路); 历史见git
 gw/traffic_logger.sh	1.2	manifest	/data/gw/traffic_logger.sh	v1.2b: 基线文件带源标记(S=qdisc|netdev), 源变即重建基线(否则切换源会记一行 22MB 假尖峰); v1.2: 蜂窝上行数据源 netdev tx_bytes → qdisc(Linux 发送路径) — 网卡计数被厂商卸载记账灌入无佐证增量(1s +1.22MB/813 包而 qdisc/抓包为 0; ccmni1 DOWN 无 IP 却记 47MB), 用作统计=长期高估; qdisc 缺失回退 netdev, 下行仍用 netdev rx(实测准确); 蜂窝/以太网流量采样器(5min 增量落 /data/gw/traffic_hist.tsv; 漂移解析+回绕自洽+40天裁剪)
 gw/udhcpc_wan.script	1.0	manifest	/data/gw/udhcpc_wan.script	WAN口 udhcpc 事件钩子(接口无关化)
 gw/healthdog.sh	1.1	manifest	/data/gw/healthdog.sh	看门狗用户态心跳
@@ -11,9 +11,9 @@ gw/v3_babysit_v2.sh	2.0	manifest	/data/gw/babysit_v2.sh	启动保姆(T1杀rcS/T2
 gw/night_report.sh	1.0	manifest	/data/gw/night_report.sh	夜间体检报告
 gw/wifi_guard.sh	1.0	manifest	/data/gw/wifi_guard.sh	BA/TX 停滞自动恢复守卫
 gw/mipc_dial_trace.sh	1.0	manifest	/data/gw/mipc_dial_trace.sh	5G 拨号取证(xtrace 抓真参)
-gw/dial_5g.sh	1.2	manifest	/data/gw/dial_5g.sh	生产 5G 拨号器(check_ia+netagent补丁)
+gw/dial_5g.sh	1.3	manifest	/data/gw/dial_5g.sh	v1.3: 不再写 metric 50 主默认(会把蜂窝插进家宽主/备之间成为地雷), 只装探活 metric 250 — main 表主默认归 wan_agg 独占; 生产 5G 拨号器(check_ia+netagent补丁)
 gw/consfeed.sh	1.0	manifest	/data/gw/consfeed.sh	v2 控制台喂食器(无setsid,v2_access拉起)
-gw/rc_netfh.sh	3.3	manifest	/data/gw/rc_netfh.sh	v3.3: 修正 v6 家宽热备注释写反的不等号(实为 2048>1024, 未打标 v6 默认走蜂窝)并写明影响面与结论: 策略有意保留; 零功能改动; 路线A: FH modem栈环境(最小army, MODE.fh门控; v3.2: shm在位判$3perms→$4size修正)
+gw/rc_netfh.sh	3.4	manifest	/data/gw/rc_netfh.sh	v3.4: 启动时的蜂窝默认路由由无 metric(=0)改 metric 250 — 避免压过家宽主路(地雷另一来源); v3.3: 修正 v6 家宽热备注释写反的不等号(实为 2048>1024, 未打标 v6 默认走蜂窝)并写明影响面与结论: 策略有意保留; 零功能改动; 路线A: FH modem栈环境(最小army, MODE.fh门控; v3.2: shm在位判$3perms→$4size修正)
 gw/radvd.conf	1.0	manifest	/data/gw/radvd.conf	IPv6 SLAAC+RDNSS通告(br-lan, ULA fd42:9ac1:7e50::/64)
 gw/capture_ubus.sh	1.1	manifest	/data/gw/capture_ubus.sh	stock拨号一次性捕获(ubus monitor+ccmni采样)
 gw/dial_variant.sh	1.1	manifest	/data/gw/dial_variant.sh	5G 拨号参数变体实验器(iptype/apn/plmn/roam)
@@ -81,7 +81,7 @@ tools/leak_check.py	2.2	tool	-	敏感词零命中门禁; v2.2: --history 全量�
 docs/ARCHITECTURE.md	1.1	doc	-	架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针)
 docs/GUI_TERMINOLOGY.md	1.2	doc	-	GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git
 gw/watchdog.sh	1.11	manifest	/data/gw/watchdog.sh	v1.11: +蜂窝查询路径活性告警(ql_nw 子服务静默失效: 守护活着/数据面正常但 cells/endc 恒返 -2147024889, GUI 小区与组网卡片静默报错; 只告警不自动重启 — 蜂窝主力时重启 RIL 会打断数据面, 恢复路径已文档化); v1.10: +蜂窝统计偏差护栏(netdev tx_bytes vs qdisc 增量逐周期比对, 阈值 256KB — 真实流量下两者逐字节相等, 实测 2MiB 阈值会漏掉单次 1.22MB 跳变) — 把统计与实际不符变成可见信号而非静默污染流量账; 持续不变量看门狗(v1.9: 告警闪烁从WAN灯迁5G橙灯gpio473 — 两写方抢同一物理灯, watchdog闪完停在0而led_mgr边沿触发不纠回, 直接造成"eth0有网WAN灯不亮"; WAN灯写权单一化归led_mgr独占; v1.8: 拨号守护实例定位改PID锁(cmdline复核, 防启动者argv自匹配/误伤旁观); v1.7: mipc探针过硬超时+dial_keeper心跳陈旧>90s判死重启+led_mgr自愈拉; v1.6: +log_keeper自愈+ql_wifi_sample卡死清除)
-tools/selftest.py	2.24	tool	-	v2.24: +聚合路由地雷护栏(t_agg_route_landmine: main 表不得含 metric<200 的 ccmni 默认 + 探活路由在位 + 家宽主默认在位) + 流量口径护栏(t_traffic_source: /api/traffic 蜂窝 tx == qdisc 值 + watchdog 偏差护栏在位); 断言式全功能测试; v2.23: +WAN灯数据面一致性+写权唯一化护栏(t_sys_led_wan) — 干跑映射b0/b1 + watchdog源码不得引用5g_evb_voice + 实况亮度无条件等于数据面推算值; 5G灯护栏去掉"容忍一拍"sleep(绝对电平驱动下等待即遮羞布); v2.22: 单实例判据改PID锁↔活进程跨层断言; v2.21: +5G灯数据面一致性; 历史见git
+tools/selftest.py	2.25	tool	-	v2.25: +未打标主路护栏(t_main_primary: 五模式×存活映射干跑 + 现场 v4/v6 选路指向同一接口且等于模式推导值); v2.24: +聚合路由地雷护栏(t_agg_route_landmine: main 表不得含 metric<200 的 ccmni 默认 + 探活路由在位 + 家宽主默认在位) + 流量口径护栏(t_traffic_source: /api/traffic 蜂窝 tx == qdisc 值 + watchdog 偏差护栏在位); 断言式全功能测试; v2.23: +WAN灯数据面一致性+写权唯一化护栏(t_sys_led_wan) — 干跑映射b0/b1 + watchdog源码不得引用5g_evb_voice + 实况亮度无条件等于数据面推算值; 5G灯护栏去掉"容忍一拍"sleep(绝对电平驱动下等待即遮羞布); v2.22: 单实例判据改PID锁↔活进程跨层断言; v2.21: +5G灯数据面一致性; 历史见git
 tools/doc_audit.py	1.1	tool	-	台账↔文档内联标记双向审计(v1.1: 标记扫描纳入台账引用的docs/外文档如install/README.md; v1.0: 版本绑定+TEST-MISSING/STALE-CODE/UNREGISTERED-CLAIM)
 gw/src/mipc_cellular.c	0.8	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源(P1): dlopen闭包预载+ql_nw_init; v0.8: +endc 组网模式(厂商 fh_set_endc 同款 ql_nw_set_nr_disable_mode 序列, 写后读回校验)
 gw/bin/mipc_cellular	0.8	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI(getbands/setlock/unlock/endc; 锁NR41+79实弹验证零扰动)

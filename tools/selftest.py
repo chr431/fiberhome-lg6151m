@@ -1320,6 +1320,44 @@ def t_traffic_source():
 
 
 
+@test("未打标主路由聚合模式推导 (v4 与 v6 同源)")
+def t_main_primary():
+    # v2.31 (用户裁定): 未打标主路(本机自身 + 丢标记的转发流)不写死优先级 —— 由
+    #   "模式+权重+真实存活"推导; main 表唯一写方 = wan_agg.main_primary_apply(),
+    #   每周期复位(level-driven)。原先 v4 只在迁移瞬间决定、v6 完全没人管(靠两侧
+    #   RA metric 固定偏好蜂窝)。
+    # 断言: ① 五种模式×存活组合的映射(--dry-primary 干跑, 不碰现场);
+    #   ② 现场 v4 与 v6 的未打标选路指向**同一**接口;
+    #   ③ 且等于现场"模式+真实存活"推导出的主路; ④ 无 metric<200 的 ccmni v4 默认。
+    def want(mode, a1, a2, pct=""):
+        out = dev(f"sh /data/gw/wan_agg.sh --dry-primary {mode} {a1} {a2} {pct}").strip()
+        m = re.search(r"primary=(\S+)", out)
+        return m.group(1) if m else "?"
+    cases = [("eth_prio", "1", "1", "", "w2"), ("cell_prio", "1", "1", "", "w1"),
+             ("cell_only", "1", "1", "", "w1"), ("eth_only", "1", "1", "", "w2"),
+             ("weight", "1", "1", "30", "w2"), ("weight", "1", "1", "70", "w1"),
+             ("eth_prio", "1", "0", "", "w1"), ("cell_prio", "0", "1", "", "w2"),
+             ("eth_prio", "0", "0", "", "none")]
+    bad = [f"{m}/{a}{b}:{want(m, a, b, p)}!={e}" for m, a, b, p, e in cases
+           if want(m, a, b, p) != e]
+    mode = dev("grep -m1 '^MODE=' /data/gw/agg.conf 2>/dev/null | cut -d= -f2").strip()
+    pct = dev("grep -m1 '^W1_PCT=' /data/gw/agg.conf 2>/dev/null | cut -d= -f2").strip() or "30"
+    a1 = "1" if dev("ping -4 -I ccmni2 -c1 -W2 -s1 223.5.5.5 2>/dev/null | grep -q ttl && echo 1").strip() == "1" else "0"
+    a2 = "1" if dev("ping -4 -I eth0 -c1 -W2 -s1 223.5.5.5 2>/dev/null | grep -q ttl && echo 1").strip() == "1" else "0"
+    exp = want(mode or "eth_prio", a1, a2, pct)
+    v4 = dev("ip route get 223.5.5.5 2>/dev/null | head -1")
+    v6 = dev("ip -6 route get 2400:3200::1 2>/dev/null | head -1")
+    ifc4 = "eth0" if "dev eth0" in v4 else ("cell" if "ccmni" in v4 else "?")
+    ifc6 = "eth0" if "dev eth0" in v6 else ("cell" if "ccmni" in v6 else "?")
+    exp_ifc = {"w1": "cell", "w2": "eth0"}.get(exp, "?")
+    land = dev("ip route show default | grep ccmni | grep -vc 'metric [2-9][0-9][0-9]'").strip()
+    ok = (not bad) and ifc4 == ifc6 and ifc4 == exp_ifc and land == "0"
+    record(t_main_primary._test_name, "system", ok,
+           f"map_bad={len(bad)} live={mode or '-'}/{pct} alive={a1}{a2} exp={exp} "
+           f"v4={ifc4} v6={ifc6} landmine={land}" + (f" {bad[0]}" if bad else ""))
+
+
+
 @test("SoC 温度在合理区间")
 def t_sys_temp():
     out = dev("for zd in /sys/class/thermal/thermal_zone*; do "

@@ -1238,9 +1238,12 @@ def t_sys_led_wan():
     map0 = "wan=0" in dry0
     map1 = "wan=1" in dry1
     night = (eff_conf(["LED_NIGHT"]).get("LED_NIGHT") or "0") == "1"
-    # watchdog 写权已迁走 = 源码里不得再出现 WAN 灯节点
-    wd_wan = dev("grep -c '5g_evb_voice' /data/gw/watchdog.sh 2>/dev/null").strip()
-    wd_alert = dev("grep -c 'gpio473' /data/gw/watchdog.sh 2>/dev/null").strip()
+    # 写权唯一化断言必须只看**代码写方**, 不看注释/说明文字(源码里明文提及
+    # 5g_evb_voice 的历史解释是允许的)。取非注释行中含 echo>/写语义的行。
+    wd_wan = dev("grep -v '^[[:space:]]*#' /data/gw/watchdog.sh 2>/dev/null | "
+                 "grep -c '5g_evb_voice'").strip()
+    wd_alert = dev("grep -v '^[[:space:]]*#' /data/gw/watchdog.sh 2>/dev/null | "
+                   "grep -c 'gpio473'").strip()
 
     # 家宽数据面实况(与 led_mgr 同源判据: 网关优先 + 公网兜底)
     bb_gw = dev("head -1 /tmp/wan.gw 2>/dev/null").strip()

@@ -11,6 +11,9 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
+v2.30 (2026-10-17): +t_ril_single — RIL 管道四件(mtk_netagent/ql_netd/
+  ql_ril_service/mipc_submonitor)各须恰 1 实例(rc_netfh v3.5 SIGKILL 清场的
+  回归护栏; 原开机 SIGTERM 被厂商守护忽略 → 三件各双实例, 实弹发现)。
 v2.29 (2026-10-17 架构轮): 拆分护栏适配 — wan_agg v3.0 播种代码路径改指
   wan_agg_lib.sh(t_agg_pins_seed); wan_alive 的 api 消费方改指 api_sys.sh(v2.75
   域拆分); +t_agg_split(lib 在位且被主管 source/ensure_lease 不在主管) +
@@ -677,6 +680,24 @@ def t_agg_eth_daemon():
     ok = out.strip() not in ("0", "")
     record(t_agg_eth_daemon._test_name, "agg", ok,
            "alive" if ok else "wan_eth dead (rc19/watchdog 应拉起)")
+
+
+@test("RIL 管道四件单实例 (rc_netfh SIGKILL 清场)")
+def t_ril_single():
+    # v2.30 (2026-10-17 实弹发现): rc_netfh 开机 SIGTERM 清场被厂商守护忽略 —
+    #   mtk_netagent/ql_netd/ql_ril_service 各存活两套(rc.d S22/S85 + rc_netfh
+    #   各一套)。双实例 = 未被理解的控制面冗余: ubus 仅一套注册成功(另一套空转),
+    #   两个 netagent 同消费 netlink 事件(多为 ignore 分支), 状态机深处竞态窗口
+    #   未知。rc_netfh v3.5 改 SIGKILL 清场; 本护栏断言四件各恰 1 实例。
+    #   (pidof 按 comm 匹配, 远端包装 shell comm="sh" 无自匹配问题。)
+    bad = []
+    for n in ("mtk_netagent", "ql_netd", "ql_ril_service", "mipc_submonitor"):
+        c = dev(f"pidof {n} | wc -w").strip()
+        if c != "1":
+            bad.append(f"{n}x{c or '0'}")
+    ok = not bad
+    record(t_ril_single._test_name, "cellular", ok,
+           "all x1" if ok else "; ".join(bad))
 
 
 @test("分流规则已安装 (模式感知)")

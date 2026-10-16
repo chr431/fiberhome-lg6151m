@@ -69,8 +69,11 @@ python tools/deploy.py attic      # 设备侧流浪脚本归档
 ## 守护拓扑（2026-10-17 架构轮拆分后）
 
 - 已下架：cfgmgr / logmgr（树不经守护，shm 由 cfg_tool 建立；rc_netfh v3.0）
-- 仍在跑的原厂件：mobilenetwork（树翻译层, P3.5 待裁）· modem 栈军（ccci 三件
-  /mtk_netagent/ql_netd/ql_ril_service/mipc_submonitor/atcid 对/thermal_core）
+- 已下架：cfgmgr / logmgr / **mobilenetwork**（树翻译层；自研拨号 mipc 直连 +
+  dial_keeper 已接管，2026-10-17 实查确认不在运行）/ cfg 树整体（KEEP_TREE=0）
+- 仍在跑的原厂件：modem 栈军（ccci 三件
+  /mtk_netagent/ql_netd/ql_ril_service/mipc_submonitor —— rc_netfh v3.5 起
+  SIGKILL 清场后单套拉起 /atcid 对/thermal_core）
 - 自研：dial_keeper（拨号兜底, 35s 宽限）· watchdog v1.12（不变量+自愈, 含
   wan_eth/led_mgr/log_keeper 兜底拉）· v3httpd/api.sh（路由核心 + 六域模块
   `www/api_{sys,wifi,lan,agg,cell,sms}.sh` 按端点懒加载）· wan_agg v3.0

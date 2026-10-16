@@ -627,3 +627,22 @@ ENABLED 的 20×0.5s 自 v1.x 起**从未真正执行过**（前者=告警功能
 （六模块在位 + 路由引用 + `*.sh` 直出拒绝）+ 既有护栏路径适配（播种代码→lib、
 wan_alive 消费方→api_sys.sh）。
 <!--CLM:CLM-MODSPLIT-->
+
+## 25. RIL 管道双实例：rc_netfh 的 SIGTERM 清场无效（2026-10-17 实弹发现）
+
+**现象**：架构轮复盘抓进程表发现 `mtk_netagent` / `ql_netd` / `ql_ril_service` 各
+存活**两个实例**（ppid 均 1，开机 1 秒内先后启动）。溯源：rc.d 链 S22/S85 起一套，
+rc_netfh（route A）清场后自起一套——而它的 `kill $(pidof ...)` 发的是 **SIGTERM，
+厂商守护忽略之**，旧套未死、新套照起。`mipc_submonitor` 未双实例纯属侥幸：S99 的
+实例与本处拉起相差 ~1s，unix/ubus 资源冲突把后到者挤死（天然去重）；netd/ril/
+netagent 无独占资源，双实例共存。
+
+**实证影响**：功能完全正常（selftest 全绿、数据面通）——ubus 上只有一套 ql-netd
+注册成功（另一套注册失败后空转），两个 netagent 同消费 netlink 事件但多为 ignore
+分支。定性：**当前无害的控制面冗余**，但两套 ql_netd 在重拨/EE 场景下的竞态行为
+未知，与 CLM-KEEPER-LOCK（pgrep 自匹配）同族：都是"启动清理逻辑没按预期生效"。
+
+**修复（rc_netfh v3.5）**：SIGKILL 全清（3 次重试吸收 procd respawn 竞态，清不净
+记 WARN 不阻断）→ 统一拉起一套 → 逐件数量复核（≠1 记警）。护栏：selftest
+`t_ril_single`（四件各恰 1 实例）。修复属开机路径，须重启验证。
+<!--CLM:CLM-RIL-DUP-->

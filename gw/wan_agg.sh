@@ -1,8 +1,19 @@
 #!/bin/sh
-# wan_agg.sh v2.34 — 协议级检测(authd 会话信号, <=5s 故障转移) 双上行聚合主管 (vendor kernel engine + iptables fallback)
-# v2.34: 钉死表缺省播种 —— 活文件 agg_pins.conf(设备侧自管, 含个人 MAC, 不入库)
-#   缺失时从随版本部署的只读基线 agg_pins.default **缺省才写**地播种: 设备侧自带
-#   机制说明, 缺失不再报错/静默失效, 已有钉死永不覆盖(与 uplink.conf 同法)。
+# wan_agg.sh v3.0 — 双上行聚合主管: 探活 + 故障转移 FSM + 未打标主路策略 + CLI
+# v3.0 (2026-10-17 架构轮, 大杂烩拆分):
+#   引擎落地层(dp_setup/fw*/kernel_apply/ensure_rules/agg_bypass/pin_*)与
+#   agg.conf/钉死表管理迁入 wan_agg_lib.sh(被 source; 单进程 = 单写方纪律不变);
+#   eth0 租约/NAT/路由看门狗(原 ensure_lease)迁出为独立守护 wan_eth.sh(rc19 先于
+#   本守护拉起, watchdog 自愈) — udhcpc 最坏 9s+ 原内联在探活环循里, 租约期间整个
+#   FSM 停摆(侵蚀 25s 硬截止预算), 独立后互不阻塞。
+#   蜂窝探活路由(metric 250)+metric-50 遗留清理上收到 main_primary_apply() 头部:
+#   原散在 ensure_lease(每周期), 上提后**双死态(prim 空)也维持探活可达** —— 否则
+#   路由被外力冲刷后无法探活 = 无法恢复的死锁。BB_GW 改由本函数自读(原在
+#   ensure_lease 设置, wan_eth 拆出后本进程无人再设)。
+#   死代码清除: pmode_of(v2.12 legacy, v2.18 起 pmode_of_mode 取代后零调用方)。
+#   MODE 白名单/W1_PCT 钳位校验原三处重复, 收敛为 lib 的 agg_conf_load()。
+# v2.34: 钉死表缺省播种(逻辑在 lib.agg_conf_seed; 活文件设备侧自管不入库, 缺失时
+#   从随版本部署的 agg_pins.default 缺省才写地播种, 已有钉死永不覆盖)。
 # v2.32 (2026-10-16 00:06 宵断实弹): 判活目标多样化 —— 原目标(223.5.5.5/120.53.53.53)
 #   被上行接入网夜间切断的白名单放行, 探测恒过而客户端全死 → 永不转移。现取三个不同
 #   运营商/ASN 且不在白名单内的目标(任一通过即活) + ICMP 全灭时 TCP 握手兜底;
@@ -12,308 +23,39 @@
 #   的**唯一写方**每周期复位(level-driven; 边沿触发会被外力冲刷后滞留)。
 #   语义: 只一侧活→该侧; 双活→eth_prio/eth_only→家宽, cell_prio/cell_only→蜂窝,
 #   weight→权重大的一侧(平局取家宽); 都不活→不猜保持现状。
-#   同时清掉其它写方(dial_5g/rc_netfh 的 metric 50)造成的"蜂窝抢 main 默认"地雷。
 # v2.30 (2026-10-15 A1): 蜂窝侧 main 表默认路由收敛为"纯探活"用途 —— metric
-#   50→250(劣于家宽备用 200), 家宽主力期不再往 main 写 metric 0/50; 补齐
-#   家宽主默认的存在性看门狗(原先只在状态迁移时装一次, 被冲刷后无人补 =
-#   未打标流量静默改走蜂窝的长期漏洞)。
-# v2.29: 移除 ETH_CURFEW 先验时段(用户裁定: 判定不做先验) — 静默型切断由 authd v2.3 静默看门狗(>40s 无 EAP 帧判死)承接
-# v2.28(2026-10-12 实弹: 宵断 00:06 切断, 00:12 才转移): w2_data_alive 去网关短路(宽限期网关仍答 ICMP 的盲区) + ETH_CURFEW 宵断时段确定性判死(weight/eth_prio 模式)
-# v2.27(2026-10-11 实弹: 上游 EAP 重启窗口漏拦截页给手机): 探测 -W1 + 首败同轮复核 — 死亡确认 25s 级→<=8s
-# v2.26(2026-10-09 21:30 实弹: 以太断链数分钟不转移): w2_alive 的"新鲜 up 免 ping"改判
-#   —— up 不再是充分的活证据, 必须叠加数据面 ICMP 实证(w2_data_alive)。根因在 authd:
-#   succ 一旦置位永不复位, 收到任何 EAPOL 帧(含服务器周期性 Req-Identity)即
-#   state_write("up"); 认证帧在途而数据面已死时 up 永远新鲜 → 以太恒判活 →
-#   eth_prio 下 5G 待命侧永无接班机会(实测 06:02 起 5g=0 持续 15h, 21:32 才因
-#   以太自愈而翻转)。down 仍保留协议级零延迟快路径。转移上界不变(25s 硬截止+环循)。
-# v2.25: 中性命名清扫(注释去私有语境词, 零功能改动)
-# v2.19(2026-10-07, eth_prio 静态形态失灵根因): [键名断链] w2_alive 静态分支读
-#   UPLINK_PROBE_GW/UPLINK_GW, 而 api.sh uplink_set 与模板写的是 PROBE_GW/AUTH_GW
-#   — 有线侧探活恒空->永久判死->5G 全量接管(GUI"有线宽带优先"形同虚设, 实弹
-#   agg:1:0 d2=99 不回切)。修复: 键链 UPLINK_PROBE_GW -> PROBE_GW -> AUTH_GW ->
-#   UPLINK_GW 依次回退; [udhcpc 噪声] FORM=static 时 ensure_lease 跳过 one-shot
-#   udhcpc(静态 IP 归 rc19 档案管, 向未认证口狂发 DHCPDISCOVER 无意义)。
-#   配套 rc19 v2.22: static 档案写 /tmp/wan.gw(表200/主表切换依赖)。
-# v2.6 规则分层修正 + 真相更正(2026-10-05 终局判别实验):
-#   [更正] 模块v6引擎完全正常(哈希%100读权重; 摘钉后100/0→4/4全WAN1实证)。
-#   早前"v6常数哈希缺陷"结论系MAC钉死自污染 — 钉死旁路哈希(v4/v6同样),
-#   而v6测试全用被钉PC发流。用户当日判断"原厂可能无辜"最终完全成立。
-#   [缺陷] 同优先级下高位v6规则先装先匹配 → 模块判WAN1的目的绕过低8位
-#   源端口分流(半数目的分流失效) → 低8位规则降优先级90/91, 双活时自建
-#   引擎全权路由; 死侧摘除后回落模块高位规则(其failover翻转已实证)。
-#   v2.5 死侧v6黑洞修复 + fwmark规则存在性看门狗(ensure_rules) 继续有效。
-#   另: conntrack二进制在v3上relocation损坏, 所有 conntrack -D 从未生效 —
-#   已移除死代码, 断而必破完全由fwmark摘除承担。
-# v1.4 三洞齐修(2026-10-04 游戏登录排查中发现):
-#   1. `ip link set $W2_IF up` 缺失(v1.3只热修未固化, 每次重启eth0 admin-down→租约死等)
-#   2. 探活 `ping -I iface` 需接口在 main 表有路由; 现: 家宽侧装 metric 200 备用默认
-#      (探活有路+故障兜底), 5G 侧 drift 块确保 main default 指向活跃 ccmni
-#      (源IP绑定法被实测否决: 源192.168.3.x的包仍按目的走main→从ccmni出去=黑洞)
-#   3. udhcpc one-shot 包 timeout 15 (链路异常时 busybox -n -q 可能无限等待, 实测挂死)
-# v1.3: 5G 承载通道动态跟踪 — FH 拨号可能落在 ccmni1 或 ccmni2(实测 2026-10-04
-#       冷启动落在 ccmni1, 而 v1.2 硬编码 ccmni2 → 表100指向死口, 40%流量黑洞)。
-#
-# 原厂架构 (subagent RE 2026-10-04, 证据: protocolmgr@0x5e850, wancc@0x9688a,
-# mobilenetwork@0x2f191, quecadp.ko netfilter hook):
-#   内核:  fhdrv_net_quecadp 按五元组 hash%100 < w1_pct 选 WAN, ct->mark 粘性
-#   路由:  wancc 式 "ip rule add fwmark 0x4000000/0xfc000000 table N"
-#   探活:  mobilenetwork 式 ping -I <if> -c1 -W3 -s1 <dst> | grep ttl
-# v1.1: 实测 /proc/multi_wan/{mode,weight,mac_config} 写入全部失败(仅 debug 可写,
-#   0644/root 无权限问题 -> 该驱动版 proc 写处理器残废, 真通道=/dev/fhdrv_net_dev
-#   ioctl cmd=5, 参数格式待逆向最终报告)。故双引擎:
-#   ENGINE=vendor: proc 写入成功且回读 mode=1 -> 用内核模块分流(最优)
-#   ENGINE=iptables: mangle WANAGG 链 statistic 随机+CONNMARK 粘性(语义等价,
-#   xt_statistic/xt_connmark 已在载) —— 当前实际生效引擎
-#   ioctl 格式确认后切 vendor 引擎(v1.2)。
-#
-# WAN1 = 5G  ccmni2 (vendor 语义 WANDevice.1=nb5g)  mark 0x4000000
-# WAN2 = 有线宽带 eth0 DHCP (静态IP形态见 uplink.conf) mark 0x8000000
+#   50→250(劣于家宽备用 200), 家宽主力期不再往 main 写 metric 0/50; 补齐家宽
+#   主默认的存在性看门狗(原先只在状态迁移时装一次 = 长期漏洞)。
+# v2.29: 移除 ETH_CURFEW 先验时段(用户裁定: 判定不做先验) — 静默型切断由 authd v2.3
+#   静默看门狗(>40s 无 EAP 帧判死)承接
+# v2.28(2026-10-12 实弹): w2_data_alive 去网关短路(宽限期网关仍答 ICMP 的盲区)
+# v2.27(2026-10-11 实弹: 上游 EAP 重启窗口漏拦截页给手机): 探测 -W1 + 首败同轮复核
+#   — 死亡确认 25s 级→<=8s
+# v2.26(2026-10-09 21:30 实弹: 以太断链数分钟不转移): up 不再是充分的活证据,
+#   必须叠加数据面 ICMP 实证(w2_data_alive)。根因在 authd: succ 一旦置位永不复位,
+#   收到任何 EAPOL 帧即 state_write("up") → 以太恒判活 → 待命侧永无接班机会。
+#   down 仍保留协议级零延迟快路径。
+# v2.24: authd 会话信号(/tmp/authd_state) — down 即时判死, up 仅作免长探测加速项。
+# v2.21: 安全启动 — W2_OK=0(eth 从未验证成功) => 硬截止立即判死 => 5G 起步。
+# v2.20: 硬截止判死(活侧 >25s 无成功探活即判死, 跳过3连击) — 计数制可被迟滞/饥饿
+#   模式饿死; 时间截止不可, 故障转移上界 = 60s + 一个环循周期。
+# v2.23: 恢复迟滞 U>=6 — 掐灭抖动源(状态抖动→规则重建churn→8s 黑洞)。
+# v1.3: 5G 承载通道动态跟踪 — FH 拨号可能落在 ccmni1 或 ccmni2(实测冷启动落
+#       ccmni1, 硬编码 ccmni2 → 表100指向死口, 40%流量黑洞)。
+# 引擎/规则/ioccc 历史与 RE 证据见 wan_agg_lib.sh 头注。
 # 实测基线 2026-10-04: 5G 258Mbps / 家宽 375Mbps (8并发 TUNA) -> 40/60
-LAN_NET=192.168.9.0/24
+. /data/gw/wan_agg_lib.sh
 W1_IF=ccmni2; W2_IF=eth0
-W1_MARK=0x4000000; W2_MARK=0x8000000; W_MASK=0xfc000000
-T1=100; T2=200
-# v2.30(A1): 蜂窝侧 main 表默认路由只作"探活可达"用途(ping -I 需该表有路),
-#   metric 必须劣于家宽备用默认(200)。旧值 50 插在家宽主默认(0)与备用(200)
-#   之间 —— 主默认被外力冲刷后, 未打标流量会静默改走蜂窝且长期滞留(实测复核)。
-W1_PRB_METRIC=250
-# v2.31: 未打标主路的 v6 显式条目 metric —— 优于两侧 RA 默认(蜂窝 RA 1024 /
-#   家宽 RA 2048), 使 v6 与 v4 走同一主路; 对侧的 RA 默认留作自动兜底。
-V6_PRI_METRIC=50
-W1_PCT=40; W2_PCT=60
 GW_FILE=/tmp/wan.gw
-UDHCPC_PID=/tmp/udhcpc_wan.pid
-UDHCPC_SCRIPT=/data/gw/udhcpc_wan.script
-LOG=/tmp/wan_agg.log
 MODE_FILE=/tmp/wan_mode
-log() { echo "$(date '+%m-%d %H:%M:%S') $*" >> $LOG; }
-# v2.12: 主备模式 — 权重 100:0 -> 5G主力/家宽待命; 0:100 反之。
-# 语义: 待命侧对引擎恒为逻辑down(真实探测照跑), 主力真死才接班, 恢复自动切回。
-pmode_of() { case "$1" in 100) echo 1;; 0) echo 2;; *) echo 0;; esac; }
-# v2.18: 五模式(MODE 键, 对齐原厂语义) —
-#   weight    按权重分流 (W1_PCT 5..95; pmode 0)
-#   cell_prio 蜂窝优先   (5G 主力, 家宽待命 failover; pmode 1)
-#   eth_prio  以太优先   (家宽主力, 5G 待命 failover; pmode 2)
-#   cell_only 仅蜂窝     (5G 全量, 家宽不参战无failover; pmode 4)
-#   eth_only  仅以太     (家宽全量, 5G 不参战无failover; pmode 3)
-# legacy 派生(无 MODE 键): ENABLE=0->cell_only; W1=100->cell_prio; 0->eth_prio; 否则 weight
-pmode_of_mode() {
-    case "$1" in
-        weight)    echo 0 ;;
-        cell_prio) echo 1 ;;
-        eth_prio)  echo 2 ;;
-        eth_only)  echo 3 ;;
-        cell_only) echo 4 ;;
-        *)         echo 0 ;;
-    esac
-}
+W1_PCT=40; W2_PCT=60
 PMODE=0
 MODE=weight
 
-# ---------- data plane ----------
-dp_setup() {
-    # 双表: T1 恒走 5G; T2 走家宽 gw (拿到租约后由 ensure_lease 侧刷新)
-    ip route replace default dev $W1_IF table $T1 2>/dev/null
-    ip rule del fwmark $W1_MARK/$W_MASK table $T1 2>/dev/null
-    ip rule add fwmark $W1_MARK/$W_MASK table $T1 priority 101 2>/dev/null
-    ip rule del fwmark $W2_MARK/$W_MASK table $T2 2>/dev/null
-    ip rule add fwmark $W2_MARK/$W_MASK table $T2 priority 102 2>/dev/null
-    # 旧 wan_policy2 规则退役 (源地址策略=全量单路, 与聚合互斥)
-    ip rule del priority 101 from $LAN_NET 2>/dev/null
-    ip rule del priority 101 from 192.168.8.0/24 2>/dev/null
-    # v2.0: v6 双栈策略路由 — quecadp 内核模块双栈打标, 规则镜像 v4
-    ip -6 rule del fwmark $W1_MARK/$W_MASK table $T1 2>/dev/null
-    ip -6 rule add fwmark $W1_MARK/$W_MASK table $T1 priority 101
-    ip -6 rule del fwmark $W2_MARK/$W_MASK table $T2 2>/dev/null
-    ip -6 rule add fwmark $W2_MARK/$W_MASK table $T2 priority 102
-    ip -6 rule del priority 50 2>/dev/null
-    ip -6 rule add to fd42:9ac1:7e50::/64 lookup main priority 50   # 入向LAN护盾(v6)
-    ip -6 route replace default dev $W1_IF table $T1 2>/dev/null
-    log "dp: v4+v6 rules+t1 ready"
-}
-
-# v2.4: v6 自建分流引擎(RE方案b落地) — 对照实验实锤: 模块对 v4 完美分流(16/16)
-# 但对 v6 全标 wan2(76/76, 常数哈希, 运行时缺陷; 静态逆向两族同码看不出)。
-# 低8位标记体系(RE共处配方): W1=0x65 W2=0x66 mask 0xff —— 模块只写高6位,互不干扰;
-# 本链 mangle(-150) 后手覆盖模块当包 skb 标记, CONNMARK 低8位存取做粘性。
-# v6 规则改查低8位(0x65/0xff→T100, 0x66/0xff→T200); 游戏PC v6 MAC钉死在链头。
-M6_LOW1=0x65; M6_LOW2=0x66
-fw6_rules() {
-    ip -6 rule del fwmark $W1_MARK/$W_MASK table $T1 2>/dev/null
-    ip -6 rule del fwmark $W2_MARK/$W_MASK table $T2 2>/dev/null
-    # v2.6: 低8位规则优先级90/91 — 先于高位规则(101/102)匹配, 双活时自建
-    # 引擎全权路由(否则模块判WAN1的目的绕过源端口分流)
-    ip -6 rule del fwmark $M6_LOW1/0xff table $T1 2>/dev/null
-    ip -6 rule add fwmark $M6_LOW1/0xff table $T1 priority 90
-    ip -6 rule del fwmark $M6_LOW2/0xff table $T2 2>/dev/null
-    ip -6 rule add fwmark $M6_LOW2/0xff table $T2 priority 91
-}
-fw6_setup() {  # $1=w2_on(1=双路分流, 0=家宽死全走5G); 5G死时用 fw6_setup_alive2
-    ip6tables -t mangle -D PREROUTING -i br-lan -j WANAGG6 2>/dev/null
-    ip6tables -t mangle -F WANAGG6 2>/dev/null
-    ip6tables -t mangle -X WANAGG6 2>/dev/null
-    ip6tables -t mangle -N WANAGG6
-    ip6tables -t mangle -A WANAGG6 -m conntrack --ctstate ESTABLISHED,RELATED \
-        -j CONNMARK --restore-mark --mask 0xff
-    # v6 钉死家宽(与v4 cmd6钉死对齐): 从 agg_pins.conf 取所有 op=2 的 MAC
-    # (v2.11: 原为单MAC硬编码; 钉死表 /data/gw/agg_pins.conf, 模板见仓库 example)
-    # (v2.12: 主备模式下跳过 — 待命侧不该收到任何流量, 钉死语义不适用)
-    if [ "$PMODE" = 0 ]; then
-        while read -r PIN_MAC PIN_OP; do
-            case "$PIN_MAC" in "#"*|"") continue ;; esac
-            [ "$PIN_OP" = "2" ] || continue
-            ip6tables -t mangle -A WANAGG6 -m mac --mac-source "$PIN_MAC" \
-                -j MARK --set-mark $M6_LOW2/0xff
-        done < /data/gw/agg_pins.conf
-    fi
-    if [ "$1" = "0" ]; then
-        # 家宽死: 全部新流 -> W1(5G)
-        ip6tables -t mangle -A WANAGG6 -m conntrack --ctstate NEW \
-            -j MARK --set-mark $M6_LOW1/0xff
-    else
-        # 双路: 源端口区间确定性分流(xt_statistic无ipv6; OS随机sport≈均匀, 40/60)
-        # v2.8: 全部规则加低8位==0守卫 — MARK覆盖语义下, 无守卫时①链尾catchall
-        # 吞掉sport规则刚写的0x65 ②sport规则吞掉链头MAC钉死的0x66(v2.4起钉死
-        # 实际失效, 只因Windows临时端口多落高端段与钉值同路而未被暴露)
-        ip6tables -t mangle -A WANAGG6 -p tcp -m conntrack --ctstate NEW \
-            -m mark --mark 0/0xff --sport 0:26213 -j MARK --set-mark $M6_LOW1/0xff
-        ip6tables -t mangle -A WANAGG6 -p tcp -m conntrack --ctstate NEW \
-            -m mark --mark 0/0xff --sport 26214:65535 -j MARK --set-mark $M6_LOW2/0xff
-        ip6tables -t mangle -A WANAGG6 -p udp -m conntrack --ctstate NEW \
-            -m mark --mark 0/0xff --sport 0:26213 -j MARK --set-mark $M6_LOW1/0xff
-        ip6tables -t mangle -A WANAGG6 -p udp -m conntrack --ctstate NEW \
-            -m mark --mark 0/0xff --sport 26214:65535 -j MARK --set-mark $M6_LOW2/0xff
-        # v2.7: catchall 同守卫 — 只兜底未被上游规则标记的包
-        ip6tables -t mangle -A WANAGG6 -m conntrack --ctstate NEW \
-            -m mark --mark 0/0xff -j MARK --set-mark $M6_LOW2/0xff
-    fi
-    ip6tables -t mangle -A WANAGG6 -j CONNMARK --save-mark --mask 0xff
-    ip6tables -t mangle -A PREROUTING -i br-lan -j WANAGG6
-}
-fw6_setup_alive2() {  # 5G死: 全部新流 -> W2(家宽)
-    ip6tables -t mangle -D PREROUTING -i br-lan -j WANAGG6 2>/dev/null
-    ip6tables -t mangle -F WANAGG6 2>/dev/null
-    ip6tables -t mangle -X WANAGG6 2>/dev/null
-    ip6tables -t mangle -N WANAGG6
-    ip6tables -t mangle -A WANAGG6 -m conntrack --ctstate ESTABLISHED,RELATED \
-        -j CONNMARK --restore-mark --mask 0xff
-    ip6tables -t mangle -A WANAGG6 -m conntrack --ctstate NEW \
-        -j MARK --set-mark $M6_LOW2/0xff
-    ip6tables -t mangle -A WANAGG6 -j CONNMARK --save-mark --mask 0xff
-    ip6tables -t mangle -A PREROUTING -i br-lan -j WANAGG6
-}
-
-kernel_apply() {  # $1=s1(5G) $2=s2(家宽) — vendor ioctl via multiwan_ctl+fhstub
-    LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib LD_PRELOAD=/data/gw/fhstub.so \
-        /data/gw/multiwan_ctl 1 $W1_PCT $W2_PCT $1 $2 >>$LOG 2>&1
-    grep -q "Current mode: 1" /proc/multi_wan/mode 2>/dev/null
-}
-
-# iptables 引擎: WANAGG 链重建 (v2.17: 免插件配方 — 本机 iptables 内建 tcp/udp/mark/
-# connmark 匹配, 而 libxt_statistic.so 缺 libxtables.so.12 不可用, libxt_mac 根本
-# 不存在; 分流改源端口区间确定性(v6 同款), 钉死改源 IP(pin MAC 经邻居表解析))
-pin_ip() {  # $1=mac -> 当前IP(空=未解析)
-    ip neigh | grep -i "$1" | awk '{print $1}' | grep -E '^[0-9.]+$' | head -1
-}
-fw_setup() {  # $1=w2_pct(家宽份额 0-100, 死侧归零后的有效值)
-    iptables -t mangle -D PREROUTING -i br-lan -j WANAGG 2>/dev/null
-    iptables -t mangle -F WANAGG 2>/dev/null
-    iptables -t mangle -X WANAGG 2>/dev/null
-    iptables -t mangle -N WANAGG
-    # 已建流: 恢复 ct mark (粘性; ctmark 0 无害)
-    iptables -t mangle -A WANAGG -m conntrack --ctstate ESTABLISHED,RELATED \
-        -j CONNMARK --restore-mark --mask $W_MASK
-    # 钉死(源IP; MAC->IP 邻居解析, 未上线则跳过留待下轮重建; 主备模式跳过)
-    if [ "$PMODE" = 0 ]; then
-        while read -r PIN_MAC PIN_OP; do
-            case "$PIN_MAC" in "#"*|"") continue ;; esac
-            if [ "$PIN_OP" = 1 ]; then PIN_MK=$W1_MARK; elif [ "$PIN_OP" = 2 ]; then PIN_MK=$W2_MARK; else continue; fi
-            PIN_IP=$(pin_ip "$PIN_MAC")
-            if [ -n "$PIN_IP" ]; then
-                iptables -t mangle -A WANAGG -s "$PIN_IP" -j MARK --set-mark $PIN_MK/$W_MASK
-                echo "$PIN_IP" > /tmp/pin_${PIN_MAC//:/}.ip
-            else
-                log "pin: $PIN_MAC 邻居未解析, 本轮跳过"
-            fi
-        done < /data/gw/agg_pins.conf
-    fi
-    # 新流: 源端口区间确定性分流(OS 临时端口近似均匀; 与 v6 引擎同款设计)
-    if [ "$1" = "0" ]; then
-        iptables -t mangle -A WANAGG -m conntrack --ctstate NEW -m mark --mark 0/$W_MASK \
-            -j MARK --set-mark $W1_MARK/$W_MASK
-    elif [ "$1" = "100" ]; then
-        iptables -t mangle -A WANAGG -m conntrack --ctstate NEW -m mark --mark 0/$W_MASK \
-            -j MARK --set-mark $W2_MARK/$W_MASK
-    else
-        CUT=$(( (65535 * $1) / 100 ))
-        for PR in tcp udp; do
-            iptables -t mangle -A WANAGG -p $PR -m conntrack --ctstate NEW -m mark --mark 0/$W_MASK \
-                --sport 0:$CUT -j MARK --set-mark $W2_MARK/$W_MASK
-            iptables -t mangle -A WANAGG -p $PR -m conntrack --ctstate NEW -m mark --mark 0/$W_MASK \
-                --sport $((CUT+1)):65535 -j MARK --set-mark $W1_MARK/$W_MASK
-        done
-        # catchall: 未标记的非 tcp/udp 新流 -> 5G
-        iptables -t mangle -A WANAGG -m conntrack --ctstate NEW -m mark --mark 0/$W_MASK \
-            -j MARK --set-mark $W1_MARK/$W_MASK
-    fi
-    # 保存 ct mark 供后续包恢复
-    iptables -t mangle -A WANAGG -j CONNMARK --save-mark --mask $W_MASK
-    iptables -t mangle -A PREROUTING -i br-lan -j WANAGG
-}
-
-# ---------- eth0 租约管理 (修 wan_policy2 v1.3 缺口: exec 路径不拉续租守护,
-# ---------- deconfig flush 后无人补 IP -> 家宽静默失效) ----------
-ensure_lease() {
-    ip link set $W2_IF up 2>/dev/null   # v1.4: PHY 只在 ifup 后 attach, 别再裸 DOWN
-    if [ -z "$(ip -4 addr show $W2_IF 2>/dev/null | grep inet)" ]; then
-        # v1.6: 本机busybox无timeout(127静默失败的元凶); 载波守卫防链路断时udhcpc长挂
-        # v2.19: FORM=static 跳过 — 静态 IP 归 rc19 档案管(开机窗口此处狂发
-        #        DHCPDISCOVER 到未认证口是纯噪声, 2026-10-07 实弹 15s 一条刷屏)
-        if [ "$(cat /sys/class/net/$W2_IF/carrier 2>/dev/null)" = "1" ] && \
-           ! grep -q '^FORM=static' /data/gw/uplink.conf 2>/dev/null; then
-            log "lease: no IP on $W2_IF, one-shot udhcpc"
-            # v1.5: 唯一所有者=本循环; 弃 renewal 守护(双udhcpc打架=全网黑洞根源)
-            udhcpc -i $W2_IF -n -q -t 3 -T 3 -p $UDHCPC_PID -s $UDHCPC_SCRIPT >/dev/null 2>&1
-        fi
-    fi
-    # v1.5: 双默认看门狗 — 每周期只补缺失, 不动存量; 谁冲刷都 5s 内自愈
-    # v1.7: to-LAN 护盾同上看门狗(入向回包带ct-mark, 无此规则会被fwmark劫持回WAN表
-    #       原路弹回公网 = 全LAN黑洞; 原属wan_policy2, 退役后重启即蒸发)
-    ip rule show | grep -q "to $LAN_NET lookup main" || \
-        ip rule add to $LAN_NET lookup main priority 50
-    # v2.30(A1): 蜂窝探活路由 — metric 250(劣于家宽备用 200)。先立新再拆旧,
-    #   避免探活路由空窗; 旧 metric 50 按精确匹配单条清除(自愈幂等)。
-    ip route show default | grep -q "dev $W1_IF metric $W1_PRB_METRIC" || \
-        ip route add default dev $W1_IF metric $W1_PRB_METRIC 2>/dev/null
-    ip route del default dev $W1_IF metric 50 2>/dev/null
-    if [ -s $GW_FILE ]; then
-        BB_GW=$(head -1 $GW_FILE)
-        ip route replace default via $BB_GW dev $W2_IF table $T2 2>/dev/null
-        ip route show default | grep -q "via $BB_GW dev $W2_IF" || \
-            ip route add default via $BB_GW dev $W2_IF metric 200 2>/dev/null
-        # v2.31: main 表主默认由 main_primary_apply() 独占维护(每周期复位) ——
-        #   本处只保留探活路由与家宽备用, 不再写主默认, 避免多写方互抢。
-    fi
-    # v2.3: eth0 NAT/FORWARD 看门狗(真补上——v1.7提交曾虚报覆盖, 手工规则重启即蒸发,
-    #       eth0裸源出公网=黑洞; 本块与路由看门狗同周期自愈)
-    iptables -t nat -C POSTROUTING -s $LAN_NET -o $W2_IF -j MASQUERADE 2>/dev/null || \
-        iptables -t nat -A POSTROUTING -s $LAN_NET -o $W2_IF -j MASQUERADE
-    iptables -C FORWARD -i br-lan -o $W2_IF -j ACCEPT 2>/dev/null || \
-        iptables -I FORWARD -i br-lan -o $W2_IF -j ACCEPT
-    iptables -C FORWARD -i $W2_IF -o br-lan -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || \
-        iptables -I FORWARD -i $W2_IF -o br-lan -m state --state ESTABLISHED,RELATED -j ACCEPT
-    # v2.0: v6 T200 家宽路由学习(从 main 的 RA 默认路由取 gw, 每周期刷新)
-    V6GW=$(ip -6 route show default 2>/dev/null | grep "dev $W2_IF" | grep -oE "via [a-f0-9:]+ " | awk '{print $2}' | head -1)
-    [ -n "$V6GW" ] && ip -6 route replace default via $V6GW dev $W2_IF table $T2 2>/dev/null
-}
-
 # ---------- v2.31: 未打标主路 = 聚合设定推导(不写死优先级) ----------
-# 未打标流量 = 本机自身(netagent/DNS/NTP/测速…)+ 丢标记的转发流。原先这一路
-# 只由状态机在**迁移瞬间**决定, 且 v6 完全没人管(靠两侧 RA metric 固定偏好蜂窝)
-# —— 等于把优先级写死。现统一为: 两侧地址族都由"真实存活 + 模式/权重"推导同一
-# 主路, 且**每周期无条件复位**(边沿触发会被外力冲刷后滞留, 与 led_mgr v2.0 同一课)。
-# 语义: 只一侧活 → 该侧; 双活 → 模式(eth_prio/eth_only→家宽, cell_prio/cell_only
-#   →蜂窝, weight→权重大的一侧, 平局取家宽); 都不活 → 不猜, 保持现状。
+# 未打标流量 = 本机自身(netagent/DNS/NTP/测速…)+ 丢标记的转发流。统一为: 两侧地址
+# 族都由"真实存活 + 模式/权重"推导同一主路, 且**每周期无条件复位**(边沿触发会被
+# 外力冲刷后滞留, 与 led_mgr v2.0 同一课)。
 prim_want() {   # $1=ns1(蜂窝真实存活 0/1) $2=ns2(家宽真实存活 0/1)
     case "$1$2" in
         10) echo w1 ;;
@@ -331,10 +73,15 @@ prim_want() {   # $1=ns1(蜂窝真实存活 0/1) $2=ns2(家宽真实存活 0/1)
 
 # main 表(未打标主路)的**唯一写方**。v4: 主路 metric 0(顺带挤掉对侧 metric-0);
 # v6: 主路我方显式条目 metric V6_PRI_METRIC, 对侧我方条目删除、RA 默认留作兜底。
-main_primary_apply() {   # $1=w1|w2 (空=状态未知, 跳过)
-    _p=$1; [ -n "$_p" ] || return 0
-    # --- v4 ---
+# v3.0: 头部先维持蜂窝探活可达(与主路无关也要保 —— 双死态探活是恢复的前提),
+#   BB_GW 自读(原由 ensure_lease 设置, wan_eth 拆出后本函数是唯一读者)。
+main_primary_apply() {   # $1=w1|w2 (空=状态未知, 仅维持探活路由)
+    ip route show default | grep -q "dev $W1_IF metric $W1_PRB_METRIC" || \
+        ip route add default dev $W1_IF metric $W1_PRB_METRIC 2>/dev/null
     ip route del default dev $W1_IF metric 50 2>/dev/null   # 清历史遗留(旧写方)
+    _p=$1; [ -n "$_p" ] || return 0
+    BB_GW=$(head -1 $GW_FILE 2>/dev/null)
+    # --- v4 ---
     if [ "$_p" = w2 ]; then
         if [ -n "$BB_GW" ]; then
             ip route replace default via $BB_GW dev $W2_IF 2>/dev/null
@@ -344,8 +91,6 @@ main_primary_apply() {   # $1=w1|w2 (空=状态未知, 跳过)
     else
         ip route replace default dev $W1_IF 2>/dev/null
     fi
-    ip route show default | grep -q "dev $W1_IF metric $W1_PRB_METRIC" || \
-        ip route add default dev $W1_IF metric $W1_PRB_METRIC 2>/dev/null
     # --- v6(与 v4 同一主路) ---
     # 家宽侧需 RA 学到的下一跳(via 链路本地地址); 蜂窝侧用**设备路由**
     #   (default dev ccmni2 —— 与 table 100 里已验证可用的同款形态), 不依赖
@@ -363,31 +108,7 @@ main_primary_apply() {   # $1=w1|w2 (空=状态未知, 跳过)
 }
 P_LAST=""
 
-ensure_rules() {  # v2.5: fwmark策略规则存在性看门狗 — 只补活侧缺失, 不动存量
-    # 病例(2026-10-05): 高位v6规则在运行中被外力蒸发(boot期home瞬断恢复后消失),
-    # 无看门狗=静默丢一半路由规则; 现与路由/NAT看门狗同周期自愈
-    if [ $S1 -eq 1 ]; then
-        ip rule show | grep -q "$W1_MARK/$W_MASK lookup $T1" || \
-            ip rule add fwmark $W1_MARK/$W_MASK table $T1 priority 101 2>/dev/null
-        ip -6 rule show | grep -q "$W1_MARK/$W_MASK lookup $T1" || \
-            ip -6 rule add fwmark $W1_MARK/$W_MASK table $T1 priority 101 2>/dev/null
-        ip -6 rule show | grep -q "$M6_LOW1/0xff lookup $T1" || \
-            ip -6 rule add fwmark $M6_LOW1/0xff table $T1 priority 90 2>/dev/null
-    fi
-    if [ $S2 -eq 1 ]; then
-        ip rule show | grep -q "$W2_MARK/$W_MASK lookup $T2" || \
-            ip rule add fwmark $W2_MARK/$W_MASK table $T2 priority 102 2>/dev/null
-        ip -6 rule show | grep -q "$W2_MARK/$W_MASK lookup $T2" || \
-            ip -6 rule add fwmark $W2_MARK/$W_MASK table $T2 priority 102 2>/dev/null
-        ip -6 rule show | grep -q "$M6_LOW2/0xff lookup $T2" || \
-            ip -6 rule add fwmark $M6_LOW2/0xff table $T2 priority 91 2>/dev/null
-    fi
-    # 入向LAN护盾(v6 版也纳入看门狗; v4版在 ensure_lease)
-    ip -6 rule show | grep -q "to fd42:9ac1:7e50::/64 lookup main" || \
-        ip -6 rule add to fd42:9ac1:7e50::/64 lookup main priority 50
-}
-
-# ---------- 探活 (mobilenetwork 原版配方) ----------
+# ---------- 探活 ----------
 probe() {  # $1=iface $2=dst
     # v2.27: -W2→-W1 — 探测最坏耗时减半(w2_alive 3 目标×超时), 死亡确认窗口
     #   相应收窄; 双路 RTT 均 <<1s, 1s 超时余量充足。
@@ -415,17 +136,14 @@ data_alive() {   # $1=iface — 数据面实证: 多样 ICMP → TCP 兜底
 }
 w1_alive() { data_alive $W1_IF; }
 w2_data_alive() {  # 以太数据面实证 — 仅公网目标, 与认证程序解耦
-    # v2.28: 移除网关探针短路(宵断宽限期网关仍答 ICMP)。v2.32: 目标多样化, 见上。
     data_alive $W2_IF
 }
 w2_alive() {
     # v2.24: 协议级信号优先 — authd 会话状态文件(/tmp/authd_state: up|down+epoch,
     #   由 EAP-Success/重询问/Failure 实时刷新)。新鲜 down=死(00:06 型事件的服务器
     #   EAP-Failure 即刻可见, 检测延迟=0), 保留零延迟快路径。
-    # v2.26(2026-10-09 21:30 实弹, 以太断链数分钟不转移): 新鲜 up 不再单独构成"活"。
-    #   根因: authd 侧 succ 一旦置位即永不复位, 只要收到任何 EAPOL 帧(含服务器周期性
-    #   Req-Identity)就 state_write("up") —— 认证帧在途而**数据面已死**时, up 永远新鲜,
-    #   w2_alive 恒返 0 → eth_prio 下 5G 待命侧永无接班机会(实测 15h: 06:02 起 5g=0)。
+    # v2.26(2026-10-09 21:30 实弹): 新鲜 up 不再单独构成"活"(authd 侧 succ 一旦
+    #   置位即永不复位, 任何 EAPOL 帧都刷 up —— 认证帧在途而数据面已死时恒"活")。
     #   新语义: up 只作为"免长探测"的加速项, 必须叠加数据面 ICMP 实证才判活;
     #   down 仍是协议级零延迟判死。转移上界不变(硬截止 25s + 一个环循)。
     [ "$AUTHD_DOWN" = 1 ] && return 1
@@ -433,21 +151,7 @@ w2_alive() {
     w2_data_alive
 }
 
-# v2.15: 旁路模式 — 拆全部分流装置(mangle 链 + fwmark 策略规则 v4/v6 高/低
-# 位), 流量回落 main 表 = 走状态机当前主路; NAT/租约/路由看门狗不受影响
-agg_bypass() {
-    iptables  -t mangle -D PREROUTING -i br-lan -j WANAGG 2>/dev/null
-    iptables  -t mangle -F WANAGG 2>/dev/null;  iptables  -t mangle -X WANAGG 2>/dev/null
-    ip6tables -t mangle -D PREROUTING -i br-lan -j WANAGG6 2>/dev/null
-    ip6tables -t mangle -F WANAGG6 2>/dev/null; ip6tables -t mangle -X WANAGG6 2>/dev/null
-    for R in "fwmark $W1_MARK/$W_MASK table $T1" "fwmark $W2_MARK/$W_MASK table $T2" \
-             "fwmark $M6_LOW1/0xff table $T1" "fwmark $M6_LOW2/0xff table $T2"; do
-        while ip rule del $R 2>/dev/null; do :; done
-        while ip -6 rule del $R 2>/dev/null; do :; done
-    done
-}
-
-# ---------- 主循环 ----------
+# ---------- CLI ----------
 # v2.31: 干跑入口(自检/回归用, 不碰现场): 打印给定模式与存活态下的未打标主路。
 #   usage: wan_agg.sh --dry-primary <mode> <ns1> <ns2> [w1_pct]
 case "$1" in
@@ -460,64 +164,22 @@ case "$1" in
     # 维护/验证入口: 立即把未打标主路(v4+v6)设为 w1|w2 并回显结果。守护在跑时
     #   下个环循会按模式复位 —— 手动覆盖是瞬态的(level-driven 的自然结果)。
     [ -n "$2" ] || { echo "usage: wan_agg.sh --set-primary w1|w2"; exit 2; }
-    BB_GW=$(head -1 $GW_FILE 2>/dev/null)
     main_primary_apply "$2"
     echo "main-primary -> $2"
     ip route show default; ip -6 route show default
     exit 0 ;;
 esac
 
-log "===== wan_agg v2.34 start (main-primary 由模式推导; 判活目标多样+发布 wan_alive) ====="
-# v2.34: 钉死表**缺省播种** —— 活文件 /data/gw/agg_pins.conf 是设备侧自管(不入库,
-#   含个人 MAC, EXTRA_KEEP 不参与部署/体检比对), 但"文件缺失"会让下面的重放循环
-#   报错且机制静默失效(weight 模式下该报错每环循重复)。故从随版本部署的只读基线
-#   agg_pins.default 播种: **缺省才写**, 已有钉死永不覆盖(与 uplink.conf 同法)。
-[ -r /data/gw/agg_pins.conf ] || cp /data/gw/agg_pins.default /data/gw/agg_pins.conf 2>/dev/null
-# v1.8: MAC 钉死表重放(内核模块状态不跨重启, 游戏PC等需开机重新钉)
-while read -r MAC OP; do
-    case "$MAC" in \#*|"") continue;; esac
-    LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib LD_PRELOAD=/data/gw/fhstub.so         /data/gw/multiwan_ctl mac "$MAC" "$OP" >>$LOG 2>&1
-    log "pin: $MAC op=$OP rc=$?"
-done < /data/gw/agg_pins.conf
+log "===== wan_agg v3.0 start (lib 拆分; eth0 归 wan_eth; 判活多样+wan_alive) ====="
+agg_conf_seed
+pin_replay
 # 引擎探测: vendor ioctl (multiwan_ctl+fhstub; proc 写已证伪为只读) 失败则 iptables
 kernel_apply 1 1 && ENGINE=vendor || ENGINE=iptables
 echo "$ENGINE" > /tmp/wan_engine
 # v2.15: 聚合总开关 (agg.conf ENABLE=0|1, GUI agg_mode 端点热切)
 AGG_ON=1
 grep -q '^ENABLE=0' /data/gw/agg.conf 2>/dev/null && AGG_ON=0
-# v2.18: MODE 读取 (无 agg.conf 时从 defaults 播种; 无 MODE 键走 legacy 派生)
-if [ ! -r /data/gw/agg.conf ] && [ -r /data/gw/defaults.conf ]; then
-    DM=$(grep -m1 '^AGG_MODE=' /data/gw/defaults.conf 2>/dev/null | cut -d= -f2)
-    DW=$(grep -m1 '^AGG_W1_PCT=' /data/gw/defaults.conf 2>/dev/null | cut -d= -f2)
-    case "$DM" in weight|cell_prio|eth_prio|cell_only|eth_only) ;; *) DM=weight ;; esac
-    case "$DW" in ''|*[!0-9]*) DW=30 ;; esac
-    [ "$DW" -ge 5 ] && [ "$DW" -le 95 ] || DW=30
-    printf 'MODE=%s
-W1_PCT=%s
-W2_PCT=%s
-ENABLE=1
-' "$DM" "$DW" "$((100-DW))" > /data/gw/agg.conf
-    log "agg.conf seeded from defaults: MODE=$DM W1=$DW"
-fi
-if [ -r /data/gw/agg.conf ]; then
-    . /data/gw/agg.conf
-    # v2.18: 旧格式迁移(无 MODE 键) — 100/0 语义映射优先模式, 其余 weight(钳5..95)
-    if ! grep -q '^MODE=' /data/gw/agg.conf; then
-        case "$W1_PCT" in 100) MODE=cell_prio ;; 0) MODE=eth_prio ;; *) MODE=weight ;; esac
-        [ "$MODE" = weight ] || W1_PCT=30
-        printf 'MODE=%s
-W1_PCT=%s
-W2_PCT=%s
-ENABLE=1
-' "$MODE" "$W1_PCT" "$((100-W1_PCT))" > /data/gw/agg.conf
-        log "agg.conf migrated to v2.18 format: MODE=$MODE W1=$W1_PCT"
-    fi
-    case "$MODE" in weight|cell_prio|eth_prio|cell_only|eth_only) ;; *) MODE=weight ;; esac
-    case "$W1_PCT" in ''|*[!0-9]*) W1_PCT=30 ;; esac
-    [ "$W1_PCT" -ge 5 ] && [ "$W1_PCT" -le 95 ] || W1_PCT=30
-    W2_PCT=$((100 - W1_PCT))
-    PMODE=$(pmode_of_mode "$MODE")
-fi
+agg_conf_load 30
 dp_setup
 S1=1; S2=1; D1=0; D2=0; U1=0; U2=0
 # v2.21: 安全启动 — W2_OK=0(eth 从未验证成功) => 硬截止立即判死 => 5G 起步;
@@ -526,7 +188,7 @@ S1=1; S2=1; D1=0; D2=0; U1=0; U2=0
 W1_OK=$(date +%s); W2_OK=0
 if [ "$AGG_ON" = 1 ]; then
     [ "$ENGINE" = iptables ] && fw_setup 60
-    fw6_rules; fw6_setup 1   # v2.4: v6 低8位自建分流(模块v6哈希常数缺陷的对策)
+    fw6_rules; fw6_setup 1   # v2.4: v6 低8位自建分流
 else
     agg_bypass
     echo "off" > $MODE_FILE
@@ -540,9 +202,9 @@ while :; do
         log "5g iface moved: $W1_IF -> $CW"
         W1_IF=$CW
         ip route replace default dev $W1_IF table $T1 2>/dev/null
-        # v1.4: main 主默认需随活跃 ccmni 重指(netagent 漂移后可能指着死口)。
-        # v2.31: 该重指已由 main_primary_apply() 每周期统一完成(它用更新后的
-        #   $W1_IF), 本处不再写 main, 避免第二写方 —— 只保证探活路由指向新口。
+        # v1.4: 探活路由随活跃 ccmni 重指(netagent 漂移后可能指着死口);
+        #   main 主默认由 main_primary_apply() 每周期统一完成(它用更新后的
+        #   $W1_IF), 本处不写 main, 避免第二写方 —— 只保证探活路由指向新口。
         ip route del default dev $W1_IF metric 50 2>/dev/null
         ip route replace default dev $W1_IF metric $W1_PRB_METRIC 2>/dev/null
         iptables -t nat -C POSTROUTING -s $LAN_NET -o $W1_IF -j MASQUERADE 2>/dev/null || \
@@ -569,23 +231,17 @@ while :; do
             log "agg: ON -> re-engage"
         fi
     fi
-    # v2.9: 权重在线热更 — GUI(api.sh agg_weights)写 /data/gw/agg.conf,
-    # 本守护每周期重读, 值变即下发 ioctl + 记日志(状态迁移不再用旧权重打回)
+    # v2.9: 权重/模式在线热更 — GUI(api.sh agg_weights/agg_mode)写 /data/gw/agg.conf,
+    # 本守护每周期重读, 值变即记日志并重装(状态迁移不再用旧权重打回);
+    # 校验/钳位归 lib.agg_conf_load(v3.0 收敛, 原三处重复)
     if [ -r /data/gw/agg.conf ] && [ "$AGG_ON" = 1 ]; then
         OW1=$W1_PCT; OMODE=$MODE
-        . /data/gw/agg.conf
-        case "$MODE" in weight|cell_prio|eth_prio|cell_only|eth_only) ;; *) MODE=$OMODE ;; esac
+        agg_conf_load
         if [ "$MODE" != "$OMODE" ]; then          # v2.18: 模式热切
-            PMODE=$(pmode_of_mode "$MODE")
             log "mode hot-reload: $OMODE -> $MODE (pmode=$PMODE)"
             FORCE=1
         fi
-        case "$W1_PCT" in
-            ''|*[!0-9]*) W1_PCT=$OW1 ;;
-        esac
-        if [ "$W1_PCT" -ge 5 ] && [ "$W1_PCT" -le 95 ]; then :; else W1_PCT=$OW1; fi
         if [ "$W1_PCT" != "$OW1" ]; then
-            W2_PCT=$((100 - W1_PCT))
             log "weights hot-reload: $OW1/$((100-OW1)) -> $W1_PCT/$W2_PCT"
             # v2.18: pmode 由 MODE 驱动(模式热切已在上面处理); 权重只影响分流比例
             if [ "$MODE" = weight ]; then
@@ -595,7 +251,6 @@ while :; do
             fi
         fi
     fi
-    ensure_lease
     [ "$AGG_ON" = 1 ] && ensure_rules
     # v2.17: 钉死IP漂移检测 — pin MAC 的邻居IP变了(或新上线)则重建分流链
     if [ "$AGG_ON" = 1 ] && [ "$PMODE" = 0 ] && [ "$ENGINE" = iptables ]; then
@@ -634,11 +289,8 @@ while :; do
     fi
     now=$(date +%s)
     NS1=$S1; NS2=$S2
-    # v2.20: 硬截止判死 — 活侧距上次成功探活 >60s 即判死, 跳过3连击。
-    #   背景(2026-10-08 00:06 实弹): 上行 00:05:56 被服务器踢会话(端口未授权,
-    #   v4gw/v4net/v6 三死, v6watch 30s 采样实证), 3连击机制却拖到 00:12:56 才
-    #   完成转移(6.5min) = 断网扩大的根因。计数制可被迟滞/饥饿模式饿死; 时间
-    #   截止不可 — 无论探测序列怎样, 故障转移上界 = 60s + 一个环循周期。
+    # v2.20: 硬截止判死 — 活侧距上次成功探活 >25s 即判死, 跳过3连击(计数制可被
+    #   迟滞/饥饿模式饿死; 时间截止不可, 故障转移上界 = 60s + 一个环循周期)
     [ $S1 -eq 1 ] && [ $((now - W1_OK)) -gt 25 ] && { NS1=0; D1=99; }
     [ $S2 -eq 1 ] && [ $((now - W2_OK)) -gt 25 ] && { NS2=0; D2=99; }
     # v2.24: authd 明示 down => 协议级判死(跳过连击) — 服务器踢会话的 Failure
@@ -653,7 +305,6 @@ while :; do
     # 3 连续判死/判活 (原厂 brokenHeartCount 同款节奏, 5s 周期 -> ~15s 收敛)
     [ $S1 -eq 1 ] && [ $D1 -ge 3 ] && NS1=0
     # v2.23: 恢复迟滞 U>=6 — 死亡快(25s 硬截止)恢复慢(持续通过), 掐灭抖动源
-    # (00:07:46-53 实弹: 上行策略态探活间歇通过 -> 状态抖动 -> 规则重建churn -> 8s 黑洞)
     [ $S1 -eq 0 ] && [ $U1 -ge 6 ] && NS1=1
     [ $S2 -eq 1 ] && [ $D2 -ge 3 ] && NS2=0
     [ $S2 -eq 0 ] && [ $U2 -ge 6 ] && NS2=1
@@ -671,8 +322,8 @@ while :; do
     main_primary_apply "$(prim_want "$NS1" "$NS2")"
     # v2.32: 发布判活结论 —— 本进程是**数据面判活的唯一权威**(每环循实测),
     #   led_mgr(WAN 灯)与 api.sh(状态页)消费本文件, 不再各自用一套判据
-    #   (2026-10-16 宵断实弹: 三处共用"223.5.5.5 通即通"的错判据 → 灯/状态页/
-    #   转移全部谎报家宽正常)。消费方须校验 ts 新鲜度, 过期回退自身探测。
+    #   (2026-10-16 宵断实弹: 三处共用错判据 → 灯/状态页/转移全部谎报)。
+    #   消费方须校验 ts 新鲜度, 过期回退自身探测。
     echo "home=$NS2 cell=$NS1 ts=$(date +%s)" > /tmp/wan_alive
     if [ "$AGG_ON" = 1 ] && { [ "$E1$E2" != "$S1$S2" ] || [ "${FORCE:-0}" = 1 ]; }; then
         FORCE=0
@@ -682,8 +333,8 @@ while :; do
             if [ $E1 -eq 1 ] && [ $E2 -eq 1 ]; then fw_setup $W2_PCT
             elif [ $E2 -eq 0 ]; then fw_setup 0
             else fw_setup 100; fi
-            # v2.5: conntrack二进制损坏(relocation: nfct_nlmsg_build_filter not found)
-            #       conntrack -D 在v3从未生效, 移除死调用 — 断而必破由下方fwmark摘除承担
+            # v2.5: conntrack二进制损坏(relocation) conntrack -D 从未生效, 已移除
+            #       死调用 — 断而必破由下方fwmark摘除承担
         fi
         # v2.4: v6 链按新态重建(低8位体系; 双路/单路形态)
         if   [ $E1 -eq 1 ] && [ $E2 -eq 1 ]; then fw6_setup 1
@@ -707,7 +358,7 @@ while :; do
             ip -6 rule del fwmark $W1_MARK/$W_MASK table $T1 2>/dev/null
             ip -6 rule del fwmark $M6_LOW1/0xff table $T1 2>/dev/null
             # v2.31: main 表主默认不在此写 —— 由 main_primary_apply() 每周期按
-            #   "模式+权重+真实存活"统一维护(唯一写方, level-driven)。
+            # "模式+权重+真实存活"统一维护(唯一写方, level-driven)。
         else
             ip rule add fwmark $W1_MARK/$W_MASK table $T1 priority 101 2>/dev/null
             ip -6 rule add fwmark $W1_MARK/$W_MASK table $T1 priority 101 2>/dev/null
@@ -717,7 +368,7 @@ while :; do
         S1=$E1; S2=$E2
         echo "agg:$S1:$S2" > $MODE_FILE
     fi
-    # v2.22: 自适应节奏 — 任一侧有失败记录时加快环循(5s->2s), 死亡确认提速
+    # v2.22: 自适应节奏 — 任一侧有失败记录时加快环循(死亡确认提速)
     SLP=3   # v2.24: authd-up 免 ping 使健康环循变廉, 基础节奏 5s->3s
     [ $D1 -gt 0 ] || [ $D2 -gt 0 ] && SLP=2
     sleep $SLP

@@ -1,8 +1,11 @@
 #!/bin/sh
-# watchdog.sh v1.11 -- on-device continuous invariant monitor.
+# watchdog.sh v1.12 -- on-device continuous invariant monitor.
 # L13: "feature silently broken until manual inspection" countermeasure.
 # Runs every 30s; failures log + ALERT LED flash (5G orange); recovers silently.
 # Started by rc19.sh (pgrep guard); single instance.
+# v1.12 (2026-10-17 架构轮): +wan_eth 检查+自愈拉(有线 WAN 接口管理守护, 自 wan_agg
+#       ensure_lease 拆出 — 其为 eth0 租约续订/NAT 看门狗唯一写方, 静默死亡 = 家宽侧
+#       静默劣化: 租约到期/规则被冲刷后无人补)。
 # v1.11 (2026-10-15 蜂窝查询面失效实弹): +蜂窝查询路径活性告警 — 厂商 RIL 的
 #       ql_nw 子服务会静默失效(守护活着/数据面正常, 但 cells/endc 恒返
 #       -2147024889, GUI 小区与组网卡片静默报错)。告警不自动重启: 蜂窝为主力时
@@ -106,6 +109,7 @@ run_cycle() {
     check dnsmasq   "pidof dnsmasq"                  "DHCP/DNS"
     check dropbear  "netstat -tln 2>/dev/null | grep -q ':22.*LISTEN'"  "SSH"
     check wan_agg   "pgrep -f wan_agg.sh"            "aggregation supervisor"
+    check wan_eth   "pgrep -f wan_eth.sh"            "wired-WAN iface keeper"
     check fan_mgr   "pgrep -f fan_mgr.sh"            "fan manager"
 
     # ---- data plane invariants ----
@@ -169,7 +173,7 @@ run_cycle() {
         nohup sh /data/gw/log_keeper.sh >/dev/null 2>&1 &
     fi
     # led_mgr: 显示器守护(v1.7 自愈拉) — 静默死亡=指示灯无声谎报(10-14 事故
-    #   里用户对"灯还亮着"的判读是第一手症状, 灯不能哑)
+    # 里用户对"灯还亮着"的判读是第一手症状, 灯不能哑)
     if pgrep -f led_mgr.sh >/dev/null 2>&1; then
         set_state led_mgr 0 "LED manager"
     else
@@ -177,6 +181,16 @@ run_cycle() {
         FAILS=$((FAILS+1))
         nohup sh /data/gw/led_mgr.sh >/dev/null 2>&1 &
         logger -t watchdog "restarted led_mgr"
+    fi
+    # wan_eth: 有线 WAN 接口管理守护(v1.12, 架构轮拆分自 wan_agg ensure_lease);
+    #   死则拉起 — eth0 租约续订/NAT/FORWARD 看门狗停摆 = 家宽侧静默劣化
+    if pgrep -f wan_eth.sh >/dev/null 2>&1; then
+        set_state wan_eth 0 "wired-WAN iface keeper"
+    else
+        set_state wan_eth 1 "wired-WAN iface keeper"
+        FAILS=$((FAILS+1))
+        nohup sh /data/gw/wan_eth.sh >/dev/null 2>&1 &
+        logger -t watchdog "restarted wan_eth"
     fi
     # ql_wifi_sample 卡死清除(L28): stdin EOF 后死循环刷 syslog(实测 3700 行/s,
     #   日志环被冲至 18s 深)。CPU 累计 >=120s 即杀(交互等待不耗 CPU, 不误伤;
@@ -315,8 +329,8 @@ run_cycle() {
 
 # ---- main ----
 touch $LOG $STATE
-log "===== watchdog v1.11 start (alert LED 5G orange; WAN LED owned by led_mgr; +cell stats divergence +cell query liveness) ====="
-logger -t watchdog "watchdog v1.11 start"
+log "===== watchdog v1.12 start (alert LED 5G orange; WAN LED owned by led_mgr; +wan_eth keeper +cell stats divergence +cell query liveness) ====="
+logger -t watchdog "watchdog v1.12 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

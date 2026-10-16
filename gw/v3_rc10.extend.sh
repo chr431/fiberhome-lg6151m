@@ -1,5 +1,8 @@
 #!/bin/sh
-# rc19.sh v2 (=local v3_rc10.extend.sh) v2.28 -- Frankenstein v3.1: br-lan world + WiFi.
+# rc19.sh v2 (=local v3_rc10.extend.sh) v2.29 -- Frankenstein v3.1: br-lan world + WiFi.
+# v2.29: +wan_eth 有线 WAN 接口管理守护(架构轮自 wan_agg ensure_lease 拆出 —
+#        eth0 租约/NAT/路由看门狗独立于聚合存活, udhcpc 不再阻塞探活 FSM);
+#        wan_agg v3.0 同轮改为 source wan_agg_lib.sh(引擎落地层)。
 # v2.28: +log_keeper 日志持久化守护接线; v2.26: 中性命名清扫(注释去私有语境词, 零功能改动)
 # v2.25: 流量采样器接线(traffic_logger.sh)
 # v2.22(P1): static 档案补写 /tmp/wan.gw — wan_agg 表200默认路由与 eth_prio
@@ -141,6 +144,10 @@ pgrep -f log_keeper.sh >/dev/null || nohup sh /data/gw/log_keeper.sh >/dev/null 
 # --- dual-uplink aggregation last (v2.8: wan_agg supersedes wan_policy2;
 #     vendor quecadp kernel split via /proc/multi_wan + fwmark policy routing;
 #     5G+家宽 both active, per-flow 40/60, ~15s failover)
+# v2.29: 有线 WAN 接口管理守护先于聚合主管拉起(租约/NAT 看门狗独立成活;
+#     watchdog v1.12+ 自愈)。启动顺序在此无硬依赖(wan_agg 只读 sysfs/文件),
+#     纯粹是让 eth0 档案尽早就绪。
+pgrep -f wan_eth.sh >/dev/null || nohup sh /data/gw/wan_eth.sh >/tmp/wan_eth.out 2>&1 &
 sleep 15
 nohup sh /data/gw/wan_agg.sh >/tmp/wagg.out 2>&1 &
 

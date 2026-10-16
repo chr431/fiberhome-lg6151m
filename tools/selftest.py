@@ -11,9 +11,9 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
+v2.31: t_ril_single 更名(机制修正: SIGKILL 清场→收编制, 见 rc_netfh v3.6)。
 v2.30 (2026-10-17): +t_ril_single — RIL 管道四件(mtk_netagent/ql_netd/
-  ql_ril_service/mipc_submonitor)各须恰 1 实例(rc_netfh v3.5 SIGKILL 清场的
-  回归护栏; 原开机 SIGTERM 被厂商守护忽略 → 三件各双实例, 实弹发现)。
+  ql_ril_service/mipc_submonitor)各须恰 1 实例(开机双实例实弹发现的回归护栏)。
 v2.29 (2026-10-17 架构轮): 拆分护栏适配 — wan_agg v3.0 播种代码路径改指
   wan_agg_lib.sh(t_agg_pins_seed); wan_alive 的 api 消费方改指 api_sys.sh(v2.75
   域拆分); +t_agg_split(lib 在位且被主管 source/ensure_lease 不在主管) +
@@ -682,24 +682,6 @@ def t_agg_eth_daemon():
            "alive" if ok else "wan_eth dead (rc19/watchdog 应拉起)")
 
 
-@test("RIL 管道四件单实例 (rc_netfh SIGKILL 清场)")
-def t_ril_single():
-    # v2.30 (2026-10-17 实弹发现): rc_netfh 开机 SIGTERM 清场被厂商守护忽略 —
-    #   mtk_netagent/ql_netd/ql_ril_service 各存活两套(rc.d S22/S85 + rc_netfh
-    #   各一套)。双实例 = 未被理解的控制面冗余: ubus 仅一套注册成功(另一套空转),
-    #   两个 netagent 同消费 netlink 事件(多为 ignore 分支), 状态机深处竞态窗口
-    #   未知。rc_netfh v3.5 改 SIGKILL 清场; 本护栏断言四件各恰 1 实例。
-    #   (pidof 按 comm 匹配, 远端包装 shell comm="sh" 无自匹配问题。)
-    bad = []
-    for n in ("mtk_netagent", "ql_netd", "ql_ril_service", "mipc_submonitor"):
-        c = dev(f"pidof {n} | wc -w").strip()
-        if c != "1":
-            bad.append(f"{n}x{c or '0'}")
-    ok = not bad
-    record(t_ril_single._test_name, "cellular", ok,
-           "all x1" if ok else "; ".join(bad))
-
-
 @test("分流规则已安装 (模式感知)")
 def t_agg_rules():
     # v2.10: weight 模式须有 sport 分界(tcp+udp各2); 优先/仅模式为单路全量 MARK 规则
@@ -853,6 +835,27 @@ category("cellular")
 # L14 (2026-10-05): 第一阶段裁剪误杀 atcid → AT 通道(SMS/CSQ/锁下发)死亡
 # 3 天无人察觉 -- 数据面测试全绿。本类别自此同时覆盖:
 #   数据面 (ccmni/DNS) + 控制面 (AT/mipc) + 翻译层 (树/自管conf) + GUI 层
+
+
+@test("RIL 管道四件单实例 (rc_netfh 收编制)")
+def t_ril_single():
+    # v2.30 (2026-10-17 实弹发现): rc_netfh 开机"清场重拉"致 mtk_netagent/
+    #   ql_netd/ql_ril_service 各存活两套(rc.d S22/S85 + rc_netfh 各一套) —
+    #   双实例 = 未被理解的控制面冗余(ubus 仅一套注册成功另一套空转, 双 netagent
+    #   同消费 netlink, 状态机深处竞态窗口未知)。
+    # v3.1 (机制修正): v3.5 的 SIGKILL 清场被 procd respawn 层推翻(杀掉必复活,
+    #   且 rc_netfh 与 S22/S85 并发起跑); rc_netfh v3.6 终版 = 收编制(等 rc.d
+    #   套就绪只补缺席)。本护栏断言四件各恰 1 实例。
+    #   (pidof 按 comm 匹配, 远端包装 shell comm="sh" 无自匹配问题。)
+    bad = []
+    for n in ("mtk_netagent", "ql_netd", "ql_ril_service", "mipc_submonitor"):
+        c = dev(f"pidof {n} | wc -w").strip()
+        if c != "1":
+            bad.append(f"{n}x{c or '0'}")
+    ok = not bad
+    record(t_ril_single._test_name, "cellular", ok,
+           "all x1" if ok else "; ".join(bad))
+
 
 @test("ccmni 接口有 IPv4")
 def t_cel_iface():

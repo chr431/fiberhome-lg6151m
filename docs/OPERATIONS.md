@@ -25,7 +25,10 @@ python tools/deploy.py attic      # 设备侧流浪脚本归档
 
 - 改动流程：改 → tools/VERSIONS.tsv 登记版本 → `vercheck render`（同步 ARCHITECTURE.md）→ commit → push
 - 运行中的 ash 脚本内容相同不重推（busybox 惰性读取）
-- agg_pins.conf（MAC 钉死表）**设备侧自管**，模板 `agg_pins.conf.example`
+- agg_pins.conf（MAC 钉死表）**设备侧自管**（`deploy.py` 的 `EXTRA_KEEP`：不进部署清单、
+  不参与体检比对 —— 含个人 MAC，避免"仓库空版本覆盖设备真钉死"）。
+  出厂只读基线 `gw/agg_pins.default`（**不含任何 MAC**）随版本部署；wan_agg 启动时
+  **缺省才写**地播种活文件，已有钉死永不覆盖。格式说明与用法示例见 `tools/agg_pins.conf.example`。
 
 ## 大文件传输（SSH 大块不稳）
 

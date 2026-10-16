@@ -1419,6 +1419,34 @@ def t_wan_alive_guard():
            f"expect={expect} fresh={int(fresh)} consumers={cons}" + (f" bad={bad[0]}" if bad else ""))
 
 
+@test("钉死表缺省播种 (缺失不再报错/静默失效)")
+def t_agg_pins_seed():
+    # v2.28: 活文件 /data/gw/agg_pins.conf 是**设备侧自管**(含个人 MAC, 不入库;
+    #   deploy.py 的 EXTRA_KEEP, 不参与部署/体检 md5 比对) —— 但"文件缺失"会让
+    #   wan_agg 的钉死重放循环报错(weight 模式下该分支每环循执行, 报错重复)且钉死
+    #   机制静默失效。现从随版本部署的**只读基线** agg_pins.default 缺省才写地播种。
+    # 断言: ① 设备上基线在位且**不含任何 MAC 行**(隐私 + 避免误钉); ② 活文件在位
+    #   且带基线说明(播种生效; 用户经 GUI 编辑时注释行被保留, 说明不丢);
+    #   ③ wan_agg 的播种逻辑在位(结构护栏); ④ 活文件仍在 EXTRA_KEEP(自管, 防被
+    #   仓库空版本覆盖 —— 那会静默清空用户钉死, 即 L10 那类事故)。
+    base_lines = dev("cat /data/gw/agg_pins.default 2>/dev/null | wc -l").strip()
+    base_macs = dev("grep -v '^#' /data/gw/agg_pins.default 2>/dev/null | grep -c .").strip()
+    live_doc = dev("grep -c 'MAC 钉死表' /data/gw/agg_pins.conf 2>/dev/null").strip()
+    seed = dev("grep -c 'agg_pins.default' /data/gw/wan_agg.sh 2>/dev/null").strip()
+    dp = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "deploy.py")
+    keep_ok = False
+    try:
+        t = open(dp, encoding="utf-8").read()
+        keep_ok = ('"agg_pins.conf"' in t) and ("EXTRA_KEEP" in t)
+    except OSError:
+        pass
+    ok = (base_lines.isdigit() and int(base_lines) > 3 and base_macs == "0"
+          and live_doc not in ("", "0") and seed not in ("", "0") and keep_ok)
+    record(t_agg_pins_seed._test_name, "agg", ok,
+           f"baseline_lines={base_lines} baseline_macs={base_macs} live_doc={live_doc} "
+           f"seed_code={seed} extra_keep={int(keep_ok)}")
+
+
 @test("SoC 温度在合理区间")
 def t_sys_temp():
     out = dev("for zd in /sys/class/thermal/thermal_zone*; do "

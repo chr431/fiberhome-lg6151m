@@ -52,6 +52,9 @@ MANIFEST = [
     ("gw/wifi_up.sh", "/data/gw/wifi_up.sh"),      # AP bring-up (factory recipe)
     ("gw/guest_fw.sh", "/data/gw/guest_fw.sh"),    # guest-net L2/L3 isolation (vendor wifiguest.sh recipe)
     ("gw/wan_agg.sh", "/data/gw/wan_agg.sh"),       # dual-uplink aggregation supervisor (v2.8+, supersedes wan_policy2)
+    ("gw/agg_pins.default", "/data/gw/agg_pins.default"),  # MAC-pin table factory baseline (read-only, NO MACs);
+                                                          #   live /data/gw/agg_pins.conf is device-side (EXTRA_KEEP),
+                                                          #   seeded from this baseline only when absent (wan_agg v2.34)
     ("gw/bin/multiwan_ctl", "/data/gw/multiwan_ctl"),     # vendor multiwan ioctl control (zig, links libfhdrv_net_api)
     ("gw/bin/fhstub.so", "/data/gw/fhstub.so"),        # FH symbol stubs: load libfhdrv_net_api standalone
     ("gw/udhcpc_wan.script", "/data/gw/udhcpc_wan.script"), # WAN udhcpc event hook (iface-agnostic)

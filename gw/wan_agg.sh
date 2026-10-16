@@ -1,5 +1,8 @@
 #!/bin/sh
-# wan_agg.sh v2.32 — 协议级检测(authd 会话信号, <=5s 故障转移) 双上行聚合主管 (vendor kernel engine + iptables fallback)
+# wan_agg.sh v2.34 — 协议级检测(authd 会话信号, <=5s 故障转移) 双上行聚合主管 (vendor kernel engine + iptables fallback)
+# v2.34: 钉死表缺省播种 —— 活文件 agg_pins.conf(设备侧自管, 含个人 MAC, 不入库)
+#   缺失时从随版本部署的只读基线 agg_pins.default **缺省才写**地播种: 设备侧自带
+#   机制说明, 缺失不再报错/静默失效, 已有钉死永不覆盖(与 uplink.conf 同法)。
 # v2.32 (2026-10-16 00:06 宵断实弹): 判活目标多样化 —— 原目标(223.5.5.5/120.53.53.53)
 #   被上行接入网夜间切断的白名单放行, 探测恒过而客户端全死 → 永不转移。现取三个不同
 #   运营商/ASN 且不在白名单内的目标(任一通过即活) + ICMP 全灭时 TCP 握手兜底;
@@ -464,7 +467,12 @@ case "$1" in
     exit 0 ;;
 esac
 
-log "===== wan_agg v2.32 start (main-primary 由模式推导; 判活目标多样+发布 wan_alive) ====="
+log "===== wan_agg v2.34 start (main-primary 由模式推导; 判活目标多样+发布 wan_alive) ====="
+# v2.34: 钉死表**缺省播种** —— 活文件 /data/gw/agg_pins.conf 是设备侧自管(不入库,
+#   含个人 MAC, EXTRA_KEEP 不参与部署/体检比对), 但"文件缺失"会让下面的重放循环
+#   报错且机制静默失效(weight 模式下该报错每环循重复)。故从随版本部署的只读基线
+#   agg_pins.default 播种: **缺省才写**, 已有钉死永不覆盖(与 uplink.conf 同法)。
+[ -r /data/gw/agg_pins.conf ] || cp /data/gw/agg_pins.default /data/gw/agg_pins.conf 2>/dev/null
 # v1.8: MAC 钉死表重放(内核模块状态不跨重启, 游戏PC等需开机重新钉)
 while read -r MAC OP; do
     case "$MAC" in \#*|"") continue;; esac

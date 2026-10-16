@@ -557,3 +557,31 @@ ENABLED 的 20×0.5s 自 v1.x 起**从未真正执行过**（前者=告警功能
 
 注: 上行接入网恢复后 wan_agg 会按恢复迟滞(U≥6)自动切回家宽, 无需人工干预。
 <!--CLM:CLM-ALIVE-AUTHORITY-->
+
+## 23. 钉死表出厂基线 + 缺省播种（2026-10-16）
+
+**问题**：`agg_pins.conf`（MAC 钉死表）是设备侧自管文件（含个人 MAC，不入库），但
+**文件缺失**时 `wan_agg` 的钉死重放循环会报 `can't open ... no such file`，且钉死
+机制**静默失效**；在 `weight` 模式下主循环里读该表的分支每环循执行，该报错会每 3 秒
+重复一次（噪音）。
+
+**为什么不直接把活文件放进部署清单**：`deploy.py doctor` 对每个 manifest 条目双侧
+比对 md5、`push` 内容不等即覆盖 —— 活文件一旦入库，仓库里那份"空版本"就成了权威，
+下一次部署或体检"修复"会**静默清空用户钉死**（即 L10"陈旧仓库覆盖工作设备"那类事故）。
+
+**落地形态（与项目既有配置体系一致：defaults.conf↔settings.conf / uplink.conf 缺省才写）**：
+
+- 新增随版本部署的**只读基线** `gw/agg_pins.default` → `/data/gw/agg_pins.default`，
+  **不含任何 MAC**，自带格式/语义/用法说明。
+- `wan_agg` v2.34 启动时 `[ -r /data/gw/agg_pins.conf ] || cp agg_pins.default agg_pins.conf`
+  —— **缺省才写**，已有钉死永不覆盖。
+- 活文件 `agg_pins.conf` **保持在 `EXTRA_KEEP`**（不进 MANIFEST、不参与比对）——
+  隐私与"防覆盖"两条同时成立。
+- GUI 写入路径（`api.sh apply_agg_pin`）保留 `#` 注释行，故基线说明不会随用户编辑丢失。
+
+**行为等价性**：基线只有注释行 → 钉死重放循环照旧跳过 → 与改动前**完全等价**，
+只是不再报错、机制在设备侧自带说明。
+
+**护栏**：selftest `t_agg_pins_seed` —— 基线在位且不含 MAC + 活文件带基线说明 +
+播种逻辑在位 + 活文件仍在 `EXTRA_KEEP`（结构护栏，防回归）。
+<!--CLM:CLM-PINS-SEED-->

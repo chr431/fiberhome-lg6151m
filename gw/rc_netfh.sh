@@ -1,5 +1,5 @@
 #!/bin/sh
-# rc_netfh.sh v3.5 -- route A: FH modem-stack environment (minimal army).
+# rc_netfh.sh v3.6 -- route A: FH modem-stack environment (minimal army).
 # Mission: give the 5G dialer its full stock environment so the modem builds
 # the IA bearer, WITHOUT the daemons that fight our v3 flight layer.
 # KEEP   (process_start_list order): cfgmgr, logmgr, mobilenetwork
@@ -10,18 +10,18 @@
 #        (fights wifi_up.sh) auto_adapt(E1 deadlock root) process_check
 #        (respawn chaos) web trafficmgr adaptmgr iotagtd peripheral link_detection
 # Mode gate: /data/gw/MODE.fh (removed = plain frankenstein mode)
-# v3.5 (2026-10-17 实弹发现): 开机 SIGTERM 清场对厂商守护无效 — mtk_netagent/
-#   ql_netd/ql_ril_service 各存活两套(rc.d S22/S85 一套 + 本处一套)。双实例实证:
-#   ubus 仅一套 ql-netd 注册成功(另一套空转), 两个 netagent 同消费 netlink 事件
-#   (多为 ignore 分支)。改 SIGKILL 全清(带重试) + 拉起后逐件数量复核(≠1 记 WARN)。
-#   注: S99 的 mipc_submonitor 与本处拉起相差 ~1s, unix/ubus 资源冲突天然去重
-#   (实证仅存一套); netd/ril/netagent 无独占资源故需显式清场。
+# v3.5 (已废弃的思路): SIGKILL 清场 — 实弹证明打不赢: procd 对 rc.d 守护有
+#   respawn 层(VENDOR_MAP §2 三层看护之首), 杀掉即复活; 且本脚本与 S22/S85
+#   并发起跑(清场窗口里 rc.d 套常尚未出生), 终态仍双实例。
+# v3.6 (2026-10-17 终版): **收编制** — rc.d 套是 procd 保障的常驻实例(死了有人
+#   拉, 这正是我们要的性质), 本处有界等待其就绪(2s×10), 只补缺席者(兜底 rc.d
+#   链异常), 结尾逐件数量复核(≠1 记警, selftest t_ril_single 回归护栏)。
 LOG=/tmp/rc_netfh.log
 glog() { echo "$(date -u +%FT%TZ) $*" >> $LOG; }
 # v1.1: FH binaries+libs live outside the default PATH/loader path
 export PATH=$PATH:/fhrom/bin:/fhrom/fhshell
 export LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib
-glog "===== rc_netfh v3.5 start ====="
+glog "===== rc_netfh v3.6 start ====="
 
 # 1. config base — v3.1 (P3 终章): cfg_tool/shmsnap/树整体退役。
 #   蜂窝全功能(锁/制式/飞行/PIN/短信/扫描/拨号)已由 mipc_cellular+dial_keeper+
@@ -55,26 +55,22 @@ glog "P3-lite: cfgmgr/logmgr daemons retired (shm-only tree)"
 #       (一并拉起保持原厂形态)。必须在 mobilenetwork 前就绪。
 pidof atcid >/dev/null || { /usr/bin/atci_service >/dev/null 2>&1 & sleep 1; /usr/bin/atcid >/var/atcid.log 2>&1 & sleep 1; }
 glog "atcid=$(pidof atcid) at_ch=$(mipc_wan_cli --at_cmd 'AT+CSQ' 2>/dev/null | grep -c '+CSQ:')"
-# v3.5: SIGKILL 清场(原 SIGTERM 被厂商守护忽略 → 双实例, 见头注)。3 次重试
-#   吸收 procd respawn 竞态; 清不净只记 WARN 不阻断(拉起后复核兜底)。
-_try=0
-while [ $_try -lt 3 ]; do
-    for p in $(pidof mtk_netagent ql_netd ql_ril_service mipc_submonitor); do kill -9 $p 2>/dev/null; done
-    sleep 2
-    [ -z "$(pidof mtk_netagent ql_netd ql_ril_service mipc_submonitor)" ] && break
-    _try=$((_try+1))
+# v3.6: 收编制(清场思路废弃, 见头注)。有界等待 rc.d 套就绪 — 本脚本经
+#   zz_data_hook/rc.extend 在 procd rc.d 链末段起跑, S22/S85/S99 的管道件在
+#   前后数秒内由 procd 拉起并**持续看护**(respawn)。2s×10 覆盖实证时序
+#   (S22@+28s S85@+30s S99@+31s); 等不齐只补缺席者(兜底 rc.d 链异常),
+#   绝不多起一份。
+_i=0
+while [ $_i -lt 10 ] && { [ -z "$(pidof mtk_netagent)" ] || [ -z "$(pidof ql_netd)" ] || [ -z "$(pidof ql_ril_service)" ] || [ -z "$(pidof mipc_submonitor)" ]; }; do
+    sleep 2; _i=$((_i+1))
 done
-[ -z "$(pidof mtk_netagent ql_netd ql_ril_service mipc_submonitor)" ] || \
-    glog "WARN plumbing not clear after 3x SIGKILL: $(pidof mtk_netagent ql_netd ql_ril_service mipc_submonitor)"
-/usr/bin/mtk_netagent >/dev/null 2>&1 &
+pidof mtk_netagent    >/dev/null || /usr/bin/mtk_netagent    >/dev/null 2>&1 &
+pidof ql_netd         >/dev/null || /usr/bin/ql_netd         >/dev/null 2>&1 &
+pidof ql_ril_service  >/dev/null || /usr/bin/ql_ril_service  >/dev/null 2>&1 &
+pidof mipc_submonitor >/dev/null || /usr/bin/mipc_submonitor >/dev/null 2>&1 &
 sleep 2
-/usr/bin/ql_netd        >/dev/null 2>&1 &
-/usr/bin/ql_ril_service >/dev/null 2>&1 &
-sleep 4
-/usr/bin/mipc_submonitor >/dev/null 2>&1 &
-sleep 2
-glog "plumbing netagent=$(pidof mtk_netagent) ql_netd=$(pidof ql_netd) ril=$(pidof ql_ril_service) submon=$(pidof mipc_submonitor)"
-# 拉起后逐件数量复核(≠1 记警 — S99 竞态或 respawn 干扰的可见化; selftest
+glog "plumbing (adopted, waited $((_i*2))s) netagent=$(pidof mtk_netagent) ql_netd=$(pidof ql_netd) ril=$(pidof ql_ril_service) submon=$(pidof mipc_submonitor)"
+# 逐件数量复核(≠1 记警 — 补齐与 procd respawn 竞态的可见化; selftest
 #   t_ril_single 以此为回归护栏)
 for _n in mtk_netagent ql_netd ql_ril_service mipc_submonitor; do
     _c=$(pidof $_n | wc -w)
@@ -179,4 +175,4 @@ if [ -n "$IF" ]; then
         glog "post-ladder rx=$R3"
     fi
 fi
-sh /data/gw/fw_apply.sh apply 2>/dev/null && glog "fw_apply ok" ; glog "===== rc_netfh v3.5 done ====="
+sh /data/gw/fw_apply.sh apply 2>/dev/null && glog "fw_apply ok" ; glog "===== rc_netfh v3.6 done ====="

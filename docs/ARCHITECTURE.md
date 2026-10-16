@@ -79,14 +79,24 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/udhcpc_wan.script` | **v1.0** | manifest | `/data/gw/udhcpc_wan.script` | WAN口 udhcpc 事件钩子(接口无关化) |
 | `gw/v2_access.sh` | **v6.1** | manifest | `/data/gw/v2_access.sh` | v2 极简访问层(串口/SSH/DHCP/防火墙22,零守护干涉) |
 | `gw/v3_babysit_v2.sh` | **v2.0** | manifest | `/data/gw/babysit_v2.sh` | 启动保姆(T1杀rcS/T2核爆回B) |
-| `gw/v3_rc10.extend.sh` | **v2.28** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2; v2.28: +log_keeper 接线; 历史见git |
-| `gw/wan_agg.sh` | **v2.34** | manifest | `/data/gw/wan_agg.sh` | v2.34: 钉死表缺省播种(活文件 agg_pins.conf 设备侧自管不入库; 缺失时从随版本部署的只读基线 agg_pins.default 缺省才写地播种 — 不再报错/静默失效, 已有钉死永不覆盖); v2.33: 命名中性化(注释去上游机构字样) — 零功能改动; v2.32(2026-10-16 宵断实弹): 判活目标多样化 — 原目标 223.5.5.5/120.53.53.53 被上行接入网夜间切断白名单放行, 探测恒过而客户端全死→永不转移(用户手动切仅蜂窝才恢复); 现取 3 个不同运营商/ASN 且不在白名单内的目标(任一通过即活)+ICMP 全灭时 TCP 握手兜底; 并发布 /tmp/wan_alive 作为数据面判活唯一权威; v2.31(用户裁定): 未打标主路(v4 与 v6)不再写死优先级 — 由模式+权重+真实存活推导(prim_want), main 表唯一写方 main_primary_apply() 每周期复位; weight 走权重大的一侧, 单侧存活即接班, 双死不猜; +--dry-primary/--set-primary 入口; v2.31b: 蜂窝侧 v6 主路用设备路由(default dev ccmni2), 不依赖模组重发 RA(实测 RIL 重启后主表 RA 默认长期不出现); v2.30(A1): 蜂窝侧 main 表默认收敛为纯探活 — metric 50→250(劣于家宽备用 200), 家宽主力期不再写 metric 0/50, 并补家宽主默认存在性看门狗(原只在状态迁移时装一次, 被外力冲刷后未打标流量静默改走蜂窝且长期滞留); 双上行聚合主管(v2.29: 移除先验时段(判定不做先验), 静默型切断由 authd v2.3 静默看门狗承接; v2.28: 去网关探针短路); 历史见git |
-| `gw/watchdog.sh` | **v1.11** | manifest | `/data/gw/watchdog.sh` | v1.11: +蜂窝查询路径活性告警(ql_nw 子服务静默失效: 守护活着/数据面正常但 cells/endc 恒返 -2147024889, GUI 小区与组网卡片静默报错; 只告警不自动重启 — 蜂窝主力时重启 RIL 会打断数据面, 恢复路径已文档化); v1.10: +蜂窝统计偏差护栏(netdev tx_bytes vs qdisc 增量逐周期比对, 阈值 256KB — 真实流量下两者逐字节相等, 实测 2MiB 阈值会漏掉单次 1.22MB 跳变) — 把统计与实际不符变成可见信号而非静默污染流量账; 持续不变量看门狗(v1.9: 告警闪烁从WAN灯迁5G橙灯gpio473 — 两写方抢同一物理灯, watchdog闪完停在0而led_mgr边沿触发不纠回, 直接造成"eth0有网WAN灯不亮"; WAN灯写权单一化归led_mgr独占; v1.8: 拨号守护实例定位改PID锁(cmdline复核, 防启动者argv自匹配/误伤旁观); v1.7: mipc探针过硬超时+dial_keeper心跳陈旧>90s判死重启+led_mgr自愈拉; v1.6: +log_keeper自愈+ql_wifi_sample卡死清除) |
+| `gw/v3_rc10.extend.sh` | **v2.29** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2; v2.29: +wan_eth 接线(架构轮); 历史见git |
+| `gw/wan_agg.sh` | **v3.0** | manifest | `/data/gw/wan_agg.sh` | v3.0(2026-10-17 架构轮, 大杂烩拆分): 引擎落地层与 conf 管理迁入 wan_agg_lib.sh(source, 单写方纪律不变); eth0 租约/NAT 看门狗迁出为独立守护 wan_eth.sh(rc19 先拉, watchdog 自愈) — udhcpc 原内联在探活环循里最坏 9s+ 停摆整个 FSM(侵蚀 25s 硬截止预算); 蜂窝探活路由(metric250)+metric50 遗留清理上收到 main_primary_apply 头部(双死态也维持探活可达, 否则冲刷后无法探活=无法恢复的死锁); 死代码 pmode_of 清除; v2.34: 钉死表缺省播种(逻辑入 lib.agg_conf_seed); v2.32(宵断实弹): 判活目标多样化+发布 /tmp/wan_alive 唯一权威; v2.31: 未打标主路(v4+v6)由模式+权重+真实存活推导, main 表唯一写方每周期复位; 历史见git |
+| `gw/wan_agg_lib.sh` | **v1.0** | manifest | `/data/gw/wan_agg_lib.sh` | 聚合引擎落地层+conf 管理库(被 wan_agg source, v3.0 架构轮拆出; dp_setup/fw6*/fw_setup/kernel_apply/ensure_rules/agg_bypass/pin_* + agg.conf 播种/迁移/校验收敛 — MODE/W1_PCT 三处重复校验消除; 单进程 source=单写方纪律不变) |
+| `gw/wan_eth.sh` | **v1.0** | manifest | `/data/gw/wan_eth.sh` | 有线 WAN(eth0) 接口管理守护(自 wan_agg ensure_lease 拆出, 架构轮): 链路+one-shot udhcpc+to-LAN 护盾+家宽备用默认+表200+eth0 NAT/FORWARD 看门狗(全幂等 level-driven); udhcpc 最坏 9s 不再阻塞探活 FSM(原内联期间整个状态机停摆) |
+| `gw/watchdog.sh` | **v1.12** | manifest | `/data/gw/watchdog.sh` | v1.12(架构轮): +wan_eth 检查+自愈拉(有线 WAN 接口守护拆分自 wan_agg — 其为 eth0 租约/NAT 看门狗唯一写方, 静默死亡=家宽侧静默劣化); v1.11: +蜂窝查询路径活性告警(只告警不自动重启); v1.10: +蜂窝统计偏差护栏(阈值256KB); 历史见git |
 | `gw/webs_revive.sh` | **v1.3** | manifest | `/data/gw/webs_revive.sh` | 原厂GUI复活器(自足nginx conf; 手动拉起) |
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
+| `gw/wifi_autoch.sh` | **v1.0** | manifest | `/data/gw/wifi_autoch.sh` | WiFi 自动选道器(自 wifi_up v1.29 拆出; IDC 安全掩码+候选收敛{1,6}; 输出契约 /tmp/wifi_autoch 不变, 可独立复用) |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
-| `gw/wifi_up.sh` | **v1.28** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.28: 候选收敛安全集深部{1,6}消边界振荡; v1.27: auto-channel接入驱动IDC安全掩码(仅在SafeChnBitmask集内选道, 防驱动自行搬道致配置≠实况); 历史版本见git) |
-| `gw/www/api.sh` | **v2.74** | manifest | `/data/gw/www/api.sh` | v2.74: 命名中性化(注释去上游机构字样) — 零功能改动; v2.73(宵断实弹): status 的 home.dp/wan5g.dp 改消费 /tmp/wan_alive — 原先各探 223.5.5.5/120.53.53.53 被白名单放行→GUI 谎报家宽正常; v2.72: get_traffic 蜂窝上行改取 qdisc(Linux 发送路径) — 与 traffic_logger v1.2 同口径, 网卡值作流量展示=假象; GUI JSON端点; v2.71: 移除宵断端点/字段(先验方案下架); 历史见git |
+| `gw/wifi_macplan.sh` | **v1.0** | manifest | `/data/gw/wifi_macplan.sh` | 出厂 MAC 派生计划(自 wifi_up v1.29 拆出; api uplink 的 eth0 原生 MAC 还原同步收敛到此唯一实现 — 原内联副本缺两级兜底属算法漂移实例) |
+| `gw/wifi_up.sh` | **v1.29** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.29 架构轮: MAC 派生拆出 wifi_macplan.sh + 自动选道拆出 wifi_autoch.sh, 主文件收敛为拉起配方本体, 变量/契约零变化; v1.28: 候选收敛安全集深部{1,6}; 历史见git) |
+| `gw/www/api.sh` | **v2.75** | manifest | `/data/gw/www/api.sh` | v2.75(2026-10-17 架构轮): 模块化拆分 — 收敛为核心(helpers/认证/配置助手)+路由表, 六域模块按端点懒加载(/data/gw/www/api_*.sh, v3httpd v2.6 静态面已拒 *.sh 直出); 每请求只解析所需域(原整文件 ~1550 行全解析); 端点与 JSON 契约零变化; v2.74: 命名中性化; v2.73: status 消费 /tmp/wan_alive; 历史见各域模块头注与git |
+| `gw/www/api_agg.sh` | **v1.0** | manifest | `/data/gw/www/api_agg.sh` | API 聚合+上行域模块(v2.75 拆出: agg/uplink 族; uplink 的 eth0 原生 MAC 还原改调 wifi_macplan.sh 统一实现) |
+| `gw/www/api_cell.sh` | **v1.0** | manifest | `/data/gw/www/api_cell.sh` | API 蜂窝域模块(v2.75 拆出: cellular/sim/pin/netmode/airplane/plmn/bandlock/celllock 族, 最大域) |
+| `gw/www/api_lan.sh` | **v1.0** | manifest | `/data/gw/www/api_lan.sh` | API LAN 服务域模块(v2.75 拆出: dhcp/dhcp_static/fw 族; fw_apply.sh 改域内懒加载 — 原对全部请求无条件 source) |
+| `gw/www/api_sms.sh` | **v1.0** | manifest | `/data/gw/www/api_sms.sh` | API 短信域模块(v2.75 拆出: sms/sms_send; UCS2 解码与多段合并) |
+| `gw/www/api_sys.sh` | **v1.0** | manifest | `/data/gw/www/api_sys.sh` | API 系统/状态域模块(v2.75 拆出: status/clients/logs/sse/fan/led/ntp/reboot/traffic 族; 按端点懒加载 — 每请求只解析所需域) |
+| `gw/www/api_wifi.sh` | **v1.0** | manifest | `/data/gw/www/api_wifi.sh` | API WiFi 域模块(v2.75 拆出: wifi/wifi_adv/band_pin/wifiscan 族; 域历史随域迁入头注) |
 | `gw/www/app.js` | **v3.51** | manifest | `/data/gw/www/app.js` | 控制台SPA; v3.51: 移除宵断卡片(先验方案下架); 历史见git |
 | `gw/www/index.html` | **v2.32** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.32: 缓存v66) |
 | `gw/www/style.css` | **v2.1** | manifest | `/data/gw/www/style.css` | 控制台主题 |
@@ -107,7 +117,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/build_steth.sh` | **v1.0** | tool | `-` | v3_steth.ko构建 |
 | `tools/build_v3fix.sh` | **v1.0** | tool | `-` | v3_fix.ko构建 |
 | `tools/build_v3httpd.sh` | **v1.0** | tool | `-` | v3httpd构建(zig cc aarch64-linux-musl全静态, 同mipc_cellular链) |
-| `tools/deploy.py` | **v2.17** | tool | `-` | v2.17: MANIFEST 增 agg_pins.default(只读基线, 设备侧活文件仍 EXTRA_KEEP 自管); MANIFEST部署/漂移检查; v2.16: +log_keeper/diag_dump 入 MANIFEST; 历史见git |
+| `tools/deploy.py` | **v2.18** | tool | `-` | v2.18(架构轮): MANIFEST +wan_agg_lib/wan_eth/wifi_macplan/wifi_autoch/api 六域模块(依赖件排消费方之前, 推送序内先落地); v2.17: MANIFEST 增 agg_pins.default; 历史见git |
 | `tools/device_local.py.example` | **v1.0** | tool | `-` | 凭证模板(真件gitignored) |
 | `tools/doc_audit.py` | **v1.1** | tool | `-` | 台账↔文档内联标记双向审计(v1.1: 标记扫描纳入台账引用的docs/外文档如install/README.md; v1.0: 版本绑定+TEST-MISSING/STALE-CODE/UNREGISTERED-CLAIM) |
 | `tools/gen_kernel_inc.py` | **v1.0** | tool | `-` | kernel头生成(构建辅助) |
@@ -124,7 +134,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/rescue_shadow.py` | **v1.0** | tool | `-` | shadow.override未bind网络救援(getpass旧口令→只读探针: 文件md5/grep行为单测/部署钩子sh -x跟踪→从.bak恢复+重bind; 依赖rc.extend v2.1) |
 | `tools/rotate_toor.py` | **v1.4** | tool | `-` | toor口令轮换器; v1.4: 轮换前存档.bak(rc.extend v2.1回退源); 历史见git |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
-| `tools/selftest.py` | **v2.28** | tool | `-` | v2.28: +钉死表缺省播种护栏(t_agg_pins_seed: 只读基线在位且不含 MAC + 活文件带基线说明 + 播种逻辑在位 + 活文件仍在 EXTRA_KEEP 自管); v2.27: 护栏状态感知(metric<200 的 ccmni 默认仅在'家宽为主路'时才是地雷, 蜂窝主路时是预期主默认) + 口径护栏改区间校验(蜂窝承载客户端流量时固定容差会误判) + 命名中性化; v2.26: +白名单陷阱护栏(t_wan_alive_guard: 探测目标≥3 且不含白名单目标 + /tmp/wan_alive 新鲜 + led_mgr/api 已消费 + 多样目标实测可达性==发布判活值); v2.25: +未打标主路护栏(t_main_primary: 五模式×存活映射干跑 + 现场 v4/v6 选路指向同一接口且等于模式推导值); v2.24: +聚合路由地雷护栏(t_agg_route_landmine: main 表不得含 metric<200 的 ccmni 默认 + 探活路由在位 + 家宽主默认在位) + 流量口径护栏(t_traffic_source: /api/traffic 蜂窝 tx == qdisc 值 + watchdog 偏差护栏在位); 断言式全功能测试; v2.23: +WAN灯数据面一致性+写权唯一化护栏(t_sys_led_wan) — 干跑映射b0/b1 + watchdog源码不得引用5g_evb_voice + 实况亮度无条件等于数据面推算值; 5G灯护栏去掉"容忍一拍"sleep(绝对电平驱动下等待即遮羞布); v2.22: 单实例判据改PID锁↔活进程跨层断言; v2.21: +5G灯数据面一致性; 历史见git |
+| `tools/selftest.py` | **v2.29** | tool | `-` | v2.29(架构轮): 拆分护栏适配 — 播种代码路径改指 wan_agg_lib.sh + wan_alive 消费方改指 api_sys.sh + 新增 t_agg_split/t_agg_eth_daemon/t_gui_apimod(模块在位+*.sh 直出拒绝回归); v2.28: +钉死表缺省播种护栏; 历史见git |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |
 | `tools/serial_server.py` | **v1.7** | tool | `-` | 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets) |
 | `tools/upgrade_slot.py` | **v1.0** | tool | `-` | SSH整槽升级器(P3第一档: vercheck/槽位/空间预检→md5门禁→dd备份旧p26→写新镜像→挂载sanity断言(toor/rcS/#v3:/procd)→失败自动整槽还原不重启→清TRY_A→reboot; PC侧轮询日志+回连终检; --dry-run) |
@@ -198,5 +208,6 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `CLM-MAIN-PRIMARY`@FINDINGS.md | ✅实证 | `gw/wan_agg.sh>=2.31, gw/dial_5g.sh>=1.3, gw/rc_netfh.sh>=3.4` | 未打标主路由聚合模式推导 (v4 与 v6 同源) | 8b2b15c@2026-10-15 | v4 原先只在状态迁移瞬间定 main 主默认、v6 无人管(靠 RA metric 恒偏好蜂窝), 且 dial_5g/rc_netfh 另写 metric 50/0 默认=地雷; 改: prim_want(模式+权重+真实存活)+main_primary_apply 唯一写方每周期复位(level-driven), 蜂窝侧 v6 用设备路由不依赖重发 RA; 实弹: eth_prio→v4/v6 均 eth0, --set-primary w1→v4/v6 均 ccmni2 且 v6 有回包, weight 跟权重侧 |
 | `CLM-ALIVE-AUTHORITY`@FINDINGS.md | ✅实证 | `gw/wan_agg.sh>=2.32, gw/led_mgr.sh>=2.1, gw/www/api.sh>=2.73` | 数据面判活不落入白名单陷阱 (宵断可见/唯一权威) | 3aeb573@2026-10-16 | 宵断(白名单式切断)未被识别: 判活目标 223.5.5.5/120.53.53.53 恰好被白名单放行→判活恒真永不转移; 且同一错判据在 wan_agg/led_mgr(含网关优先短路)/api 三处副本→灯与GUI一起谎报; 修: 目标改3个不同运营商且不在白名单内(任一通过即活)+ICMP全灭时TCP兜底, 发布 /tmp/wan_alive 为唯一权威, 两处消费; 实弹: home=0 灯灭 硬截止判死 客户端经蜂窝 72/0 |
 | `CLM-PINS-SEED`@FINDINGS.md | ✅实证 | `gw/wan_agg.sh>=2.34, tools/deploy.py>=2.17` | 钉死表缺省播种 (缺失不再报错/静默失效) | 30e81d6@2026-10-16 | 活文件 agg_pins.conf 设备侧自管(含个人MAC不入库)但缺失时重放循环报错+钉死静默失效(weight 模式每环循重复); 修: 随版本部署只读基线 gw/agg_pins.default(不含任何MAC, 自带说明), wan_agg 缺省才写地播种, 已有钉死永不覆盖; 活文件保持 EXTRA_KEEP 以防仓库空版本覆盖设备真钉死(L10 类事故); 行为等价(基线仅注释行) |
+| `CLM-MODSPLIT`@FINDINGS.md | ⚠️推断 | `gw/wan_agg.sh>=3.0, gw/wan_agg_lib.sh>=1.0, gw/wan_eth.sh>=1.0, gw/www/api.sh>=2.75, gw/wifi_up.sh>=1.29, gw/wifi_macplan.sh>=1.0, gw/wifi_autoch.sh>=1.0` | wan_agg 拆分件在位 (lib 被 source + eth0 归属移交), wan_eth 守护进程存活 (有线 WAN 接口管理), API 域模块在位且静态面拒绝直出 (v2.75 拆分护栏) | e548896@2026-10-17 | 架构轮三分: 引擎落地层(wan_agg_lib, sourced=单写方不变)+eth0 接口管理(wan_eth 独立守护, udhcpc 9s 不再阻塞探活 FSM)+决策核心(wan_agg); api 六域懒加载(每请求只解析所需域, *.sh 直出拒绝受保护面扩大); wifi_up 拆出 macplan/autoch(消除 MAC 算法漂移副本); MODE/W1_PCT 三处重复校验收敛; 行为零变化除 udhcpc 阻塞修复 |
 
 <!--CLMAUDIT:END-->

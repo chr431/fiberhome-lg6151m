@@ -49,9 +49,13 @@ MGMT_CANDIDATES = ["192.168.9.1", "192.168.1.1", "192.168.8.1", "192.168.3.75"]
 MANIFEST = [
     ("gw/rc.extend.sh", "/data/rc.extend.sh"),         # slot dispatcher (boot entry)
     ("gw/v3_rc10.extend.sh", "/data/gw/rc19.sh"),         # rc19v2: br-lan+wifi+wan stack
+    ("gw/wifi_macplan.sh", "/data/gw/wifi_macplan.sh"),  # factory MAC plan (wifi_up BSSIDs + api uplink native-MAC restore; v1.29 split)
+    ("gw/wifi_autoch.sh", "/data/gw/wifi_autoch.sh"),    # auto-channel scanner (wifi_up CH=0 path; v1.29 split)
     ("gw/wifi_up.sh", "/data/gw/wifi_up.sh"),      # AP bring-up (factory recipe)
     ("gw/guest_fw.sh", "/data/gw/guest_fw.sh"),    # guest-net L2/L3 isolation (vendor wifiguest.sh recipe)
-    ("gw/wan_agg.sh", "/data/gw/wan_agg.sh"),       # dual-uplink aggregation supervisor (v2.8+, supersedes wan_policy2)
+    ("gw/wan_agg_lib.sh", "/data/gw/wan_agg_lib.sh"),  # aggregation engine+conf library (sourced by wan_agg; v3.0 split)
+    ("gw/wan_eth.sh", "/data/gw/wan_eth.sh"),  # wired-WAN iface keeper (lease/NAT watchdog; split from wan_agg ensure_lease)
+    ("gw/wan_agg.sh", "/data/gw/wan_agg.sh"),       # dual-uplink aggregation supervisor (v3.0+, supersedes wan_policy2)
     ("gw/agg_pins.default", "/data/gw/agg_pins.default"),  # MAC-pin table factory baseline (read-only, NO MACs);
                                                           #   live /data/gw/agg_pins.conf is device-side (EXTRA_KEEP),
                                                           #   seeded from this baseline only when absent (wan_agg v2.34)
@@ -74,7 +78,13 @@ MANIFEST = [
     ("gw/radvd.conf", "/data/gw/radvd.conf"),        # IPv6 SLAAC+RDNSS advert (FH radvd 1.6)
     ("gw/led_mgr.sh", "/data/gw/led_mgr.sh"),        # stock-style LED state supervisor (visual-mapped GPIOs)
     ("gw/bin/v3httpd", "/data/gw/v3httpd"),           # gateway GUI http server (:80)
-    ("gw/www/api.sh", "/data/gw/www/api.sh"),        # JSON endpoints
+    ("gw/www/api_sys.sh", "/data/gw/www/api_sys.sh"),   # API system-domain module (lazy-loaded; v2.75 split)
+    ("gw/www/api_wifi.sh", "/data/gw/www/api_wifi.sh"), # API wifi-domain module (lazy-loaded; v2.75 split)
+    ("gw/www/api_lan.sh", "/data/gw/www/api_lan.sh"),   # API LAN/DHCP/fw-domain module (lazy-loaded; v2.75 split)
+    ("gw/www/api_agg.sh", "/data/gw/www/api_agg.sh"),   # API agg+uplink-domain module (lazy-loaded; v2.75 split)
+    ("gw/www/api_cell.sh", "/data/gw/www/api_cell.sh"), # API cellular-domain module (lazy-loaded; v2.75 split)
+    ("gw/www/api_sms.sh", "/data/gw/www/api_sms.sh"),   # API sms-domain module (lazy-loaded; v2.75 split)
+    ("gw/www/api.sh", "/data/gw/www/api.sh"),        # JSON endpoints (core router; sources domain modules)
     ("gw/www/index.html", "/data/gw/www/index.html"),    # console page
     ("gw/www/style.css", "/data/gw/www/style.css"),     # theme
     ("gw/www/app.js", "/data/gw/www/app.js"),        # SPA router+pages (v2.0)

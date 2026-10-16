@@ -11,6 +11,11 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
+v2.29 (2026-10-17 架构轮): 拆分护栏适配 — wan_agg v3.0 播种代码路径改指
+  wan_agg_lib.sh(t_agg_pins_seed); wan_alive 的 api 消费方改指 api_sys.sh(v2.75
+  域拆分); +t_agg_split(lib 在位且被主管 source/ensure_lease 不在主管) +
+  t_agg_eth_daemon(wan_eth 守护活) + t_gui_apimod(六域模块在位+路由引用+
+  静态面拒 *.sh 直出回归)。
 v2.22 (2026-10-14 同日): 拨号单实例判据随 dial_keeper v1.3 改 PID 锁 — 护栏同步为
   锁 ↔ 活进程跨层一致断言(原脚本文本 grep 退役)。
 v2.21 (2026-10-14 模组 EE 事故轮): +5G 指示灯数据面一致性护栏(灯不得在无 5G
@@ -469,6 +474,33 @@ def t_gui_plugin():
     record(t_gui_plugin._test_name, "gui", ok, note)
 
 
+@test("API 域模块在位且静态面拒绝直出 (v2.75 拆分护栏)")
+def t_gui_apimod():
+    # v2.29 (api v2.75 架构轮): 路由懒加载六域模块 — 断言:
+    #   ① 六模块在设备上在位(api.sh 只剩路由, 模块缺席=全部端点 unknown);
+    #   ② api.sh 路由确实引用模块(拆分接线在);
+    #   ③ 静态面拒绝 *.sh 直出(v3httpd v2.6; 模块与 CGI 同目录, 直出=免认证
+    #      泄露服务端逻辑 — 拆分后受保护面扩大, 此回归必须钉住)。
+    mods = ["api_sys.sh", "api_wifi.sh", "api_lan.sh",
+            "api_agg.sh", "api_cell.sh", "api_sms.sh"]
+    missing = [m for m in mods
+               if dev(f"[ -s /data/gw/www/{m} ] && echo y").strip() != "y"]
+    router = dev("grep -c 'api_sys.sh' /data/gw/www/api.sh 2>/dev/null").strip()
+    leaked = []
+    for m in ("api.sh", "api_cell.sh", "api_sys.sh"):
+        try:
+            urllib.request.urlopen(f"http://{lgssh.HOST}/{m}", timeout=5)
+            leaked.append(f"{m}:200")   # 200 = 服务端脚本被直出
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                leaked.append(f"{m}:{e.code}")
+        except Exception as e:
+            leaked.append(f"{m}:{type(e).__name__}")
+    ok = not missing and router not in ("", "0") and not leaked
+    record(t_gui_apimod._test_name, "gui", ok,
+           f"missing={missing or 0} router_refs={router} leaked={leaked or 0}")
+
+
 @test("SSE 信号事件流 (v3httpd v2.5 + api.sh sse token 门)")
 def t_gui_sse():
     # v2.9: 原始 socket 拉 /api/sse, 5s 内应收到带 rsrp 的 data: 事件
@@ -620,6 +652,31 @@ def t_agg_daemon():
     out = dev("ps | grep -c '[w]an_agg.sh'")
     ok = out.strip() not in ("0", "")
     record(t_agg_daemon._test_name, "agg", ok)
+
+
+@test("wan_agg 拆分件在位 (lib 被 source + eth0 归属移交)")
+def t_agg_split():
+    # v2.29 (wan_agg v3.0 架构轮): 引擎库与 eth0 守护拆出 — 断言拆分后结构完整:
+    #   ① lib 在位且被主管 source(路径引用在); ② wan_agg 不再自带 ensure_lease
+    #      (eth0 归 wan_eth, 若回流=双写方); ③ 探活/FSM 仍在主管(核心职责未漂移)。
+    lib_ref = dev("grep -c 'wan_agg_lib' /data/gw/wan_agg.sh 2>/dev/null").strip()
+    lib_ok = dev("[ -s /data/gw/wan_agg_lib.sh ] && echo y").strip()
+    nold = dev("grep -c 'ensure_lease()' /data/gw/wan_agg.sh 2>/dev/null").strip()
+    fsm = dev("grep -c 'prim_want' /data/gw/wan_agg.sh 2>/dev/null").strip()
+    ok = (lib_ref not in ("", "0") and lib_ok == "y"
+          and nold == "0" and fsm not in ("", "0"))
+    record(t_agg_split._test_name, "agg", ok,
+           f"lib_ref={lib_ref} lib={lib_ok} ensure_lease_in_wan_agg={nold} fsm_in_wan_agg={fsm}")
+
+
+@test("wan_eth 守护进程存活 (有线 WAN 接口管理)")
+def t_agg_eth_daemon():
+    # v2.29 (架构轮): wan_eth 自 wan_agg ensure_lease 拆出 — eth0 租约/NAT/路由
+    #   看门狗的唯一写方; 死则家宽侧静默劣化(watchdog v1.12 30s 兜底拉起)。
+    out = dev("ps | grep -c '[w]an_eth.sh'")
+    ok = out.strip() not in ("0", "")
+    record(t_agg_eth_daemon._test_name, "agg", ok,
+           "alive" if ok else "wan_eth dead (rc19/watchdog 应拉起)")
 
 
 @test("分流规则已安装 (模式感知)")
@@ -1411,7 +1468,8 @@ def t_wan_alive_guard():
     home, _cell, fresh = _wan_alive_state()
     home = home or "?"
     expect = "1" if reach > 0 else "0"
-    cons = [dev(f"grep -c 'wan_alive' /data/gw/{f} 2>/dev/null").strip() for f in ("led_mgr.sh", "www/api.sh")]
+    # v2.29 (api v2.75 拆分): api.sh 的 wan_alive 消费代码随 status 迁入 api_sys.sh
+    cons = [dev(f"grep -c 'wan_alive' /data/gw/{f} 2>/dev/null").strip() for f in ("led_mgr.sh", "www/api_sys.sh")]
     ok = (len(targets) >= 3 and not bad and fresh and home == expect
           and all(c not in ("", "0") for c in cons))
     record(t_wan_alive_guard._test_name, "system", ok,
@@ -1427,12 +1485,14 @@ def t_agg_pins_seed():
     #   机制静默失效。现从随版本部署的**只读基线** agg_pins.default 缺省才写地播种。
     # 断言: ① 设备上基线在位且**不含任何 MAC 行**(隐私 + 避免误钉); ② 活文件在位
     #   且带基线说明(播种生效; 用户经 GUI 编辑时注释行被保留, 说明不丢);
-    #   ③ wan_agg 的播种逻辑在位(结构护栏); ④ 活文件仍在 EXTRA_KEEP(自管, 防被
-    #   仓库空版本覆盖 —— 那会静默清空用户钉死, 即 L10 那类事故)。
+    #   ③ 播种逻辑在位(结构护栏; v2.29/架构轮: 随 conf 管理迁入 wan_agg_lib.sh,
+    #   检查两处 — 主管启动调 agg_conf_seed, 库内含播种本体); ④ 活文件仍在
+    #   EXTRA_KEEP(自管, 防被仓库空版本覆盖 —— 那会静默清空用户钉死, 即 L10 那类事故)。
     base_lines = dev("cat /data/gw/agg_pins.default 2>/dev/null | wc -l").strip()
     base_macs = dev("grep -v '^#' /data/gw/agg_pins.default 2>/dev/null | grep -c .").strip()
     live_doc = dev("grep -c 'MAC 钉死表' /data/gw/agg_pins.conf 2>/dev/null").strip()
-    seed = dev("grep -c 'agg_pins.default' /data/gw/wan_agg.sh 2>/dev/null").strip()
+    seed = dev("grep -c 'agg_pins.default' /data/gw/wan_agg_lib.sh 2>/dev/null").strip()
+    seed_call = dev("grep -c 'agg_conf_seed' /data/gw/wan_agg.sh 2>/dev/null").strip()
     dp = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "deploy.py")
     keep_ok = False
     try:
@@ -1441,10 +1501,11 @@ def t_agg_pins_seed():
     except OSError:
         pass
     ok = (base_lines.isdigit() and int(base_lines) > 3 and base_macs == "0"
-          and live_doc not in ("", "0") and seed not in ("", "0") and keep_ok)
+          and live_doc not in ("", "0") and seed not in ("", "0")
+          and seed_call not in ("", "0") and keep_ok)
     record(t_agg_pins_seed._test_name, "agg", ok,
            f"baseline_lines={base_lines} baseline_macs={base_macs} live_doc={live_doc} "
-           f"seed_code={seed} extra_keep={int(keep_ok)}")
+           f"seed_code={seed} seed_call={seed_call} extra_keep={int(keep_ok)}")
 
 
 @test("SoC 温度在合理区间")

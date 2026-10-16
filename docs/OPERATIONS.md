@@ -66,13 +66,18 @@ python tools/deploy.py attic      # 设备侧流浪脚本归档
 - CMGS 交互式 AT 会毒化 ril（需 sysrq-b 恢复）→ 短信发送未启用
 - 上行认证守护按 AUTHD_CMD 配置运行（现场 EAP 类认证建议先在测试口验证）
 
-## 守护拓扑（2026-10-06 P3-lite 后）
+## 守护拓扑（2026-10-17 架构轮拆分后）
 
 - 已下架：cfgmgr / logmgr（树不经守护，shm 由 cfg_tool 建立；rc_netfh v3.0）
 - 仍在跑的原厂件：mobilenetwork（树翻译层, P3.5 待裁）· modem 栈军（ccci 三件
   /mtk_netagent/ql_netd/ql_ril_service/mipc_submonitor/atcid 对/thermal_core）
-- 自研：dial_keeper（拨号兜底, 35s 宽限）· watchdog v1.3（17 不变量+自愈）·
-  v3httpd/api.sh · wan_agg · wifi_up/hostapd
+- 自研：dial_keeper（拨号兜底, 35s 宽限）· watchdog v1.12（不变量+自愈, 含
+  wan_eth/led_mgr/log_keeper 兜底拉）· v3httpd/api.sh（路由核心 + 六域模块
+  `www/api_{sys,wifi,lan,agg,cell,sms}.sh` 按端点懒加载）· wan_agg v3.0
+  （探活+FSM+主路策略; 引擎落地层 source `wan_agg_lib.sh`）· wan_eth v1.0
+  （eth0 租约/NAT/路由看门狗, 自 ensure_lease 拆出, rc19 先于 wan_agg 拉起）·
+  wifi_up/hostapd（MAC 派生 `wifi_macplan.sh` / 自动选道 `wifi_autoch.sh`
+  已拆出为独立可复用件）
 - 首刷默认：WiFi `LG6151M`/`lg6151m`，GUI `lg6151m`（均见 install/README）
 
 ## 日常观测点
@@ -80,4 +85,5 @@ python tools/deploy.py attic      # 设备侧流浪脚本归档
 - `/tmp/wifi_up.log`（AP 拉起 + 自动选道结果 `/tmp/wifi_autoch`）
 - `/tmp/v3httpd.log`（GUI + FH 隧道流量，proxy REQ/RESP 行）
 - `/tmp/wifi_guard.log`（BA stall 计数）、`/tmp/wagg.out`（聚合状态）
+- `/tmp/wan_eth.log`（eth0 租约/看门狗动作）、`/tmp/wan_agg.log`（FSM/主路/模式热载）
 - `iotagtd` 云连接：`netstat -tnp | grep iotagtd`（应见 :9991 ESTABLISHED）

@@ -585,3 +585,45 @@ ENABLED 的 20×0.5s 自 v1.x 起**从未真正执行过**（前者=告警功能
 **护栏**：selftest `t_agg_pins_seed` —— 基线在位且不含 MAC + 活文件带基线说明 +
 播种逻辑在位 + 活文件仍在 `EXTRA_KEEP`（结构护栏，防回归）。
 <!--CLM:CLM-PINS-SEED-->
+
+## 24. 大杂烩脚本拆分：wan_agg / api / wifi_up 架构轮（2026-10-17）
+
+**动机**：`wan_agg.sh`（724 行）、`api.sh`（1550 行）、`wifi_up.sh`（699 行）三个
+文件职责混杂到互相掩盖的程度 —— 改一处要在无关域的上下文里穿行，历史注记彼此
+纠缠。本轮按"决策/落地/接口管理"分层拆分，**行为零变化**（除下述一处实害修复）。
+
+**wan_agg v3.0 三分**：
+
+- **`wan_agg_lib.sh` v1.0**（被 source 的引擎落地层）：dp_setup/fw6\*/fw_setup/
+  kernel_apply/ensure_rules/agg_bypass/pin_\* + agg.conf 播种/迁移/校验。全部是
+  "读全局状态 → 幂等写内核"的映射函数，无决策逻辑；单进程 source = **单写方
+  纪律不变**（所有内核写方仍在 wan_agg 进程内）。顺带消除真实重复：MODE 白名单
+  与 W1_PCT 钳位校验原先在启动/迁移/热载三处各写一份。
+- **`wan_eth.sh` v1.0**（独立守护，rc19 先于 wan_agg 拉起，watchdog v1.12 自愈）：
+  原 `ensure_lease` 的 eth0 侧 —— 链路拉起、one-shot udhcpc、to-LAN 护盾、家宽
+  备用默认(metric 200)、表 200 默认(v4/v6)、eth0 NAT/FORWARD 看门狗。与聚合决策
+  正交（旁路/仅蜂窝下照样要跑）。**实害修复**：udhcpc（-t3 -T3 最坏 9 秒+）原
+  内联在探活环循里，租约获取期间整个 FSM 停摆（探活/故障转移全停，侵蚀 25 秒
+  硬截止预算）；独立进程后互不阻塞，FSM 卡死也不再连累租约续订。
+- **wan_agg 保留**：探活 + FSM + 主路策略（main 表唯一写方）+ 启动编排 + CLI。
+  蜂窝探活路由（metric 250）与 metric-50 遗留清理由 ensure_lease **上收到
+  main_primary_apply() 头部** —— 双死态（prim 空）也维持探活可达，否则路由被
+  外力冲刷后无法探活 = 无法恢复的死锁。死代码 pmode_of 一并清除。
+
+**api.sh v2.75 六域懒加载**：核心（helpers/认证/配置助手）+ 路由表，六域模块
+（sys/wifi/lan/agg/cell/sms）按端点 source —— 每请求只解析所需域（原整文件
+~1550 行全解析），`fw_apply.sh` 改在防火墙域内懒加载。模块与 CGI 同目录，静态面
+由 v3httpd v2.6 的 `*.sh` 直出拒绝保护（此前只有 api.sh 受保护，拆分后受保护面
+扩大——selftest `t_gui_apimod` 钉住此回归）。端点与 JSON 契约零变化，GUI 不动。
+
+**wifi_up v1.29 两件拆出**：`wifi_macplan.sh`（出厂 MAC 派生；**消除一处已漂移的
+算法副本** —— api uplink 的 eth0 原生 MAC 还原原为内联实现，缺 brmac 档案不可读
+时的两级兜底，收敛到唯一实现）与 `wifi_autoch.sh`（自动选道纯逻辑件，输出契约
+`/tmp/wifi_autoch` 不变，可独立复用）。apcfg 工厂模板与 hostapd 安全面保留在
+主文件（线性拉起配方的本体）。
+
+**护栏**：selftest v2.29 —— `t_agg_split`（lib 在位且被 source、ensure_lease 不
+回流主管、FSM 未漂移）+ `t_agg_eth_daemon`（wan_eth 存活）+ `t_gui_apimod`
+（六模块在位 + 路由引用 + `*.sh` 直出拒绝）+ 既有护栏路径适配（播种代码→lib、
+wan_alive 消费方→api_sys.sh）。
+<!--CLM:CLM-MODSPLIT-->

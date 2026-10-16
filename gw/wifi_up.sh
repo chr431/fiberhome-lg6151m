@@ -1,5 +1,14 @@
 #!/bin/sh
-# wifi_up.sh — v3 WiFi bring-up (v1.28: 候选收敛安全集深部{1,6} — 开机掩码不可用期回退选出边界道ch9被驱动IDC整晚搬运2↔3↔9; v1.27: auto-channel 接入驱动 IDC 安全掩码(mwctl show unsafeinfo 的 SafeChnBitmask), 只在安全集内选道 — 防选出驱动会自行搬走的道致"配置≠实况"; v1.26: 终端频段锁定 band_pins.conf→对侧频段deny ACL; v1.25: v1.19 块过期 reboot 注释修正(v1.23 已撤销); v1.24: MLD快照按uptime过滤; v1.23: MLO在线重应用先下电回冷启动等价态, 撤销需重启纪律; v1.22: 访客iface显式入桥; v1.20: MLO单次AP启动; v1.19: MLO真双链路 — 两带 dat 各写 MldGroup=1;0;x6
+# wifi_up.sh — v3 WiFi bring-up (v1.29, 2026-10-17 架构轮: MAC 派生计划拆出
+#   wifi_macplan.sh + 自动选道拆出 wifi_autoch.sh —— 纯逻辑复用件独立, 主文件收敛
+#   为拉起配方本体(dat 模板/hostapd 安全面/后处理); 输出契约 /tmp/wifi_autoch 与
+#   BSSID 变量名不变; v1.28: 候选收敛安全集深部{1,6} — 开机掩码不可用期回退选出
+#   边界道ch9被驱动IDC整晚搬运2↔3↔9; v1.27: auto-channel 接入驱动 IDC 安全掩码
+#   (mwctl show unsafeinfo 的 SafeChnBitmask), 只在安全集内选道 — 防选出驱动会
+#   自行搬走的道致"配置≠实况"; v1.26: 终端频段锁定 band_pins.conf→对侧频段deny ACL;
+#   v1.25: v1.19 块过期 reboot 注释修正(v1.23 已撤销); v1.24: MLD快照按uptime过滤;
+#   v1.23: MLO在线重应用先下电回冷启动等价态, 撤销需重启纪律; v1.22: 访客iface
+#   显式入桥; v1.20: MLO单次AP启动; v1.19: MLO真双链路 — 两带 dat 各写 MldGroup=1;0;x6
 #   (RE实证: stock be_init_wlan_apcfg_file 同款形态, 1基组号配对成MLD; 全零表=v1.15
 #   事故形态禁写; MldAddr/ApcliMloDisable 勿写; MLD生效需冷启动(FW锁存); 纯MLO不需wapp);
 #   v1.18: 访客独立配置; v1.16: F3单进程hostapd; v1.10: 自动信道扫描选道),
@@ -21,33 +30,8 @@ WU_UPT=$(cut -d. -f1 /proc/uptime)   # v1.24: MLD快照的dmesg时间起点
 mkdir -p /var/wlan /var/ctcwifi
 echo -n /etc/wireless > /sys/module/firmware_class/parameters/path 2>/dev/null
 
-# ---- MAC plan (factory algorithm from brmac) ----
-brmac=$(uci get /fhdata/factory_conf.brmac.value 2>/dev/null)
-# 兜底1: 出厂档案不可读时由 eth0 原生MAC反推基址(第二字节-1, 与出厂算法互逆)
-if [ -z "$brmac" ]; then
-    E0=$(cat /sys/class/net/eth0/address 2>/dev/null)
-    if [ -n "$E0" ]; then
-        b0=$(printf %d 0x$(echo $E0 | cut -d: -f2)); b0=$(( (b0 + 255) % 256 ))
-        brmac="$(echo $E0 | cut -d: -f1):$(printf %02X $b0):$(echo $E0 | cut -d: -f3-)"
-    fi
-fi
-# 兜底2: 合成本地管理地址(不可路由, 非任何真实设备)
-[ -z "$brmac" ] && brmac=02:03:7F:00:00:00
-mac1=${brmac:0:2}; mac2=${brmac:3:2}; mac3=${brmac:6:2}
-mac4=${brmac:9:2};  mac5=${brmac:12:2}; mac6=${brmac:15:2}
-mac2="0x${mac2}"; mac2=$(printf %d ${mac2})
-[ $mac2 -eq 255 ] && mac2=0 || mac2=$((mac2+1))
-mac2=$(printf %02X ${mac2})
-rai0_mac6="0x${mac6}"; rai0_mac6=$(printf %d ${rai0_mac6}); rai0_mac6=$((rai0_mac6+8))
-[ $rai0_mac6 -gt 255 ] && rai0_mac6=$((rai0_mac6-255))
-rai0_mac6=$(printf %02X ${rai0_mac6})
-ra0_mac="${mac1}:${mac2}:${mac3}:${mac4}:${mac5}:${mac6}"
-rai0_mac="${mac1}:${mac2}:${mac3}:${mac4}:${mac5}:${rai0_mac6}"
-# v1.18: 访客 BSSID 按厂测 mbss 规则从各自射频基址 +1 派生 (逐机唯一, 替换 v1.4 的全机型固定样例MAC)
-g6="0x${mac6}";    g6=$(printf %d $g6);    g6=$(( (g6+1)%256 ));    g6=$(printf %02X $g6)
-gi6="0x${rai0_mac6}"; gi6=$(printf %d $gi6); gi6=$(( (gi6+1)%256 )); gi6=$(printf %02X $gi6)
-ra1_mac="${mac1}:${mac2}:${mac3}:${mac4}:${mac5}:${g6}"
-rai1_mac="${mac1}:${mac2}:${mac3}:${mac4}:${mac5}:${gi6}"
+# ---- MAC plan (factory algorithm from brmac; v1.29: 统一实现拆出 wifi_macplan.sh) ----
+eval "$(sh $B/wifi_macplan.sh)"
 echo "brmac=$brmac ra0=$ra0_mac rai0=$rai0_mac ra1=$ra1_mac rai1=$rai1_mac"
 
 BSSIDNUM=8
@@ -97,108 +81,17 @@ HT2=""
 [ "$BW2G" = 40 ] && HT2="[HT40+]"
 # v1.7: 自动信道 (CH2G/CH5G=0) — 上层显式扫描选道。
 # hwifi 内部 ACS(AutoChannelSelect=1)在 hostapd 接管安全的架构下从未验证可用,
-# 改为拉起 apcli0/apclii0 扫描(与 GUI wifiscan 同配方), 对候选道按
-# 线性功率(mW)和评分取最小: 2.4G 邻道±4重叠+经典道(1/6/11)偏好;
-# 5G 80M按整组(36-48/149-161), 20/40M按±(bw/40+... )邻道。
-# 结果落 /tmp/wifi_autoch (RCH2G=/RCH5G=), GUI wifi_adv 端点回读展示。
+# 改为拉起 apcli0/apclii0 扫描(与 GUI wifiscan 同配方)。
+# v1.29(架构轮): 选道逻辑拆出 wifi_autoch.sh(纯逻辑件, 可独立复用);
+#   结果落 /tmp/wifi_autoch (RCH2G=/RCH5G=, GUI wifi_adv 端点回读)的契约不变。
 rm -f /tmp/wifi_autoch; RCH2G=""; RCH5G=""
 if [ "$CH2G" = 0 ] || [ "$CH5G" = 0 ]; then
-    echo "== auto-channel: scan for best channel (CH2G=$CH2G CH5G=$CH5G) =="
-    # v1.27: IDC(LTE 共存避让)安全掩码 — 驱动 IDC 武装时(bEnabled=1, 每秒轮询模组
-    #   频段)会把 AP 从"不安全"信道自行搬走(实测 n41@2644: ch1-8 安全/9-10 降功率/
-    #   11-14 避让)。选道必须只在安全集内, 否则必然出现"配置道≠实况道"。
-    #   掩码源: mwctl show 输出进内核日志; SafeChnBitmask 首段 bit=信道号(1fe=ch1-8)。
-    #   读不到(模组未起/命令不支持) → 回退全量候选(现行为), 由 watchdog 漂移护栏兜底。
-    IDC_SAFE=""
-    /usr/sbin/mwctl dev ra0 show unsafeinfo >/dev/null 2>&1
-    _M=$(dmesg 2>/dev/null | tail -60 | grep -o 'SafeChnBitmask=[0-9a-f]*' | tail -1 | cut -d= -f2)
-    [ -n "$_M" ] && IDC_SAFE=$((0x$_M))
-    # v1.28: 候选收敛到安全集深部 {1,6} — 实弹(2026-10-12): 开机模组未起时掩码
-    #   不可用, 回退全量候选选出边界道 ch9(功率压缩区), 驱动 IDC 整晚反复搬运
-    #   2↔3↔9(客户端每 30-60s 被踢一次)。{1,6} 是经典不重叠中心且在 n41 安全集
-    #   深部(掩码 1fe/1fc 两种形态下 ch6 恒安全), 从根上消除边界振荡。
-    CAND2=""
-    if [ -n "$IDC_SAFE" ] && [ "$IDC_SAFE" -gt 0 ] 2>/dev/null; then
-        for c in 1 6; do
-            [ $(( (IDC_SAFE >> c) & 1 )) = 1 ] && CAND2="$CAND2 $c"
-        done
-        [ -z "$CAND2" ] && for c in 1 2 3 4 5 6 7 8 9 10 11 12 13; do
-            [ $(( (IDC_SAFE >> c) & 1 )) = 1 ] && CAND2="$CAND2 $c"
-        done
-    fi
-    [ -z "$CAND2" ] && CAND2="1 6"
-    echo "== IDC safe mask: ${_M:-unavailable} cand2g=$CAND2 =="
-    ifconfig apcli0 up 2>/dev/null; ifconfig apclii0 up 2>/dev/null; sleep 3
-    ASCAN=$(iw apcli0 scan 2>/dev/null; iw apclii0 scan 2>/dev/null)
-    ifconfig apcli0 down 2>/dev/null; ifconfig apclii0 down 2>/dev/null
-    echo "$ASCAN" | awk -v want2="$CH2G" -v want5="$CH5G" -v bw5="$BW5G" -v cand2="$CAND2" '
-        function ch_of(f) {
-            if (f == 2484) return 14
-            if (f < 4000)  return int((f - 2407 + 2) / 5)
-            return int((f - 5000 + 2) / 5)
-        }
-        function store() {
-            if (fr == "" || sig == "") { fr = ""; sig = ""; return }
-            if (sig + 0 > -90) {
-                if (fr + 0 < 4000) p24[ch_of(fr + 0)] += 10 ^ (sig / 10)
-                else               p5[ch_of(fr + 0)]  += 10 ^ (sig / 10)
-            }
-            fr = ""; sig = ""
-        }
-        function abs(v) { return v < 0 ? -v : v }
-        /^BSS /       { store() }
-        /^[ \t]+signal:/ { sig = $2 }
-        /^[ \t]+freq:/   { fr = $2 }
-        END {
-            store()
-            if (want2 == 0) {
-                best = 1; bs = 1e30
-                n = split(cand2, CA, " ")   # v1.27: 候选=IDC 安全集(无掩码时=全量 1-13)
-                for (i = 1; i <= n; i++) {
-                    c = CA[i] + 0
-                    s = 0
-                    for (d = 1; d <= 13; d++) if (abs(d - c) <= 4) s += p24[d]
-                    if (c != 1 && c != 6 && c != 11) s *= 1.15   # 非经典道轻惩罚
-                    if (s < bs) { bs = s; best = c }
-                }
-                print "RCH2G=" best
-            }
-            if (want5 == 0) {
-                # busybox awk 实测不解析跨行嵌套三元 -> 全部展开成 if/else
-                split("36 40 44 48 149 153 157 161", C, " ")
-                best = 149; bs = 1e30
-                for (i = 1; i <= 8; i++) {
-                    c = C[i]; s = 0
-                    if (bw5 >= 160) half = 14
-                    else if (bw5 >= 80) half = 8
-                    else if (bw5 == 40) half = 1
-                    else half = 0
-                    for (d = 36; d <= 165; d++) {
-                        if (!(d in p5)) continue
-                        ov = 0
-                        if (bw5 >= 160) {
-                            # 160: 整个 36-64 块(含DFS)为一组; 149 组不可能连续160
-                            if (c < 100) { if (d >= 36 && d <= 64) ov = 1 }
-                            else         { if (d >= 149) ov = 1 }
-                        } else if (bw5 >= 80) {
-                            if (c < 100) { if (d >= 36 && d <= 48) ov = 1 }
-                            else         { if (d >= 149) ov = 1 }
-                        } else {
-                            if (d >= c - half && d <= c + half) ov = 1
-                        }
-                        if (ov) s += p5[d]
-                    }
-                    if (s < bs) { bs = s; best = c }
-                }
-                print "RCH5G=" best
-            }
-        }
-    ' > /tmp/wifi_autoch
+    sh $B/wifi_autoch.sh "$CH2G" "$CH5G" "$BW5G" > /tmp/wifi_autoch
     [ -s /tmp/wifi_autoch ] && . /tmp/wifi_autoch
     [ -n "$RCH2G" ] && [ "$CH2G" = 0 ] && CH2G=$RCH2G
     [ -n "$RCH5G" ] && [ "$CH5G" = 0 ] && CH5G=$RCH5G
     echo "== auto-channel resolved: 2.4G=$CH2G 5G=$CH5G ($(tr '\n' ' ' < /tmp/wifi_autoch 2>/dev/null))"
-    # 兜底: awk全空输出时退回安全默认, 绝不让 Channel=0 进 hwifi/hostapd
+    # 兜底: 选道器全空输出时退回安全默认, 绝不让 Channel=0 进 hwifi/hostapd
     case "$CH2G" in ''|0) CH2G=6 ;; esac
     case "$CH5G" in ''|0) CH5G=149 ;; esac
 fi

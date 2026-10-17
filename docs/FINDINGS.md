@@ -885,4 +885,10 @@ TICK 级输入（探活逐目标、ccmni 清单、authd 年龄、租约耗时、
 造成本地时间跨段不可比（实机观察到 02:34→10:34 的 8h 跳变）。watchdog v1.15
 检测 epoch 与 uptime 增量偏差 >5s 时记 `EVT clock jump`。C 工具的 `localtime`
 在无 `/etc/localtime` 时按 UTC 输出，**跨日志关联一律以 epoch 为准**。
+
+**上线即收获（实弹）**：日志启用 20 分钟内，`mipc_cellular.log` 抓到 cells
+间歇 `decode=-2 plen≈2960~3520`。原始载荷落盘后比对：正常响应数组 tag 是
+`0x810b`，19 邻区的大响应改用 `0x010b`（记录布局/长度完全相同）——旧解码器
+只认前者，GUI 小区卡因此间歇失败。v0.16 已接受双变体；连续 20 次查询 0 失败。
+该案例说明"把输入与失败原因写下来"比"只记最终状态"更快定位问题。
 <!--CLM:CLM-LOGGING-FINE-->

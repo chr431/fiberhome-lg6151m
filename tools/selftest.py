@@ -11,6 +11,9 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
+v2.36 (RIL 清零轮收尾): t_agg_route_landmine 的探活路由断言改"指向任一存活
+  ccmni"(v3.1 漂移按探活选口, 不再固定 ccmni2) + t_wan_alive_guard 瞬时窗口
+  重采(守护重启边界不再误报 fresh=0)。
 v2.35 (RIL 清零轮·终章): t_ril_single 改"RIL 守护全退役"(四件进程+procd 服务
   面零残留) + t_ril_thin 纳入 ql_ril_service + 新增 t_cell_ops_direct(写路径
   直连: endc get/cells 无 fallback + setlock/unlock 结构护栏)。
@@ -1496,6 +1499,11 @@ def t_agg_route_landmine():
         if not m or int(m.group(1)) < 200:
             land.append(l.strip())
     probe = any("metric 250" in l for l in ccmni_lines)
+    # v2.36: 探活路由可能指向任意 ccmni(v3.1 承载漂移按探活实证选口), 只要求
+    #   这条路由指向**当前有 IPv4 的** ccmni(僵尸口不算)。
+    live_ccmni = dev("ip -o -4 addr show 2>/dev/null | grep ccmni | grep 'inet ' "
+                     "| awk '{print $2}'").split()
+    probe = probe and any(any(c in l for c in live_ccmni) for l in ccmni_lines if "metric 250" in l)
     eth_pri = [l for l in rts if "dev eth0" in l and "metric" not in l]
     mode, pct = _agg_conf()
     home, cell, _fresh = _wan_alive_state()
@@ -1602,6 +1610,10 @@ def t_wan_alive_guard():
     reach = sum(1 for t in targets
                 if dev(f"ping -4 -I eth0 -c1 -W2 -s1 {t} 2>/dev/null | grep -q ttl && echo y").strip() == "y")
     home, _cell, fresh = _wan_alive_state()
+    if not fresh:   # v2.36: 瞬时窗口(守护刚重启/环循边界) → 重采一次再判
+        import time as _t
+        _t.sleep(6)
+        home, _cell, fresh = _wan_alive_state()
     home = home or "?"
     expect = "1" if reach > 0 else "0"
     # v2.29 (api v2.75 拆分): api.sh 的 wan_alive 消费代码随 status 迁入 api_sys.sh

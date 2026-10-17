@@ -1,5 +1,5 @@
 #!/bin/sh
-# wan_agg.sh v3.0 — 双上行聚合主管: 探活 + 故障转移 FSM + 未打标主路策略 + CLI
+# wan_agg.sh v3.1 — 双上行聚合主管: 探活 + 故障转移 FSM + 未打标主路策略 + CLI
 # v3.0 (2026-10-17 架构轮, 大杂烩拆分):
 #   引擎落地层(dp_setup/fw*/kernel_apply/ensure_rules/agg_bypass/pin_*)与
 #   agg.conf/钉死表管理迁入 wan_agg_lib.sh(被 source; 单进程 = 单写方纪律不变);
@@ -170,7 +170,7 @@ case "$1" in
     exit 0 ;;
 esac
 
-log "===== wan_agg v3.0 start (lib 拆分; eth0 归 wan_eth; 判活多样+wan_alive) ====="
+log "===== wan_agg v3.1 start (lib 拆分; eth0 归 wan_eth; 判活多样+wan_alive) ====="
 agg_conf_seed
 pin_replay
 # 引擎探测: vendor ioctl (multiwan_ctl+fhstub; proc 写已证伪为只读) 失败则 iptables
@@ -197,7 +197,19 @@ log "init: engine=$ENGINE agg_on=$AGG_ON weights=$W1_PCT/$W2_PCT s1=$S1 s2=$S2"
 
 while :; do
     # 5G 承载漂移检测: 活跃 ccmni 变了就刷新 表100/main/NAT/FORWARD (幂等)
-    CW=$(ip -o addr show 2>/dev/null | grep ccmni | grep 'inet ' | awk '{print $2}' | head -1)
+    # v3.1 (RIL 清零轮回归): 原判据取 `ip addr show | head -1` —— 字母序第一个。
+    #   多 ccmni 并存(旧 PDN 未 deact 干净)时可能选中**僵尸口**(有 IP 无数据),
+    #   而真正承载数据的是另一口(实弹: ccmni1 通/cmmni2,3 僵尸, 探活全灭 cell=0)。
+    #   新判据: 候选按字母序, **能探活通过的那个才算活跃**; 当前口仍通则不变
+    #   (避免每轮乒乓)。全部不通时保持现状, 由 FSM 判死转移。
+    _cand=$(ip -o -4 addr show 2>/dev/null | grep ccmni | grep 'inet ' | awk '{print $2}')
+    CW=""
+    for _c in $W1_IF $_cand; do
+        [ -n "$_c" ] || continue
+        for _t in $PROBE_V4; do        # 轻量单目标 ICMP(不做 TCP 兜底, 保环循节奏)
+            probe "$_c" "$_t" && { CW=$_c; break 2; }
+        done
+    done
     if [ -n "$CW" ] && [ "$CW" != "$W1_IF" ]; then
         log "5g iface moved: $W1_IF -> $CW"
         W1_IF=$CW

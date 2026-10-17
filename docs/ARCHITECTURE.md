@@ -81,7 +81,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/v2_access.sh` | **v6.1** | manifest | `/data/gw/v2_access.sh` | v2 极简访问层(串口/SSH/DHCP/防火墙22,零守护干涉) |
 | `gw/v3_babysit_v2.sh` | **v2.0** | manifest | `/data/gw/babysit_v2.sh` | 启动保姆(T1杀rcS/T2核爆回B) |
 | `gw/v3_rc10.extend.sh` | **v2.29** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2; v2.29: +wan_eth 接线(架构轮); 历史见git |
-| `gw/wan_agg.sh` | **v3.0** | manifest | `/data/gw/wan_agg.sh` | v3.0(2026-10-17 架构轮, 大杂烩拆分): 引擎落地层与 conf 管理迁入 wan_agg_lib.sh(source, 单写方纪律不变); eth0 租约/NAT 看门狗迁出为独立守护 wan_eth.sh(rc19 先拉, watchdog 自愈) — udhcpc 原内联在探活环循里最坏 9s+ 停摆整个 FSM(侵蚀 25s 硬截止预算); 蜂窝探活路由(metric250)+metric50 遗留清理上收到 main_primary_apply 头部(双死态也维持探活可达, 否则冲刷后无法探活=无法恢复的死锁); 死代码 pmode_of 清除; v2.34: 钉死表缺省播种(逻辑入 lib.agg_conf_seed); v2.32(宵断实弹): 判活目标多样化+发布 /tmp/wan_alive 唯一权威; v2.31: 未打标主路(v4+v6)由模式+权重+真实存活推导, main 表唯一写方每周期复位; 历史见git |
+| `gw/wan_agg.sh` | **v3.1** | manifest | `/data/gw/wan_agg.sh` | 双上行聚合主管; v3.1(RIL 清零轮回归): 承载漂移检测改探活实证选口 — 原取 ip addr 字母序第一个, 多 ccmni 并存时选中僵尸口(有IP无数据)致探活全灭 cell=0; 现候选逐口 ICMP 实证(当前口优先, 避免乒乓); 历史见git |
 | `gw/wan_agg_lib.sh` | **v1.0** | manifest | `/data/gw/wan_agg_lib.sh` | 聚合引擎落地层+conf 管理库(被 wan_agg source, v3.0 架构轮拆出; dp_setup/fw6*/fw_setup/kernel_apply/ensure_rules/agg_bypass/pin_* + agg.conf 播种/迁移/校验收敛 — MODE/W1_PCT 三处重复校验消除; 单进程 source=单写方纪律不变) |
 | `gw/wan_eth.sh` | **v1.0** | manifest | `/data/gw/wan_eth.sh` | 有线 WAN(eth0) 接口管理守护(自 wan_agg ensure_lease 拆出, 架构轮): 链路+one-shot udhcpc+to-LAN 护盾+家宽备用默认+表200+eth0 NAT/FORWARD 看门狗(全幂等 level-driven); udhcpc 最坏 9s 不再阻塞探活 FSM(原内联期间整个状态机停摆) |
 | `gw/watchdog.sh` | **v1.14** | manifest | `/data/gw/watchdog.sh` | 持续不变量看门狗; v1.14(RIL 清零轮): cell 查询恢复提示改直连语义(RIL 守护已全退役); 历史见git |

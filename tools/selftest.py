@@ -1465,13 +1465,20 @@ def _agg_conf():
 
 
 def _wan_alive_state():
-    """读 wan_agg 发布的判活结论(唯一权威): (home, cell, fresh)。"""
-    wa = dev("cat /tmp/wan_alive 2>/dev/null").strip()
-    m = re.search(r"home=([01]).*cell=([01]).*ts=(\d+)", wa)
+    """读 wan_agg 发布的判活结论(唯一权威): (home, cell, fresh)。
+    v2.36: 新鲜度在**设备侧**计算 — PC 与设备时钟可能不同步(实测差 8h:
+    设备跑 UTC 而 PC 是 CST), 用 PC time.time() 比对设备 ts 会恒判过期。"""
+    wa = dev("cat /tmp/wan_alive 2>/dev/null; date +%s").splitlines()
+    if not wa:
+        return None, None, False
+    m = re.search(r"home=([01]).*cell=([01]).*ts=(\d+)", wa[0])
     if not m:
         return None, None, False
-    return m.group(1), m.group(2), abs(int(time.time()) - int(m.group(3))) <= 30
-
+    try:
+        now = int(wa[-1].strip())
+    except ValueError:
+        return m.group(1), m.group(2), False
+    return m.group(1), m.group(2), abs(now - int(m.group(3))) <= 30
 
 def _dry_primary(mode, a1, a2, pct=""):
     """干跑主路推导(--dry-primary), 不碰现场。"""

@@ -771,3 +771,4 @@ libqlril（回退），**行为零变化**——是解码器落地的安全垫�
 JSON 值无线性关系（43/61/28 一族值待解）；ql_ril_service 的
 `hosl_nas_convert_cell_info`（strings 命名）是权威映射，二进制已拉回库存档
 （stripped，需反汇编或多捕获统计标定）。
+<!--CLM:CLM-MIPC-TRANSPORT-->

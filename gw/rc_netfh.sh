@@ -31,7 +31,7 @@ glog() { echo "$(date -u +%FT%TZ) $*" >> $LOG; }
 # v1.1: FH binaries+libs live outside the default PATH/loader path
 export PATH=$PATH:/fhrom/bin:/fhrom/fhshell
 export LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib
-glog "===== rc_netfh v3.8 start ====="
+glog "===== rc_netfh v3.9 start ====="
 
 # 1. config base — v3.1 (P3 终章): cfg_tool/shmsnap/树整体退役。
 #   蜂窝全功能(锁/制式/飞行/PIN/短信/扫描/拨号)已由 mipc_cellular+dial_keeper+
@@ -195,4 +195,4 @@ if [ -n "$IF" ]; then
         glog "post-ladder rx=$R3"
     fi
 fi
-sh /data/gw/fw_apply.sh apply 2>/dev/null && glog "fw_apply ok" ; glog "===== rc_netfh v3.8 done ====="
+sh /data/gw/fw_apply.sh apply 2>/dev/null && glog "fw_apply ok" ; glog "===== rc_netfh v3.9 done ====="

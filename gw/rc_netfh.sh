@@ -1,5 +1,5 @@
 #!/bin/sh
-# rc_netfh.sh v3.6 -- route A: FH modem-stack environment (minimal army).
+# rc_netfh.sh v3.8 -- route A: FH modem-stack environment (minimal army).
 # Mission: give the 5G dialer its full stock environment so the modem builds
 # the IA bearer, WITHOUT the daemons that fight our v3 flight layer.
 # KEEP   (process_start_list order): cfgmgr, logmgr, mobilenetwork
@@ -21,12 +21,17 @@
 #   IP), 职能由自研 ccmni_up.sh 承接(dial_keeper v1.4 / dial_5g v1.4 共用)。
 #   停法 = ubus service delete(让 procd 停止看护 — 杀不死的正解, 见 §25 教训)。
 #   兜底: ccmni_up.sh 缺席(异常部署态)时保留 netagent 不退。
+# v3.8 (2026-10-17 RIL 收尾轮, 拔管实验定案): ql_netd + mipc_submonitor 退役 —
+#   8 项功能矩阵(AT/SIM/信号/APN/cells/bands/短信/数据面)逐件拔管实证零依赖;
+#   拨号终证: 目标终态飞行往返 t+61s 自愈。ql_ril_service **保留**(不可约:
+#   mipc_cellular cells 的 ql_nw 路径唯一依赖, 拔之 cells 恒返 -2147024889,
+#   GUI 小区卡/SSE 消费; procd respawn 自愈 + watchdog 查询面护栏在位)。
 LOG=/tmp/rc_netfh.log
 glog() { echo "$(date -u +%FT%TZ) $*" >> $LOG; }
 # v1.1: FH binaries+libs live outside the default PATH/loader path
 export PATH=$PATH:/fhrom/bin:/fhrom/fhshell
 export LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib
-glog "===== rc_netfh v3.7 start ====="
+glog "===== rc_netfh v3.8 start ====="
 
 # 1. config base — v3.1 (P3 终章): cfg_tool/shmsnap/树整体退役。
 #   蜂窝全功能(锁/制式/飞行/PIN/短信/扫描/拨号)已由 mipc_cellular+dial_keeper+
@@ -60,18 +65,16 @@ glog "P3-lite: cfgmgr/logmgr daemons retired (shm-only tree)"
 #       (一并拉起保持原厂形态)。必须在 mobilenetwork 前就绪。
 pidof atcid >/dev/null || { /usr/bin/atci_service >/dev/null 2>&1 & sleep 1; /usr/bin/atcid >/var/atcid.log 2>&1 & sleep 1; }
 glog "atcid=$(pidof atcid) at_ch=$(mipc_wan_cli --at_cmd 'AT+CSQ' 2>/dev/null | grep -c '+CSQ:')"
-# v3.7: 收编制(清场思路废弃, 见头注)。有界等待 rc.d 套就绪 — 本脚本经
-#   zz_data_hook/rc.extend 在 procd rc.d 链末段起跑, S85/S99 的管道件在
-#   前后数秒内由 procd 拉起并**持续看护**(respawn)。2s×10 覆盖实证时序
-#   (S85@+30s S99@+31s); 等不齐只补缺席者(兜底 rc.d 链异常), 绝不多起一份。
-#   mtk_netagent 不在名单(v3.7 退役, 见下)。
+# v3.8: 收编制(清场思路废弃, 见头注)。有界等待 rc.d 套就绪 — 本脚本经
+#   zz_data_hook/rc.extend 在 procd rc.d 链末段起跑, S85 的管道件在前后数秒内
+#   由 procd 拉起并**持续看护**(respawn)。2s×10 覆盖实证时序(S85@+30s);
+#   等不齐只补缺席者(兜底 rc.d 链异常), 绝不多起一份。
+#   名单只剩 ql_ril_service(v3.8 拔管实验: 唯一不可约依赖, cells 路径)。
 _i=0
-while [ $_i -lt 10 ] && { [ -z "$(pidof ql_netd)" ] || [ -z "$(pidof ql_ril_service)" ] || [ -z "$(pidof mipc_submonitor)" ]; }; do
+while [ $_i -lt 10 ] && [ -z "$(pidof ql_ril_service)" ]; do
     sleep 2; _i=$((_i+1))
 done
-pidof ql_netd         >/dev/null || /usr/bin/ql_netd         >/dev/null 2>&1 &
 pidof ql_ril_service  >/dev/null || /usr/bin/ql_ril_service  >/dev/null 2>&1 &
-pidof mipc_submonitor >/dev/null || /usr/bin/mipc_submonitor >/dev/null 2>&1 &
 sleep 2
 # v3.7: mtk_netagent 退役(摘除试验实证其为 ccmni IP 执行者, 职能已由
 #   ccmni_up.sh 承接)。停法 = service delete(procd 不再看护); 若仍在(竞态)
@@ -87,13 +90,20 @@ if [ -x /data/gw/ccmni_up.sh ]; then
 else
     glog "WARN ccmni_up.sh absent — netagent kept (fallback)"
 fi
-glog "plumbing (adopted, waited $((_i*2))s) netagent=$(pidof mtk_netagent | wc -w) ql_netd=$(pidof ql_netd) ril=$(pidof ql_ril_service) submon=$(pidof mipc_submonitor)"
-# 逐件数量复核(≠1 记警 — 补齐与 procd respawn 竞态的可见化; selftest
-#   t_ril_single 以此为回归护栏; netagent 预期 0)
-for _n in ql_netd ql_ril_service mipc_submonitor; do
-    _c=$(pidof $_n | wc -w)
-    [ "$_c" = "1" ] || glog "WARN plumbing ${_n} x${_c} (want 1)"
+# v3.8: ql_netd + mipc_submonitor 退役(拔管实验零依赖, 见头注); 同款 service
+#   delete + SIGKILL 收尾。注: submonitor 的 procd 服务名带 .init 后缀。
+for _svc in ql_netd mipc_submonitor.init; do
+    ubus call service delete "{\"name\":\"$_svc\"}" >/dev/null 2>&1
 done
+sleep 1
+for p in $(pidof ql_netd mipc_submonitor); do kill -9 $p 2>/dev/null; done
+sleep 1
+[ -z "$(pidof ql_netd mipc_submonitor)" ] && glog "ql_netd+mipc_submonitor retired (zero-dep, drill-proven)" \
+    || glog "WARN ql_netd/submonitor alive after retire: $(pidof ql_netd mipc_submonitor)"
+glog "plumbing (adopted, waited $((_i*2))s) ril=$(pidof ql_ril_service) netd=$(pidof ql_netd | wc -w) submon=$(pidof mipc_submonitor | wc -w)"
+# 保留件数量复核(≠1 记警 — selftest t_ril_single 回归护栏)
+_c=$(pidof ql_ril_service | wc -w)
+[ "$_c" = "1" ] || glog "WARN plumbing ql_ril_service x${_c} (want 1)"
 
 # 3. THE stock dialer (army spawn form, taskset like process_start_list)
 if [ "$KEEP_TREE" = 1 ]; then
@@ -193,4 +203,4 @@ if [ -n "$IF" ]; then
         glog "post-ladder rx=$R3"
     fi
 fi
-sh /data/gw/fw_apply.sh apply 2>/dev/null && glog "fw_apply ok" ; glog "===== rc_netfh v3.7 done ====="
+sh /data/gw/fw_apply.sh apply 2>/dev/null && glog "fw_apply ok" ; glog "===== rc_netfh v3.8 done ====="

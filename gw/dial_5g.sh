@@ -1,5 +1,6 @@
 #!/bin/sh
-# dial_5g.sh v1.4 — production 5G dialer for v3 (recipe proven live 2026-10-02).
+# dial_5g.sh v1.5 — production 5G dialer for v3 (recipe proven live 2026-10-02).
+# v1.5 (RIL 收尾轮): ubus 冷启动引导去掉 ql_netd(拔管实证零依赖, 已退役)。
 #
 # v1.4 (2026-10-17 netagent 摘除试验轮): 拨号+落地统一改走 ccmni_up.sh —
 # 实证 mtk_netagent 才是 ccmni IP 执行者, 且厂商 proto(mipc.sh)同样不含落地
@@ -25,13 +26,14 @@ if ! pidof ubusd >/dev/null; then
     /sbin/ubusd >/dev/null 2>&1 &
     sleep 2
     # re-register the MIPC providers (they predate ubusd, never connected)
-    kill $(pidof ql_netd ql_ril_service logd) 2>/dev/null
+    # v1.5: ql_netd 已退役(RIL 收尾轮拔管实证零依赖), 重注册只剩 ql_ril_service
+    #   (mipc_cellular cells 路径的不可约依赖)
+    kill $(pidof ql_ril_service logd) 2>/dev/null
     sleep 1
     /sbin/logd -S 10240 >/dev/null 2>&1 &
     /usr/bin/ql_ril_service >/dev/null 2>&1 &
-    /usr/bin/ql_netd >/dev/null 2>&1 &
     sleep 4
-    glog "ubusd bootstrapped + ql daemons re-registered"
+    glog "ubusd bootstrapped + ql_ril_service re-registered"
 fi
 
 # --- 1+2+3. dial + land via ccmni_up (v1.4; APN 取自 SIM 档案, keeper 同源) ---

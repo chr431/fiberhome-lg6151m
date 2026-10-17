@@ -1,5 +1,7 @@
 #!/bin/sh
-# watchdog.sh v1.12 -- on-device continuous invariant monitor.
+# watchdog.sh v1.13 -- on-device continuous invariant monitor.
+# v1.13 (RIL 收尾轮): cell 查询面恢复消息修正 — ql_netd 已退役, 恢复只需
+#   restart ql_ril_service。
 # L13: "feature silently broken until manual inspection" countermeasure.
 # Runs every 30s; failures log + ALERT LED flash (5G orange); recovers silently.
 # Started by rc19.sh (pgrep guard); single instance.
@@ -298,7 +300,7 @@ run_cycle() {
     CQ_TICK=$(( ${CQ_TICK:-0} + 1 ))
     if [ $((CQ_TICK % 10)) -eq 1 ]; then
         /data/gw/mipc_cellular cells 2>/dev/null | grep -q '"serving"' || \
-            log "WARN  cell query path dead (cells 无 serving 字段) — 厂商 RIL 查询面失效(数据面可能正常); 恢复: kill \$(pidof ql_netd ql_ril_service) 后按 dial_5g 路径重启两者, 见 docs/FINDINGS"
+            log "WARN  cell query path dead (cells 无 serving 字段) — 厂商 RIL 查询面失效(数据面可能正常); 恢复(v1.13: ql_netd 已退役): /etc/init.d/ql_ril_service restart, 见 docs/FINDINGS §27"
     fi
 
     # ---- visual alert ----
@@ -329,8 +331,8 @@ run_cycle() {
 
 # ---- main ----
 touch $LOG $STATE
-log "===== watchdog v1.12 start (alert LED 5G orange; WAN LED owned by led_mgr; +wan_eth keeper +cell stats divergence +cell query liveness) ====="
-logger -t watchdog "watchdog v1.12 start"
+log "===== watchdog v1.13 start (alert LED 5G orange; WAN LED owned by led_mgr; +wan_eth keeper +cell stats divergence +cell query liveness) ====="
+logger -t watchdog "watchdog v1.13 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

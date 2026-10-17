@@ -18,11 +18,10 @@ if ! pidof ubusd >/dev/null; then
     mkdir -p /var/run
     /sbin/ubusd >/dev/null 2>&1 &
     sleep 2
-    kill $(pidof ql_netd ql_ril_service logd) 2>/dev/null
+    kill $(pidof ql_ril_service logd) 2>/dev/null
     sleep 1
     /sbin/logd -S 10240 >/dev/null 2>&1 &
     /usr/bin/ql_ril_service >/dev/null 2>&1 &
-    /usr/bin/ql_netd >/dev/null 2>&1 &
     sleep 4
     echo "ubus bootstrapped" >> $LOG
 fi

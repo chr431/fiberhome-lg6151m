@@ -16,13 +16,13 @@ gw/v3_babysit_v2.sh	2.0	manifest	/data/gw/babysit_v2.sh	启动保姆(T1杀rcS/T2
 gw/night_report.sh	1.0	manifest	/data/gw/night_report.sh	夜间体检报告
 gw/wifi_guard.sh	1.0	manifest	/data/gw/wifi_guard.sh	BA/TX 停滞自动恢复守卫
 gw/mipc_dial_trace.sh	1.0	manifest	/data/gw/mipc_dial_trace.sh	5G 拨号取证(xtrace 抓真参)
-gw/dial_5g.sh	1.4	manifest	/data/gw/dial_5g.sh	生产 5G 拨号器; v1.4: 拨号+落地统一走 ccmni_up(proto 驱动段退役 — 实证 mipc.sh 无落地语句, 旧注释'由 proto 应用'系错误归属); ubus 引导/载体验证/路由 NAT TTL 段保留; 历史见git
+gw/dial_5g.sh	1.5	manifest	/data/gw/dial_5g.sh	生产 5G 拨号器; v1.5: ubus 冷启动引导去掉 ql_netd(退役); v1.4: 拨号+落地统一走 ccmni_up; 历史见git
 gw/ccmni_up.sh	1.0	manifest	/data/gw/ccmni_up.sh	netagent-lite: MIPC 拨号+ccmni 接口落地(deact+act→解析 v4/v6 地址→flush+add+mtu); 实证 netagent 是 IP 执行者(act 响应含全套地址而无人落地), 本脚本是它退役的前提; 不写路由/NAT(单写方纪律: main 表归 wan_agg)
 gw/consfeed.sh	1.0	manifest	/data/gw/consfeed.sh	v2 控制台喂食器(无setsid,v2_access拉起)
-gw/rc_netfh.sh	3.7	manifest	/data/gw/rc_netfh.sh	路线A: FH modem栈环境; v3.7(netagent 摘除轮): mtk_netagent 退役 — 开机 ubus service delete(procd 停止看护)+SIGKILL 收尾, 职能由 ccmni_up 承接; 收编制名单收缩为三件; ccmni_up 缺席时保留 netagent 兜底; 历史见git
+gw/rc_netfh.sh	3.8	manifest	/data/gw/rc_netfh.sh	路线A: FH modem栈环境; v3.8(RIL 收尾轮, 拔管实验): ql_netd+mipc_submonitor 退役(8 项功能矩阵零依赖+飞行往返拨号终证 t+61s), 收编制名单收敛为 ql_ril_service 一件(不可约: mipc_cellular cells 路径唯一依赖); v3.7: netagent 退役; 历史见git
 gw/radvd.conf	1.0	manifest	/data/gw/radvd.conf	IPv6 SLAAC+RDNSS通告(br-lan, ULA fd42:9ac1:7e50::/64)
 gw/capture_ubus.sh	1.1	manifest	/data/gw/capture_ubus.sh	stock拨号一次性捕获(ubus monitor+ccmni采样)
-gw/dial_variant.sh	1.1	manifest	/data/gw/dial_variant.sh	5G 拨号参数变体实验器(iptype/apn/plmn/roam)
+gw/dial_variant.sh	1.2	manifest	/data/gw/dial_variant.sh	5G 拨号参数变体实验器; v1.2: ubus 引导同步去掉 ql_netd(退役)
 gw/v2_access.sh	6.1	manifest	/data/gw/v2_access.sh	v2 极简访问层(串口/SSH/DHCP/防火墙22,零守护干涉)
 gw/bin/healthdog.ko	1.0	manifest	/data/gw/healthdog.ko	取证看门狗内核模块(forensic=1)
 gw/bin/v3_fix.ko	1.1	manifest	/data/gw/v3_fix.ko	TTL伪装/PPE解绑内核模块(wan_if/ttl_mode/unhook)
@@ -92,8 +92,8 @@ gw/defaults.conf	1.8	manifest	/data/gw/defaults.conf	统一配置只读出厂基
 tools/leak_check.py	2.2	tool	-	敏感词零命中门禁; v2.2: --history 全量扫提交正文(%B, 原仅扫标题%s可漏检消息体); v2.1: 修复 PAT_PARTS NameError; 历史见git
 docs/ARCHITECTURE.md	1.1	doc	-	架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针)
 docs/GUI_TERMINOLOGY.md	1.2	doc	-	GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git
-gw/watchdog.sh	1.12	manifest	/data/gw/watchdog.sh	v1.12(架构轮): +wan_eth 检查+自愈拉(有线 WAN 接口守护拆分自 wan_agg — 其为 eth0 租约/NAT 看门狗唯一写方, 静默死亡=家宽侧静默劣化); v1.11: +蜂窝查询路径活性告警(只告警不自动重启); v1.10: +蜂窝统计偏差护栏(阈值256KB); 历史见git
-tools/selftest.py	2.32	tool	-	v2.32(netagent 摘除轮): t_ril_single 更名三件 + t_netagent_retired(进程/procd 服务面双缺席+ccmni_up 接线+僵尸 IP 护栏+数据面); 历史见git
+gw/watchdog.sh	1.13	manifest	/data/gw/watchdog.sh	持续不变量看门狗; v1.13(RIL 收尾轮): cell 查询面恢复消息修正(ql_netd 已退役, 恢复只需 restart ql_ril_service); v1.12: +wan_eth 自愈; 历史见git
+tools/selftest.py	2.33	tool	-	v2.33(RIL 收尾轮): t_ril_single 改保留件(含 procd respawn 断言) + t_ril_thin(netd/submon 退役+cells 活); v2.32: t_netagent_retired; 历史见git
 tools/doc_audit.py	1.1	tool	-	台账↔文档内联标记双向审计(v1.1: 标记扫描纳入台账引用的docs/外文档如install/README.md; v1.0: 版本绑定+TEST-MISSING/STALE-CODE/UNREGISTERED-CLAIM)
 gw/src/mipc_cellular.c	0.8	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源(P1): dlopen闭包预载+ql_nw_init; v0.8: +endc 组网模式(厂商 fh_set_endc 同款 ql_nw_set_nr_disable_mode 序列, 写后读回校验)
 gw/bin/mipc_cellular	0.8	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI(getbands/setlock/unlock/endc; 锁NR41+79实弹验证零扰动)

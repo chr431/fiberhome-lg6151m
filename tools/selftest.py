@@ -11,6 +11,9 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
+v2.33 (RIL 收尾轮): t_ril_single 改"保留件单实例"(仅 ql_ril_service, 含 procd
+  服务面在位断言) + 新增 t_ril_thin(ql_netd/mipc_submonitor 退役: 进程/服务面
+  双缺席 + cells 查询活 — 拔管实验矩阵的回归护栏)。
 v2.32 (netagent 摘除轮): t_ril_single 更名并收缩为三件(netagent 预期缺席) + 新增
   t_netagent_retired(netagent 退役断言: 进程/procd 服务面双缺席 + ccmni_up
   在位且被 keeper/dialer 引用 + 僵尸 IP 触发护栏在位 + 数据面通)。
@@ -840,7 +843,7 @@ category("cellular")
 #   数据面 (ccmni/DNS) + 控制面 (AT/mipc) + 翻译层 (树/自管conf) + GUI 层
 
 
-@test("RIL 管道三件单实例 (rc_netfh 收编制)")
+@test("RIL 保留件单实例 (ql_ril_service)")
 def t_ril_single():
     # v2.30 (2026-10-17 实弹发现): rc_netfh 开机"清场重拉"致 mtk_netagent/
     #   ql_netd/ql_ril_service 各存活两套(rc.d S22/S85 + rc_netfh 各一套) —
@@ -850,14 +853,42 @@ def t_ril_single():
     #   且 rc_netfh 与 S22/S85 并发起跑); rc_netfh v3.6 终版 = 收编制(等 rc.d
     #   套就绪只补缺席)。本护栏断言四件各恰 1 实例。
     #   (pidof 按 comm 匹配, 远端包装 shell comm="sh" 无自匹配问题。)
+    # v2.33 (RIL 收尾轮): 名单只剩 ql_ril_service(拔管实验唯一不可约依赖);
+    #   ql_netd/mipc_submonitor 退役断言归 t_ril_thin。procd 服务面在位 =
+    #   respawn 保护仍在(静默死亡形态的兜底)。
     bad = []
-    for n in ("ql_netd", "ql_ril_service", "mipc_submonitor"):   # v2.32: netagent 退役(t_netagent_retired)
-        c = dev(f"pidof {n} | wc -w").strip()
-        if c != "1":
-            bad.append(f"{n}x{c or '0'}")
+    c = dev("pidof ql_ril_service | wc -w").strip()
+    if c != "1":
+        bad.append(f"ql_ril_service x{c or '0'}")
+    svc = dev("ubus call service list 2>/dev/null | grep -c '\"ql_ril_service\"'").strip()
+    if svc in ("", "0"):
+        bad.append("procd-svc-absent")
     ok = not bad
     record(t_ril_single._test_name, "cellular", ok,
-           "all x1" if ok else "; ".join(bad))
+           f"x1+respawn" if ok else "; ".join(bad))
+
+
+@test("RIL 瘦身终态 (ql_netd/mipc_submonitor 退役)")
+def t_ril_thin():
+    # v2.33 (2026-10-17 RIL 收尾轮, 拔管实验): 8 项功能矩阵(AT/SIM/信号/APN/
+    #   cells/bands/短信/数据面)逐件拔管实证 ql_netd 与 mipc_submonitor 零依赖;
+    #   拨号终证 = 目标终态飞行往返 t+61s 自愈。退役 = rc_netfh v3.8 开机
+    #   service delete + SIGKILL。ql_ril_service 保留(mipc_cellular cells 的
+    #   ql_nw 路径唯一依赖 — 拔之 cells 恒返 -2147024889)。
+    # 断言: ① 两件进程+procd 服务面双缺席; ② cells 查询活(保留件功能性)。
+    bad = []
+    for n, svc in (("ql_netd", "ql_netd"), ("mipc_submonitor", "mipc_submonitor.init")):
+        c = dev(f"pidof {n} | wc -w").strip()
+        s = dev(f"ubus call service list 2>/dev/null | grep -c '\"{svc}\"'").strip()
+        if c != "0":
+            bad.append(f"{n}x{c}")
+        if s not in ("", "0"):
+            bad.append(f"{svc}-svc-present")
+    cells = dev("/data/gw/mipc_cellular cells 2>/dev/null | head -c 40").strip()
+    if '"serving"' not in cells:
+        bad.append("cells-dead")
+    record(t_ril_thin._test_name, "cellular", not bad,
+           f"netd=0 submon=0 cells=ok {cells[:24]}" if not bad else "; ".join(bad))
 
 
 @test("mtk_netagent 退役 (ccmni_up 接管落地)")

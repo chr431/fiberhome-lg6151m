@@ -113,7 +113,8 @@ fhrom 之外另有 usr/lib 的 Quectel SDK 层：libqlril(133K, ql_nw_* 55+/ql_s
 ## 4. Modem/MIPC 栈（控制面全链）
 
 ```
-[功能层]  mobilenetwork (cfg 树 X_FH_MobileNetwork.* 翻译器, ubus mobile_network 35 方法)
+[功能层]  mobilenetwork (cfg 树翻译器; 已退役 — 自研 mipc 直连接管)
+         [注] ql_netd/mipc_submonitor 亦已退役(2026-10-17 拔管实验零依赖); ql_ril_service 保留(cells 路径不可约)
              ├─ AT 面: popen mipc_wan_cli --at_cmd → libql_at → atcid → MIPC
              └─ 原生面: libqlril/libqlnet → ubus ril / ql-netd → ql_ril_service/ql_netd → MIPC
 [CLI 面]  mipc_wan_cli(~50 子命令) / ql_datacall — 自带 libmipc_msg 直连

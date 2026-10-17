@@ -705,3 +705,35 @@ cell=0 无人救）。旧形态下 netagent 在 CFUN 事件里刷接口把这个
 在 FH 模式（route A）下本就被 rc19 跳过，其 v1.4 改造目前休眠（非 FH 启动才启用）；
 ③ 部分 act 响应的 v6_addr 仅链路本地（modem 侧行为，落地逻辑无害兼容）。
 <!--CLM:CLM-NETAGENT-RETIRE-->
+
+## 27. RIL 瘦身：ql_netd / mipc_submonitor 退役，ql_ril_service 判不可约（2026-10-17 拔管实验轮）
+
+**方法**：先静态普查（我们的生产代码对三件的引用只剩 rc_netfh 收编制名单与
+dial_5g 的 ubus 冷启动引导，零 ubus 事件消费者）→ 三件都是 procd 服务（退役
+正解同 §25/§26：`ubus call service delete`，注意 **submonitor 的服务名带
+`.init` 后缀**——裸名 delete 报 Not found，易踩坑）→ **逐件拔管 + 8 项功能
+矩阵**（AT/SIM/信号/APN/cells/bands/短信/数据面）：
+
+| 拔掉的件 | 矩阵结果 |
+|---|---|
+| mipc_submonitor（IND→ubus 翻译层） | 8/8 全绿（消费者 mobilenetwork 已退役，纯死重） |
+| ql_netd | 8/8 全绿（**拨号 = mipc_wan_cli data_call 直连 MIPC，不经它**） |
+| ql_ril_service | **cells 断**（恒返 -2147024889，与 10-15 静默失效同错码），其余 7 项绿 |
+
+**拨号终证**：目标终态（ql_netd/submonitor 缺席、ql_ril_service 在位）飞行
+模式往返 → **t+61s 全自动恢复**，cells 活、数据通。mipc_cellular 的
+getbands 有趣地在无 ril_service 时仍活（不同传输路径），但 cells 路径
+（libqlril ql_nw_get_cell_info）确证依赖该守护。
+
+**终态**：rc_netfh v3.8 收编制名单收敛为 **ql_ril_service 一件**（不可约：
+GUI 小区卡/SSE 信号流的唯一数据源；其静默死亡形态由 watchdog v1.11 查询面
+告警 + procd respawn 兜底，恢复路径 v1.13 起简化为单守护 restart）。
+ql_netd/mipc_submonitor 开机 service delete + SIGKILL 退役。dial_5g v1.5 的
+ubus 冷启动引导同步去掉 ql_netd。
+
+**护栏**：`t_ril_thin`（两件进程+服务面双缺席 + cells 活）+ `t_ril_single`
+改保留件语义（×1 且 procd 服务面在位 = respawn 保护仍在）。
+
+至此 RIL 管道从四件收到一件：**在场的原厂蜂窝件只剩 ccci 三件（modem 生命
+线）、thermal_core（温控）、atcid 对（AT 通道）、ql_ril_service（cells 源）**。
+<!--CLM:CLM-RIL-THIN-->

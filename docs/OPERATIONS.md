@@ -73,8 +73,10 @@ python tools/deploy.py attic      # 设备侧流浪脚本归档
   dial_keeper 已接管，2026-10-17 实查确认不在运行）/ cfg 树整体（KEEP_TREE=0）/
   **mtk_netagent**（ccmni IP 执行者；2026-10-17 摘除试验实证身份，职能由自研
   ccmni_up.sh 承接，rc_netfh v3.7 开机 service delete 退役）
-- 仍在跑的原厂件：modem 栈军（ccci 三件 / ql_netd/ql_ril_service/
-  mipc_submonitor —— rc_netfh v3.6 起收编制单套 / atcid 对 / thermal_core）
+- 仍在跑的原厂件（RIL 瘦身后仅存）：ccci 三件（modem 生命线）/ ql_ril_service
+  （不可约：mipc_cellular cells 数据源，拔管实证）/ atcid 对（AT 通道）/
+  thermal_core（modem 温控）。ql_netd/mipc_submonitor/mtk_netagent 已退役
+  （2026-10-17 拔管实验，零依赖实证）
 - 自研：dial_keeper（拨号兜底, 35s 宽限）· watchdog v1.12（不变量+自愈, 含
   wan_eth/led_mgr/log_keeper 兜底拉）· v3httpd/api.sh（路由核心 + 六域模块
   `www/api_{sys,wifi,lan,agg,cell,sms}.sh` 按端点懒加载）· wan_agg v3.0

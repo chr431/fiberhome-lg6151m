@@ -1,5 +1,8 @@
-/* mipc_cellular.c v0.15 -- 蜂窝 MIPC 直连工具（零 RIL 依赖）
+/* mipc_cellular.c v0.16 -- 蜂窝 MIPC 直连工具（零 RIL 依赖）
  *
+ * v0.16 (2026-10-17 日志加密轮实弹): cells 数组 tag 双变体 —
+ *   0x810b 与 0x010b 均为合法(记录布局/长度一致), 旧解码只认 0x810b;
+ *   实机 19 邻区响应使用 0x010b, 导致间歇 decode=-2。已实测复核。
  * v0.15 (2026-10-17 日志加密轮): cells 解码失败时保存原始载荷
  *   /tmp/cells_decode_fail.bin + 日志记 head 12 字节 — 实机已抓到
  *   plen≈2960 / decode=-2 的间歇失败, 需区分部分帧/异种响应/新布局。
@@ -284,7 +287,10 @@ static int cells_decode(const unsigned char *p, int n, struct cellrec *out, int 
         if (len > 0x1000 || off + 4 + (int)len > n) break;
         const unsigned char *v = p + off + 4;
         if (tag == 0x010a && len == 4) nr_cnt = R32(v);
-        else if (tag == 0x810b) { nr_arr = v; nr_len = (int)len; }
+        /* v0.16: 数组 tag 有 0x810b / 0x010b 两种变体(高位 0x8000 不稳定;
+         *   记录布局与长度完全一致)。实机取证: 19 条邻区时用 0x010b,
+         *   旧代码只认 0x810b -> decode=-2 / GUI 小区卡间歇失败。 */
+        else if (tag == 0x810b || tag == 0x010b) { nr_arr = v; nr_len = (int)len; }
         off += (4 + (int)len + 7) & ~7;
     }
     if (!nr_arr) return -2;

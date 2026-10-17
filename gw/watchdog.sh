@@ -1,5 +1,7 @@
 #!/bin/sh
-# watchdog.sh v1.16 -- on-device continuous invariant monitor.
+# watchdog.sh v1.17 -- on-device continuous invariant monitor.
+# v1.17 (2026-10-17 日志加密轮补): modem_reg/at_chan 分支此前绕过 check() 直接
+#   set_state, 失败没有 rc/输出证据; 现补 FAIL detail(COPS/CFUN 原文)。
 # v1.15 (2026-10-17 日志加密轮): 失败检查附 rc/输出摘要; 每 2 环循(60s)一行
 #   TICK 全量状态; 每 10 环循(5min)一行 HEALTH(load/mem//data//tmp/进程/僵尸/
 #   conntrack/蜂窝统计双口径); 自愈重启记录原因与旧 PID; cells 查询失败附
@@ -253,13 +255,16 @@ run_cycle() {
         case "$COPSR" in
         *'"'*) set_state modem_reg 0 "modem registered" ;;
         *)     set_state modem_reg 1 "modem NOT registered"
+               log "FAIL detail modem_reg out=$(printf '%s' "$COPSR" | tr '\n' ' ' | head -c 160)"
                FAILS=$((FAILS+1)) ;;
         esac
         ;;
     *)  # 连 CFUN 都不回 = 通道死
         set_state at_chan 1 "AT channel DEAD (no CFUN response)"
+        log "FAIL detail at_chan out=$(printf '%s' "$CFUNR" | tr '\n' ' ' | head -c 160)"
         FAILS=$((FAILS+1))
         set_state modem_reg 1 "modem state unknown (AT dead)"
+        log "FAIL detail modem_reg out=AT channel dead"
         FAILS=$((FAILS+1))
         ;;
     esac
@@ -381,7 +386,7 @@ run_cycle() {
 
 # ---- main ----
 touch $LOG $STATE
-log "===== watchdog v1.16 start (alert LED 5G orange; WAN LED owned by led_mgr; +wan_eth keeper +cell stats divergence +cell query liveness; fine-log TICK/HEALTH) ====="
+log "===== watchdog v1.17 start (alert LED 5G orange; WAN LED owned by led_mgr; +wan_eth keeper +cell stats divergence +cell query liveness; fine-log TICK/HEALTH) ====="
 logger -t watchdog "watchdog v1.16 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine

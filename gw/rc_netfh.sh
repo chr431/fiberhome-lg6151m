@@ -16,12 +16,17 @@
 # v3.6 (2026-10-17 终版): **收编制** — rc.d 套是 procd 保障的常驻实例(死了有人
 #   拉, 这正是我们要的性质), 本处有界等待其就绪(2s×10), 只补缺席者(兜底 rc.d
 #   链异常), 结尾逐件数量复核(≠1 记警, selftest t_ril_single 回归护栏)。
+# v3.7 (2026-10-17 netagent 摘除轮): mtk_netagent 退役 — 实证其为 ccmni IP
+#   执行者(act 响应含 v4/v6 全套地址而无人落地; 拨号 result:0 但接口挂僵尸旧
+#   IP), 职能由自研 ccmni_up.sh 承接(dial_keeper v1.4 / dial_5g v1.4 共用)。
+#   停法 = ubus service delete(让 procd 停止看护 — 杀不死的正解, 见 §25 教训)。
+#   兜底: ccmni_up.sh 缺席(异常部署态)时保留 netagent 不退。
 LOG=/tmp/rc_netfh.log
 glog() { echo "$(date -u +%FT%TZ) $*" >> $LOG; }
 # v1.1: FH binaries+libs live outside the default PATH/loader path
 export PATH=$PATH:/fhrom/bin:/fhrom/fhshell
 export LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib
-glog "===== rc_netfh v3.6 start ====="
+glog "===== rc_netfh v3.7 start ====="
 
 # 1. config base — v3.1 (P3 终章): cfg_tool/shmsnap/树整体退役。
 #   蜂窝全功能(锁/制式/飞行/PIN/短信/扫描/拨号)已由 mipc_cellular+dial_keeper+
@@ -55,24 +60,37 @@ glog "P3-lite: cfgmgr/logmgr daemons retired (shm-only tree)"
 #       (一并拉起保持原厂形态)。必须在 mobilenetwork 前就绪。
 pidof atcid >/dev/null || { /usr/bin/atci_service >/dev/null 2>&1 & sleep 1; /usr/bin/atcid >/var/atcid.log 2>&1 & sleep 1; }
 glog "atcid=$(pidof atcid) at_ch=$(mipc_wan_cli --at_cmd 'AT+CSQ' 2>/dev/null | grep -c '+CSQ:')"
-# v3.6: 收编制(清场思路废弃, 见头注)。有界等待 rc.d 套就绪 — 本脚本经
-#   zz_data_hook/rc.extend 在 procd rc.d 链末段起跑, S22/S85/S99 的管道件在
+# v3.7: 收编制(清场思路废弃, 见头注)。有界等待 rc.d 套就绪 — 本脚本经
+#   zz_data_hook/rc.extend 在 procd rc.d 链末段起跑, S85/S99 的管道件在
 #   前后数秒内由 procd 拉起并**持续看护**(respawn)。2s×10 覆盖实证时序
-#   (S22@+28s S85@+30s S99@+31s); 等不齐只补缺席者(兜底 rc.d 链异常),
-#   绝不多起一份。
+#   (S85@+30s S99@+31s); 等不齐只补缺席者(兜底 rc.d 链异常), 绝不多起一份。
+#   mtk_netagent 不在名单(v3.7 退役, 见下)。
 _i=0
-while [ $_i -lt 10 ] && { [ -z "$(pidof mtk_netagent)" ] || [ -z "$(pidof ql_netd)" ] || [ -z "$(pidof ql_ril_service)" ] || [ -z "$(pidof mipc_submonitor)" ]; }; do
+while [ $_i -lt 10 ] && { [ -z "$(pidof ql_netd)" ] || [ -z "$(pidof ql_ril_service)" ] || [ -z "$(pidof mipc_submonitor)" ]; }; do
     sleep 2; _i=$((_i+1))
 done
-pidof mtk_netagent    >/dev/null || /usr/bin/mtk_netagent    >/dev/null 2>&1 &
 pidof ql_netd         >/dev/null || /usr/bin/ql_netd         >/dev/null 2>&1 &
 pidof ql_ril_service  >/dev/null || /usr/bin/ql_ril_service  >/dev/null 2>&1 &
 pidof mipc_submonitor >/dev/null || /usr/bin/mipc_submonitor >/dev/null 2>&1 &
 sleep 2
-glog "plumbing (adopted, waited $((_i*2))s) netagent=$(pidof mtk_netagent) ql_netd=$(pidof ql_netd) ril=$(pidof ql_ril_service) submon=$(pidof mipc_submonitor)"
+# v3.7: mtk_netagent 退役(摘除试验实证其为 ccmni IP 执行者, 职能已由
+#   ccmni_up.sh 承接)。停法 = service delete(procd 不再看护); 若仍在(竞态)
+#   补一刀 SIGKILL(此时已无 respawn, 杀得死)。ccmni_up 缺席 = 保留 netagent
+#   (异常部署态的兜底, 退回旧行为)。
+if [ -x /data/gw/ccmni_up.sh ]; then
+    ubus call service delete '{"name":"mtk_netagent"}' >/dev/null 2>&1
+    sleep 1
+    for p in $(pidof mtk_netagent); do kill -9 $p 2>/dev/null; done
+    sleep 1
+    [ -z "$(pidof mtk_netagent)" ] && glog "netagent retired (ccmni_up takes over)" \
+        || glog "WARN netagent alive after retire"
+else
+    glog "WARN ccmni_up.sh absent — netagent kept (fallback)"
+fi
+glog "plumbing (adopted, waited $((_i*2))s) netagent=$(pidof mtk_netagent | wc -w) ql_netd=$(pidof ql_netd) ril=$(pidof ql_ril_service) submon=$(pidof mipc_submonitor)"
 # 逐件数量复核(≠1 记警 — 补齐与 procd respawn 竞态的可见化; selftest
-#   t_ril_single 以此为回归护栏)
-for _n in mtk_netagent ql_netd ql_ril_service mipc_submonitor; do
+#   t_ril_single 以此为回归护栏; netagent 预期 0)
+for _n in ql_netd ql_ril_service mipc_submonitor; do
     _c=$(pidof $_n | wc -w)
     [ "$_c" = "1" ] || glog "WARN plumbing ${_n} x${_c} (want 1)"
 done
@@ -175,4 +193,4 @@ if [ -n "$IF" ]; then
         glog "post-ladder rx=$R3"
     fi
 fi
-sh /data/gw/fw_apply.sh apply 2>/dev/null && glog "fw_apply ok" ; glog "===== rc_netfh v3.6 done ====="
+sh /data/gw/fw_apply.sh apply 2>/dev/null && glog "fw_apply ok" ; glog "===== rc_netfh v3.7 done ====="

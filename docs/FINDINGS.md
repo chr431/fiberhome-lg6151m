@@ -657,3 +657,36 @@ netagent 无独占资源，双实例共存。
 教训入库：与 CLM-KEEPER-LOCK 同族但深一层——**清理逻辑打不赢看护者时，正确答案
 不是更强的清理，而是收编制（让看护者替你看护）**。
 <!--CLM:CLM-RIL-DUP-->
+
+## 26. mtk_netagent 退役：实证 IP 执行者身份 + ccmni_up 自研承接（2026-10-17 摘除试验轮）
+
+**试验设计与决定性证据**：`ubus call service delete '{"name":"mtk_netagent"}'` 正经
+停服务（procd 不再看护，无复活）→ 飞行模式往返逼重拨 → 拨号 `result:0` 而 ccmni
+**僵尸旧 IP 纹丝不动、数据面 100% 丢包**；抓全量 act 响应发现它自带全套地址
+（ifname/v4_addr/v4_mask/v4_gw/mtu + v6_addr/v6_prefix + dns 两族）——**响应到
+接口这段"落地"没人做，netagent 就是执行者**。追查还发现厂商 netifd proto
+（mipc.sh）同样不含任何落地语句——**dial_5g 的 proto 路径与 dial_keeper 的裸
+调用都依赖 netagent 兜底**，dial_5g 旧注释"IP already applied by the proto"
+系错误归属（已纠正）。
+
+**附带挖出一个恢复矩阵真洞**：飞行模式往返后 ccmni 挂僵尸 IP（IP 在而数据面
+死），dial_keeper 的触发判据是"无 IP 超时"——被骗过，整夜未重拨（wan_alive
+cell=0 无人救）。旧形态下 netagent 在 CFUN 事件里刷接口把这个洞盖住了；摘除
+它之前必须先补上。
+
+**落地**：
+
+- **`ccmni_up.sh` v1.0**（netagent-lite）：deact+act（keeper 同款实弹配方）→
+  解析响应 → flush 僵尸 IP → 落地 v4/v6/mtu → up。不写任何路由/NAT——main 表
+  归 wan_agg.main_primary_apply 独占，探活路由由其每周期维持（单写方纪律不因
+  退役而破）。dial_keeper v1.4 与 dial_5g v1.4 共用（dial_5g 的 proto 驱动段
+  退役）。
+- **dial_keeper v1.4**：触发条件叠加数据面（消费 wan_alive 唯一权威，无文件/
+  过期回退旧 IP 判据）+ 飞行模式守卫（CFUN=0 不盲拨）。
+- **rc_netfh v3.7**：开机 `ubus service delete` + SIGKILL 收尾（procd 停止看护
+  ——杀不死的正解）；收编制名单收缩为三件；ccmni_up 缺席时保留 netagent 兜底
+  （异常部署态回退旧行为）。
+
+**护栏**：selftest `t_netagent_retired`（进程+procd 服务面双缺席、ccmni_up 在位
+且被两处引用、僵尸 IP 触发护栏在位、蜂窝数据面通）+ `t_ril_single` 收缩三件。
+<!--CLM:CLM-NETAGENT-RETIRE-->

@@ -16,9 +16,10 @@ gw/v3_babysit_v2.sh	2.0	manifest	/data/gw/babysit_v2.sh	启动保姆(T1杀rcS/T2
 gw/night_report.sh	1.0	manifest	/data/gw/night_report.sh	夜间体检报告
 gw/wifi_guard.sh	1.0	manifest	/data/gw/wifi_guard.sh	BA/TX 停滞自动恢复守卫
 gw/mipc_dial_trace.sh	1.0	manifest	/data/gw/mipc_dial_trace.sh	5G 拨号取证(xtrace 抓真参)
-gw/dial_5g.sh	1.3	manifest	/data/gw/dial_5g.sh	v1.3: 不再写 metric 50 主默认(会把蜂窝插进家宽主/备之间成为地雷), 只装探活 metric 250 — main 表主默认归 wan_agg 独占; 生产 5G 拨号器(check_ia+netagent补丁)
+gw/dial_5g.sh	1.4	manifest	/data/gw/dial_5g.sh	生产 5G 拨号器; v1.4: 拨号+落地统一走 ccmni_up(proto 驱动段退役 — 实证 mipc.sh 无落地语句, 旧注释'由 proto 应用'系错误归属); ubus 引导/载体验证/路由 NAT TTL 段保留; 历史见git
+gw/ccmni_up.sh	1.0	manifest	/data/gw/ccmni_up.sh	netagent-lite: MIPC 拨号+ccmni 接口落地(deact+act→解析 v4/v6 地址→flush+add+mtu); 实证 netagent 是 IP 执行者(act 响应含全套地址而无人落地), 本脚本是它退役的前提; 不写路由/NAT(单写方纪律: main 表归 wan_agg)
 gw/consfeed.sh	1.0	manifest	/data/gw/consfeed.sh	v2 控制台喂食器(无setsid,v2_access拉起)
-gw/rc_netfh.sh	3.6	manifest	/data/gw/rc_netfh.sh	路线A: FH modem栈环境(最小军, MODE.fh门控); v3.6(2026-10-17终版): RIL管道收编制 — 有界等待rc.d套就绪(2s×10)+只补缺席者+逐件数量复核, 消开机双实例(v3.5的SIGKILL清场被procd respawn层推翻: 杀掉必复活且与S22/S85并发起跑, 清场结构性打不赢); v3.4: 蜂窝默认路由 metric 250; 历史见git
+gw/rc_netfh.sh	3.7	manifest	/data/gw/rc_netfh.sh	路线A: FH modem栈环境; v3.7(netagent 摘除轮): mtk_netagent 退役 — 开机 ubus service delete(procd 停止看护)+SIGKILL 收尾, 职能由 ccmni_up 承接; 收编制名单收缩为三件; ccmni_up 缺席时保留 netagent 兜底; 历史见git
 gw/radvd.conf	1.0	manifest	/data/gw/radvd.conf	IPv6 SLAAC+RDNSS通告(br-lan, ULA fd42:9ac1:7e50::/64)
 gw/capture_ubus.sh	1.1	manifest	/data/gw/capture_ubus.sh	stock拨号一次性捕获(ubus monitor+ccmni采样)
 gw/dial_variant.sh	1.1	manifest	/data/gw/dial_variant.sh	5G 拨号参数变体实验器(iptype/apn/plmn/roam)
@@ -29,7 +30,7 @@ gw/bin/v3_steth.ko	1.0	manifest	/data/gw/v3_steth.ko	hook槽位听诊器(bias/in
 gw/src/healthdog.c	1.0	src	gw/bin/healthdog.ko	看门狗模块源码(版本随产物)
 gw/src/v3_fix.c	1.1	src	gw/bin/v3_fix.ko	TTL/解绑模块源码(版本随产物)
 gw/src/v3_steth.c	1.0	src	gw/bin/v3_steth.ko	听诊器模块源码(版本随产物)
-tools/deploy.py	2.18	tool	-	v2.18(架构轮): MANIFEST +wan_agg_lib/wan_eth/wifi_macplan/wifi_autoch/api 六域模块(依赖件排消费方之前, 推送序内先落地); v2.17: MANIFEST 增 agg_pins.default; 历史见git
+tools/deploy.py	2.19	tool	-	v2.19: MANIFEST +ccmni_up.sh(netagent-lite, dial 族共用); 历史见git
 tools/serial_server.py	1.7	tool	-	常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets)
 tools/serial_cmd.py	1.3	tool	-	串口命令瘦客户端(marker输出捕获; v1.3示例路径更新)
 tools/lk_flip2.py	1.1	tool	-	LK 一键翻槽(a|b, misc[2060]字节)
@@ -92,12 +93,12 @@ tools/leak_check.py	2.2	tool	-	敏感词零命中门禁; v2.2: --history 全量�
 docs/ARCHITECTURE.md	1.1	doc	-	架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针)
 docs/GUI_TERMINOLOGY.md	1.2	doc	-	GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git
 gw/watchdog.sh	1.12	manifest	/data/gw/watchdog.sh	v1.12(架构轮): +wan_eth 检查+自愈拉(有线 WAN 接口守护拆分自 wan_agg — 其为 eth0 租约/NAT 看门狗唯一写方, 静默死亡=家宽侧静默劣化); v1.11: +蜂窝查询路径活性告警(只告警不自动重启); v1.10: +蜂窝统计偏差护栏(阈值256KB); 历史见git
-tools/selftest.py	2.31	tool	-	v2.31: t_ril_single 更名收编编制(机制修正); v2.30: +t_ril_single(RIL管道四件单实例护栏); v2.29(架构轮): 拆分护栏适配+t_agg_split/t_agg_eth_daemon/t_gui_apimod; 历史见git
+tools/selftest.py	2.32	tool	-	v2.32(netagent 摘除轮): t_ril_single 更名三件 + t_netagent_retired(进程/procd 服务面双缺席+ccmni_up 接线+僵尸 IP 护栏+数据面); 历史见git
 tools/doc_audit.py	1.1	tool	-	台账↔文档内联标记双向审计(v1.1: 标记扫描纳入台账引用的docs/外文档如install/README.md; v1.0: 版本绑定+TEST-MISSING/STALE-CODE/UNREGISTERED-CLAIM)
 gw/src/mipc_cellular.c	0.8	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源(P1): dlopen闭包预载+ql_nw_init; v0.8: +endc 组网模式(厂商 fh_set_endc 同款 ql_nw_set_nr_disable_mode 序列, 写后读回校验)
 gw/bin/mipc_cellular	0.8	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI(getbands/setlock/unlock/endc; 锁NR41+79实弹验证零扰动)
 tools/build_mipc_cellular.sh	1.0	tool	-	mipc_cellular构建(zig cc aarch64-musl动态)
-gw/dial_keeper.sh	1.3	manifest	/data/gw/dial_keeper.sh	拨号自持兜底守护(P2): ccmni无IP超35s→MIPC直连重拨(deact_apn+act_type配方); v1.3: 单实例守改PID锁(cmdline复核; 原pgrep判据在启动者argv含脚本路径时自匹配实测); v1.2: 启动即写心跳; v1.1: mipc调用全走mto()硬超时+心跳判陈旧重启+EE转储增量强制重拨+logger落syslog
+gw/dial_keeper.sh	1.4	manifest	/data/gw/dial_keeper.sh	拨号自持守护; v1.4(netagent 摘除轮): dial 改走 ccmni_up(拨号+落地一体, 缺席回退旧配方) + 触发条件叠加数据面(消费 wan_alive 堵僵尸 IP 洞 — 实弹: 飞行往返后 IP 在而数据死, 旧 IP-only 判据被骗过整夜) + 飞行模式守卫(CFUN=0 不盲拨); 历史见git
 gw/guest_fw.sh	1.6	manifest	/data/gw/guest_fw.sh	访客隔离防火墙v1.6(审计P0: GUEST_ISOLATE开关删除=强制隔离; 兼容需求改由主WiFi终端频段锁定承接; 历史版本见git)
 install/run.sh	1.1	tool	-	raw shell自驱脚本(v1.1: 分区次设备号从/proc/partitions动态解析成布局门禁, RP102/RP103通用; v1.0硬编码259:7等)
 tools/build_v3httpd.sh	1.0	tool	-	v3httpd构建(zig cc aarch64-linux-musl全静态, 同mipc_cellular链)

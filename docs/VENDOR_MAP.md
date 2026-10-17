@@ -120,7 +120,7 @@ fhrom 之外另有 usr/lib 的 Quectel SDK 层：libqlril(133K, ql_nw_* 55+/ql_s
 [消息层]  libmipc_msg.so (95 导出: mipc_msg_* TLV 编解码 + ttyCMIPC 串口原语 + OSAL)
 [内核]    /dev/ttyCMIPC0..14 → ccci 栈(内建) + mtk_pcie_smt.ko → T830 modem
 [数据面]  ccmni0..2 直连 ccci DPMAIF — 不经任何控制进程
-[旁路]    mtk_netagent(ccmni IP/路由执行者) mipc_submonitor(全 IND→ubus 16 主题)
+[旁路]    mtk_netagent(ccmni IP/路由执行者; 2026-10-17 已退役—自研 ccmni_up.sh 承接 IP 落地, 见 FINDINGS §26) mipc_submonitor(全 IND→ubus 16 主题)
           thermal_core(ttyCMIPC9 独占温控)
 ```
 

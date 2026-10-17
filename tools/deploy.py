@@ -70,6 +70,7 @@ MANIFEST = [
     ("gw/bin/mipc_cellular", "/data/gw/mipc_cellular"),  # cellular MIPC direct CLI (P1 engine base)
     ("gw/mipc_dial_trace.sh", "/data/gw/mipc_dial_trace.sh"),  # 5G dial forensics
     ("gw/dial_5g.sh", "/data/gw/dial_5g.sh"),      # production 5G dialer
+    ("gw/ccmni_up.sh", "/data/gw/ccmni_up.sh"),    # MIPC dial+ccmni landing (netagent-lite; shared by dial_5g/dial_keeper)
     ("gw/v2_access.sh", "/data/gw/v2_access.sh"),    # slot-B serial/SSH hardening
     ("gw/consfeed.sh", "/data/gw/consfeed.sh"),      # v2 console feeder (spawned by v2_access)
     ("gw/dial_variant.sh", "/data/gw/dial_variant.sh"),   # 5G dial param experiments (iptype/apn/plmn)

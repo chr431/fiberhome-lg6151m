@@ -11,6 +11,9 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
+v2.32 (netagent 摘除轮): t_ril_single 更名并收缩为三件(netagent 预期缺席) + 新增
+  t_netagent_retired(netagent 退役断言: 进程/procd 服务面双缺席 + ccmni_up
+  在位且被 keeper/dialer 引用 + 僵尸 IP 触发护栏在位 + 数据面通)。
 v2.31: t_ril_single 更名(机制修正: SIGKILL 清场→收编制, 见 rc_netfh v3.6)。
 v2.30 (2026-10-17): +t_ril_single — RIL 管道四件(mtk_netagent/ql_netd/
   ql_ril_service/mipc_submonitor)各须恰 1 实例(开机双实例实弹发现的回归护栏)。
@@ -837,7 +840,7 @@ category("cellular")
 #   数据面 (ccmni/DNS) + 控制面 (AT/mipc) + 翻译层 (树/自管conf) + GUI 层
 
 
-@test("RIL 管道四件单实例 (rc_netfh 收编制)")
+@test("RIL 管道三件单实例 (rc_netfh 收编制)")
 def t_ril_single():
     # v2.30 (2026-10-17 实弹发现): rc_netfh 开机"清场重拉"致 mtk_netagent/
     #   ql_netd/ql_ril_service 各存活两套(rc.d S22/S85 + rc_netfh 各一套) —
@@ -848,13 +851,47 @@ def t_ril_single():
     #   套就绪只补缺席)。本护栏断言四件各恰 1 实例。
     #   (pidof 按 comm 匹配, 远端包装 shell comm="sh" 无自匹配问题。)
     bad = []
-    for n in ("mtk_netagent", "ql_netd", "ql_ril_service", "mipc_submonitor"):
+    for n in ("ql_netd", "ql_ril_service", "mipc_submonitor"):   # v2.32: netagent 退役(t_netagent_retired)
         c = dev(f"pidof {n} | wc -w").strip()
         if c != "1":
             bad.append(f"{n}x{c or '0'}")
     ok = not bad
     record(t_ril_single._test_name, "cellular", ok,
            "all x1" if ok else "; ".join(bad))
+
+
+@test("mtk_netagent 退役 (ccmni_up 接管落地)")
+def t_netagent_retired():
+    # v2.32 (2026-10-17 netagent 摘除轮): 实证 netagent 是 ccmni IP 执行者(act
+    #   响应含 v4/v6 全套地址而无人落地 — 无它时拨号 result:0 接口挂僵尸旧 IP)。
+    #   退役设计: rc_netfh v3.7 开机 ubus service delete(procd 不再看护)+SIGKILL
+    #   收尾; 职能由自研 ccmni_up.sh 承接(dial_keeper/dial_5g 共用)。
+    # 断言: ① 进程与 procd 服务面双缺席; ② ccmni_up 在位且被 keeper/dialer 引用;
+    #   ③ keeper 僵尸 IP 触发护栏在位(消费 wan_alive — 飞行模式往返僵尸 IP 洞);
+    #   ④ 蜂窝数据面通(退役未破坏功能)。
+    proc = dev("pidof mtk_netagent | wc -w").strip()
+    svc = dev("ubus call service list 2>/dev/null | grep -c mtk_netagent").strip()
+    cup = dev("[ -x /data/gw/ccmni_up.sh ] && echo y").strip()
+    ref = dev("grep -c ccmni_up /data/gw/dial_keeper.sh /data/gw/dial_5g.sh 2>/dev/null | awk -F: '{s+=$2} END{print s}'").strip()
+    zomb = dev("grep -c 'wan_alive' /data/gw/dial_keeper.sh 2>/dev/null").strip()
+    cif = dev("ip -o -4 addr show 2>/dev/null | grep -m1 'ccmni.*inet' | awk '{print $2}'").strip()
+    dp = dev(f"ping -4 -I {cif} -c2 -W2 223.5.5.5 2>&1 | grep -c 'packets received'").strip() if cif else "0"
+    bad = []
+    if proc != "0":
+        bad.append(f"proc=x{proc}")
+    if svc not in ("0", ""):
+        bad.append("procd-svc-present")
+    if cup != "y":
+        bad.append("ccmni_up-missing")
+    if not ref.isdigit() or int(ref) < 2:
+        bad.append(f"wiring={ref}")
+    if zomb in ("", "0"):
+        bad.append("zombie-guard-missing")
+    if dp == "0":
+        bad.append("dataplane-dead")
+    record(t_netagent_retired._test_name, "cellular", not bad,
+           f"proc=0 svc=0 cup={cup} wiring={ref} zguard={zomb} dp={dp}"
+           if not bad else "; ".join(bad))
 
 
 @test("ccmni 接口有 IPv4")

@@ -1,5 +1,15 @@
 #!/bin/sh
-# dial_keeper.sh v1.3 -- 拨号自持守护 (ROADMAP P2, 2026-10-06)
+# dial_keeper.sh v1.4 -- 拨号自持守护 (ROADMAP P2, 2026-10-06)
+#
+# v1.4 (2026-10-17 netagent 摘除试验轮): 三改 —
+#   ① dial() 改走 ccmni_up.sh(拨号+接口落地一体): 实证 mtk_netagent 才是
+#      ccmni IP 执行者(act 响应含全套地址而无人落地), 它退役后裸调用会得到
+#      result:0 + 僵尸 IP。ccmni_up.sh 缺席时回退旧裸配方(过渡态兜底)。
+#   ② 触发条件补数据面: 原判据仅"无 IP" — 实弹发现飞行模式往返后 ccmni 挂
+#      僵尸 IP(IP 在而数据面死), 本守护被骗过从未重拨(wan_alive cell=0 整夜
+#      无人救)。现叠加消费 wan_agg 发布的 /tmp/wan_alive(唯一权威, ts 新鲜
+#      才信; 无文件/过期回退旧 IP 判据)。
+#   ③ 重拨前飞行模式守卫: CFUN=0 时跳过拨号尝试(避免飞行中盲拨刷退避)。
 #
 # 背景(闸门A实证): mobilenetwork 是 PDN 生命周期持有者 — 杀掉后 ccmni IPv4
 # ≤10s 消失; 因此 P3 下架 cfgmgr/mobilenetwork 前必须有自研拨号能力。
@@ -102,19 +112,37 @@ get_apn() {
     mipc_to --apn_provision_by_sim 2>/dev/null | grep -oE '"apn": *"[^"]+"' | cut -d'"' -f4
 }
 
-dial() {  # $1=apn
+dial() {  # $1=apn — v1.4: ccmni_up 拨号+落地一体(回退旧裸配方)
+    if [ -x /data/gw/ccmni_up.sh ]; then
+        sh /data/gw/ccmni_up.sh "$1" >/dev/null 2>&1
+        return $?
+    fi
     mipc_to --data_call_deact_apn "$1" >/dev/null 2>&1
     mipc_to --data_call_act_type \
         "{\"apn\":\"$1\",\"apn_type\":0,\"ip_type\":3,\"roaming_type\":3,\"auth_type\":0,\"username\":\"\",\"password\":\"\",\"bearer_bitmask\":\"0xfffdffff\",\"mtu\":1400,\"mode\":1}" \
         2>&1 | grep -q '"result": *0'
 }
 
+# v1.4: 数据面判活(堵僵尸 IP 洞) — 消费 wan_agg 的唯一权威结论;
+#   无文件/ts 过期(>30s)回退 0(=由调用方回退 IP-only 旧判据)。
+cell_alive() {
+    _wa=$(cat /tmp/wan_alive 2>/dev/null)
+    _c=$(printf '%s' "$_wa" | sed -n 's/.*cell=\([01]\).*/\1/p')
+    _t=$(printf '%s' "$_wa" | sed -n 's/.*ts=\([0-9]*\).*/\1/p')
+    [ -n "$_t" ] || return 0
+    [ $(( $(date +%s) - _t )) -le 30 ] || return 0
+    [ "$_c" = 1 ]
+}
+
+# v1.4: 飞行模式守卫(CFUN=0 时不盲拨)
+cfun_off() { mipc_to --at_cmd 'AT+CFUN?' 2>/dev/null | grep -q 'CFUN: 0'; }
+
 ee_count() { ls -d /data/log/aee_exp/db.*.EE 2>/dev/null | wc -l; }
 
 DOWN=0; B=$MINB
 EE_N=$(ee_count)
-log "===== keeper v1.3 start (grace=${GRACE}s poll=${POLL}s mto=${MTO}s ee=${EE_N}) ====="
-logger -t dial_keeper "keeper v1.3 start (grace=${GRACE}s mto=${MTO}s ee=${EE_N})"
+log "===== keeper v1.4 start (grace=${GRACE}s poll=${POLL}s mto=${MTO}s ee=${EE_N}; ccmni_up=netagent-lite; trigger=ip+dataplane) ====="
+logger -t dial_keeper "keeper v1.4 start (grace=${GRACE}s mto=${MTO}s ee=${EE_N})"
 while :; do
     hb
     # v1.1: 模组 EE 事件 = 复位信号 → 强制重拨路径(不等被动宽限)
@@ -126,7 +154,8 @@ while :; do
         DOWN=$GRACE
         B=$MINB
     fi
-    if has_ip; then
+    # v1.4: 无 IP **或** 数据面死(僵尸 IP) 都计 DOWN — 后者来自 wan_alive
+    if has_ip && cell_alive; then
         [ "$DOWN" -gt 0 ] && log "recovered (down ${DOWN}s)"
         DOWN=0; B=$MINB
     else
@@ -134,6 +163,9 @@ while :; do
         if [ "$DOWN" -ge "$GRACE" ]; then
             if ! modem_ok; then
                 log "down ${DOWN}s but modem/SIM not ready, wait"
+            elif cfun_off; then
+                log "down ${DOWN}s but airplane (CFUN=0), skip dial"
+                DOWN=0   # 飞行解除后重新计时
             else
                 APN=$(get_apn)
                 if [ -z "$APN" ]; then

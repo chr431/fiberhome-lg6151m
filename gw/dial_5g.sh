@@ -1,18 +1,17 @@
 #!/bin/sh
-# dial_5g.sh — production 5G dialer for v3 (recipe proven live 2026-10-02).
+# dial_5g.sh v1.4 — production 5G dialer for v3 (recipe proven live 2026-10-02).
 #
-# History in one line: manual mipc dials failed with result 2 for hours; a
-# set -x direct-run of the stock mipc proto revealed the three secrets —
-#   1. the winning act JSON differs from every guess: apn_type=1 mode=1
-#      bearer_bitmask="0xfffdffff" (from check_ia's real args, rattype=21)
-#   2. check_ia must run FIRST with its true 9-arg form
-#   3. the proto hard-blocks on `ubus call service list | grep mtk_netagent`
-#      (procd's service object never registers in our hand-started ubusd)
-#      -> patch the gate out of a tmpfs working copy and drive that.
-#
-# Post-dial plumbing: IP already applied by the proto; we add default route,
-# NAT for the LAN subnet, and reload v3_fix TTL masquerade on the data iface.
-# Idempotent: re-running deacts+acts fresh. Log: /tmp/dial_5g.log
+# v1.4 (2026-10-17 netagent 摘除试验轮): 拨号+落地统一改走 ccmni_up.sh —
+# 实证 mtk_netagent 才是 ccmni IP 执行者, 且厂商 proto(mipc.sh)同样不含落地
+# 语句(旧注释"IP already applied by the proto"系错误归属, 实为 netagent 兜的);
+# 它退役后 proto 路径与裸调用都会得到 result:0 + 僵尸 IP。proto 驱动段
+# (打补丁副本+XTRACE 解析)随之退役 — dial_keeper 同款配方自 2026-10-06 起
+# 每日实弹验证, check_ia/apn_type 时代的"三秘密"已不再必要。
+# ubus 引导段保留(Frankenstein boot 的 ubusd 空转问题仍在)。
+# History: 2026-10-02 手工 mipc 拨号 result:2 数小时, set -x 直跑 proto 揭出
+# 三秘密(act JSON 形态/check_ia 前置/netagent 门); 该配方服务于 proto 路径。
+# Post-dial plumbing: 落地后的默认路由(仅探活 metric 250)、LAN NAT 与 v3_fix
+# TTL 伪装重载。Idempotent: re-running deacts+acts fresh. Log: /tmp/dial_5g.log
 LOG=/tmp/dial_5g.log
 LAN_NET=192.168.9.0/24
 KLOG() { echo "DIAL5G: $*" > /dev/kmsg 2>/dev/null; }
@@ -35,33 +34,14 @@ if ! pidof ubusd >/dev/null; then
     glog "ubusd bootstrapped + ql daemons re-registered"
 fi
 
-work=/tmp/protowrap/mipc.dial.sh
-mkdir -p /tmp/protowrap
-
-# --- 1. build patched proto copy (gate -> pidof check; intent-equivalent) ---
-cp /lib/netifd/proto/mipc.sh "$work" || { glog "FATAL: no pristine mipc.sh"; exit 1; }
-sed -i 's#ubus call service list | grep mtk_netagent#pidof mtk_netagent#' "$work"
-
-# --- 2. drive it with netifd's exact argv (from the successful trace) ---
-CFG='{"device":"ccmni","proto":"mipc","apn":"cbnet","iptype":3,"roamingtype":3,"mtu":1400,"plmn":"460015","sim":1,"mtu":1400}'
-rm -f /tmp/5g_dial_trace.log
-cd /lib/netifd/proto
-sh -x "$work" mipc setup wan "$CFG" >/tmp/5g_dial_out.log 2>/tmp/5g_dial_trace.log
+# --- 1+2+3. dial + land via ccmni_up (v1.4; APN 取自 SIM 档案, keeper 同源) ---
+APN=$(mipc_wan_cli --apn_provision_by_sim 2>/dev/null | grep -oE '"apn": *"[^"]+"' | cut -d'"' -f4)
+[ -n "$APN" ] || APN=cbnet
+IF=$(sh /data/gw/ccmni_up.sh "$APN")
 rc=$?
-grep -q "Connect OK" /tmp/5g_dial_out.log 2>/dev/null && ok=1 || ok=0
-glog "dial rc=$rc ok=$ok"
-[ $ok -eq 1 ] || { tail -5 /tmp/5g_dial_out.log >> $LOG; KLOG "dial FAILED rc=$rc"; exit 2; }
-
-# --- 3. extract iface + gw (result JSON lands in the XTRACE stream, not
-#        stdout — 2026-10-02 lesson: parsing stdout yielded empty gw and a
-#        stale iface; also fall back to detecting the IP-bearing ccmni) ---
-IF=$(sed -n 's/.*"ifname": "\([^"]*\)".*/\1/p' /tmp/5g_dial_trace.log | tail -1)
-GW=$(sed -n 's/.*"v4_gw": "\([^"]*\)".*/\1/p' /tmp/5g_dial_trace.log | tail -1)
-if [ -z "$IF" ] || ! ip -o addr show "$IF" 2>/dev/null | grep -q "inet "; then
-    IF=$(ip -o addr show 2>/dev/null | grep "ccmni" | grep "inet " | head -1 | sed 's/:.*//;s/^[0-9]*: //;s/ .*//')
-fi
-[ -z "$GW" ] && GW=""
-glog "iface=$IF gw=$GW"
+glog "ccmni_up apn=$APN rc=$rc if=$IF"
+[ $rc -eq 0 ] && [ -n "$IF" ] || { KLOG "dial FAILED rc=$rc"; exit 2; }
+glog "iface=$IF"
 
 # --- 3b. bearer sanity: a result-0 dial can still be dead (2026-10-02 night:
 #         CEREG 0,0 attach-refused while MIPC returns success). Verify, don't hope.
@@ -75,7 +55,7 @@ if [ -n "$IF" ]; then
             glog "WARN: bearer DEAD after dial (attach refused? check AT+CEREG?)"
     fi
 fi
-KLOG "5G UP on $IF via $GW"
+KLOG "5G UP on $IF"
 
 # --- 4. routes + NAT + TTL masquerade ---
 # v2.31: main 表默认路由由 wan_agg 的 main_primary_apply() **独占**维护(按聚合

@@ -875,7 +875,7 @@ TICK 级输入（探活逐目标、ccmni 清单、authd 年龄、租约耗时、
 | watchdog v1.15 | 失败检查 rc+输出摘要、每 60s TICK 全量状态、每 5min HEALTH（load/mem//data//tmp/进程/僵尸/conntrack/双口径流量）、自愈重启原因与旧 PID | 资源泄漏、僵尸进程、静默自愈 |
 | led_mgr v2.4 | 每次外部写导致的 `DRIFT gpio 旧->应为`、状态变化附 ccmni/wan_alive 原文 | 灯不符实际的外部扰动来源 |
 | api.sh v2.76 + 域模块 | `/tmp/api.log`：写端点全记、读端点仅慢/错误；端点/方法/耗时/错误码；蜂窝/短信/聚合动作（凭证与内容脱敏） | GUI 操作与模组实际响应是否一致 |
-| mipc_cellular v0.13 | `/tmp/mipc_cellular.log`：命令/msgid/端口/响应长度/rc/耗时/解码摘要；正常 60s 限流，异常与慢调用必记，256KB 轮转 | MIPC 层超时/端口占用/解码失败 |
+| mipc_cellular v0.15 | `/tmp/mipc_cellular.log`：命令/msgid/端口/响应长度/rc/耗时/解码摘要；正常 60s 限流，异常与慢调用必记，256KB 轮转；cells 解码失败另存 `/tmp/cells_decode_fail.bin` + head 12B | MIPC 层超时/端口占用/解码失败（实机已抓到间歇 plen≈2960 / decode=-2） |
 | wifi_autoch v1.1 | `# scan/choose` 注释行（扫描规模、候选、评分） | 选道依据与 IDC 安全集 |
 
 **日志量预算**：wan_agg ≈2 行/30s、watchdog ≈1 行/60s + HEALTH 1 行/5min、

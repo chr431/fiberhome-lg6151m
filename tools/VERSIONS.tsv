@@ -95,8 +95,8 @@ docs/GUI_TERMINOLOGY.md	1.2	doc	-	GUI文案基准; v1.2: bad_cmd文案更新+sse
 gw/watchdog.sh	1.16	manifest	/data/gw/watchdog.sh	持续不变量看门狗; v1.15(日志加密轮): 失败检查 rc+输出摘要、60s TICK 全量状态、5min HEALTH(load/mem/disk/进程/僵尸/conntrack)、自愈重启原因; v1.14: cell 查询直连语义; v1.16(日志加密轮补): epoch 时间基准 + 时钟跳变检测
 tools/selftest.py	2.40	tool	-	v2.40(日志加密轮): +t_logging_fine(log_keeper 增量落盘+wan_agg/watchdog TICK 持久化); v2.39: 冷启动 qdisc 回退同口径; 历史见git
 tools/doc_audit.py	1.1	tool	-	台账↔文档内联标记双向审计(v1.1: 标记扫描纳入台账引用的docs/外文档如install/README.md; v1.0: 版本绑定+TEST-MISSING/STALE-CODE/UNREGISTERED-CLAIM)
-gw/src/mipc_cellular.c	0.14	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源码; v0.13(日志加密轮): 结构化诊断日志(命令/msgid/端口/rlen/rc/耗时/解码摘要; 60s 限流, 异常与慢调用必记, 256KB 轮转); 随产物0.13; v0.14(日志加密轮补): 日志行补 epoch 时间基准(跨日志关联)
-gw/bin/mipc_cellular	0.14	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI; v0.13(日志加密轮): +/tmp/mipc_cellular.log 诊断(限流); 零动态依赖(静态 musl, NEEDED 空); v0.12: RIL 零依赖重写; v0.14(日志加密轮补): 日志行补 epoch 时间基准(跨日志关联)
+gw/src/mipc_cellular.c	0.15	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源码; v0.13(日志加密轮): 结构化诊断日志(命令/msgid/端口/rlen/rc/耗时/解码摘要; 60s 限流, 异常与慢调用必记, 256KB 轮转); 随产物0.13; v0.15: cells 解码失败保存原始载荷+head 12B(间歇 plen≈2960/decode=-2 取证)
+gw/bin/mipc_cellular	0.15	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI; v0.13(日志加密轮): +/tmp/mipc_cellular.log 诊断(限流); 零动态依赖(静态 musl, NEEDED 空); v0.12: RIL 零依赖重写; v0.15: cells 解码失败保存原始载荷+head 12B(间歇 plen≈2960/decode=-2 取证)
 tools/build_mipc_cellular.sh	1.1	tool	-	mipc_cellular构建(zig cc aarch64-musl 静态); v1.1: 移除 libqlril 链接(v0.12+ 零 RIL 依赖)
 gw/dial_keeper.sh	1.6	manifest	/data/gw/dial_keeper.sh	拨号自持守护; v1.5(日志加密轮): 60s TICK(has_ip/cell_alive/wan_alive 原文+年龄/down/backoff/APN/cci)+僵尸IP边沿+modem未就绪原因+飞行切换+ccmni_up rc/输出/耗时; v1.4: ccmni_up 一体+数据面触发+飞行守卫; v1.6(日志加密轮补): 日志行补 epoch 时间基准(跨日志关联)
 gw/guest_fw.sh	1.6	manifest	/data/gw/guest_fw.sh	访客隔离防火墙v1.6(审计P0: GUEST_ISOLATE开关删除=强制隔离; 兼容需求改由主WiFi终端频段锁定承接; 历史版本见git)

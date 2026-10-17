@@ -45,7 +45,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/agg_pins.default` | **v1.0** | manifest | `/data/gw/agg_pins.default` | MAC钉死表出厂缺省基线(只读, 不含任何MAC; 设备侧活文件 agg_pins.conf 由 wan_agg 缺省才写地播种, 个人MAC不入库) |
 | `gw/bin/fhstub.so` | **v1.0** | manifest | `/data/gw/fhstub.so` | FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径) |
 | `gw/bin/healthdog.ko` | **v1.0** | manifest | `/data/gw/healthdog.ko` | 取证看门狗内核模块(forensic=1) |
-| `gw/bin/mipc_cellular` | **v0.14** | manifest | `/data/gw/mipc_cellular` | 蜂窝MIPC直连CLI; v0.13(日志加密轮): +/tmp/mipc_cellular.log 诊断(限流); 零动态依赖(静态 musl, NEEDED 空); v0.12: RIL 零依赖重写; v0.14(日志加密轮补): 日志行补 epoch 时间基准(跨日志关联) |
+| `gw/bin/mipc_cellular` | **v0.15** | manifest | `/data/gw/mipc_cellular` | 蜂窝MIPC直连CLI; v0.13(日志加密轮): +/tmp/mipc_cellular.log 诊断(限流); 零动态依赖(静态 musl, NEEDED 空); v0.12: RIL 零依赖重写; v0.15: cells 解码失败保存原始载荷+head 12B(间歇 plen≈2960/decode=-2 取证) |
 | `gw/bin/multiwan_ctl` | **v1.1** | manifest | `/data/gw/multiwan_ctl` | 原厂multiwan引擎ioctl控制器(zig动态链libfhdrv_net_api,36B结构体) |
 | `gw/bin/shmsnap` | **v1.0** | manifest | `/data/gw/shmsnap` | cfgmgr树共享内存快照工具(save/load 16MB原始字节, gzip后127KB, 开机恢复锁定状态) |
 | `gw/bin/v3_fix.ko` | **v1.1** | manifest | `/data/gw/v3_fix.ko` | TTL伪装/PPE解绑内核模块(wan_if/ttl_mode/unhook) |
@@ -104,7 +104,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/zz_data_hook` | **v1.1** | manifest | `/data/build/rootfs/etc/init.d/zz_data_hook` | S98数据钩子(v1.1: plain sh——原厂无/etc/rc.common, rc.common式shebang致开机栈全灭; 回归实测发现) |
 | `gw/src/fhstub.c` | **v1.0** | src | `gw/bin/fhstub.so` | FH符号桩库源码 |
 | `gw/src/healthdog.c` | **v1.0** | src | `gw/bin/healthdog.ko` | 看门狗模块源码(版本随产物) |
-| `gw/src/mipc_cellular.c` | **v0.14** | src | `gw/bin/mipc_cellular` | 蜂窝MIPC直连CLI源码; v0.13(日志加密轮): 结构化诊断日志(命令/msgid/端口/rlen/rc/耗时/解码摘要; 60s 限流, 异常与慢调用必记, 256KB 轮转); 随产物0.13; v0.14(日志加密轮补): 日志行补 epoch 时间基准(跨日志关联) |
+| `gw/src/mipc_cellular.c` | **v0.15** | src | `gw/bin/mipc_cellular` | 蜂窝MIPC直连CLI源码; v0.13(日志加密轮): 结构化诊断日志(命令/msgid/端口/rlen/rc/耗时/解码摘要; 60s 限流, 异常与慢调用必记, 256KB 轮转); 随产物0.13; v0.15: cells 解码失败保存原始载荷+head 12B(间歇 plen≈2960/decode=-2 取证) |
 | `gw/src/multiwan_ctl.c` | **v1.1** | src | `gw/bin/multiwan_ctl` | multiwan控制器源码(随产物1.1) |
 | `gw/src/shmsnap.c` | **v1.0** | src | `gw/bin/shmsnap` | cfgmgr快照源码 |
 | `gw/src/v3_fix.c` | **v1.1** | src | `gw/bin/v3_fix.ko` | TTL/解绑模块源码(版本随产物) |

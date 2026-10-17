@@ -1,5 +1,8 @@
-/* mipc_cellular.c v0.14 -- 蜂窝 MIPC 直连工具（零 RIL 依赖）
+/* mipc_cellular.c v0.15 -- 蜂窝 MIPC 直连工具（零 RIL 依赖）
  *
+ * v0.15 (2026-10-17 日志加密轮): cells 解码失败时保存原始载荷
+ *   /tmp/cells_decode_fail.bin + 日志记 head 12 字节 — 实机已抓到
+ *   plen≈2960 / decode=-2 的间歇失败, 需区分部分帧/异种响应/新布局。
  * v0.13 (2026-10-17 日志加密轮): 结构化诊断日志 /tmp/mipc_cellular.log —
  *   每次调用至多一行(命令/msgid/端口/响应长度/rc/耗时/解码摘要); 正常调用
  *   60s 限流, 异常(rc!=0)与慢调用(>=800ms)必记; 256KB 轮转。MIPC_LOG 可改
@@ -335,7 +338,15 @@ static int do_cells(void)
     if (fd >= 0) { ssize_t w = write(fd, dpay, dn); (void)w; close(fd); }
     int k = cells_decode(dpay, dn, cr, 24);
     if (k <= 0) {
-        snprintf(g_detail, sizeof g_detail, "decode=%d plen=%d", k, dn);
+        /* v0.15: 解码失败留原始载荷 — 24h 分析需要区分"部分帧/异种响应/
+         * 新布局"三种可能; 只保留最近一次, 16KB 上限, 不刷 flash。 */
+        int ff = open("/tmp/cells_decode_fail.bin", O_WRONLY | O_CREAT | O_TRUNC, 0600);
+        if (ff >= 0) { ssize_t w = write(ff, dpay, dn); (void)w; close(ff); }
+        char head[40]; int hn = dn < 12 ? dn : 12;
+        for (int i = 0; i < hn; i++) sprintf(head + i * 2, "%02x", dpay[i]);
+        head[hn * 2] = 0;
+        snprintf(g_detail, sizeof g_detail,
+                 "decode=%d plen=%d head=%s raw=/tmp/cells_decode_fail.bin", k, dn, head);
         printf("{\"error\":\"decode %d\"}\n", k); return 3;
     }
     struct cellrec *sv = NULL;

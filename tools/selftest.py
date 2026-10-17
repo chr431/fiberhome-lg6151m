@@ -11,6 +11,8 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
+v2.34 (cells 直连轮): +t_cells_direct(直连解码护栏: 直连预取在位 + 无 fallback
+  + JSON 形状完整 — mipc_cellular v0.10, 0x24 TLV 解码)。
 v2.33 (RIL 收尾轮): t_ril_single 改"保留件单实例"(仅 ql_ril_service, 含 procd
   服务面在位断言) + 新增 t_ril_thin(ql_netd/mipc_submonitor 退役: 进程/服务面
   双缺席 + cells 查询活 — 拔管实验矩阵的回归护栏)。
@@ -889,6 +891,26 @@ def t_ril_thin():
         bad.append("cells-dead")
     record(t_ril_thin._test_name, "cellular", not bad,
            f"netd=0 submon=0 cells=ok {cells[:24]}" if not bad else "; ".join(bad))
+
+
+@test("cells 直连解码 (mipc_cellular 0x23→0x24 TLV)")
+def t_cells_direct():
+    # v2.34 (2026-10-17 反编译攻坚轮): ql_ril_service 的 cells 解码逻辑已由
+    #   反汇编还原(_re C_cells_decode: TLV 层 + NR 记录 0xB8 布局 + 编码公式
+    #   rsrp=raw-156 / sinr=raw/2-43), mipc_cellular v0.10 直连主路径上线,
+    #   libqlril 仅作回退。断言: ① 直连预取真实发生(bin 落盘); ② 无 fallback
+    #   (stderr 无标记); ③ JSON 形状完整(serving/cells/n)。
+    dev("rm -f /tmp/cells_direct.bin /tmp/cd.err")
+    out = dev("/data/gw/mipc_cellular cells 2>/tmp/cd.err").strip()
+    bin_ok = dev("[ -s /tmp/cells_direct.bin ] && echo y").strip()
+    err = dev("cat /tmp/cd.err 2>/dev/null").strip()
+    ok = (bin_ok == "y" and "fallback" not in err
+          and '"serving"' in out and '"cells"' in out and '"n"' in out
+          and "error" not in out)
+    n = re.search(r'"n":(\d+)', out)
+    record(t_cells_direct._test_name, "cellular", ok,
+           f"bin={bin_ok} fallback={'no' if 'fallback' not in err else 'YES'} n={n.group(1) if n else '?'}"
+           if ok else f"bin={bin_ok} err={err[:40]} out={out[:40]}")
 
 
 @test("mtk_netagent 退役 (ccmni_up 接管落地)")

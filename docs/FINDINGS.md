@@ -771,4 +771,28 @@ libqlril（回退），**行为零变化**——是解码器落地的安全垫�
 JSON 值无线性关系（43/61/28 一族值待解）；ql_ril_service 的
 `hosl_nas_convert_cell_info`（strings 命名）是权威映射，二进制已拉回库存档
 （stripped，需反汇编或多捕获统计标定）。
+
+## 28b. 反编译攻坚：解码全解 + cells 直连上线（同日·下）
+
+**反汇编（子代理，报告 _re/reports/C_cells_decode.md）**：ADRP+ADD 字符串
+交叉引用定位 stripped 二进制里的目标函数；还原出：
+
+- **TLV 层**：`[tag u16le][len u16le][value]` 流，顺序不定；0x010a=NR 计数、
+  0x810b=NR 数组（元素 0xB8=184B）、0x8107=LTE 数组（0xB4）；计数 TLV 缺失时
+  count=len/记录长 兜底。
+- **NR 记录布局**（3 对新鲜样本逐字段验证）：state@0(1=服务)、plmn char[7]@1、
+  pci@0x10、arfcn@0x14、tac@0x18、**rsrp=raw@0x1C−156**、**sinr=raw@0x20/2−43**、
+  rsrq=raw@0x24/2−23、band@0x38；可选字段缺省 0x0FFFFFFF。
+- **85 项 RIL↔MIPC msgid 映射表**（§8）——后续迁移 setlock(0x33)/endc(0x2D/0x51)/
+  scan(0x09)/短信(0x05) 的钥匙。
+- **顺带挖出旧路径既有 bug**：旧 JSON cells[j] 的 pci 标签实为记录 j+1 的 pci
+  （消费端 0x2C 偏移越界）——直连解码器天然修复。
+
+**落地（mipc_cellular v0.10）**：`mipc_xfer` 多帧重组（TLV 流跨帧拼接）+
+`cells_decode` + `do_cells_direct` 直连主路径（libqlril 仅回退）。守护死亡态
+实弹验证：**全 JSON 正常输出**（serving+8 邻区，pci 归属修正后）。bw 字段为
+显示型数据，从 0x31 载荷提取（编码待反汇编补充，暂 ASCII 扫描容错）。
+
+**ql_ril_service 退役前置就绪**：读路径（cells/getbands）已直连；余下写路径
+（setlock/endc/scan/短信发送）msgid 已知，迁移后即可退役最后一个 RIL 守护。
 <!--CLM:CLM-MIPC-TRANSPORT-->

@@ -239,15 +239,19 @@ static int mipc_xfer(unsigned char msgid, const unsigned char *pl, int plen,
     if (plen > 0) memcpy(req + 16, pl, plen);
     if (write(fd, req, rl) != rl) { close(fd); return -2; }
 
-    /* 读到完整帧: 按 magic 扫描, 匹配 txid=1 且 msgid=msgid+1 */
-    unsigned char buf[8192];
-    int have = 0, got = -3;
+    /* 读到完整帧: 按 magic 扫描, 匹配 txid=1 且 msgid=msgid+1。
+     * v0.10: TLV 流可跨帧(实测 528B 帧 + 0x810b 声明 1840 = 截在帧边界,
+     * 见 _re C_cells_decode §5) — 同 msgid 后续帧在静默窗内到达则拼接 body,
+     * 直到超时或缓冲满。 */
+    unsigned char buf[16384];
+    int have = 0, got = 0;
     struct pollfd pf = { fd, POLLIN, 0 };
-    int waited = 0;
-    while (waited < to_ms) {
+    int waited = 0, idle = 0;
+    while (waited < to_ms && idle < 300 && got < outmax - 16) {
         int pr = poll(&pf, 1, 100);
         waited += 100;
-        if (pr <= 0) continue;
+        if (pr <= 0) { if (got > 0) idle += 100; continue; }
+        idle = 0;
         int n = read(fd, buf + have, sizeof buf - have);
         if (n > 0) have += n;
         int pos = 0;
@@ -256,33 +260,149 @@ static int mipc_xfer(unsigned char msgid, const unsigned char *pl, int plen,
             int rsp_id = buf[pos + 10];
             unsigned txid = (unsigned)buf[pos + 12] | ((unsigned)buf[pos + 13] << 8);
             unsigned rlen = (unsigned)buf[pos + 14] | ((unsigned)buf[pos + 15] << 8);
-            if (rsp_id == (int)((msgid + 1) & 0xff) && txid == 1) {
-                if (rlen > (unsigned)outmax) rlen = outmax;
-                if (pos + 16 + (int)rlen <= have) {
-                    memcpy(out, buf + pos + 16, rlen);
-                    got = (int)rlen;
+            if (rsp_id == (int)((msgid + 1) & 0xff) &&
+                (txid == 1 || got > 0)) {            /* 首帧验 txid; 续帧同 msgid 即收 */
+                int take = (int)rlen;
+                if (got + take > outmax) take = outmax - got;
+                if (pos + 16 + take <= have) {
+                    memcpy(out + got, buf + pos + 16, take);
+                    got += take;
                 }
-                goto done;
             }
             pos += 16 + (int)rlen;
         }
+        /* 压缩已消费区 */
+        if (pos > 0) { memmove(buf, buf + pos, have - pos); have -= pos; }
     }
-done:
     close(fd);
-    return got;
+    return got > 0 ? got : -3;
+}
+
+/* v0.10: 0x24 TLV 载荷解码(_re C_cells_decode 反汇编还原, 3 对新鲜样本逐字段验证)。
+ * TLV 层: [tag u16le][len u16le][value]; 0x010a=NR 计数, 0x810b=NR 数组(元素 0xB8)。
+ * NR 记录: state u8@0(1=服务), plmn char[7]@1, cid@8, ta@0xC, pci@0x10, arfcn@0x14,
+ *   tac@0x18(0x0FFFFFFF=无), rsrp@0x1C(raw-156), sinr@0x20(raw/2-43),
+ *   rsrq@0x24(raw/2-23), band u32@0x38(邻区 0 → arfcn 现算)。
+ * 旧路径已知 bug 顺带修复: 旧 cells[j] 的 pci 实为记录 j+1 的(消费端 0x2C 越界)。 */
+struct cellrec {
+    int valid, serving;
+    unsigned pci, arfcn, tac, band, cid, ta;
+    int rsrp, sinr, rsrq;
+    char plmn[8];
+};
+static int cells_decode(const unsigned char *p, int n, struct cellrec *out, int maxout)
+{
+    unsigned nr_cnt = 0;
+    const unsigned char *nr_arr = NULL; int nr_len = 0;
+    int off = 0;
+    while (off + 4 <= n) {
+        unsigned tag = (unsigned)p[off] | ((unsigned)p[off + 1] << 8);
+        unsigned len = (unsigned)p[off + 2] | ((unsigned)p[off + 3] << 8);
+        if (off + 4 + (int)len > n) break;
+        const unsigned char *v = p + off + 4;
+        if (tag == 0x010a && len == 4) nr_cnt = R32(v);
+        else if (tag == 0x810b) { nr_arr = v; nr_len = (int)len; }
+        off += 4 + (int)len;
+    }
+    if (!nr_arr) return -2;
+    if (nr_cnt == 0 || nr_cnt > 32) nr_cnt = (unsigned)(nr_len / 0xB8);
+    int k = 0;
+    for (unsigned i = 0; i < nr_cnt && k < maxout; i++) {
+        const unsigned char *r = nr_arr + (size_t)i * 0xB8;
+        if (r + 0xB8 > p + n) break;
+        struct cellrec *c = &out[k++];
+        memset(c, 0, sizeof *c);
+        c->valid = 1;
+        c->serving = (r[0] == 1);
+        memcpy(c->plmn, r + 1, 7); c->plmn[7] = 0;
+        c->cid = R32(r + 8); c->ta = R32(r + 0xC);
+        c->pci = R32(r + 0x10); c->arfcn = R32(r + 0x14); c->tac = R32(r + 0x18);
+        c->rsrp = (int)R32(r + 0x1C) - 156;
+        c->sinr = (int)(R32(r + 0x20) / 2) - 43;
+        c->rsrq = (int)(R32(r + 0x24) / 2) - 23;
+        c->band = R32(r + 0x38);
+    }
+    return k;
+}
+
+/* bw 字段(v0.10 终版, 反汇编 §11 + 实弹修正): mipc 0x44F(线上 0x4F) 同步查询 —
+ * 请求 8B = TLV tag 0x0100 len 1 val 02(选 NR)+pad; 响应 tag 0x0109(NR DL) 值内
+ * 含 pci/arfcn + bw ASCII("100M"/"60M", 零换算)。实测值内偏移有 ±2 漂移 —
+ * 在整个值内做 "[0-9]{1,3}M" 扫描(显示型数据, 对布局漂移鲁棒)。
+ * TLV 流 4 字节对齐(len 非 4 倍数时值后有 pad)。 */
+static void bw_from_4f(const unsigned char *p, int n, char *out, int outsz)
+{
+    snprintf(out, outsz, "?");
+    int off = 0;
+    while (off + 4 <= n) {
+        unsigned tag = (unsigned)p[off] | ((unsigned)p[off + 1] << 8);
+        unsigned len = (unsigned)p[off + 2] | ((unsigned)p[off + 3] << 8);
+        if (len > 0x800 || off + 4 + (int)len > n) break;
+        const unsigned char *v = p + off + 4;
+        if (tag == 0x0109 && len >= 8) {
+            for (int i = 0; i + 1 < (int)len; i++) {
+                int j = i;
+                while (j < (int)len && v[j] >= '0' && v[j] <= '9' && j - i < 3) j++;
+                if (j > i && j < (int)len && v[j] == 'M') {
+                    snprintf(out, outsz, "%.*sM", j - i, v + i);
+                    return;
+                }
+                i = j;
+            }
+        }
+        off += 4 + (int)((len + 3) & ~3u);   /* TLV 4 字节对齐 */
+    }
+}
+
+static int do_cells_direct(void)
+{
+    static unsigned char bpay[8192];
+    static struct cellrec cr[24];
+    static unsigned char dpay[16384];
+    int dn = mipc_xfer(0x23, NULL, 0, dpay, sizeof dpay, 2500);
+    if (dn <= 0) return dn;
+    int k = cells_decode(dpay, dn, cr, 24);
+    if (k <= 0) return k;
+    struct cellrec *sv = NULL;
+    for (int i = 0; i < k; i++) if (cr[i].serving) { sv = &cr[i]; break; }
+    if (!sv) sv = &cr[0];
+    char bw[12];
+    static const unsigned char q4f[8] = { 0x00, 0x01, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00 };
+    int bn = mipc_xfer(0x4F, q4f, 8, bpay, sizeof bpay, 1500);
+    bw_from_4f(bpay, bn > 0 ? bn : 0, bw, sizeof bw);
+    printf("{\"serving\":{\"band\":\"N%u\",\"arfcn\":\"%u\",\"pci\":\"%u\","
+           "\"rsrp\":\"%d\",\"sinr\":\"%d\",\"bw\":\"%s\",\"plmn\":\"%s\",\"tac\":\"%u\"},",
+           sv->band, sv->arfcn, sv->pci, sv->rsrp, sv->sinr,
+           bw, sv->plmn, sv->tac == 0x0FFFFFFF ? 0 : sv->tac);
+    printf("\"cells\":[");
+    int first = 1;
+    for (int i = 0; i < k; i++) {
+        if (&cr[i] == sv) continue;
+        struct cellrec *c = &cr[i];
+        char bname[8];
+        if (c->band) snprintf(bname, sizeof bname, "N%u", c->band);
+        else snprintf(bname, sizeof bname, "%s", nr_band_of(c->arfcn));
+        printf("%s{\"band\":\"%s\",\"arfcn\":\"%u\",\"pci\":\"%u\","
+               "\"rsrp\":\"%d\",\"sinr\":\"%d\"}",
+               first ? "" : ",", bname, c->arfcn, c->pci, c->rsrp, c->sinr);
+        first = 0;
+    }
+    printf("],\"n\":%d}\n", k - 1);
+    return 0;
 }
 
 static int do_cells(void)
 {
-    /* v0.9: 直连优先 — 0x23 空请求 -> 0x24 TLV 载荷(见头注); 失败回退 libqlril。
-     * 载荷同时落 /tmp/cells_direct.bin(偏移标定/取证; 幂等覆盖)。 */
-    static unsigned char dpay[8192];
-    int dn = mipc_xfer(0x23, NULL, 0, dpay, sizeof dpay, 1500);
+    /* v0.10: 直连主路径(0x23+TLV 解码); 失败回退 libqlril。
+     * 载荷同时落 /tmp/cells_direct.bin(取证; 幂等覆盖)。 */
+    static unsigned char dpay[16384];
+    int dn = mipc_xfer(0x23, NULL, 0, dpay, sizeof dpay, 2500);
     if (dn > 0) {
         int fd = open("/tmp/cells_direct.bin", O_WRONLY | O_CREAT | O_TRUNC, 0600);
         if (fd >= 0) { ssize_t w = write(fd, dpay, dn); (void)w; close(fd); }
-        fprintf(stderr, "direct payload %d bytes\n", dn);
-        /* 载荷解码 v0.9 标定中 — 当前回退 libqlril 输出, bin 留作离线标定 */
+        int rc = do_cells_direct();
+        if (rc == 0) return 0;
+        fprintf(stderr, "cells direct fallback (%d)\n", rc);
     }
     struct bi bi; struct ci ci;
     memset(&bi, 0, sizeof bi); memset(&ci, 0, sizeof ci);
@@ -517,9 +637,14 @@ int main(int argc, char **argv)
         printf("\n");
         return 0;
     }
-    if (argc >= 2 && !strcmp(argv[1], "cellraw-direct")) { /* v0.9: 直连原始载荷 */
-        static unsigned char dpay[8192];
-        int dn = mipc_xfer(0x23, NULL, 0, dpay, sizeof dpay, 1500);
+    if (argc >= 2 && !strcmp(argv[1], "cellraw-direct")) { /* v0.10: 直连原始载荷 [msgid [hexpayload]] */
+        static unsigned char dpay[16384];
+        unsigned char req[512];
+        int reqlen = 0;
+        unsigned char msgid = 0x23;
+        if (argc >= 3) msgid = (unsigned char)strtoul(argv[2], NULL, 0);
+        if (argc >= 4) reqlen = hex2bin(argv[3], req, sizeof req);
+        int dn = mipc_xfer(msgid, reqlen > 0 ? req : NULL, reqlen, dpay, sizeof dpay, 2000);
         if (dn <= 0) { printf("directerr %d\n", dn); return 4; }
         for (int i = 0; i < dn; i++) printf("%02x", dpay[i]);
         printf("\n");

@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.76 (v2.76, 2026-10-17 日志加密轮: +请求级日志 /tmp/api.log — 写端点
+# api.sh v2.77 (v2.76, 2026-10-17 日志加密轮: +请求级日志 /tmp/api.log — 写端点
 #   全记、读端点仅慢请求/错误, 只含端点/方法/耗时/错误码, 不记 body/token/口令;
 #   v2.75, 2026-10-17 架构轮: 模块化拆分 — 本文件收敛为 核心(helpers/
 #   认证/配置助手) + 路由表, 六个域模块按端点懒加载($APID/api_{sys,wifi,lan,agg,
@@ -25,7 +25,7 @@ API_T0=$(date +%s)
 API_EP="${1:-?}"
 API_M="${V3_METHOD:-GET}"
 alog() {
-    echo "$(date '+%m-%d %H:%M:%S') $*" >> $API_LOG
+    echo "$(date '+%m-%d %H:%M:%S') epoch=$(date +%s) $*" >> $API_LOG
     [ "$(wc -c < $API_LOG 2>/dev/null || echo 0)" -gt 524288 ] && {
         tail -n 1000 $API_LOG > $API_LOG.tmp && mv $API_LOG.tmp $API_LOG; }
 }

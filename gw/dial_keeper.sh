@@ -1,5 +1,5 @@
 #!/bin/sh
-# dial_keeper.sh v1.5 -- 拨号自持守护 (ROADMAP P2, 2026-10-06)
+# dial_keeper.sh v1.6 -- 拨号自持守护 (ROADMAP P2, 2026-10-06)
 #
 # v1.5 (2026-10-17 日志加密轮): 每 60s TICK(has_ip/cell_alive/wan_alive 原文与
 #   年龄/DOWN/退避/APN/cci); 僵尸 IP 触发边沿、modem 未就绪原因、飞行模式切换、
@@ -160,8 +160,8 @@ ee_count() { ls -d /data/log/aee_exp/db.*.EE 2>/dev/null | wc -l; }
 DOWN=0; B=$MINB
 CYC=0; ZOMBIE=0; APN_LAST=""; APN_SRC_LAST=""; CFUN_LAST=""
 EE_N=$(ee_count)
-log "===== keeper v1.5 start (grace=${GRACE}s poll=${POLL}s mto=${MTO}s ee=${EE_N}; ccmni_up=netagent-lite; trigger=ip+dataplane; fine-log) ====="
-logger -t dial_keeper "keeper v1.5 start (grace=${GRACE}s mto=${MTO}s ee=${EE_N})"
+log "===== keeper v1.6 start (grace=${GRACE}s poll=${POLL}s mto=${MTO}s ee=${EE_N}; ccmni_up=netagent-lite; trigger=ip+dataplane; fine-log) ====="
+logger -t dial_keeper "keeper v1.6 start (grace=${GRACE}s mto=${MTO}s ee=${EE_N})"
 while :; do
     hb; CYC=$((CYC+1)); [ $((CYC % 12)) -eq 0 ] && log_rot
     # v1.1: 模组 EE 事件 = 复位信号 → 强制重拨路径(不等被动宽限)
@@ -229,7 +229,7 @@ while :; do
     fi
     # v1.5: 每 12 环循(~60s)一行决策输入快照 — 24h 时间线的主干
     if [ $((CYC % 12)) -eq 0 ]; then
-        log "TICK has_ip=$HIP cell_alive=$CA wa_state=${WA_STATE:-?} wa_age=${WA_AGE:--}s wa=[${WA_RAW:-none}] down=$DOWN backoff=$B apn=${APN_LAST:-?} cci=$(cat /sys/kernel/ccci/boot 2>/dev/null | head -c 16)"
+        log "TICK epoch=$(date +%s) has_ip=$HIP cell_alive=$CA wa_state=${WA_STATE:-?} wa_age=${WA_AGE:--}s wa=[${WA_RAW:-none}] down=$DOWN backoff=$B apn=${APN_LAST:-?} cci=$(cat /sys/kernel/ccci/boot 2>/dev/null | head -c 16)"
     fi
     nap $POLL
 done

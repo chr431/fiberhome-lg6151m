@@ -880,4 +880,9 @@ TICK 级输入（探活逐目标、ccmni 清单、authd 年龄、租约耗时、
 
 **日志量预算**：wan_agg ≈2 行/30s、watchdog ≈1 行/60s + HEALTH 1 行/5min、
 其余按事件；合计约 1–2MB/天，`/data` 2GB 可用，单文件 1MB×2 代足够覆盖 24h。
+
+**时间基准**：所有 TICK/HEALTH/API/MIPC 行带 `epoch=`；设备无 RTC，NTP 校时会
+造成本地时间跨段不可比（实机观察到 02:34→10:34 的 8h 跳变）。watchdog v1.15
+检测 epoch 与 uptime 增量偏差 >5s 时记 `EVT clock jump`。C 工具的 `localtime`
+在无 `/etc/localtime` 时按 UTC 输出，**跨日志关联一律以 epoch 为准**。
 <!--CLM:CLM-LOGGING-FINE-->

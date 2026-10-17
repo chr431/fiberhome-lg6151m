@@ -1,5 +1,5 @@
 #!/bin/sh
-# wan_agg.sh v3.2 — 双上行聚合主管: 探活 + 故障转移 FSM + 未打标主路策略 + CLI
+# wan_agg.sh v3.3 — 双上行聚合主管: 探活 + 故障转移 FSM + 未打标主路策略 + CLI
 # v3.2 (2026-10-17 日志加密轮): 每 ~30s TICK 汇总(存活/计数/authd/承载口/候选),
 #   探活逐目标结果、硬截止触发、ccmni 清单变化、authd/W2_READY 边沿、主路写失败
 #   全部留痕; 本文件日志自轮转(400 行) — 24h 分析不再依赖偶然的状态迁移行。
@@ -191,7 +191,7 @@ case "$1" in
     exit 0 ;;
 esac
 
-log "===== wan_agg v3.2 start (lib 拆分; eth0 归 wan_eth; 判活多样+wan_alive; fine-log) ====="
+log "===== wan_agg v3.3 start (lib 拆分; eth0 归 wan_eth; 判活多样+wan_alive; fine-log) ====="
 log "EVT env: w1=$W1_IF w2=$W2_IF probe=[$PROBE_V4] t1=$T1 t2=$T2 metric_prb=$W1_PRB_METRIC up=$(cut -d. -f1 /proc/uptime)s"
 agg_conf_seed
 pin_replay
@@ -399,7 +399,7 @@ while :; do
         P1R_LAST=$P1R; P2R_LAST=$P2R
     fi
     if [ $((CYC % 10)) -eq 0 ]; then
-        log "TICK cyc=$CYC loop=$((now - T0))s s=$S1/$S2 ns=$NS1/$NS2 d=$D1/$D2 u=$U1/$U2 authd=${AS:-none}/${ASAGE}s w2rdy=$W2_READY car=${W2_CAR:-?} ip=${W2_IP:-none} cw=${CW:-none} prim=${P_LAST:-none} mode=$MODE w1=$W1_PCT agg=$AGG_ON eng=$ENGINE slp=$SLP"
+        log "TICK epoch=$now cyc=$CYC loop=$((now - T0))s s=$S1/$S2 ns=$NS1/$NS2 d=$D1/$D2 u=$U1/$U2 authd=${AS:-none}/${ASAGE}s w2rdy=$W2_READY car=${W2_CAR:-?} ip=${W2_IP:-none} cw=${CW:-none} prim=${P_LAST:-none} mode=$MODE w1=$W1_PCT agg=$AGG_ON eng=$ENGINE slp=$SLP"
         log "TICK probe w1=[$P1R] w2=[$P2R] cand=[$(echo $_cand | tr ' ' ',')]"
     fi
     if [ "$AGG_ON" = 1 ] && { [ "$E1$E2" != "$S1$S2" ] || [ "${FORCE:-0}" = 1 ]; }; then

@@ -1,5 +1,5 @@
 #!/bin/sh
-# wan_eth.sh v1.1 — 有线 WAN(eth0) 接口管理守护 (自 wan_agg v2.34 ensure_lease 拆出, 架构轮)
+# wan_eth.sh v1.2 — 有线 WAN(eth0) 接口管理守护 (自 wan_agg v2.34 ensure_lease 拆出, 架构轮)
 # v1.1 (2026-10-17 日志加密轮): 租约尝试/结果与耗时、载波/IP/网关/RA 网关边沿、
 #   每条规则的真实补装(REPAIR, 含 rc)、每 60s TICK 汇总 — 家宽侧静默劣化可追溯。
 # 职责(与聚合决策正交; 聚合旁路/仅蜂窝模式下照样要跑):
@@ -25,7 +25,7 @@ MAXL=600
 log() { echo "$(date '+%m-%d %H:%M:%S') $*" >> $LOG; }
 log_rot() { [ -s $LOG ] && [ "$(wc -l < $LOG 2>/dev/null || echo 0)" -gt $MAXL ] && \
     { tail -n $((MAXL/2)) $LOG > $LOG.tmp && mv $LOG.tmp $LOG; }; }
-log "===== wan_eth v1.1 start (fine-log: lease/carrier/repair/tick) ====="
+log "===== wan_eth v1.2 start (fine-log: lease/carrier/repair/tick) ====="
 CYC=0; LAST_CAR=""; LAST_IP=""; LAST_GW=""; LAST_V6GW=""; STATIC_LOGGED=""; NOCAR_LOGGED=""
 while :; do
     CYC=$((CYC+1)); [ $((CYC % 12)) -eq 0 ] && log_rot
@@ -107,7 +107,7 @@ while :; do
         }
     fi
     if [ $((CYC % 12)) -eq 0 ]; then
-        log "TICK carrier=${CAR:-?} ip=${IP4:-none} gw=$(head -1 $GW_FILE 2>/dev/null || echo none) v6gw=${V6GW:-none} nat=$NAT_OK fwd=$FWD_OK form=$(grep -m1 '^FORM=' /data/gw/uplink.conf 2>/dev/null | cut -d= -f2 || echo '?')"
+        log "TICK epoch=$(date +%s) carrier=${CAR:-?} ip=${IP4:-none} gw=$(head -1 $GW_FILE 2>/dev/null || echo none) v6gw=${V6GW:-none} nat=$NAT_OK fwd=$FWD_OK form=$(grep -m1 '^FORM=' /data/gw/uplink.conf 2>/dev/null | cut -d= -f2 || echo '?')"
     fi
     sleep 5
 done

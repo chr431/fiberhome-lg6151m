@@ -1,5 +1,5 @@
 #!/bin/sh
-# rc_netfh.sh v3.10 -- route A: FH modem-stack environment (minimal army).
+# rc_netfh.sh v3.11 -- route A: FH modem-stack environment (minimal army).
 # v3.10 (2026-10-17 日志加密轮): 全程相位计时(t+Ns)+每阶段 pid/rc 快照; settle
 #   watch 每轮记录 ccmni 清单(不再只记最终结果); fw_apply rc、route/NAT 真实补装
 #   均留痕。24h 分析可区分"开机没起来"与"起来后又被拆"。
@@ -41,7 +41,7 @@ ph() { glog "PHASE $* (t+$(( $(cut -d. -f1 /proc/uptime 2>/dev/null) - ${T_BOOT:
 export PATH=$PATH:/fhrom/bin:/fhrom/fhshell
 export LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib
 log_rot
-glog "===== rc_netfh v3.10 start (boot=$(cut -d. -f1 /proc/uptime)s slot=$(tr ' ' '\n' < /proc/cmdline | sed -n 's/^bootslot=//p') cci=$(cat /sys/kernel/ccci/boot 2>/dev/null)) ====="
+glog "===== rc_netfh v3.11 start (epoch=$(date +%s) boot=$(cut -d. -f1 /proc/uptime)s slot=$(tr ' ' '\n' < /proc/cmdline | sed -n 's/^bootslot=//p') cci=$(cat /sys/kernel/ccci/boot 2>/dev/null)) ====="
 
 # 1. config base — v3.1 (P3 终章): cfg_tool/shmsnap/树整体退役。
 #   蜂窝全功能(锁/制式/飞行/PIN/短信/扫描/拨号)已由 mipc_cellular+dial_keeper+
@@ -228,4 +228,4 @@ if [ -n "$IF" ]; then
 fi
 sh /data/gw/fw_apply.sh apply 2>/dev/null; FWRC=$?
 [ $FWRC -eq 0 ] && glog "fw_apply ok" || glog "WARN fw_apply rc=$FWRC"
-glog "===== rc_netfh v3.10 done (total=$(( $(cut -d. -f1 /proc/uptime) - ${T_BOOT:-0} ))s) ====="
+glog "===== rc_netfh v3.11 done (total=$(( $(cut -d. -f1 /proc/uptime) - ${T_BOOT:-0} ))s) ====="

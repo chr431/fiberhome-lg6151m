@@ -1,5 +1,5 @@
 #!/bin/sh
-# log_keeper.sh v1.3 -- 日志持久化守护（日志改善专项轮）
+# log_keeper.sh v1.4 -- 日志持久化守护（日志改善专项轮）
 #   v1.3 (2026-10-17 日志加密轮): /tmp/*.log 由"tail 32K 覆盖快照"改为**增量追加**
 #   (锚行定位; 本文件被本地轮转/截断 → resync 标记 + tail 120 重同步)。此前
 #   /data/gw/logs/tmp 只保留每个日志的最后 32K, 加密后的 TICK/EVT 会被迅速覆盖,
@@ -63,7 +63,7 @@ stream() { # $1=/tmp/xxx.log
     tail -n 1 "$f" > "$anchor"
 }
 bootmark() {
-    B="===== BOOT $(date '+%F %T %z') up=$(cut -d. -f1 /proc/uptime)s slot=$(tr ' ' '\n' < /proc/cmdline | sed -n 's/^bootslot=//p') kern=$(uname -r) ====="
+    B="===== BOOT epoch=$(date +%s) $(date '+%F %T %z') up=$(cut -d. -f1 /proc/uptime)s slot=$(tr ' ' '\n' < /proc/cmdline | sed -n 's/^bootslot=//p') kern=$(uname -r) ====="
     echo "$B" >> $DIR/syslog.log
     echo "$B" >> $DIR/dmesg.log
     lk "$B"

@@ -1,4 +1,4 @@
-/* mipc_cellular.c v0.13 -- 蜂窝 MIPC 直连工具（零 RIL 依赖）
+/* mipc_cellular.c v0.14 -- 蜂窝 MIPC 直连工具（零 RIL 依赖）
  *
  * v0.13 (2026-10-17 日志加密轮): 结构化诊断日志 /tmp/mipc_cellular.log —
  *   每次调用至多一行(命令/msgid/端口/响应长度/rc/耗时/解码摘要); 正常调用
@@ -89,8 +89,8 @@ static void mlog_finish(int rc)
     unsigned prim = g_first_msgid ? g_first_msgid : g_last_msgid;
     char line[512];
     snprintf(line, sizeof line,
-             "%s %s msgid=0x%04x last=0x%04x port=%d rlen=%d rc=%d ms=%ld detail=%s\n",
-             ts, g_cmd, prim, g_last_msgid, g_last_port, g_last_rlen, rc, g_last_ms,
+             "%s epoch=%ld %s msgid=0x%04x last=0x%04x port=%d rlen=%d rc=%d ms=%ld detail=%s\n",
+             ts, (long)now, g_cmd, prim, g_last_msgid, g_last_port, g_last_rlen, rc, g_last_ms,
              g_detail[0] ? g_detail : "-");
     int fd = open(g_logpath, O_WRONLY | O_CREAT | O_APPEND, 0600);
     if (fd < 0) return;

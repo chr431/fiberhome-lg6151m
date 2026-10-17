@@ -1,5 +1,5 @@
 #!/bin/sh
-# watchdog.sh v1.15 -- on-device continuous invariant monitor.
+# watchdog.sh v1.16 -- on-device continuous invariant monitor.
 # v1.15 (2026-10-17 日志加密轮): 失败检查附 rc/输出摘要; 每 2 环循(60s)一行
 #   TICK 全量状态; 每 10 环循(5min)一行 HEALTH(load/mem//data//tmp/进程/僵尸/
 #   conntrack/蜂窝统计双口径); 自愈重启记录原因与旧 PID; cells 查询失败附
@@ -47,7 +47,7 @@ STATE=/tmp/watchdog_state
 ALED=/sys/class/gpio/gpio473/value
 CYCLE=30
 MAX_LOG=500
-CYC_TICK=0; QNODISC=""
+CYC_TICK=0; QNODISC=""; LAST_EPOCH=""; LAST_UP=""
 
 log() { echo "$(date '+%m-%d %H:%M:%S') $*" >> $LOG; }
 
@@ -113,6 +113,15 @@ check() {  # $1=key $3=label, $2=check command
 
 run_cycle() {
     FAILS=0
+    # v1.15: 时钟跳变检测 — NTP 校时/回拨会让本地时间戳不可跨段比较; epoch 与
+    #   uptime 增量不一致即留痕(设备无 RTC, 开机曾出现 8h 跳变)。
+    _NOW=$(date +%s); _UP=$(cut -d. -f1 /proc/uptime)
+    if [ -n "$LAST_EPOCH" ] && [ -n "$LAST_UP" ]; then
+        _de=$(( _NOW - LAST_EPOCH )); _du=$(( _UP - LAST_UP ))
+        _dd=$(( _de - _du )); [ $_dd -lt 0 ] && _dd=$(( -_dd ))
+        [ "$_dd" -gt 5 ] && log "EVT clock jump: epoch +${_de}s vs uptime +${_du}s (skew ${_dd}s)"
+    fi
+    LAST_EPOCH=$_NOW; LAST_UP=$_UP
 
     # ---- process invariants (pidof 比 pgrep -x 更可靠, busybox -x 有怪癖) ----
     check hostapd   "pgrep -f 'hostapd -B'"         "hostapd F3 daemon"
@@ -329,7 +338,7 @@ run_cycle() {
     # ---- v1.15: periodic summaries (24h 分析主干) ----
     CYC_TICK=$((CYC_TICK + 1))
     if [ $((CYC_TICK % 2)) -eq 0 ] || [ "$FAILS" -gt 0 ]; then
-        log "TICK fails=$FAILS up=$(cut -d. -f1 /proc/uptime)s state=[$(tr '\n' ' ' < $STATE 2>/dev/null)]"
+        log "TICK epoch=$(date +%s) fails=$FAILS up=$(cut -d. -f1 /proc/uptime)s state=[$(tr '\n' ' ' < $STATE 2>/dev/null)]"
     fi
     if [ $((CYC_TICK % 10)) -eq 0 ]; then
         _load=$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null)
@@ -340,7 +349,7 @@ run_cycle() {
         _np=$(ls /proc 2>/dev/null | grep -c '^[0-9]')
         _nz=$(ps 2>/dev/null | awk '$4 ~ /^Z/{n++} END{print n+0}')
         _ct=$(cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null)
-        log "HEALTH up=$(cut -d. -f1 /proc/uptime)s load=$_load memfree=${_mf:-?}KB memavail=${_ma:-?}KB data_free=${_df:-?}KB tmp_free=${_tf:-?}KB procs=$_np zombies=$_nz conntrack=${_ct:-n/a} cell_if=${CIF:-none} netdev=${CN:-0} qdisc=${CQ:-0}"
+        log "HEALTH epoch=$(date +%s) up=$(cut -d. -f1 /proc/uptime)s load=$_load memfree=${_mf:-?}KB memavail=${_ma:-?}KB data_free=${_df:-?}KB tmp_free=${_tf:-?}KB procs=$_np zombies=$_nz conntrack=${_ct:-n/a} cell_if=${CIF:-none} netdev=${CN:-0} qdisc=${CQ:-0}"
         [ "${_df:-0}" -lt 102400 ] 2>/dev/null && log "WARN /data free low: ${_df}KB (<100MB)"
     fi
 
@@ -372,8 +381,8 @@ run_cycle() {
 
 # ---- main ----
 touch $LOG $STATE
-log "===== watchdog v1.15 start (alert LED 5G orange; WAN LED owned by led_mgr; +wan_eth keeper +cell stats divergence +cell query liveness; fine-log TICK/HEALTH) ====="
-logger -t watchdog "watchdog v1.15 start"
+log "===== watchdog v1.16 start (alert LED 5G orange; WAN LED owned by led_mgr; +wan_eth keeper +cell stats divergence +cell query liveness; fine-log TICK/HEALTH) ====="
+logger -t watchdog "watchdog v1.16 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

@@ -1,5 +1,5 @@
 #!/bin/sh
-# led_mgr.sh v2.4 — 原厂风格指示灯状态守护 (绝对电平驱动 + 自愈 + 全灯覆盖)
+# led_mgr.sh v2.5 — 原厂风格指示灯状态守护 (绝对电平驱动 + 自愈 + 全灯覆盖)
 # v2.4 (2026-10-17 日志加密轮): 每次外部写导致的电平漂移都记 DRIFT(旧值->应为值),
 #   状态变化时附 ccmni 清单/载波/wan_alive 原文与年龄; 本文件日志轮转(400 行)。
 #   灯是"显示反映实际"的仪器 — 漂移频率直接反映外部写方(内核 trigger/watchdog)活跃度。
@@ -181,7 +181,7 @@ if [ -n "$_lp" ] && kill -0 "$_lp" 2>/dev/null    && grep -qa led_mgr /proc/$_lp
 fi
 echo $$ > $LOCK
 
-llog "===== led_mgr v2.4 start (absolute-level drive + self-heal + 2s poll; pid-lock; pid=$$) ====="
+llog "===== led_mgr v2.5 start (absolute-level drive + self-heal + 2s poll; pid-lock; pid=$$) ====="
 BCN_LAST=""   # v1.6: 固件信标事件计数(RE实证三条权威标志)
 ST=""         # 仅用于日志: 状态串变化才写日志(灯写入已不依赖它)
 POLL=${LED_POLL:-2}
@@ -213,7 +213,7 @@ while :; do
         _wa=$(cat /tmp/wan_alive 2>/dev/null)
         _wt=$(printf '%s' "$_wa" | sed -n 's/.*ts=\([0-9]*\).*/\1/p')
         _wage=-1; [ -n "$_wt" ] && _wage=$(( $(date +%s) - _wt ))
-        llog "state: $NS 5g=$(cell_sub) wan_led=$BB (carrier=$BBP) ccmni=[${_cinv%,}] wan_alive=[${_wa:-none}] age=${_wage}s"
+        llog "state: $NS epoch=$(date +%s) 5g=$(cell_sub) wan_led=$BB (carrier=$BBP) ccmni=[${_cinv%,}] wan_alive=[${_wa:-none}] age=${_wage}s"
         ST=$NS
     fi
     # v1.6: 信标看门狗 — 驱动固件权威事件增量触发 no_bcn 重装(与wifi_up F2同原语)

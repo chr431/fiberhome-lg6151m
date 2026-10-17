@@ -737,3 +737,37 @@ ubus 冷启动引导同步去掉 ql_netd。
 至此 RIL 管道从四件收到一件：**在场的原厂蜂窝件只剩 ccci 三件（modem 生命
 线）、thermal_core（温控）、atcid 对（AT 通道）、ql_ril_service（cells 源）**。
 <!--CLM:CLM-RIL-THIN-->
+
+## 28. MIPC 协议破解：cells 直连传输层落地，载荷解码标定中（2026-10-17 RIL 清零轮·上）
+
+**目标**：把 `mipc_cellular cells` 迁到 MIPC 直连，为 ql_ril_service（最后一个
+RIL 守护）退役铺路。
+
+**协议发现链（全部实弹）**：
+
+1. **传输层澄清**：`ubus listen` 抓不到方法调用（只显事件）——必须用
+   `ubus monitor`。实况：cells = `ril_request{id:1287}` → ql_ril_service 应答
+   2248B（=0x8C8 结构 ✓），getbands = id:1296 → 128B（=0x80 ✓）；另有
+   `ril.unsol.nw.ecell`（id:1447, 同款 2248B）周期推送。
+2. **LD_PRELOAD 取证器**（tools/oneoff/mipcap.c，zig 构建）：musl 内部 open
+   不过 PLT（open 截不到）→ fd 判别改为 read/write 时 readlink；constructor
+   自证标记。抓到 ql_ril_service 在 ttyCMIPC10 上的全部 MIPC 帧。
+3. **帧格式**（双向实证）：`84 19 54 24 | seq(4B=0) | 10 00 | msgid | 04 |
+   txid(u16) | len(u16) | payload`；响应 msgid=请求+1、txid 回显、len 随邻区数
+   变化。cells 真身 = **msgid 0x23 空请求 → 0x24 TLV 载荷**（ql_ril_service
+   自己也是这么取的，还伴随 AT+QNWCFG 逐字段补查）。
+4. **端口拓扑**：ttyCMIPC0..14 单开者语义（O_RDWR 一次开同 fd 读写）；
+   2=atcid、9=thermal、10=ql_ril_service；kill -9 中途读会把端口楔死
+   （13/14 实证）——正常 close 无此问题。空闲口探测式选择（11/12/8/…）。
+5. **判决实验**：**杀掉 ql_ril_service 后裸帧 0x23 查询照常应答**——modem
+   不依赖该守护，直连成立。
+
+**落地（mipc_cellular v0.9）**：`mipc_xfer()` 原始帧传输层 + `cellraw-direct`
+标定子命令 + do_cells 直连预取（载荷落 /tmp/cells_direct.bin）；输出仍走
+libqlril（回退），**行为零变化**——是解码器落地的安全垫脚石。
+
+**未竟（下轮）**：0x24 载荷的记录级解码——邻区记录 stride=0x60 晶格已定位
+（pci@记录头、arfcn@+0x2c 带 ffffff0f 前缀三联），但 rsrp/sinr 的编码与
+JSON 值无线性关系（43/61/28 一族值待解）；ql_ril_service 的
+`hosl_nas_convert_cell_info`（strings 命名）是权威映射，二进制已拉回库存档
+（stripped，需反汇编或多捕获统计标定）。

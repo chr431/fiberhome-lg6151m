@@ -26,6 +26,16 @@
  * 实弹记录: 锁 NR{41,79} ret=0 树小区列表即时只剩 N41/N79; 全 1 解锁 ret=0;
  * 每次变更 modem 重扫 ~20-60s, PDN 由 mobilenetwork 重拨(过渡期)。
  *
+ * v0.9 (2026-10-17 RIL 清零轮): 原始 MIPC 直连传输层 — 不经 ql_ril_service。
+ *   帧格式(mipcap LD_PRELOAD 抓 ql_ril_service + 裸帧实验双向实证):
+ *     req: 84 19 54 24 | seq(4B=0) | 10 00 | msgid | 04 | txid(u16) | len(u16) | payload
+ *     rsp: 同构, msgid= req+1, txid 回显, len= payload 长度(随邻区数变化)
+ *   cells 实证: msgid 0x23(空请求) -> 0x24(TLV 载荷, plmn/pci/arfcn/邻区全在)。
+ *   端口: /dev/ttyCMIPC0..14 单开者语义(O_RDWR 一次开, 同 fd 读写); 1/2/9/10
+ *   被占(atcid/thermal/ril), 13 曾被 kill -9 中途读楔住 — 探测式选空闲口。
+ *   ql_ril_service 死亡时直连路径照常工作(实弹判决实验 2026-10-17)。
+ *   do_cells: 直连优先, libqlril 回退(过渡期双保险)。
+ *
  * 用法:
  *   mipc_cellular getbands
  *   mipc_cellular setlock lte=1,3,38,40,41 nr=41,79 [umts=all|1,8]
@@ -201,8 +211,79 @@ static const char *nr_band_of(uint32_t a)
     return "?";
 }
 
+/* ---- v0.9: 原始 MIPC 直连传输 (帧格式见头注) ---- */
+#include <poll.h>
+static const unsigned char MIPC_MAGIC[4] = { 0x84, 0x19, 0x54, 0x24 };
+
+static int mipc_xfer(unsigned char msgid, const unsigned char *pl, int plen,
+                     unsigned char *out, int outmax, int to_ms)
+{
+    static const int ports[] = { 11, 12, 8, 7, 6, 5, 4, 3, 0 };
+    int fd = -1;
+    for (unsigned i = 0; i < sizeof ports / sizeof ports[0]; i++) {
+        char dev[32];
+        snprintf(dev, sizeof dev, "/dev/ttyCMIPC%d", ports[i]);
+        fd = open(dev, O_RDWR | O_NONBLOCK);
+        if (fd >= 0) break;
+    }
+    if (fd < 0) return -1;
+    unsigned char req[16 + 256];
+    int rl = 16 + (plen > 0 ? plen : 0);
+    memset(req, 0, sizeof req);
+    memcpy(req, MIPC_MAGIC, 4);
+    req[8] = 0x10; req[9] = 0x00;
+    req[10] = msgid; req[11] = 0x04;
+    req[12] = 0x01; req[13] = 0x00;                 /* txid = 1 */
+    req[14] = (unsigned char)(plen & 0xff);
+    req[15] = (unsigned char)((plen >> 8) & 0xff);
+    if (plen > 0) memcpy(req + 16, pl, plen);
+    if (write(fd, req, rl) != rl) { close(fd); return -2; }
+
+    /* 读到完整帧: 按 magic 扫描, 匹配 txid=1 且 msgid=msgid+1 */
+    unsigned char buf[8192];
+    int have = 0, got = -3;
+    struct pollfd pf = { fd, POLLIN, 0 };
+    int waited = 0;
+    while (waited < to_ms) {
+        int pr = poll(&pf, 1, 100);
+        waited += 100;
+        if (pr <= 0) continue;
+        int n = read(fd, buf + have, sizeof buf - have);
+        if (n > 0) have += n;
+        int pos = 0;
+        while (pos + 16 <= have) {
+            if (memcmp(buf + pos, MIPC_MAGIC, 4)) { pos++; continue; }
+            int rsp_id = buf[pos + 10];
+            unsigned txid = (unsigned)buf[pos + 12] | ((unsigned)buf[pos + 13] << 8);
+            unsigned rlen = (unsigned)buf[pos + 14] | ((unsigned)buf[pos + 15] << 8);
+            if (rsp_id == (int)((msgid + 1) & 0xff) && txid == 1) {
+                if (rlen > (unsigned)outmax) rlen = outmax;
+                if (pos + 16 + (int)rlen <= have) {
+                    memcpy(out, buf + pos + 16, rlen);
+                    got = (int)rlen;
+                }
+                goto done;
+            }
+            pos += 16 + (int)rlen;
+        }
+    }
+done:
+    close(fd);
+    return got;
+}
+
 static int do_cells(void)
 {
+    /* v0.9: 直连优先 — 0x23 空请求 -> 0x24 TLV 载荷(见头注); 失败回退 libqlril。
+     * 载荷同时落 /tmp/cells_direct.bin(偏移标定/取证; 幂等覆盖)。 */
+    static unsigned char dpay[8192];
+    int dn = mipc_xfer(0x23, NULL, 0, dpay, sizeof dpay, 1500);
+    if (dn > 0) {
+        int fd = open("/tmp/cells_direct.bin", O_WRONLY | O_CREAT | O_TRUNC, 0600);
+        if (fd >= 0) { ssize_t w = write(fd, dpay, dn); (void)w; close(fd); }
+        fprintf(stderr, "direct payload %d bytes\n", dn);
+        /* 载荷解码 v0.9 标定中 — 当前回退 libqlril 输出, bin 留作离线标定 */
+    }
     struct bi bi; struct ci ci;
     memset(&bi, 0, sizeof bi); memset(&ci, 0, sizeof ci);
     int r1 = p_get_band_info(&bi);
@@ -433,6 +514,14 @@ int main(int argc, char **argv)
         p_get_cell_info(&ci);
         unsigned char *p = (unsigned char *)&ci;
         for (int i = 0; i < 0x700; i++) printf("%02x", p[i]);
+        printf("\n");
+        return 0;
+    }
+    if (argc >= 2 && !strcmp(argv[1], "cellraw-direct")) { /* v0.9: 直连原始载荷 */
+        static unsigned char dpay[8192];
+        int dn = mipc_xfer(0x23, NULL, 0, dpay, sizeof dpay, 1500);
+        if (dn <= 0) { printf("directerr %d\n", dn); return 4; }
+        for (int i = 0; i < dn; i++) printf("%02x", dpay[i]);
         printf("\n");
         return 0;
     }

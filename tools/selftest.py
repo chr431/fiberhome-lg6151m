@@ -755,8 +755,8 @@ def t_agg_pin():
 def t_agg_5g_dp():
     # 设备侧强制 ccmni 出口 ping -- 与 PC 的 MAC 钉死/分流权重无关
     # (PC 钉死 WAN2 时 PC-ping-delta 探测会假失败, 曾现瞬态红)
-    out = dev("IF=$(ip -o -4 addr show 2>/dev/null | grep ccmni | grep -m1 inet "
-              "| awk '{print $2}'); ping -c 3 -W 2 -I $IF 223.5.5.5 2>&1 | tail -2")
+    _if = _cell_iface()
+    out = dev(f"ping -c 3 -W 2 -I {_if} 223.5.5.5 2>&1 | tail -2") if _if else "no live ccmni"
     m = re.search(r"(\d+) packets? received", out)
     ok = m is not None and int(m.group(1)) >= 1
     record(t_agg_5g_dp._test_name, "agg", ok,
@@ -952,7 +952,7 @@ def t_netagent_retired():
     cup = dev("[ -x /data/gw/ccmni_up.sh ] && echo y").strip()
     ref = dev("grep -c ccmni_up /data/gw/dial_keeper.sh /data/gw/dial_5g.sh 2>/dev/null | awk -F: '{s+=$2} END{print s}'").strip()
     zomb = dev("grep -c 'wan_alive' /data/gw/dial_keeper.sh 2>/dev/null").strip()
-    cif = dev("ip -o -4 addr show 2>/dev/null | grep -m1 'ccmni.*inet' | awk '{print $2}'").strip()
+    cif = _cell_iface()
     dp = dev(f"ping -4 -I {cif} -c2 -W2 223.5.5.5 2>&1 | grep -c 'packets received'").strip() if cif else "0"
     bad = []
     if proc != "0":
@@ -1464,6 +1464,28 @@ def _agg_conf():
     return mode, pct
 
 
+_CELL_IF_CACHE = []
+
+
+def _cell_iface():
+    """实际承载数据的 ccmni 口(v2.36/2.37): 多口并存时按探活实证选, 不用"第一个
+    有 IP"—— 旧 PDN 未 deact 干净常有僵尸口(有 IP 无数据), 会导致护栏假红。
+    探针目标与 wan_agg 同源(多样/非白名单); 结果缓存(单次 selftest 内不变)。"""
+    if _CELL_IF_CACHE:
+        return _CELL_IF_CACHE[0]
+    cands = dev("ip -o -4 addr show 2>/dev/null | grep ccmni | grep inet "
+                "| cut -d' ' -f2").split()
+    pick = ""
+    for c in cands:
+        for tg in ("180.76.76.76", "119.29.29.29", "8.8.8.8"):
+            if dev(f"ping -4 -I {c} -c1 -W2 {tg} 2>/dev/null | grep -q ttl && echo ok").strip() == "ok":
+                pick = c
+                break
+        if pick:
+            break
+    _CELL_IF_CACHE.append(pick)
+    return pick
+
 def _wan_alive_state():
     """读 wan_agg 发布的判活结论(唯一权威): (home, cell, fresh)。
     v2.36: 新鲜度在**设备侧**计算 — PC 与设备时钟可能不同步(实测差 8h:
@@ -1541,7 +1563,10 @@ def t_traffic_source():
         record(t_traffic_source._test_name, "system", True,
                "skip — 无 GUI token(" + (_TOKEN_NOTE[0] or "未配置") + ")")
         return
-    cif = dev("ip -o -4 addr show 2>/dev/null | grep -m1 'ccmni.*inet' | awk '{print $2}'").strip()
+    # v2.38: 同口比对 — 先让 API 报出它实际取样的口(/api/traffic 的 if 字段),
+    #   再在该口上做 qdisc 前后读数。双方各自"选活口"会在多 ccmni 并存时错配。
+    j0 = api("traffic", tok)
+    cif = str(j0.get("if") or "") or _cell_iface()
     nd = dev(f"cat /sys/class/net/{cif}/statistics/tx_bytes 2>/dev/null").strip()
     # 区间校验: API 取到的值必须落在**调用前后两次 qdisc 读数之间** —— 对任意流量
     #   速率都成立(蜂窝承载客户端流量时, 两次读取间会有真实增量, 固定容差会误判)。

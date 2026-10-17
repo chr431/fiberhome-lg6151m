@@ -96,7 +96,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/www/api_cell.sh` | **v1.0** | manifest | `/data/gw/www/api_cell.sh` | API 蜂窝域模块(v2.75 拆出: cellular/sim/pin/netmode/airplane/plmn/bandlock/celllock 族, 最大域) |
 | `gw/www/api_lan.sh` | **v1.0** | manifest | `/data/gw/www/api_lan.sh` | API LAN 服务域模块(v2.75 拆出: dhcp/dhcp_static/fw 族; fw_apply.sh 改域内懒加载 — 原对全部请求无条件 source) |
 | `gw/www/api_sms.sh` | **v1.1** | manifest | `/data/gw/www/api_sms.sh` | API 短信域模块; v1.1(RIL 清零轮): 发送改 AT+EMGS 路线(mipc_wan_cli --at_cmd, atcid 通道; 厂商 ql_sms_send_msg 同族 — 反汇编 §12.5), 中文 CSCS=UCS2+hex, 发毕回 CMGF=0; 不再依赖 mipc_cellular/libqlril |
-| `gw/www/api_sys.sh` | **v1.1** | manifest | `/data/gw/www/api_sys.sh` | API 系统/状态域模块; v1.1: 流量与 status 的蜂窝口改探活实证选口(旧 PDN 僵尸口不再导致错口显示) |
+| `gw/www/api_sys.sh` | **v1.2** | manifest | `/data/gw/www/api_sys.sh` | API 系统/状态域模块; v1.2: /api/traffic 增 if 字段(实际取样口, 多 ccmni 并存时消费方可同口比对); v1.1: 探活实证选口; 历史见git |
 | `gw/www/api_wifi.sh` | **v1.0** | manifest | `/data/gw/www/api_wifi.sh` | API WiFi 域模块(v2.75 拆出: wifi/wifi_adv/band_pin/wifiscan 族; 域历史随域迁入头注) |
 | `gw/www/app.js` | **v3.51** | manifest | `/data/gw/www/app.js` | 控制台SPA; v3.51: 移除宵断卡片(先验方案下架); 历史见git |
 | `gw/www/index.html` | **v2.32** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.32: 缓存v66) |
@@ -135,7 +135,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/rescue_shadow.py` | **v1.0** | tool | `-` | shadow.override未bind网络救援(getpass旧口令→只读探针: 文件md5/grep行为单测/部署钩子sh -x跟踪→从.bak恢复+重bind; 依赖rc.extend v2.1) |
 | `tools/rotate_toor.py` | **v1.4** | tool | `-` | toor口令轮换器; v1.4: 轮换前存档.bak(rc.extend v2.1回退源); 历史见git |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
-| `tools/selftest.py` | **v2.37** | tool | `-` | v2.37: _cell_iface 缓存+多样探针(单目标在该网络常不回致误判); v2.36: 设备侧时钟比 fresh + 动态选口; 历史见git |
+| `tools/selftest.py` | **v2.38** | tool | `-` | v2.38: t_traffic_source 用 /api/traffic 的 if 字段同口比对; v2.37: _cell_iface 缓存+多样探针; 历史见git |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |
 | `tools/serial_server.py` | **v1.7** | tool | `-` | 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets) |
 | `tools/upgrade_slot.py` | **v1.0** | tool | `-` | SSH整槽升级器(P3第一档: vercheck/槽位/空间预检→md5门禁→dd备份旧p26→写新镜像→挂载sanity断言(toor/rcS/#v3:/procd)→失败自动整槽还原不重启→清TRY_A→reboot; PC侧轮询日志+回连终检; --dry-run) |

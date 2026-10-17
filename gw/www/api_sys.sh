@@ -38,8 +38,9 @@ get_traffic() {
     ERX=$(cat /sys/class/net/eth0/statistics/rx_bytes 2>/dev/null)
     ETX=$(cat /sys/class/net/eth0/statistics/tx_bytes 2>/dev/null)
     [ -r $GWDATA/traffic.conf ] && . $GWDATA/traffic.conf
-    printf '{"rx":"%s","tx":"%s","erx":"%s","etx":"%s","day_limit_mb":"%s","month_limit_mb":"%s","ts":%d}' \
-        "${RX:-0}" "${TX:-0}" "${ERX:-0}" "${ETX:-0}" "${DAY_LIMIT_MB:-0}" "${MONTH_LIMIT_MB:-0}" "$(date +%s)"
+    # v1.2: +if 字段(本次统计实际取样的蜂窝口) — 多 ccmni 并存时消费方可同口比对
+    printf '{"if":"%s","rx":"%s","tx":"%s","erx":"%s","etx":"%s","day_limit_mb":"%s","month_limit_mb":"%s","ts":%d}' \
+        "${IF:-}" "${RX:-0}" "${TX:-0}" "${ERX:-0}" "${ETX:-0}" "${DAY_LIMIT_MB:-0}" "${MONTH_LIMIT_MB:-0}" "$(date +%s)"
 }
 # v2.56: 流量历史聚合 — span=week(168 小时桶)/month(30 天桶), 本地时区(+8)对齐
 # 数据源 /data/gw/traffic_hist.tsv (epoch drx_c dtx_c drx_e dtx_e, 5min 增量)

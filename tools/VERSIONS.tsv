@@ -42,7 +42,7 @@ gw/bin/multiwan_ctl	1.1	manifest	/data/gw/multiwan_ctl	原厂multiwan引擎ioctl
 gw/bin/fhstub.so	1.0	manifest	/data/gw/fhstub.so	FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径)
 gw/led_mgr.sh	2.3	manifest	/data/gw/led_mgr.sh	原厂风格LED守护; v2.3: +单实例 PID 锁(开机 rc19 与 watchdog 自愈并发各起一份, 双实例同写灯); v2.2: 中性命名; v2.1: 判活消费 wan_alive; 历史见git
 gw/bin/v3httpd	2.6	manifest	/data/gw/v3httpd	网关GUI HTTP服务; v2.6(P2): 静态面拒*.sh(免认证源码泄露)+Host头校验(根治DNS rebinding)
-gw/www/api_sys.sh	1.1	manifest	/data/gw/www/api_sys.sh	API 系统/状态域模块; v1.1: 流量与 status 的蜂窝口改探活实证选口(旧 PDN 僵尸口不再导致错口显示)
+gw/www/api_sys.sh	1.2	manifest	/data/gw/www/api_sys.sh	API 系统/状态域模块; v1.2: /api/traffic 增 if 字段(实际取样口, 多 ccmni 并存时消费方可同口比对); v1.1: 探活实证选口; 历史见git
 gw/www/api_wifi.sh	1.0	manifest	/data/gw/www/api_wifi.sh	API WiFi 域模块(v2.75 拆出: wifi/wifi_adv/band_pin/wifiscan 族; 域历史随域迁入头注)
 gw/www/api_lan.sh	1.0	manifest	/data/gw/www/api_lan.sh	API LAN 服务域模块(v2.75 拆出: dhcp/dhcp_static/fw 族; fw_apply.sh 改域内懒加载 — 原对全部请求无条件 source)
 gw/www/api_agg.sh	1.0	manifest	/data/gw/www/api_agg.sh	API 聚合+上行域模块(v2.75 拆出: agg/uplink 族; uplink 的 eth0 原生 MAC 还原改调 wifi_macplan.sh 统一实现)
@@ -93,7 +93,7 @@ tools/leak_check.py	2.2	tool	-	敏感词零命中门禁; v2.2: --history 全量�
 docs/ARCHITECTURE.md	1.1	doc	-	架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针)
 docs/GUI_TERMINOLOGY.md	1.2	doc	-	GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git
 gw/watchdog.sh	1.14	manifest	/data/gw/watchdog.sh	持续不变量看门狗; v1.14(RIL 清零轮): cell 查询恢复提示改直连语义(RIL 守护已全退役); 历史见git
-tools/selftest.py	2.37	tool	-	v2.37: _cell_iface 缓存+多样探针(单目标在该网络常不回致误判); v2.36: 设备侧时钟比 fresh + 动态选口; 历史见git
+tools/selftest.py	2.38	tool	-	v2.38: t_traffic_source 用 /api/traffic 的 if 字段同口比对; v2.37: _cell_iface 缓存+多样探针; 历史见git
 tools/doc_audit.py	1.1	tool	-	台账↔文档内联标记双向审计(v1.1: 标记扫描纳入台账引用的docs/外文档如install/README.md; v1.0: 版本绑定+TEST-MISSING/STALE-CODE/UNREGISTERED-CLAIM)
 gw/src/mipc_cellular.c	0.12	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源码; v0.12: 零 RIL 依赖重写(反汇编产物落地); 随产物0.12
 gw/bin/mipc_cellular	0.12	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI; v0.12(RIL 清零终章): 彻底移除 libqlril(NEEDED 空), 零动态依赖; msgid u16; cells/getbands/setlock/endc/scan 全直连; 修 TLV 步进/大响应分帧/脏帧越界三缺陷; 位映射修正 off-by-one; 历史见git

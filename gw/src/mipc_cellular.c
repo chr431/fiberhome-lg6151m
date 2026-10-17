@@ -1,5 +1,9 @@
-/* mipc_cellular.c v0.16 -- 蜂窝 MIPC 直连工具（零 RIL 依赖）
+/* mipc_cellular.c v0.17 -- 蜂窝 MIPC 直连工具（零 RIL 依赖）
  *
+ * v0.17 (2026-10-17 日志修正): 日志区分 primary/last 两次传输 — cells 命令
+ *   先 0x0423(邻区, 可达数千字节) 再 0x044f(带宽, 136B); 旧行只记最后
+ *   一次, 成功行 rlen=136 会让人误判 cells 载荷很小。现 plen/prc/pms +
+ *   lrlen/lrc/lms 并列。
  * v0.16 (2026-10-17 日志加密轮实弹): cells 数组 tag 双变体 —
  *   0x810b 与 0x010b 均为合法(记录布局/长度一致), 旧解码只认 0x810b;
  *   实机 19 邻区响应使用 0x010b, 导致间歇 decode=-2。已实测复核。
@@ -63,6 +67,8 @@ static int g_log_on = 1;
 static char g_cmd[32] = "?";
 static char g_detail[192] = "";
 static unsigned g_first_msgid = 0, g_last_msgid = 0;
+static int g_first_rlen = 0, g_first_rc = 0, g_first_port = -1;
+static long g_first_ms = 0;
 static int g_last_rlen = 0, g_last_rc = 0, g_last_port = -1;
 static long g_last_ms = 0;
 
@@ -71,6 +77,17 @@ static long now_ms(void)
     struct timeval tv;
     gettimeofday(&tv, NULL);
     return (long)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+}
+
+/* 记录一次传输结果; 第一次传输另存为 primary(cells 命令有 0x0423+0x044f 两次) */
+static void xfer_note(unsigned msgid, int port, int rlen, int rc, long ms)
+{
+    g_last_msgid = msgid; g_last_port = port; g_last_rlen = rlen;
+    g_last_rc = rc; g_last_ms = ms;
+    if (!g_first_msgid) {
+        g_first_msgid = msgid; g_first_port = port; g_first_rlen = rlen;
+        g_first_rc = rc; g_first_ms = ms;
+    }
 }
 
 static void mlog_init(const char *cmd)
@@ -95,8 +112,9 @@ static void mlog_finish(int rc)
     unsigned prim = g_first_msgid ? g_first_msgid : g_last_msgid;
     char line[512];
     snprintf(line, sizeof line,
-             "%s epoch=%ld %s msgid=0x%04x last=0x%04x port=%d rlen=%d rc=%d ms=%ld detail=%s\n",
-             ts, (long)now, g_cmd, prim, g_last_msgid, g_last_port, g_last_rlen, rc, g_last_ms,
+             "%s epoch=%ld %s msgid=0x%04x plen=%d prc=%d pms=%ld last=0x%04x lrlen=%d lrc=%d lms=%ld port=%d rc=%d ms=%ld detail=%s\n",
+             ts, (long)now, g_cmd, prim, g_first_rlen, g_first_rc, g_first_ms,
+             g_last_msgid, g_last_rlen, g_last_rc, g_last_ms, g_last_port, rc, g_last_ms,
              g_detail[0] ? g_detail : "-");
     int fd = open(g_logpath, O_WRONLY | O_CREAT | O_APPEND, 0600);
     if (fd < 0) return;
@@ -157,18 +175,14 @@ static int mipc_xfer(unsigned msgid, const unsigned char *pl, int plen,
         if (fd >= 0) { used_port = ports[i]; break; }
     }
     if (fd < 0) {
-        g_last_msgid = msgid; g_last_port = -1; g_last_rlen = 0;
-        g_last_rc = -1; g_last_ms = now_ms() - t0;
-        if (!g_first_msgid) g_first_msgid = msgid;
+        xfer_note(msgid, -1, 0, -1, now_ms() - t0);
         return -1;
     }
     unsigned char req[16 + 1024];
     int rl = 16 + (plen > 0 ? plen : 0);
     if (plen > 1024) {
         close(fd);
-        g_last_msgid = msgid; g_last_port = used_port; g_last_rlen = 0;
-        g_last_rc = -2; g_last_ms = now_ms() - t0;
-        if (!g_first_msgid) g_first_msgid = msgid;
+        xfer_note(msgid, used_port, 0, -2, now_ms() - t0);
         return -2;
     }
     memset(req, 0, sizeof req);
@@ -182,9 +196,7 @@ static int mipc_xfer(unsigned msgid, const unsigned char *pl, int plen,
     if (plen > 0) memcpy(req + 16, pl, plen);
     if (write(fd, req, rl) != rl) {
         close(fd);
-        g_last_msgid = msgid; g_last_port = used_port; g_last_rlen = 0;
-        g_last_rc = -2; g_last_ms = now_ms() - t0;
-        if (!g_first_msgid) g_first_msgid = msgid;
+        xfer_note(msgid, used_port, 0, -2, now_ms() - t0);
         return -2;
     }
 
@@ -223,9 +235,7 @@ static int mipc_xfer(unsigned msgid, const unsigned char *pl, int plen,
         if (pos > 0) { memmove(buf, buf + pos, have - pos); have -= pos; }
     }
     close(fd);
-    g_last_msgid = msgid; g_last_port = used_port; g_last_rlen = got;
-    g_last_rc = got > 0 ? 0 : -3; g_last_ms = now_ms() - t0;
-    if (!g_first_msgid) g_first_msgid = msgid;
+    xfer_note(msgid, used_port, got, got > 0 ? 0 : -3, now_ms() - t0);
     return got > 0 ? got : -3;
 }
 

@@ -689,4 +689,19 @@ cell=0 无人救）。旧形态下 netagent 在 CFUN 事件里刷接口把这个
 
 **护栏**：selftest `t_netagent_retired`（进程+procd 服务面双缺席、ccmni_up 在位
 且被两处引用、僵尸 IP 触发护栏在位、蜂窝数据面通）+ `t_ril_single` 收缩三件。
+
+**实弹验证链（2026-10-17）**：
+
+1. **运行时救援**：设备置于完美试验态（netagent 已删+僵尸 IP+数据死）→ keeper
+   v1.4 的数据面触发 35s 准确开火 → ccmni_up 落地 → 自愈（中间经历一次 cid 轮转，
+   第二轮拨号落回 ccmni2 并冲掉僵尸 IP）。
+2. **冷启动**：rc_netfh v3.7 开机退役 netagent（"netagent retired"日志+三件 ×1）；
+   开机首拨撞 RIL 热身窗口超时 → keeper 退避重试 2-3 轮收敛（~2min），全程无人工。
+3. **飞行往返演练（僵尸洞终证）**：ON（cell=0，ccmni 双僵尸 IP 在场）→ OFF →
+   **t+49s 自动恢复** cell=1，数据通（54ms）。
+
+**已知残留（自愈、不阻断）**：① 开机 RIL 热身期首拨超时会引发 cid 轮转（deact
+不总撕掉旧呼叫，ccmni2/ccmni3 可短暂并存双 IP），keeper 重试自然收敛；② dial_5g
+在 FH 模式（route A）下本就被 rc19 跳过，其 v1.4 改造目前休眠（非 FH 启动才启用）；
+③ 部分 act 响应的 v6_addr 仅链路本地（modem 侧行为，落地逻辑无害兼容）。
 <!--CLM:CLM-NETAGENT-RETIRE-->

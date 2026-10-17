@@ -1581,9 +1581,11 @@ def t_traffic_source():
         gap = int(nd) - b
         near = (a <= c <= b) if b >= a else abs(c - b) <= 65536   # 重置回退小容差
     except ValueError:
+        # v2.39: 冷启动瞬间新 ccmni 可能尚无 qdisc Sent 行(接口未承载流量) —
+        #   API 自身在 qdisc 缺失时回退 netdev, 护栏同口径比对, 不判红。
         gap = -1
-        near = False
-    ok = bool(cif) and nd.isdigit() and qd.isdigit() and near and guard not in ("", "0")
+        near = nd.isdigit() and api_tx.isdigit() and int(api_tx) == int(nd)
+    ok = bool(cif) and nd.isdigit() and (qd.isdigit() or near) and near and guard not in ("", "0")
     record(t_traffic_source._test_name, "system", ok,
            f"if={cif} api_tx={api_tx} qdisc[{qd0},{qd}] netdev={nd} netdev_minus_qdisc={gap} guard={guard}")
 

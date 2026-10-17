@@ -93,7 +93,7 @@ tools/leak_check.py	2.2	tool	-	敏感词零命中门禁; v2.2: --history 全量�
 docs/ARCHITECTURE.md	1.1	doc	-	架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针)
 docs/GUI_TERMINOLOGY.md	1.2	doc	-	GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git
 gw/watchdog.sh	1.14	manifest	/data/gw/watchdog.sh	持续不变量看门狗; v1.14(RIL 清零轮): cell 查询恢复提示改直连语义(RIL 守护已全退役); 历史见git
-tools/selftest.py	2.38	tool	-	v2.38: t_traffic_source 用 /api/traffic 的 if 字段同口比对; v2.37: _cell_iface 缓存+多样探针; 历史见git
+tools/selftest.py	2.39	tool	-	v2.39: t_traffic_source 冷启动 qdisc 缺失回退 netdev 同口径; v2.38: if 字段同口比对; v2.37: 缓存+多样探针; 历史见git
 tools/doc_audit.py	1.1	tool	-	台账↔文档内联标记双向审计(v1.1: 标记扫描纳入台账引用的docs/外文档如install/README.md; v1.0: 版本绑定+TEST-MISSING/STALE-CODE/UNREGISTERED-CLAIM)
 gw/src/mipc_cellular.c	0.12	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源码; v0.12: 零 RIL 依赖重写(反汇编产物落地); 随产物0.12
 gw/bin/mipc_cellular	0.12	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI; v0.12(RIL 清零终章): 彻底移除 libqlril(NEEDED 空), 零动态依赖; msgid u16; cells/getbands/setlock/endc/scan 全直连; 修 TLV 步进/大响应分帧/脏帧越界三缺陷; 位映射修正 off-by-one; 历史见git

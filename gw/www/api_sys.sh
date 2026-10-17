@@ -20,7 +20,15 @@ get_traffic() {
     #   +1.22MB/813 包而 qdisc/抓包为 0; 见 traffic_logger v1.2 长注释), 用作
     #   流量展示=假象。qdisc 对真实流量逐字节精确; 缺失时回退 netdev。下行用
     #   netdev rx(实测准确)。
-    IF=$(ip -o -4 addr show 2>/dev/null | grep -m1 'ccmni.*inet' | awk '{print $2}')
+    # v1.1 (RIL 清零轮): 选**探活实证的**承载口 — 多口并存时"第一个有 IP"常是
+    #   旧 PDN 僵尸口(有 IP 无数据), 会导致流量/GUI 显示错口。
+    IF=""
+    for _c in $(ip -o -4 addr show 2>/dev/null | grep ccmni | grep inet | awk '{print $2}'); do
+        for _t in 180.76.76.76 119.29.29.29 8.8.8.8; do
+            ping -4 -I $_c -c1 -W1 -s1 $_t 2>/dev/null | grep -q ttl && { IF=$_c; break 2; }
+        done
+    done
+    [ -n "$IF" ] || IF=$(ip -o -4 addr show 2>/dev/null | grep -m1 'ccmni.*inet' | awk '{print $2}')
     RX=0; TX=0; ERX=0; ETX=0
     if [ -n "$IF" ]; then
         RX=$(cat /sys/class/net/$IF/statistics/rx_bytes 2>/dev/null)
@@ -174,7 +182,13 @@ get_status() {
     UP_D=$((U/86400)); UP_H=$(( (U%86400)/3600 )); UP_M=$(( (U%3600)/60 ))
     LOAD=$(cut -d" " -f1-3 /proc/loadavg)
     MEM=$(awk '/MemTotal/{t=$2}/MemAvailable/{a=$2}END{printf "%d %d", t, a}' /proc/meminfo)
-    W5G_IF=$(ip -o -4 addr show 2>/dev/null | grep ccmni | grep -m1 inet | awk '{print $2}')
+    W5G_IF=""
+    for _c in $(ip -o -4 addr show 2>/dev/null | grep ccmni | grep inet | awk '{print $2}'); do
+        for _t in 180.76.76.76 119.29.29.29 8.8.8.8; do
+            ping -4 -I $_c -c1 -W1 -s1 $_t 2>/dev/null | grep -q ttl && { W5G_IF=$_c; break 2; }
+        done
+    done
+    [ -n "$W5G_IF" ] || W5G_IF=$(ip -o -4 addr show 2>/dev/null | grep ccmni | grep -m1 inet | awk '{print $2}')
     W5G_IP=$(ip -o -4 addr show $W5G_IF 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
     W5G_V6=$(ip -o -6 addr show $W5G_IF 2>/dev/null | grep -m1 global | awk '{print $4}' | cut -d/ -f1)
     ETH_IP=$(ip -o -4 addr show eth0 2>/dev/null | awk '{print $4}' | cut -d/ -f1)

@@ -82,7 +82,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/v3_babysit_v2.sh` | **v2.0** | manifest | `/data/gw/babysit_v2.sh` | 启动保姆(T1杀rcS/T2核爆回B) |
 | `gw/v3_rc10.extend.sh` | **v2.29** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2; v2.29: +wan_eth 接线(架构轮); 历史见git |
 | `gw/wan_agg.sh` | **v3.1** | manifest | `/data/gw/wan_agg.sh` | 双上行聚合主管; v3.1(RIL 清零轮回归): 承载漂移检测改探活实证选口 — 原取 ip addr 字母序第一个, 多 ccmni 并存时选中僵尸口(有IP无数据)致探活全灭 cell=0; 现候选逐口 ICMP 实证(当前口优先, 避免乒乓); 历史见git |
-| `gw/wan_agg_lib.sh` | **v1.0** | manifest | `/data/gw/wan_agg_lib.sh` | 聚合引擎落地层+conf 管理库(被 wan_agg source, v3.0 架构轮拆出; dp_setup/fw6*/fw_setup/kernel_apply/ensure_rules/agg_bypass/pin_* + agg.conf 播种/迁移/校验收敛 — MODE/W1_PCT 三处重复校验消除; 单进程 source=单写方纪律不变) |
+| `gw/wan_agg_lib.sh` | **v1.1** | manifest | `/data/gw/wan_agg_lib.sh` | 聚合引擎落地层+conf 管理库; v1.1(RIL 清零轮): +cell_iface_pick(探活实证选承载口 — 多口并存时僵尸口不再被误选) |
 | `gw/wan_eth.sh` | **v1.0** | manifest | `/data/gw/wan_eth.sh` | 有线 WAN(eth0) 接口管理守护(自 wan_agg ensure_lease 拆出, 架构轮): 链路+one-shot udhcpc+to-LAN 护盾+家宽备用默认+表200+eth0 NAT/FORWARD 看门狗(全幂等 level-driven); udhcpc 最坏 9s 不再阻塞探活 FSM(原内联期间整个状态机停摆) |
 | `gw/watchdog.sh` | **v1.14** | manifest | `/data/gw/watchdog.sh` | 持续不变量看门狗; v1.14(RIL 清零轮): cell 查询恢复提示改直连语义(RIL 守护已全退役); 历史见git |
 | `gw/webs_revive.sh` | **v1.3** | manifest | `/data/gw/webs_revive.sh` | 原厂GUI复活器(自足nginx conf; 手动拉起) |
@@ -96,7 +96,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/www/api_cell.sh` | **v1.0** | manifest | `/data/gw/www/api_cell.sh` | API 蜂窝域模块(v2.75 拆出: cellular/sim/pin/netmode/airplane/plmn/bandlock/celllock 族, 最大域) |
 | `gw/www/api_lan.sh` | **v1.0** | manifest | `/data/gw/www/api_lan.sh` | API LAN 服务域模块(v2.75 拆出: dhcp/dhcp_static/fw 族; fw_apply.sh 改域内懒加载 — 原对全部请求无条件 source) |
 | `gw/www/api_sms.sh` | **v1.1** | manifest | `/data/gw/www/api_sms.sh` | API 短信域模块; v1.1(RIL 清零轮): 发送改 AT+EMGS 路线(mipc_wan_cli --at_cmd, atcid 通道; 厂商 ql_sms_send_msg 同族 — 反汇编 §12.5), 中文 CSCS=UCS2+hex, 发毕回 CMGF=0; 不再依赖 mipc_cellular/libqlril |
-| `gw/www/api_sys.sh` | **v1.0** | manifest | `/data/gw/www/api_sys.sh` | API 系统/状态域模块(v2.75 拆出: status/clients/logs/sse/fan/led/ntp/reboot/traffic 族; 按端点懒加载 — 每请求只解析所需域) |
+| `gw/www/api_sys.sh` | **v1.1** | manifest | `/data/gw/www/api_sys.sh` | API 系统/状态域模块; v1.1: 流量与 status 的蜂窝口改探活实证选口(旧 PDN 僵尸口不再导致错口显示) |
 | `gw/www/api_wifi.sh` | **v1.0** | manifest | `/data/gw/www/api_wifi.sh` | API WiFi 域模块(v2.75 拆出: wifi/wifi_adv/band_pin/wifiscan 族; 域历史随域迁入头注) |
 | `gw/www/app.js` | **v3.51** | manifest | `/data/gw/www/app.js` | 控制台SPA; v3.51: 移除宵断卡片(先验方案下架); 历史见git |
 | `gw/www/index.html` | **v2.32** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.32: 缓存v66) |
@@ -135,7 +135,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/rescue_shadow.py` | **v1.0** | tool | `-` | shadow.override未bind网络救援(getpass旧口令→只读探针: 文件md5/grep行为单测/部署钩子sh -x跟踪→从.bak恢复+重bind; 依赖rc.extend v2.1) |
 | `tools/rotate_toor.py` | **v1.4** | tool | `-` | toor口令轮换器; v1.4: 轮换前存档.bak(rc.extend v2.1回退源); 历史见git |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
-| `tools/selftest.py` | **v2.36** | tool | `-` | v2.36: 探活路由断言改'指向任一存活 ccmni'(v3.1 动态选口) + wan_alive 瞬时窗口重采; v2.35: RIL 全退役语义+t_cell_ops_direct; 历史见git |
+| `tools/selftest.py` | **v2.37** | tool | `-` | v2.37: _cell_iface 缓存+多样探针(单目标在该网络常不回致误判); v2.36: 设备侧时钟比 fresh + 动态选口; 历史见git |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |
 | `tools/serial_server.py` | **v1.7** | tool | `-` | 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets) |
 | `tools/upgrade_slot.py` | **v1.0** | tool | `-` | SSH整槽升级器(P3第一档: vercheck/槽位/空间预检→md5门禁→dd备份旧p26→写新镜像→挂载sanity断言(toor/rcS/#v3:/procd)→失败自动整槽还原不重启→清TRY_A→reboot; PC侧轮询日志+回连终检; --dry-run) |

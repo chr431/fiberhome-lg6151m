@@ -127,6 +127,21 @@ pin_replay() {
     done < /data/gw/agg_pins.conf
 }
 
+# v3.1: 活跃 ccmni 选口(探活实证) — 多口并存时旧 PDN 常留僵尸口(有 IP 无数据),
+#   按"第一个有 IP"取会选到它(GUI 流量/状态、selftest 护栏都曾因此假红/谎报)。
+#   $1=ccmni 名输出; 全部不通时回退第一候选(由 FSM 判死转移)。
+#   纯 ICMP 单目标×3(不做 TCP 兜底, 保调用方节奏)。
+cell_iface_pick() {
+    _cand=$(ip -o -4 addr show 2>/dev/null | grep ccmni | grep 'inet ' | awk '{print $2}')
+    for _c in $W1_IF $_cand; do
+        [ -n "$_c" ] || continue
+        for _t in 180.76.76.76 119.29.29.29 8.8.8.8; do
+            ping -4 -I $_c -c1 -W1 -s1 $_t 2>/dev/null | grep -q ttl && { echo $_c; return 0; }
+        done
+    done
+    echo $_cand | awk '{print $1}'
+}
+
 # ---------- data plane ----------
 dp_setup() {
     # 双表: T1 恒走 5G; T2 走家宽 gw (拿到租约后由 wan_eth 侧刷新)

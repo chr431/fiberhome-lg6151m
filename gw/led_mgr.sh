@@ -1,5 +1,8 @@
 #!/bin/sh
-# led_mgr.sh v2.1 — 原厂风格指示灯状态守护 (绝对电平驱动 + 自愈 + 全灯覆盖)
+# led_mgr.sh v2.3 — 原厂风格指示灯状态守护 (绝对电平驱动 + 自愈 + 全灯覆盖)
+# v2.3 (2026-10-17): 单实例 PID 锁 — 开机 rc19 与 watchdog 自愈可并发各起一份,
+#   两个实例同时写灯虽值相同(绝对电平)但日志/告警重复且浪费; 同 dial_keeper
+#   教训(CLM-KEEPER-LOCK): pgrep 判据不如 PID 锁+cmdline 复核可靠。
 # v2.1 (2026-10-16 宵断实弹): 家宽数据面判活改为消费 wan_agg 发布的 /tmp/wan_alive
 #   —— 原先三处(wan_agg/led_mgr/api)各一套判据且都探 223.5.5.5/120.53.53.53,
 #   本处还有"网关优先"短路; 上行接入网夜间切断的白名单恰好放行这些 → 灯照亮而客户端
@@ -154,7 +157,16 @@ case "$1" in
     probe; apply_state "w$WIFI c$C5 b$BB p$BBP" 1; exit 0 ;;
 esac
 
-llog "===== led_mgr v2.0 start (absolute-level drive + self-heal + 2s poll) ====="
+# v2.3: 单实例守 — PID 锁 + cmdline 复核(无模式匹配; 供 watchdog 精确取实例 PID)
+LOCK=/tmp/led_mgr.lock
+_lp=$(cat $LOCK 2>/dev/null)
+if [ -n "$_lp" ] && kill -0 "$_lp" 2>/dev/null    && grep -qa led_mgr /proc/$_lp/cmdline 2>/dev/null; then
+    llog "duplicate instance pid=$_lp alive — exit (single-instance lock)"
+    exit 0
+fi
+echo $$ > $LOCK
+
+llog "===== led_mgr v2.3 start (absolute-level drive + self-heal + 2s poll; pid-lock) ====="
 BCN_LAST=""   # v1.6: 固件信标事件计数(RE实证三条权威标志)
 ST=""         # 仅用于日志: 状态串变化才写日志(灯写入已不依赖它)
 POLL=${LED_POLL:-2}

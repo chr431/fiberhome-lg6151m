@@ -66,7 +66,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/fw_apply.sh` | **v1.5** | manifest | `/data/gw/fw_apply.sh` | 端口映射/DMZ/禁网安装器(rc_netfh开机+api共用); v1.5(P1): v4 WAN面default-deny(icmp/DHCP客户端/established放行其余DROP, 含旧7端口黑名单语义)+V4WANGUARDF挡WAN->LAN新建转发(-A挂载保DNAT优先); v1.4: v6同构; 历史见git |
 | `gw/guest_fw.sh` | **v1.6** | manifest | `/data/gw/guest_fw.sh` | 访客隔离防火墙v1.6(审计P0: GUEST_ISOLATE开关删除=强制隔离; 兼容需求改由主WiFi终端频段锁定承接; 历史版本见git) |
 | `gw/healthdog.sh` | **v1.1** | manifest | `/data/gw/healthdog.sh` | 看门狗用户态心跳 |
-| `gw/led_mgr.sh` | **v2.2** | manifest | `/data/gw/led_mgr.sh` | v2.2: 命名中性化(注释去上游机构字样) — 零功能改动; v2.1(宵断实弹): WAN 灯判活改为消费 wan_agg 发布的 /tmp/wan_alive — 原先自带一套判据且含"网关优先"短路, 白名单式切断下灯照亮而客户端全死; 唯一权威化后此族谎报结构性消除; 原厂风格LED守护(v2.0: 边沿触发→绝对电平驱动+自愈 — 外部写方改灯后旧版只在状态串变化时才写, 状态串不变即永不纠回(实弹: eth0数据面通b1起5h内一次没写), 每2s无条件把应为值写到每灯且已在正确值即跳过; 轮询10s→2s; WiFi判据双频ra0/rai0任一在线; +4G三色占位恒灭; v1.9: 5G灯判据收敛数据面唯一; +--once/--dry-state 干跑入口; v1.8: WAN灯判据 carrier→数据面实测ICMP) |
+| `gw/led_mgr.sh` | **v2.3** | manifest | `/data/gw/led_mgr.sh` | 原厂风格LED守护; v2.3: +单实例 PID 锁(开机 rc19 与 watchdog 自愈并发各起一份, 双实例同写灯); v2.2: 中性命名; v2.1: 判活消费 wan_alive; 历史见git |
 | `gw/log_keeper.sh` | **v1.2** | manifest | `/data/gw/log_keeper.sh` | 日志持久化守护(syslog/dmesg增量镜像+/tmp快照+boot分隔+容量轮转; v1.2: 上一boot快照转存 logs/tmp.prev(.snap_up归属判定; 事故现场不再被新boot覆盖)+心跳入快照; v1.1: 轮转后重写boot上下文; 每开机一份诊断包) |
 | `gw/mipc_dial_trace.sh` | **v1.0** | manifest | `/data/gw/mipc_dial_trace.sh` | 5G 拨号取证(xtrace 抓真参) |
 | `gw/night_report.sh` | **v1.0** | manifest | `/data/gw/night_report.sh` | 夜间体检报告 |

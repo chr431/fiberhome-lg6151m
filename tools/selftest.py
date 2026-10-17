@@ -11,6 +11,8 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
+v2.40 (日志加密轮): +t_logging_fine — log_keeper v1.3 增量落盘(stream/1MB 轮转/
+  resync) + wan_agg/watchdog 持久化副本含 TICK/EVT 主干行; 24h 分析管线回归护栏。
 v2.36 (RIL 清零轮收尾): t_agg_route_landmine 的探活路由断言改"指向任一存活
   ccmni"(v3.1 漂移按探活选口, 不再固定 ccmni2) + t_wan_alive_guard 瞬时窗口
   重采(守护重启边界不再误报 fresh=0)。
@@ -1803,6 +1805,25 @@ def run_all(filter_cats=None, json_out=False):
     if _c:
         _c.close()
     return 0 if failed == 0 else 1
+
+
+@test("日志细粒度与 24h 持久化管线 (log_keeper v1.3 增量)")
+def t_logging_fine():
+    # v2.40 (日志加密轮): 静态 — log_keeper 必须是增量追加(stream/STREAM_CAP/
+    #   resync), 而不是旧的 tail 32K 覆盖快照; 动态 — wan_agg/watchdog 的持久化
+    #   副本已落盘且含 TICK/EVT 主干行(部署后首轮即应出现)。
+    st = dev("grep -c 'STREAM_CAP=1048576' /data/gw/log_keeper.sh 2>/dev/null").strip()
+    sm = dev("grep -c 'stream()' /data/gw/log_keeper.sh 2>/dev/null").strip()
+    rs = dev("grep -c 'stream resync' /data/gw/log_keeper.sh 2>/dev/null").strip()
+    wa = dev("wc -c < /data/gw/logs/tmp/wan_agg.log 2>/dev/null || echo 0").strip()
+    wt = dev("tail -n 300 /data/gw/logs/tmp/wan_agg.log 2>/dev/null | grep -cE 'TICK|EVT'").strip()
+    wd = dev("wc -c < /data/gw/logs/tmp/watchdog.log 2>/dev/null || echo 0").strip()
+    wdt = dev("tail -n 300 /data/gw/logs/tmp/watchdog.log 2>/dev/null | grep -c 'TICK'").strip()
+    ok = (st not in ("", "0") and sm not in ("", "0") and rs not in ("", "0")
+          and int(wa or 0) > 0 and int(wt or 0) > 0
+          and int(wd or 0) > 0 and int(wdt or 0) > 0)
+    record(t_logging_fine._test_name, "system", ok,
+           f"cap={st} stream={sm} resync={rs} wan={wa}B/{wt}evt wd={wd}B/{wdt}tick")
 
 
 def main():

@@ -1,5 +1,9 @@
 #!/bin/sh
-# dial_keeper.sh v1.4 -- 拨号自持守护 (ROADMAP P2, 2026-10-06)
+# dial_keeper.sh v1.5 -- 拨号自持守护 (ROADMAP P2, 2026-10-06)
+#
+# v1.5 (2026-10-17 日志加密轮): 每 60s TICK(has_ip/cell_alive/wan_alive 原文与
+#   年龄/DOWN/退避/APN/cci); 僵尸 IP 触发边沿、modem 未就绪原因、飞行模式切换、
+#   APN 来源、ccmni_up 的 rc+输出+耗时全部留痕 — 冷启动 cid 轮换/EE 事故可复盘。
 #
 # v1.4 (2026-10-17 netagent 摘除试验轮): 三改 —
 #   ① dial() 改走 ccmni_up.sh(拨号+接口落地一体): 实证 mtk_netagent 才是
@@ -52,8 +56,10 @@ MINB=15       # 失败退避起步
 MAXB=300      # 退避上限
 MTO=10        # 单次 mipc 调用硬超时(秒)
 
+MAXL=400
 log() { echo "$(date '+%m-%d %H:%M:%S') $*" >> $LOG; }
-[ -s $LOG ] && [ "$(wc -l < $LOG)" -gt 200 ] && { tail -100 $LOG > $LOG.tmp && mv $LOG.tmp $LOG; }
+log_rot() { [ -s $LOG ] && [ "$(wc -l < $LOG 2>/dev/null || echo 0)" -gt $MAXL ] && \
+    { tail -n $((MAXL/2)) $LOG > $LOG.tmp && mv $LOG.tmp $LOG; }; }
 
 # v1.3: 单实例守 — PID 锁 + cmdline 复核(无模式匹配; 供 watchdog 精确取实例 PID)
 _lp=$(cat $LOCK 2>/dev/null)
@@ -101,22 +107,32 @@ mipc_to() {
 has_ip() { ip -o -4 addr show 2>/dev/null | grep -q 'ccmni.*inet'; }
 
 modem_ok() {
-    [ "$(cat /sys/kernel/ccci/boot 2>/dev/null | head -c 5)" = "md1:4" ] || return 1
-    mipc_to --show_sim_status 2>/dev/null | grep -q COMPLETE_READY
+    _b=$(cat /sys/kernel/ccci/boot 2>/dev/null)
+    [ "$(printf '%s' "$_b" | head -c 5)" = "md1:4" ] || { MODEM_WHY="cci=$(printf '%s' "$_b" | head -c 24)"; return 1; }
+    _s=$(mipc_to --show_sim_status 2>/dev/null)
+    printf '%s' "$_s" | grep -q COMPLETE_READY || { MODEM_WHY="sim=$(printf '%s' "$_s" | tr '\n' ' ' | head -c 60)"; return 1; }
+    MODEM_WHY=ok
 }
 
 get_apn() {
     # busybox ash: . 缺失文件 = 致命退出, 必须 [ -r ] 守卫
     [ -r "$CONF" ] && . "$CONF"
-    if [ -n "${APN:-}" ] && [ "$APN" != "auto" ]; then echo "$APN"; return; fi
+    if [ -n "${APN:-}" ] && [ "$APN" != "auto" ]; then
+        APN_SRC=conf
+        echo "$APN"; return
+    fi
+    APN_SRC=sim
     mipc_to --apn_provision_by_sim 2>/dev/null | grep -oE '"apn": *"[^"]+"' | cut -d'"' -f4
 }
 
 dial() {  # $1=apn — v1.4: ccmni_up 拨号+落地一体(回退旧裸配方)
     if [ -x /data/gw/ccmni_up.sh ]; then
-        sh /data/gw/ccmni_up.sh "$1" >/dev/null 2>&1
-        return $?
+        _t0=$(date +%s)
+        _out=$(sh /data/gw/ccmni_up.sh "$1" 2>&1); _rc=$?
+        log "EVT ccmni_up apn=$1 rc=$_rc elapsed=$(( $(date +%s) - _t0 ))s out=$(printf '%s' "$_out" | tr '\n' ' ' | head -c 200)"
+        return $_rc
     fi
+    log "WARN ccmni_up.sh missing — fallback bare dial recipe"
     mipc_to --data_call_deact_apn "$1" >/dev/null 2>&1
     mipc_to --data_call_act_type \
         "{\"apn\":\"$1\",\"apn_type\":0,\"ip_type\":3,\"roaming_type\":3,\"auth_type\":0,\"username\":\"\",\"password\":\"\",\"bearer_bitmask\":\"0xfffdffff\",\"mtu\":1400,\"mode\":1}" \
@@ -126,12 +142,14 @@ dial() {  # $1=apn — v1.4: ccmni_up 拨号+落地一体(回退旧裸配方)
 # v1.4: 数据面判活(堵僵尸 IP 洞) — 消费 wan_agg 的唯一权威结论;
 #   无文件/ts 过期(>30s)回退 0(=由调用方回退 IP-only 旧判据)。
 cell_alive() {
-    _wa=$(cat /tmp/wan_alive 2>/dev/null)
+    _wa=$(cat /tmp/wan_alive 2>/dev/null); WA_RAW=$_wa
     _c=$(printf '%s' "$_wa" | sed -n 's/.*cell=\([01]\).*/\1/p')
     _t=$(printf '%s' "$_wa" | sed -n 's/.*ts=\([0-9]*\).*/\1/p')
-    [ -n "$_t" ] || return 0
-    [ $(( $(date +%s) - _t )) -le 30 ] || return 0
-    [ "$_c" = 1 ]
+    if [ -n "$_t" ]; then WA_AGE=$(( $(date +%s) - _t )); else WA_AGE=-1; fi
+    [ -n "$_t" ] || { WA_STATE=no_file; return 0; }
+    [ "$WA_AGE" -le 30 ] || { WA_STATE=stale; return 0; }
+    [ "$_c" = 1 ] && { WA_STATE=alive; return 0; }
+    WA_STATE=dead; return 1
 }
 
 # v1.4: 飞行模式守卫(CFUN=0 时不盲拨)
@@ -140,11 +158,12 @@ cfun_off() { mipc_to --at_cmd 'AT+CFUN?' 2>/dev/null | grep -q 'CFUN: 0'; }
 ee_count() { ls -d /data/log/aee_exp/db.*.EE 2>/dev/null | wc -l; }
 
 DOWN=0; B=$MINB
+CYC=0; ZOMBIE=0; APN_LAST=""; APN_SRC_LAST=""; CFUN_LAST=""
 EE_N=$(ee_count)
-log "===== keeper v1.4 start (grace=${GRACE}s poll=${POLL}s mto=${MTO}s ee=${EE_N}; ccmni_up=netagent-lite; trigger=ip+dataplane) ====="
-logger -t dial_keeper "keeper v1.4 start (grace=${GRACE}s mto=${MTO}s ee=${EE_N})"
+log "===== keeper v1.5 start (grace=${GRACE}s poll=${POLL}s mto=${MTO}s ee=${EE_N}; ccmni_up=netagent-lite; trigger=ip+dataplane; fine-log) ====="
+logger -t dial_keeper "keeper v1.5 start (grace=${GRACE}s mto=${MTO}s ee=${EE_N})"
 while :; do
-    hb
+    hb; CYC=$((CYC+1)); [ $((CYC % 12)) -eq 0 ] && log_rot
     # v1.1: 模组 EE 事件 = 复位信号 → 强制重拨路径(不等被动宽限)
     EEN=$(ee_count)
     if [ "${EEN:-0}" -gt "${EE_N:-0}" ] 2>/dev/null; then
@@ -155,35 +174,50 @@ while :; do
         B=$MINB
     fi
     # v1.4: 无 IP **或** 数据面死(僵尸 IP) 都计 DOWN — 后者来自 wan_alive
-    if has_ip && cell_alive; then
+    HIP=0; has_ip && HIP=1
+    CA=0; cell_alive && CA=1
+    if [ "$HIP" = 1 ] && [ "$CA" = 1 ]; then
         [ "$DOWN" -gt 0 ] && log "recovered (down ${DOWN}s)"
-        DOWN=0; B=$MINB
+        [ "$ZOMBIE" = 1 ] && { log "EVT zombie-IP cleared: data plane alive again (wa_age=${WA_AGE}s)"; ZOMBIE=0; }
+        DOWN=0; B=$MINB; CFUN_LAST=""
     else
+        # v1.5: 僵尸 IP 触发边沿 — "有 IP 但数据面死"是重拨的真正理由, 单独留痕
+        if [ "$HIP" = 1 ] && [ "$CA" = 0 ] && [ "$ZOMBIE" = 0 ]; then
+            log "EVT zombie-IP: has_ip=1 data_plane=dead wa_state=${WA_STATE:-?} wa_age=${WA_AGE:-?}s wa=[${WA_RAW:-none}]"
+            ZOMBIE=1
+        fi
         DOWN=$((DOWN + POLL))
         if [ "$DOWN" -ge "$GRACE" ]; then
             if ! modem_ok; then
-                log "down ${DOWN}s but modem/SIM not ready, wait"
+                log "down ${DOWN}s but modem/SIM not ready: ${MODEM_WHY:-?}"
             elif cfun_off; then
                 log "down ${DOWN}s but airplane (CFUN=0), skip dial"
+                [ "$CFUN_LAST" != 1 ] && { log "EVT airplane ON (CFUN=0) — dial suppressed"; CFUN_LAST=1; }
                 DOWN=0   # 飞行解除后重新计时
             else
+                [ "$CFUN_LAST" = 1 ] && { log "EVT airplane OFF (CFUN!=0) — dial re-enabled"; CFUN_LAST=0; }
                 APN=$(get_apn)
+                [ "$APN" != "$APN_LAST" ] && {
+                    log "EVT apn ${APN_LAST:-none} -> ${APN:-none} src=${APN_SRC:-?}"
+                    APN_LAST=$APN
+                }
                 if [ -z "$APN" ]; then
                     log "down ${DOWN}s but no APN (SIM?), wait"
                 else
-                    log "dial attempt apn=$APN (down ${DOWN}s)"
+                    _dt=$(date +%s)
+                    log "dial attempt apn=$APN (down ${DOWN}s backoff=$B)"
                     logger -t dial_keeper "dial attempt apn=$APN (down ${DOWN}s)"
                     if dial "$APN"; then
                         nap 3
                         if has_ip; then
-                            log "DIAL OK apn=$APN (was down ${DOWN}s)"
+                            log "DIAL OK apn=$APN (was down ${DOWN}s dial=$(( $(date +%s) - _dt ))s)"
                             logger -t dial_keeper "DIAL OK apn=$APN (was down ${DOWN}s)"
                         else
-                            log "result:0 but no IP yet, continue watch"
+                            log "result:0 but no IP yet, continue watch (dial=$(( $(date +%s) - _dt ))s)"
                         fi
                         DOWN=0
                     else
-                        log "DIAL FAIL apn=$APN backoff ${B}s"
+                        log "DIAL FAIL apn=$APN backoff ${B}s (dial=$(( $(date +%s) - _dt ))s)"
                         logger -t dial_keeper "DIAL FAIL apn=$APN backoff ${B}s"
                         nap "$B"
                         B=$((B * 2)); [ "$B" -gt "$MAXB" ] && B=$MAXB
@@ -192,6 +226,10 @@ while :; do
                 fi
             fi
         fi
+    fi
+    # v1.5: 每 12 环循(~60s)一行决策输入快照 — 24h 时间线的主干
+    if [ $((CYC % 12)) -eq 0 ]; then
+        log "TICK has_ip=$HIP cell_alive=$CA wa_state=${WA_STATE:-?} wa_age=${WA_AGE:--}s wa=[${WA_RAW:-none}] down=$DOWN backoff=$B apn=${APN_LAST:-?} cci=$(cat /sys/kernel/ccci/boot 2>/dev/null | head -c 16)"
     fi
     nap $POLL
 done

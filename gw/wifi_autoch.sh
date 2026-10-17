@@ -1,5 +1,7 @@
 #!/bin/sh
-# wifi_autoch.sh v1.0 — WiFi 自动选道 (自 wifi_up v1.28 拆出, 2026-10-17 架构轮)
+# wifi_autoch.sh v1.1 — WiFi 自动选道 (自 wifi_up v1.28 拆出, 2026-10-17 架构轮)
+# v1.1 (2026-10-17 日志加密轮): 输出 # 注释行记录扫描规模/候选/评分(源码时无害),
+#   选道依据可复盘。
 # usage: wifi_autoch.sh <want2> <want5> <bw5>
 #   want2/want5: 0=该频段自动选道; 非 0=跳过该频段(不输出该行)
 #   bw5: 5G 带宽(20/40/80/160), 用于邻道重叠评估
@@ -48,8 +50,8 @@ echo "$ASCAN" | awk -v want2="$WANT2" -v want5="$WANT5" -v bw5="$BW5" -v cand2="
     function store() {
         if (fr == "" || sig == "") { fr = ""; sig = ""; return }
         if (sig + 0 > -90) {
-            if (fr + 0 < 4000) p24[ch_of(fr + 0)] += 10 ^ (sig / 10)
-            else               p5[ch_of(fr + 0)]  += 10 ^ (sig / 10)
+            if (fr + 0 < 4000) { p24[ch_of(fr + 0)] += 10 ^ (sig / 10); n24++ }
+            else               { p5[ch_of(fr + 0)]  += 10 ^ (sig / 10); n5++ }
         }
         fr = ""; sig = ""
     }
@@ -59,6 +61,9 @@ echo "$ASCAN" | awk -v want2="$WANT2" -v want5="$WANT5" -v bw5="$BW5" -v cand2="
     /^[ \t]+freq:/   { fr = $2 }
     END {
         store()
+        # 输出注释行(# 前缀) — 被 wifi_up `. /tmp/wifi_autoch` source 时是无害注释,
+        # 但保留了扫描规模/候选/评分, 24h 后可直接复盘选道依据。
+        printf "# scan bss24=%d bss5=%d cand2=[%s] bw5=%s\n", n24, n5, cand2, bw5
         if (want2 == 0) {
             best = 1; bs = 1e30
             n = split(cand2, CA, " ")   # v1.27: 候选=IDC 安全集深部(无掩码时=经典{1,6})
@@ -69,6 +74,7 @@ echo "$ASCAN" | awk -v want2="$WANT2" -v want5="$WANT5" -v bw5="$BW5" -v cand2="
                 if (c != 1 && c != 6 && c != 11) s *= 1.15   # 非经典道轻惩罚
                 if (s < bs) { bs = s; best = c }
             }
+            printf "# choose2g ch=%d score=%.6g\n", best, bs
             print "RCH2G=" best
         }
         if (want5 == 0) {
@@ -98,6 +104,7 @@ echo "$ASCAN" | awk -v want2="$WANT2" -v want5="$WANT5" -v bw5="$BW5" -v cand2="
                 }
                 if (s < bs) { bs = s; best = c }
             }
+            printf "# choose5g ch=%d score=%.6g\n", best, bs
             print "RCH5G=" best
         }
     }'

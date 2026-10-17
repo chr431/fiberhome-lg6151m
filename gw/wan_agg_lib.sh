@@ -1,5 +1,8 @@
 #!/bin/sh
-# wan_agg_lib.sh v1.0 — 聚合引擎落地层 + conf 管理 (库; 被 wan_agg.sh source, 不独立运行)
+# wan_agg_lib.sh v1.2 — 聚合引擎落地层 + conf 管理 (库; 被 wan_agg.sh source, 不独立运行)
+# v1.2 (2026-10-17 日志加密轮): ensure_rules 的每次补装都记 REPAIR 行(规则被外力
+#   蒸发此前完全静默, 只有最终状态异常才可见); 日志轮转由调用方统一负责。
+# v1.1: +cell_iface_pick(探活实证选承载口)。
 # v1.0 (2026-10-17 架构轮): 自 wan_agg v2.34 拆出 — 本库只含"读全局状态 -> 幂等写内核"
 #   的映射层与 agg.conf/钉死表管理, 不含决策逻辑(探活/FSM/主路推导留在 wan_agg)。
 #   单进程 source = 单写方纪律不变(所有内核写方仍在 wan_agg 进程内)。
@@ -302,23 +305,32 @@ agg_bypass() {
 #   病例(2026-10-05): 高位v6规则在运行中被外力蒸发(boot期home瞬断恢复后消失),
 #   无看门狗=静默丢一半路由规则。调用方须已设置 S1/S2(当前有效态)。
 ensure_rules() {
+    # v1.2: 每次补装都记 REPAIR —— 规则被外力蒸发此前是静默事件, 只能靠
+    #   "最终状态不对"倒推; 24h 日志里 REPAIR 频率是判断外部写方活跃度的关键。
     if [ $S1 -eq 1 ]; then
-        ip rule show | grep -q "$W1_MARK/$W_MASK lookup $T1" || \
+        ip rule show | grep -q "$W1_MARK/$W_MASK lookup $T1" || {
             ip rule add fwmark $W1_MARK/$W_MASK table $T1 priority 101 2>/dev/null
-        ip -6 rule show | grep -q "$W1_MARK/$W_MASK lookup $T1" || \
+            log "REPAIR v4 rule w1 fwmark/$W1_MARK table $T1 (missing -> re-added rc=$?)"; }
+        ip -6 rule show | grep -q "$W1_MARK/$W_MASK lookup $T1" || {
             ip -6 rule add fwmark $W1_MARK/$W_MASK table $T1 priority 101 2>/dev/null
-        ip -6 rule show | grep -q "$M6_LOW1/0xff lookup $T1" || \
+            log "REPAIR v6 rule w1 fwmark/$W1_MARK table $T1 (missing -> re-added rc=$?)"; }
+        ip -6 rule show | grep -q "$M6_LOW1/0xff lookup $T1" || {
             ip -6 rule add fwmark $M6_LOW1/0xff table $T1 priority 90 2>/dev/null
+            log "REPAIR v6 rule w1 low8/$M6_LOW1 table $T1 (missing -> re-added rc=$?)"; }
     fi
     if [ $S2 -eq 1 ]; then
-        ip rule show | grep -q "$W2_MARK/$W_MASK lookup $T2" || \
+        ip rule show | grep -q "$W2_MARK/$W_MASK lookup $T2" || {
             ip rule add fwmark $W2_MARK/$W_MASK table $T2 priority 102 2>/dev/null
-        ip -6 rule show | grep -q "$W2_MARK/$W_MASK lookup $T2" || \
+            log "REPAIR v4 rule w2 fwmark/$W2_MARK table $T2 (missing -> re-added rc=$?)"; }
+        ip -6 rule show | grep -q "$W2_MARK/$W_MASK lookup $T2" || {
             ip -6 rule add fwmark $W2_MARK/$W_MASK table $T2 priority 102 2>/dev/null
-        ip -6 rule show | grep -q "$M6_LOW2/0xff lookup $T2" || \
+            log "REPAIR v6 rule w2 fwmark/$W2_MARK table $T2 (missing -> re-added rc=$?)"; }
+        ip -6 rule show | grep -q "$M6_LOW2/0xff lookup $T2" || {
             ip -6 rule add fwmark $M6_LOW2/0xff table $T2 priority 91 2>/dev/null
+            log "REPAIR v6 rule w2 low8/$M6_LOW2 table $T2 (missing -> re-added rc=$?)"; }
     fi
     # 入向LAN护盾(v6 版也纳入看门狗; v4版在 wan_eth)
-    ip -6 rule show | grep -q "to fd42:9ac1:7e50::/64 lookup main" || \
+    ip -6 rule show | grep -q "to fd42:9ac1:7e50::/64 lookup main" || {
         ip -6 rule add to fd42:9ac1:7e50::/64 lookup main priority 50
+        log "REPAIR v6 LAN shield rule (missing -> re-added rc=$?)"; }
 }

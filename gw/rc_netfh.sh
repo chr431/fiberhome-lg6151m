@@ -1,5 +1,9 @@
 #!/bin/sh
-# rc_netfh.sh v3.8 -- route A: FH modem-stack environment (minimal army).
+# rc_netfh.sh v3.10 -- route A: FH modem-stack environment (minimal army).
+# v3.10 (2026-10-17 日志加密轮): 全程相位计时(t+Ns)+每阶段 pid/rc 快照; settle
+#   watch 每轮记录 ccmni 清单(不再只记最终结果); fw_apply rc、route/NAT 真实补装
+#   均留痕。24h 分析可区分"开机没起来"与"起来后又被拆"。
+# v3.9 (RIL 清零轮·终章): 四件套全退役(见下)。
 # Mission: give the 5G dialer its full stock environment so the modem builds
 # the IA bearer, WITHOUT the daemons that fight our v3 flight layer.
 # KEEP   (process_start_list order): cfgmgr, logmgr, mobilenetwork
@@ -27,11 +31,17 @@
 #   mipc_cellular cells 的 ql_nw 路径唯一依赖, 拔之 cells 恒返 -2147024889,
 #   GUI 小区卡/SSE 消费; procd respawn 自愈 + watchdog 查询面护栏在位)。
 LOG=/tmp/rc_netfh.log
+MAXL=600
 glog() { echo "$(date -u +%FT%TZ) $*" >> $LOG; }
+log_rot() { [ -s $LOG ] && [ "$(wc -l < $LOG 2>/dev/null || echo 0)" -gt $MAXL ] && \
+    { tail -n $((MAXL/2)) $LOG > $LOG.tmp && mv $LOG.tmp $LOG; }; }
+T_BOOT=$(cut -d. -f1 /proc/uptime 2>/dev/null)
+ph() { glog "PHASE $* (t+$(( $(cut -d. -f1 /proc/uptime 2>/dev/null) - ${T_BOOT:-0} ))s)"; }
 # v1.1: FH binaries+libs live outside the default PATH/loader path
 export PATH=$PATH:/fhrom/bin:/fhrom/fhshell
 export LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib
-glog "===== rc_netfh v3.9 start ====="
+log_rot
+glog "===== rc_netfh v3.10 start (boot=$(cut -d. -f1 /proc/uptime)s slot=$(tr ' ' '\n' < /proc/cmdline | sed -n 's/^bootslot=//p') cci=$(cat /sys/kernel/ccci/boot 2>/dev/null)) ====="
 
 # 1. config base — v3.1 (P3 终章): cfg_tool/shmsnap/树整体退役。
 #   蜂窝全功能(锁/制式/飞行/PIN/短信/扫描/拨号)已由 mipc_cellular+dial_keeper+
@@ -56,6 +66,7 @@ fi
 #   mobilenetwork 照常工作; logmgr 已死亡数周无人察觉(台账 CLM-LOGMGR-DEAD)。
 #   cfg_tool 的 shm 构建与快照恢复仍然保留(树翻译链的底座)。
 glog "P3-lite: cfgmgr/logmgr daemons retired (shm-only tree)"
+ph "tree phase done (KEEP_TREE=${KEEP_TREE:-0})"
 
 # 2. net plumbing, fresh MIPC sessions, stock order
 [ "$(cat /sys/kernel/ccci/boot 2>/dev/null | head -c 5)" = "md1:4" ] || glog "WARN cci=$(cat /sys/kernel/ccci/boot 2>/dev/null)"
@@ -65,6 +76,7 @@ glog "P3-lite: cfgmgr/logmgr daemons retired (shm-only tree)"
 #       (一并拉起保持原厂形态)。必须在 mobilenetwork 前就绪。
 pidof atcid >/dev/null || { /usr/bin/atci_service >/dev/null 2>&1 & sleep 1; /usr/bin/atcid >/var/atcid.log 2>&1 & sleep 1; }
 glog "atcid=$(pidof atcid) at_ch=$(mipc_wan_cli --at_cmd 'AT+CSQ' 2>/dev/null | grep -c '+CSQ:')"
+ph "atcid phase done (pid=$(pidof atcid))"
 # v3.8: 收编制(清场思路废弃, 见头注)。有界等待 rc.d 套就绪 — 本脚本经
 #   zz_data_hook/rc.extend 在 procd rc.d 链末段起跑, S85 的管道件在前后数秒内
 #   由 procd 拉起并**持续看护**(respawn)。
@@ -80,7 +92,8 @@ if [ -x /data/gw/ccmni_up.sh ]; then
     for p in $(pidof mtk_netagent); do kill -9 $p 2>/dev/null; done
     sleep 1
     [ -z "$(pidof mtk_netagent)" ] && glog "netagent retired (ccmni_up takes over)" \
-        || glog "WARN netagent alive after retire"
+        || glog "WARN netagent alive after retire: $(pidof mtk_netagent)"
+    ph "netagent retire done"
 else
     glog "WARN ccmni_up.sh absent — netagent kept (fallback)"
 fi
@@ -96,6 +109,7 @@ sleep 1
     && glog "RIL daemons retired (ril_service+netd+submonitor; read/write paths direct)" \
     || glog "WARN RIL daemon alive after retire: $(pidof ql_ril_service ql_netd mipc_submonitor)"
 glog "RIL state: ril=$(pidof ql_ril_service | wc -w) netd=$(pidof ql_netd | wc -w) submon=$(pidof mipc_submonitor | wc -w) (all want 0)"
+ph "ril retire done (ril=$(pidof ql_ril_service | wc -w) netd=$(pidof ql_netd | wc -w) submon=$(pidof mipc_submonitor | wc -w))"
 
 # 3. THE stock dialer (army spawn form, taskset like process_start_list)
 if [ "$KEEP_TREE" = 1 ]; then
@@ -111,14 +125,17 @@ pgrep -f dial_keeper.sh >/dev/null || nohup sh /data/gw/dial_keeper.sh >/dev/nul
 sleep 10
 glog "mobilenetwork=$(pidof mobilenetwork) mn_boot=$(wc -c </tmp/mn_boot.log 2>/dev/null || echo 0)B"
 glog "ubus ql-netd=$(ubus list 2>/dev/null | grep -c '^ql-netd$') ril=$(ubus list 2>/dev/null | grep -c '^ril$')"
+ph "dialers spawned (mn=$(pidof mobilenetwork) keeper=$(cat /tmp/dial_keeper.lock 2>/dev/null))"
 
 # 4. settle watch: does the stock dial produce an IP + rx?
 i=0
 while [ $i -lt 12 ]; do
     sleep 10
-    IP=$(ip -o addr show 2>/dev/null | grep 'ccmni' | grep 'inet ' | head -1)
-    [ -n "$IP" ] && break
     i=$((i+1))
+    _inv=$(ip -o -4 addr show 2>/dev/null | grep ccmni | awk '{print $2":"$4}' | tr '\n' ',')
+    IP=$(ip -o addr show 2>/dev/null | grep 'ccmni' | grep 'inet ' | head -1)
+    glog "settle t+$((i*10))s ccmni=[${_inv%,}]"
+    [ -n "$IP" ] && break
 done
 glog "ccmni ip: ${IP:-none after 120s}"
 IF=$(echo "$IP" | awk '{print $2}')
@@ -129,14 +146,20 @@ if [ -n "$IF" ]; then
     # v3.4: 只装"可探活"用的 metric 250 —— main 表主默认归 wan_agg 的
     #   main_primary_apply() 独占(按聚合模式推导), 此处原先的无 metric(=0)默认
     #   会压过家宽主路, 是"蜂窝抢 main 默认"地雷的另一个来源。
-    ip route show default | grep -q "dev $IF metric 250" || ip route replace default dev $IF metric 250 2>/dev/null
-    iptables -t nat -C POSTROUTING -s 192.168.9.0/24 -o $IF -j MASQUERADE 2>/dev/null || \
+    ip route show default | grep -q "dev $IF metric 250" || {
+        ip route replace default dev $IF metric 250 2>/dev/null
+        glog "REPAIR probe route dev $IF metric250 (missing -> re-added rc=$?)"; }
+    iptables -t nat -C POSTROUTING -s 192.168.9.0/24 -o $IF -j MASQUERADE 2>/dev/null || {
         iptables -t nat -A POSTROUTING -s 192.168.9.0/24 -o $IF -j MASQUERADE
-    iptables -C FORWARD -i br-lan -o $IF -j ACCEPT 2>/dev/null || \
+        glog "REPAIR nat -o $IF (missing -> added rc=$?)"; }
+    iptables -C FORWARD -i br-lan -o $IF -j ACCEPT 2>/dev/null || {
         iptables -I FORWARD -i br-lan -o $IF -j ACCEPT
-    iptables -C FORWARD -i $IF -o br-lan -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || \
+        glog "REPAIR FORWARD br-lan->$IF (missing -> added rc=$?)"; }
+    iptables -C FORWARD -i $IF -o br-lan -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || {
         iptables -I FORWARD -i $IF -o br-lan -m state --state ESTABLISHED,RELATED -j ACCEPT
+        glog "REPAIR FORWARD $IF->br-lan established (missing -> added rc=$?)"; }
     glog "route+nat on $IF ok"
+    ph "route+nat phase done ($IF)"
 
     # v1.4: IPv6 LAN -- cellular WAN is /128 (no PD delegated), so real routing
     # is impossible; ULA + NAT66 + radvd SLAAC instead. dnsmasq (rc19) already
@@ -165,23 +188,31 @@ if [ -n "$IF" ]; then
         [ -d /sys/class/net/br-lan ] || { j=0; while [ $j -lt 12 ] && [ ! -d /sys/class/net/br-lan ]; do sleep 5; j=$((j+1)); done; }
         ip -6 addr add fd42:9ac1:7e50::1/64 dev br-lan 2>/dev/null
         # netagent RA-learns the v6 default route, but re-assert idempotently
-        ip -6 route show default | grep -q "dev $IF" || ip -6 route add default dev $IF
-        ip6tables -t nat -C POSTROUTING -s fd42:9ac1:7e50::/64 -o $IF -j MASQUERADE 2>/dev/null || \
+        ip -6 route show default | grep -q "dev $IF" || {
+            ip -6 route add default dev $IF
+            glog "REPAIR v6 default dev $IF (missing -> added rc=$?)"; }
+        ip6tables -t nat -C POSTROUTING -s fd42:9ac1:7e50::/64 -o $IF -j MASQUERADE 2>/dev/null || {
             ip6tables -t nat -A POSTROUTING -s fd42:9ac1:7e50::/64 -o $IF -j MASQUERADE
-        ip6tables -C FORWARD -i br-lan -o $IF -j ACCEPT 2>/dev/null || \
+            glog "REPAIR v6 nat66 -o $IF (missing -> added rc=$?)"; }
+        ip6tables -C FORWARD -i br-lan -o $IF -j ACCEPT 2>/dev/null || {
             ip6tables -I FORWARD -i br-lan -o $IF -j ACCEPT
-        ip6tables -C FORWARD -i $IF -o br-lan -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || \
+            glog "REPAIR v6 FORWARD br-lan->$IF (missing -> added rc=$?)"; }
+        ip6tables -C FORWARD -i $IF -o br-lan -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || {
             ip6tables -I FORWARD -i $IF -o br-lan -m state --state ESTABLISHED,RELATED -j ACCEPT
+            glog "REPAIR v6 FORWARD $IF->br-lan established (missing -> added rc=$?)"; }
         pidof radvd >/dev/null || /fhrom/bin/radvd -C /data/gw/radvd.conf -p /tmp/radvd.pid -m logfile -l /tmp/radvd.log
         glog "v6: ula+nat66+radvd=$(pidof radvd) on $IF"
+        ph "v6 phase done (radvd=$(pidof radvd))"
     else
         glog "v6: no global v6 on $IF (bearer v4-only?) -- LAN v6 skipped"
+        ph "v6 phase skipped (no global v6 on $IF)"
     fi
 
     R1=$(cat /sys/class/net/$IF/statistics/rx_packets 2>/dev/null)
     sleep 10
     R2=$(cat /sys/class/net/$IF/statistics/rx_packets 2>/dev/null)
     glog "bearer probe $IF rx=$R1->$R2"
+    ph "bearer probe done ($IF rx=$R1->$R2)"
     # bearer health: FH's own criterion (60s tx>10 && rx==0 => dead PDN) --
     # on failure run stock's tier-2 ladder once (EGREA re-attach) and re-probe
     TX=$(cat /sys/class/net/$IF/statistics/tx_packets 2>/dev/null)
@@ -195,4 +226,6 @@ if [ -n "$IF" ]; then
         glog "post-ladder rx=$R3"
     fi
 fi
-sh /data/gw/fw_apply.sh apply 2>/dev/null && glog "fw_apply ok" ; glog "===== rc_netfh v3.9 done ====="
+sh /data/gw/fw_apply.sh apply 2>/dev/null; FWRC=$?
+[ $FWRC -eq 0 ] && glog "fw_apply ok" || glog "WARN fw_apply rc=$FWRC"
+glog "===== rc_netfh v3.10 done (total=$(( $(cut -d. -f1 /proc/uptime) - ${T_BOOT:-0} ))s) ====="

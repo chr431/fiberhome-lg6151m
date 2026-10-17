@@ -1,4 +1,5 @@
-# api_agg.sh v1.0 — 聚合+上行域模块 (被 api.sh 按端点懒加载; 依赖核心的 helpers/cfg 助手)
+# api_agg.sh v1.1 — 聚合+上行域模块 (被 api.sh 按端点懒加载; 依赖核心的 helpers/cfg 助手)
+# v1.1 (2026-10-17 日志加密轮): 权重/模式/钉死/上行档案变更写 /tmp/api.log(凭证脱敏)。
 # v1.0 (2026-10-17 架构轮): 自 api.sh v2.74 拆出 — agg/agg_weights/agg_mode/agg_pin +
 #   uplink/uplink_set/uplink_form 端点族。域历史(自 api.sh 头注迁入):
 # v2.48(P1-B): AUTHD_CMD 收权 root 通道 — GUI/API 不再可写(原字符集校验仍放行
@@ -20,6 +21,7 @@ apply_agg_weights() {
     # v2.20: vendor ioctl 只是引擎可用时的即时加速, 守护热载为准 — 不再因 ioctl 失败误报
     LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib LD_PRELOAD=$GWDATA/fhstub.so \
         $GWDATA/multiwan_ctl 1 $W1 $W2 1 1 >/dev/null 2>&1
+    alog "INFO agg weights w1=$W1 w2=$W2 mode=$MD"
     ok_json
 }
 apply_agg_mode() {   # v2.45: 聚合模式选择(对齐原厂五模式), wan_agg 热载生效
@@ -38,6 +40,7 @@ apply_agg_mode() {   # v2.45: 聚合模式选择(对齐原厂五模式), wan_agg
     echo "$W" | grep -qE '^[0-9]{1,3}$' || W=30
     [ "$W" -ge 5 ] && [ "$W" -le 95 ] || W=30
     printf 'MODE=%s\nW1_PCT=%s\nW2_PCT=%s\nENABLE=1\n' "$M" "$W" "$((100-W))" > $GWDATA/agg.conf
+    alog "INFO agg mode=$M w1=$W"
     ok_json
 }
 apply_agg_pin() {
@@ -51,6 +54,7 @@ apply_agg_pin() {
     mv /tmp/p.$$ $GWDATA/agg_pins.conf
     LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib LD_PRELOAD=/data/gw/fhstub.so \
         $GWDATA/multiwan_ctl mac "$M" "$OP" >/dev/null 2>&1 || jerr ioctl_fail
+    alog "INFO agg pin op=$OP (mac redacted)"
     ok_json
 }
 
@@ -121,6 +125,7 @@ apply_uplink() {
     printf 'ENABLE=%s\nAUTH_USER=%s\nAUTH_PASS=%s\nAUTH_IP=%s\nAUTH_MASK=%s\nAUTH_GW=%s\nPROBE_GW=%s\nAUTHD_CMD='"'"'%s'"'"'\nMAC_SPOOF=%s\nSPOOF_MAC=%s\nTTL_SPOOF=%s\nTTL_VALUE=%s\n%s\n' \
         "$EN" "$U" "$PW" "$IP" "$MASK" "$GW" "$GW" "$AC" "$MSP" "$SMA" "$TSP" "$TVA" "${OLD:-FORM=home}" > $GWDATA/uplink.conf
     chmod 600 $GWDATA/uplink.conf
+    alog "INFO uplink saved enable=$EN mac_spoof=$MSP ttl_spoof=$TSP (user/pass redacted)"
     ok_json
 }
 
@@ -166,6 +171,7 @@ apply_uplink_form() {  # 档案切换: home(DHCP) <-> static(静态IP; 认证由
     fi
     spoof_ttl_apply "$F"
     sed -i "s/^FORM=.*/FORM=$F/" $GWDATA/uplink.conf
+    alog "INFO uplink form=$F (credentials untouched)"
     ok_json '"form":"'$F'"'
 }
 

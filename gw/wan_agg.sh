@@ -1,5 +1,8 @@
 #!/bin/sh
-# wan_agg.sh v3.1 — 双上行聚合主管: 探活 + 故障转移 FSM + 未打标主路策略 + CLI
+# wan_agg.sh v3.2 — 双上行聚合主管: 探活 + 故障转移 FSM + 未打标主路策略 + CLI
+# v3.2 (2026-10-17 日志加密轮): 每 ~30s TICK 汇总(存活/计数/authd/承载口/候选),
+#   探活逐目标结果、硬截止触发、ccmni 清单变化、authd/W2_READY 边沿、主路写失败
+#   全部留痕; 本文件日志自轮转(400 行) — 24h 分析不再依赖偶然的状态迁移行。
 # v3.0 (2026-10-17 架构轮, 大杂烩拆分):
 #   引擎落地层(dp_setup/fw*/kernel_apply/ensure_rules/agg_bypass/pin_*)与
 #   agg.conf/钉死表管理迁入 wan_agg_lib.sh(被 source; 单进程 = 单写方纪律不变);
@@ -51,6 +54,10 @@ MODE_FILE=/tmp/wan_mode
 W1_PCT=40; W2_PCT=60
 PMODE=0
 MODE=weight
+# v3.2: 本文件日志轮转(日志加密轮) — 400 行保留 200; log_keeper 侧再做增量持久化
+MAXL=400
+log_rot() { [ -s $LOG ] && [ "$(wc -l < $LOG 2>/dev/null || echo 0)" -gt $MAXL ] && \
+    { tail -n $((MAXL/2)) $LOG > $LOG.tmp && mv $LOG.tmp $LOG; }; }
 
 # ---------- v2.31: 未打标主路 = 聚合设定推导(不写死优先级) ----------
 # 未打标流量 = 本机自身(netagent/DNS/NTP/测速…)+ 丢标记的转发流。统一为: 两侧地址
@@ -84,12 +91,15 @@ main_primary_apply() {   # $1=w1|w2 (空=状态未知, 仅维持探活路由)
     # --- v4 ---
     if [ "$_p" = w2 ]; then
         if [ -n "$BB_GW" ]; then
-            ip route replace default via $BB_GW dev $W2_IF 2>/dev/null
-            ip route show default | grep -q "via $BB_GW dev $W2_IF metric 200" || \
-                ip route add default via $BB_GW dev $W2_IF metric 200 2>/dev/null
+            ip route replace default via $BB_GW dev $W2_IF 2>/dev/null || \
+                log "WARN main v4 w2 write failed (gw=$BB_GW dev=$W2_IF)"
+            ip route show default | grep -q "via $BB_GW dev $W2_IF metric 200" || {
+                ip route add default via $BB_GW dev $W2_IF metric 200 2>/dev/null || \
+                    log "WARN main v4 w2 backup metric200 add failed (gw=$BB_GW)"; }
         fi
     else
-        ip route replace default dev $W1_IF 2>/dev/null
+        ip route replace default dev $W1_IF 2>/dev/null || \
+            log "WARN main v4 w1 write failed (dev=$W1_IF)"
     fi
     # --- v6(与 v4 同一主路) ---
     # 家宽侧需 RA 学到的下一跳(via 链路本地地址); 蜂窝侧用**设备路由**
@@ -99,10 +109,14 @@ main_primary_apply() {   # $1=w1|w2 (空=状态未知, 仅维持探活路由)
     if [ "$_p" = w2 ]; then
         ip -6 route del default dev $W1_IF metric $V6_PRI_METRIC 2>/dev/null
         ip -6 route del default dev $W1_IF metric 0 2>/dev/null   # 清 rc_netfh 遗留
-        [ -n "$_g2" ] && ip -6 route replace default via $_g2 dev $W2_IF metric $V6_PRI_METRIC 2>/dev/null
+        [ -n "$_g2" ] && { ip -6 route replace default via $_g2 dev $W2_IF metric $V6_PRI_METRIC 2>/dev/null || \
+            log "WARN main v6 w2 write failed (via=$_g2 dev=$W2_IF)"; }
+        [ -z "$_g2" ] && [ "$_p" != "$P_LAST" ] && \
+            log "WARN main v6 w2: no RA next-hop on $W2_IF (route left to RA default)"
     else
         ip -6 route del default dev $W2_IF metric $V6_PRI_METRIC 2>/dev/null
-        ip -6 route replace default dev $W1_IF metric $V6_PRI_METRIC 2>/dev/null
+        ip -6 route replace default dev $W1_IF metric $V6_PRI_METRIC 2>/dev/null || \
+            log "WARN main v6 w1 write failed (dev=$W1_IF)"
     fi
     [ "$_p" != "$P_LAST" ] && { log "main-primary: $_p (v4+v6 未打标主路; mode=$MODE w1=$W1_PCT% 存活=$NS1/$NS2)"; P_LAST=$_p; }
 }
@@ -130,8 +144,15 @@ tcp_probe() {   # $1=iface
     [ -n "$_c" ] && [ "$_c" != "000" ]
 }
 data_alive() {   # $1=iface — 数据面实证: 多样 ICMP → TCP 兜底
-    for _t in $PROBE_V4; do probe $1 $_t && return 0; done
-    tcp_probe $1 && return 0
+    # v3.2: 逐目标结果写入 PRB_RES(日志用) — 24h 分析可区分"整段断"与"单目标
+    #   被白名单放行/过滤"; 探测失败才付 TCP 兜底的代价, 结果一并留痕。
+    _r=""
+    for _t in $PROBE_V4; do
+        if probe $1 $_t; then PRB_RES="${_r# } $_t:1"; return 0; fi
+        _r="$_r $_t:0"
+    done
+    if tcp_probe $1; then PRB_RES="${_r# } tcp:1"; return 0; fi
+    PRB_RES="${_r# } tcp:0"
     return 1
 }
 w1_alive() { data_alive $W1_IF; }
@@ -170,7 +191,8 @@ case "$1" in
     exit 0 ;;
 esac
 
-log "===== wan_agg v3.1 start (lib 拆分; eth0 归 wan_eth; 判活多样+wan_alive) ====="
+log "===== wan_agg v3.2 start (lib 拆分; eth0 归 wan_eth; 判活多样+wan_alive; fine-log) ====="
+log "EVT env: w1=$W1_IF w2=$W2_IF probe=[$PROBE_V4] t1=$T1 t2=$T2 metric_prb=$W1_PRB_METRIC up=$(cut -d. -f1 /proc/uptime)s"
 agg_conf_seed
 pin_replay
 # 引擎探测: vendor ioctl (multiwan_ctl+fhstub; proc 写已证伪为只读) 失败则 iptables
@@ -195,7 +217,10 @@ else
 fi
 log "init: engine=$ENGINE agg_on=$AGG_ON weights=$W1_PCT/$W2_PCT s1=$S1 s2=$S2"
 
+CYC=0; CAND_LAST=""; AS_LAST=""; W2R_LAST=""; P1R_LAST=""; P2R_LAST=""; CW_LAST=""
 while :; do
+    CYC=$((CYC+1)); T0=$(date +%s)
+    [ $((CYC % 10)) -eq 0 ] && log_rot
     # 5G 承载漂移检测: 活跃 ccmni 变了就刷新 表100/main/NAT/FORWARD (幂等)
     # v3.1 (RIL 清零轮回归): 原判据取 `ip addr show | head -1` —— 字母序第一个。
     #   多 ccmni 并存(旧 PDN 未 deact 干净)时可能选中**僵尸口**(有 IP 无数据),
@@ -203,6 +228,12 @@ while :; do
     #   新判据: 候选按字母序, **能探活通过的那个才算活跃**; 当前口仍通则不变
     #   (避免每轮乒乓)。全部不通时保持现状, 由 FSM 判死转移。
     _cand=$(ip -o -4 addr show 2>/dev/null | grep ccmni | grep 'inet ' | awk '{print $2}')
+    # v3.2: ccmni 清单/地址变化留痕 — 僵尸口增删是"多 PDN 并存"的第一手证据
+    _inv=$(ip -o -4 addr show 2>/dev/null | grep ccmni | awk '{print $2":"$4}' | tr '\n' ',')
+    if [ "$_inv" != "$CAND_LAST" ]; then
+        log "EVT ccmni inventory: [${_inv%,}] (candidates=[$(echo $_cand | tr ' ' ',')])"
+        CAND_LAST=$_inv
+    fi
     CW=""
     for _c in $W1_IF $_cand; do
         [ -n "$_c" ] || continue
@@ -210,6 +241,10 @@ while :; do
             probe "$_c" "$_t" && { CW=$_c; break 2; }
         done
     done
+    if [ -z "$CW" ] && [ "$CW_LAST" != "none" ]; then
+        log "WARN no probe-passing ccmni this cycle (candidates=[$(echo $_cand | tr ' ' ',')])"
+        CW_LAST=none
+    elif [ -n "$CW" ]; then CW_LAST=$CW; fi
     if [ -n "$CW" ] && [ "$CW" != "$W1_IF" ]; then
         log "5g iface moved: $W1_IF -> $CW"
         W1_IF=$CW
@@ -288,8 +323,16 @@ while :; do
     AUTHD_UP=0; AUTHD_DOWN=0
     [ "$AS" = up ] && [ $ASAGE -le 45 ] && AUTHD_UP=1
     [ "$AS" = down ] && [ $ASAGE -le 60 ] && AUTHD_DOWN=1
-    if w1_alive; then U1=$((U1+1)); D1=0; W1_OK=$(date +%s); else D1=$((D1+1)); U1=0; fi
-    if w2_alive; then U2=$((U2+1)); D2=0; W2_OK=$(date +%s); else D2=$((D2+1)); U2=0; fi
+    # v3.2: 认证会话信号边沿留痕(up/down 切换是家宽判活的协议级证据)
+    if [ "$AS" != "$AS_LAST" ]; then
+        log "EVT authd signal ${AS_LAST:-none} -> ${AS:-none} (age=${ASAGE}s up=$AUTHD_UP down=$AUTHD_DOWN)"
+        AS_LAST=$AS
+    fi
+    # 信号过期: 状态文件在但已不新鲜(认证程序可能卡死/未刷新)
+    [ -n "$AS" ] && [ "$AUTHD_UP$AUTHD_DOWN" = "00" ] && [ $((CYC % 10)) -eq 0 ] && \
+        log "WARN authd signal stale: state=$AS age=${ASAGE}s (>45/60s)"
+    if w1_alive; then P1R=$PRB_RES; U1=$((U1+1)); D1=0; W1_OK=$(date +%s); else P1R=$PRB_RES; D1=$((D1+1)); U1=0; fi
+    if w2_alive; then P2R=$PRB_RES; U2=$((U2+1)); D2=0; W2_OK=$(date +%s); else P2R=$PRB_RES; D2=$((D2+1)); U2=0; fi
     # v2.27: 首败同轮复核 — 家宽首败立即复探, 再败即确认(D2=3)。背景(2026-10-11
     #   实弹): 上游交换机 EAP 重启窗口内"载波在/数据死"最长 25s(硬截止)才转移,
     #   LAN 探测流量漏出 eth0 被上游拦截页 302 → 手机把 SSID 标"需要认证"转投
@@ -297,23 +340,36 @@ while :; do
     #   单包丢失在复探中自愈不误切。authd 会话重启(交换机 EAP restart)由此
     #   最快 ~5s 摘除 eth0 出口。
     if [ $S2 -eq 1 ] && [ $D2 -eq 1 ]; then
-        if w2_alive; then U2=$((U2+1)); D2=0; W2_OK=$(date +%s); else D2=3; fi
+        if w2_alive; then P2R=$PRB_RES; U2=$((U2+1)); D2=0; W2_OK=$(date +%s); else P2R=$PRB_RES; D2=3; fi
     fi
     now=$(date +%s)
     NS1=$S1; NS2=$S2
     # v2.20: 硬截止判死 — 活侧距上次成功探活 >25s 即判死, 跳过3连击(计数制可被
     #   迟滞/饥饿模式饿死; 时间截止不可, 故障转移上界 = 60s + 一个环循周期)
-    [ $S1 -eq 1 ] && [ $((now - W1_OK)) -gt 25 ] && { NS1=0; D1=99; }
-    [ $S2 -eq 1 ] && [ $((now - W2_OK)) -gt 25 ] && { NS2=0; D2=99; }
+    [ $S1 -eq 1 ] && [ $((now - W1_OK)) -gt 25 ] && {
+        log "EVT hard-deadline w1: last success $((now - W1_OK))s ago (>25s) probe=[$P1R]"
+        NS1=0; D1=99; }
+    [ $S2 -eq 1 ] && [ $((now - W2_OK)) -gt 25 ] && {
+        log "EVT hard-deadline w2: last success $((now - W2_OK))s ago (>25s) probe=[$P2R]"
+        NS2=0; D2=99; }
     # v2.24: authd 明示 down => 协议级判死(跳过连击) — 服务器踢会话的 Failure
     # 信号零延迟, 故障转移上界压缩到一个环循周期(<=3s)
-    [ "$AUTHD_DOWN" = 1 ] && [ $S2 -eq 1 ] && { NS2=0; D2=99; }
+    [ "$AUTHD_DOWN" = 1 ] && [ $S2 -eq 1 ] && {
+        log "EVT authd-down -> w2 immediate dead (age=${ASAGE}s)"
+        NS2=0; D2=99; }
     # v2.0: 确定性信号瞬时降级 — 无载波/无IP是"确定"而非"疑似"(重租约窗口被hash到
     #       家宽的新流全灭=恢复期粗糙窗口的根因), 跳过3连击立即全量切5G
-    W2_READY=0
-    [ "$(cat /sys/class/net/$W2_IF/carrier 2>/dev/null)" = "1" ] && \
-      [ -n "$(ip -4 addr show $W2_IF 2>/dev/null | grep inet)" ] && W2_READY=1
-    if [ $S2 -eq 1 ] && [ $W2_READY -eq 0 ]; then NS2=0; D2=99; fi
+    W2_READY=0; W2_CAR=$(cat /sys/class/net/$W2_IF/carrier 2>/dev/null)
+    W2_IP=$(ip -o -4 addr show $W2_IF 2>/dev/null | awk '{print $4}' | head -1)
+    [ "$W2_CAR" = "1" ] && [ -n "$W2_IP" ] && W2_READY=1
+    if [ "$W2_READY" != "$W2R_LAST" ]; then
+        log "EVT w2 ready $W2R_LAST -> $W2_READY (carrier=${W2_CAR:-?} ip=${W2_IP:-none})"
+        W2R_LAST=$W2_READY
+    fi
+    if [ $S2 -eq 1 ] && [ $W2_READY -eq 0 ]; then
+        log "EVT w2 deterministic-dead: carrier=${W2_CAR:-?} ip=${W2_IP:-none}"
+        NS2=0; D2=99
+    fi
     # 3 连续判死/判活 (原厂 brokenHeartCount 同款节奏, 5s 周期 -> ~15s 收敛)
     [ $S1 -eq 1 ] && [ $D1 -ge 3 ] && NS1=0
     # v2.23: 恢复迟滞 U>=6 — 死亡快(25s 硬截止)恢复慢(持续通过), 掐灭抖动源
@@ -337,9 +393,18 @@ while :; do
     #   (2026-10-16 宵断实弹: 三处共用错判据 → 灯/状态页/转移全部谎报)。
     #   消费方须校验 ts 新鲜度, 过期回退自身探测。
     echo "home=$NS2 cell=$NS1 ts=$(date +%s)" > /tmp/wan_alive
+    # v3.2: 探活结果边沿 + 每 10 环循(~30s)汇总 — 24h 分析的主时间线
+    if [ "$P1R" != "$P1R_LAST" ] || [ "$P2R" != "$P2R_LAST" ]; then
+        log "EVT probe w1[$W1_IF]=[$P1R] alive=$NS1 | w2[$W2_IF]=[$P2R] alive=$NS2"
+        P1R_LAST=$P1R; P2R_LAST=$P2R
+    fi
+    if [ $((CYC % 10)) -eq 0 ]; then
+        log "TICK cyc=$CYC loop=$((now - T0))s s=$S1/$S2 ns=$NS1/$NS2 d=$D1/$D2 u=$U1/$U2 authd=${AS:-none}/${ASAGE}s w2rdy=$W2_READY car=${W2_CAR:-?} ip=${W2_IP:-none} cw=${CW:-none} prim=${P_LAST:-none} mode=$MODE w1=$W1_PCT agg=$AGG_ON eng=$ENGINE slp=$SLP"
+        log "TICK probe w1=[$P1R] w2=[$P2R] cand=[$(echo $_cand | tr ' ' ',')]"
+    fi
     if [ "$AGG_ON" = 1 ] && { [ "$E1$E2" != "$S1$S2" ] || [ "${FORCE:-0}" = 1 ]; }; then
         FORCE=0
-        log "state: 5g $S1->$E1 (d1=$D1) home $S2->$E2 (d2=$D2) pmode=$PMODE"
+        log "state: 5g $S1->$E1 (d1=$D1) home $S2->$E2 (d2=$D2) pmode=$PMODE probe1=[$P1R] probe2=[$P2R] authd=${AS:-none}/${ASAGE}s w2rdy=$W2_READY"
         kernel_apply $E1 $E2 2>>$LOG   # vendor 引擎下即生效; iptables 引擎下无害空写
         if [ "$ENGINE" = iptables ]; then
             if [ $E1 -eq 1 ] && [ $E2 -eq 1 ]; then fw_setup $W2_PCT

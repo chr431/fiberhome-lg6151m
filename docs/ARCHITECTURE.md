@@ -45,7 +45,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/agg_pins.default` | **v1.0** | manifest | `/data/gw/agg_pins.default` | MAC钉死表出厂缺省基线(只读, 不含任何MAC; 设备侧活文件 agg_pins.conf 由 wan_agg 缺省才写地播种, 个人MAC不入库) |
 | `gw/bin/fhstub.so` | **v1.0** | manifest | `/data/gw/fhstub.so` | FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径) |
 | `gw/bin/healthdog.ko` | **v1.0** | manifest | `/data/gw/healthdog.ko` | 取证看门狗内核模块(forensic=1) |
-| `gw/bin/mipc_cellular` | **v0.12** | manifest | `/data/gw/mipc_cellular` | 蜂窝MIPC直连CLI; v0.12(RIL 清零终章): 彻底移除 libqlril(NEEDED 空), 零动态依赖; msgid u16; cells/getbands/setlock/endc/scan 全直连; 修 TLV 步进/大响应分帧/脏帧越界三缺陷; 位映射修正 off-by-one; 历史见git |
+| `gw/bin/mipc_cellular` | **v0.13** | manifest | `/data/gw/mipc_cellular` | 蜂窝MIPC直连CLI; v0.13(日志加密轮): +/tmp/mipc_cellular.log 诊断(限流); 零动态依赖(静态 musl, NEEDED 空); v0.12: RIL 零依赖重写 |
 | `gw/bin/multiwan_ctl` | **v1.1** | manifest | `/data/gw/multiwan_ctl` | 原厂multiwan引擎ioctl控制器(zig动态链libfhdrv_net_api,36B结构体) |
 | `gw/bin/shmsnap` | **v1.0** | manifest | `/data/gw/shmsnap` | cfgmgr树共享内存快照工具(save/load 16MB原始字节, gzip后127KB, 开机恢复锁定状态) |
 | `gw/bin/v3_fix.ko` | **v1.1** | manifest | `/data/gw/v3_fix.ko` | TTL伪装/PPE解绑内核模块(wan_if/ttl_mode/unhook) |
@@ -53,27 +53,27 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/bin/v3httpd` | **v2.6** | manifest | `/data/gw/v3httpd` | 网关GUI HTTP服务; v2.6(P2): 静态面拒*.sh(免认证源码泄露)+Host头校验(根治DNS rebinding) |
 | `gw/bin/wpapmk` | **v1.0** | manifest | `/data/gw/wpapmk` | WPA口令转PMK(纯C PBKDF2-SHA1; fh魔改hostapd只吃wpa_psk) |
 | `gw/capture_ubus.sh` | **v1.1** | manifest | `/data/gw/capture_ubus.sh` | stock拨号一次性捕获(ubus monitor+ccmni采样) |
-| `gw/ccmni_up.sh` | **v1.0** | manifest | `/data/gw/ccmni_up.sh` | netagent-lite: MIPC 拨号+ccmni 接口落地(deact+act→解析 v4/v6 地址→flush+add+mtu); 实证 netagent 是 IP 执行者(act 响应含全套地址而无人落地), 本脚本是它退役的前提; 不写路由/NAT(单写方纪律: main 表归 wan_agg) |
+| `gw/ccmni_up.sh` | **v1.1** | manifest | `/data/gw/ccmni_up.sh` | netagent-lite: MIPC 拨号+ccmni 落地(deact+act→解析→flush+add+mtu); v1.1(日志加密轮): 入口旧地址/deact/act rc+耗时/响应/flush/add rc/总耗时全程留痕; 不写路由/NAT |
 | `gw/cellular_replay.sh` | **v2.1** | manifest | `/data/gw/cellular_replay.sh` | 蜂窝锁定开机重放(频段/小区锁到cfgmgr树, 树每次开机由出厂档案重建) |
 | `gw/consfeed.sh` | **v1.0** | manifest | `/data/gw/consfeed.sh` | v2 控制台喂食器(无setsid,v2_access拉起) |
 | `gw/defaults.conf` | **v1.8** | manifest | `/data/gw/defaults.conf` | 统一配置只读出厂基线(444); 消费方source叠加settings.conf稀疏覆盖; v1.8: -ETH_CURFEW(先验时段下架); v1.6: +TZ(时区入自管配置) |
 | `gw/diag_dump.sh` | **v1.1** | manifest | `/data/gw/diag_dump.sh` | 一键诊断包(脱敏: 配置/无线MLO掩码/网络/全量日志现场; v1.1: 结束行带生成时刻) |
 | `gw/dial_5g.sh` | **v1.6** | manifest | `/data/gw/dial_5g.sh` | 生产 5G 拨号器; v1.6: ubus 冷启动引导不再拉起 ql_ril_service(已退役); 历史见git |
-| `gw/dial_keeper.sh` | **v1.4** | manifest | `/data/gw/dial_keeper.sh` | 拨号自持守护; v1.4(netagent 摘除轮): dial 改走 ccmni_up(拨号+落地一体, 缺席回退旧配方) + 触发条件叠加数据面(消费 wan_alive 堵僵尸 IP 洞 — 实弹: 飞行往返后 IP 在而数据死, 旧 IP-only 判据被骗过整夜) + 飞行模式守卫(CFUN=0 不盲拨); 历史见git |
+| `gw/dial_keeper.sh` | **v1.5** | manifest | `/data/gw/dial_keeper.sh` | 拨号自持守护; v1.5(日志加密轮): 60s TICK(has_ip/cell_alive/wan_alive 原文+年龄/down/backoff/APN/cci)+僵尸IP边沿+modem未就绪原因+飞行切换+ccmni_up rc/输出/耗时; v1.4: ccmni_up 一体+数据面触发+飞行守卫 |
 | `gw/dial_variant.sh` | **v1.3** | manifest | `/data/gw/dial_variant.sh` | 5G 拨号参数变体实验器; v1.3: ubus 引导同步去除 ql_ril_service |
 | `gw/fan_mgr.sh` | **v1.3** | manifest | `/data/gw/fan_mgr.sh` | 原厂梯度温控风扇(v1.3: 配置统一overlay+修复v1.2双/data/gw路径bug——GUI静音切换从未生效的根因) |
 | `gw/fan_mode.conf` | **v1.0** | manifest | `/data/gw/fan_mode.conf` | 风扇模式:performance|silent(静音+6°C偏移) |
 | `gw/fw_apply.sh` | **v1.5** | manifest | `/data/gw/fw_apply.sh` | 端口映射/DMZ/禁网安装器(rc_netfh开机+api共用); v1.5(P1): v4 WAN面default-deny(icmp/DHCP客户端/established放行其余DROP, 含旧7端口黑名单语义)+V4WANGUARDF挡WAN->LAN新建转发(-A挂载保DNAT优先); v1.4: v6同构; 历史见git |
 | `gw/guest_fw.sh` | **v1.6** | manifest | `/data/gw/guest_fw.sh` | 访客隔离防火墙v1.6(审计P0: GUEST_ISOLATE开关删除=强制隔离; 兼容需求改由主WiFi终端频段锁定承接; 历史版本见git) |
 | `gw/healthdog.sh` | **v1.1** | manifest | `/data/gw/healthdog.sh` | 看门狗用户态心跳 |
-| `gw/led_mgr.sh` | **v2.3** | manifest | `/data/gw/led_mgr.sh` | 原厂风格LED守护; v2.3: +单实例 PID 锁(开机 rc19 与 watchdog 自愈并发各起一份, 双实例同写灯); v2.2: 中性命名; v2.1: 判活消费 wan_alive; 历史见git |
-| `gw/log_keeper.sh` | **v1.2** | manifest | `/data/gw/log_keeper.sh` | 日志持久化守护(syslog/dmesg增量镜像+/tmp快照+boot分隔+容量轮转; v1.2: 上一boot快照转存 logs/tmp.prev(.snap_up归属判定; 事故现场不再被新boot覆盖)+心跳入快照; v1.1: 轮转后重写boot上下文; 每开机一份诊断包) |
+| `gw/led_mgr.sh` | **v2.4** | manifest | `/data/gw/led_mgr.sh` | 原厂风格LED守护(绝对电平+自愈); v2.4(日志加密轮): 外部写导致的 DRIFT 旧值->应为值、状态变化附 ccmni/wan_alive 原文; v2.3: 单实例 PID 锁; v2.1: 判活消费 wan_alive |
+| `gw/log_keeper.sh` | **v1.3** | manifest | `/data/gw/log_keeper.sh` | 日志持久化守护; v1.3(日志加密轮): /tmp/*.log 改增量追加(锚行定位/每文件1MB轮转/resync标记), 24h 历史可分析; 非日志状态文件仍覆盖快照; 上一boot 转存 tmp.prev 不变 |
 | `gw/mipc_dial_trace.sh` | **v1.0** | manifest | `/data/gw/mipc_dial_trace.sh` | 5G 拨号取证(xtrace 抓真参) |
 | `gw/night_report.sh` | **v1.0** | manifest | `/data/gw/night_report.sh` | 夜间体检报告 |
 | `gw/ntp_keeper.sh` | **v1.2** | manifest | `/data/gw/ntp_keeper.sh` | 每小时NTP守时(多源; 设备无RTC; v1.2: +时区自愈(/etc/TZ→tmpfs重启即失, 每轮重应用); v1.1: 首选 NTP_SERVER 自管配置) |
 | `gw/radvd.conf` | **v1.0** | manifest | `/data/gw/radvd.conf` | IPv6 SLAAC+RDNSS通告(br-lan, ULA fd42:9ac1:7e50::/64) |
 | `gw/rc.extend.sh` | **v2.1** | manifest | `/data/rc.extend.sh` | 槽位调度器; v2.1(P3): shadow.override合法性校验+.bak回退自愈(坏文件不再锁死SSH+串口); v2.0: 开机清token; 历史见git |
-| `gw/rc_netfh.sh` | **v3.9** | manifest | `/data/gw/rc_netfh.sh` | 路线A: FH modem栈环境; v3.9(RIL 清零轮·终章): ql_ril_service 退役 — 读路径(cells/getbands)+写路径(setlock/endc/scan/短信)全部直连 MIPC(mipc_cellular v0.11); RIL 三守护+submonitor 全清零; 历史见git |
+| `gw/rc_netfh.sh` | **v3.10** | manifest | `/data/gw/rc_netfh.sh` | 路线A: FH modem栈环境; v3.10(日志加密轮): 相位计时+settle 每10s ccmni 清单+route/NAT REPAIR+fw_apply rc+总耗时; v3.9: RIL 四件套全退役, 读/写路径直连 |
 | `gw/reboot_sched.sh` | **v1.1** | manifest | `/data/gw/reboot_sched.sh` | 定时重启守护(默认每日04:00; 护栏: 时钟可信/开机300s/5min窗口/当日去重; v1.1: 每轮自应用时区(不依赖他守护时序)) |
 | `gw/traffic_logger.sh` | **v1.2** | manifest | `/data/gw/traffic_logger.sh` | v1.2b: 基线文件带源标记(S=qdisc|netdev), 源变即重建基线(否则切换源会记一行 22MB 假尖峰); v1.2: 蜂窝上行数据源 netdev tx_bytes → qdisc(Linux 发送路径) — 网卡计数被厂商卸载记账灌入无佐证增量(1s +1.22MB/813 包而 qdisc/抓包为 0; ccmni1 DOWN 无 IP 却记 47MB), 用作统计=长期高估; qdisc 缺失回退 netdev, 下行仍用 netdev rx(实测准确); 蜂窝/以太网流量采样器(5min 增量落 /data/gw/traffic_hist.tsv; 漂移解析+回绕自洽+40天裁剪) |
 | `gw/udhcpc_eth1.script` | **v1.0** | manifest | `/data/gw/udhcpc_eth1.script` | eth1口 udhcpc 事件钩子(补登记) |
@@ -81,22 +81,22 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/v2_access.sh` | **v6.1** | manifest | `/data/gw/v2_access.sh` | v2 极简访问层(串口/SSH/DHCP/防火墙22,零守护干涉) |
 | `gw/v3_babysit_v2.sh` | **v2.0** | manifest | `/data/gw/babysit_v2.sh` | 启动保姆(T1杀rcS/T2核爆回B) |
 | `gw/v3_rc10.extend.sh` | **v2.29** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2; v2.29: +wan_eth 接线(架构轮); 历史见git |
-| `gw/wan_agg.sh` | **v3.1** | manifest | `/data/gw/wan_agg.sh` | 双上行聚合主管; v3.1(RIL 清零轮回归): 承载漂移检测改探活实证选口 — 原取 ip addr 字母序第一个, 多 ccmni 并存时选中僵尸口(有IP无数据)致探活全灭 cell=0; 现候选逐口 ICMP 实证(当前口优先, 避免乒乓); 历史见git |
-| `gw/wan_agg_lib.sh` | **v1.1** | manifest | `/data/gw/wan_agg_lib.sh` | 聚合引擎落地层+conf 管理库; v1.1(RIL 清零轮): +cell_iface_pick(探活实证选承载口 — 多口并存时僵尸口不再被误选) |
-| `gw/wan_eth.sh` | **v1.0** | manifest | `/data/gw/wan_eth.sh` | 有线 WAN(eth0) 接口管理守护(自 wan_agg ensure_lease 拆出, 架构轮): 链路+one-shot udhcpc+to-LAN 护盾+家宽备用默认+表200+eth0 NAT/FORWARD 看门狗(全幂等 level-driven); udhcpc 最坏 9s 不再阻塞探活 FSM(原内联期间整个状态机停摆) |
-| `gw/watchdog.sh` | **v1.14** | manifest | `/data/gw/watchdog.sh` | 持续不变量看门狗; v1.14(RIL 清零轮): cell 查询恢复提示改直连语义(RIL 守护已全退役); 历史见git |
+| `gw/wan_agg.sh` | **v3.2** | manifest | `/data/gw/wan_agg.sh` | 双上行聚合主管; v3.2(日志加密轮): TICK(30s)汇总+探活逐目标+硬截止/authd/W2_READY 边沿+主路写失败留痕; v3.1: 探活实证选承载口(僵尸口); 历史见git |
+| `gw/wan_agg_lib.sh` | **v1.2** | manifest | `/data/gw/wan_agg_lib.sh` | 聚合引擎落地层+conf 管理库; v1.2(日志加密轮): ensure_rules 每次补装记 REPAIR+rc(规则被外力蒸发不再静默); v1.1: +cell_iface_pick(探活实证选承载口) |
+| `gw/wan_eth.sh` | **v1.1** | manifest | `/data/gw/wan_eth.sh` | 有线 WAN(eth0) 接口管理守护(自 wan_agg ensure_lease 拆出): 链路+one-shot udhcpc+to-LAN 护盾+备用默认+表200+NAT/FORWARD 看门狗; v1.1(日志加密轮): 租约结果/耗时、carrier/IP/gw 边沿、REPAIR、60s TICK |
+| `gw/watchdog.sh` | **v1.15** | manifest | `/data/gw/watchdog.sh` | 持续不变量看门狗; v1.15(日志加密轮): 失败检查 rc+输出摘要、60s TICK 全量状态、5min HEALTH(load/mem/disk/进程/僵尸/conntrack)、自愈重启原因; v1.14: cell 查询直连语义 |
 | `gw/webs_revive.sh` | **v1.3** | manifest | `/data/gw/webs_revive.sh` | 原厂GUI复活器(自足nginx conf; 手动拉起) |
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
-| `gw/wifi_autoch.sh` | **v1.0** | manifest | `/data/gw/wifi_autoch.sh` | WiFi 自动选道器(自 wifi_up v1.29 拆出; IDC 安全掩码+候选收敛{1,6}; 输出契约 /tmp/wifi_autoch 不变, 可独立复用) |
+| `gw/wifi_autoch.sh` | **v1.1** | manifest | `/data/gw/wifi_autoch.sh` | WiFi 自动选道器; v1.1(日志加密轮): 输出 # 注释行记录扫描规模/候选/评分(源码时无害) — 选道依据可复盘; IDC 安全掩码+候选{1,6} |
 | `gw/wifi_guard.sh` | **v1.0** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫 |
 | `gw/wifi_macplan.sh` | **v1.0** | manifest | `/data/gw/wifi_macplan.sh` | 出厂 MAC 派生计划(自 wifi_up v1.29 拆出; api uplink 的 eth0 原生 MAC 还原同步收敛到此唯一实现 — 原内联副本缺两级兜底属算法漂移实例) |
 | `gw/wifi_up.sh` | **v1.29** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.29 架构轮: MAC 派生拆出 wifi_macplan.sh + 自动选道拆出 wifi_autoch.sh, 主文件收敛为拉起配方本体, 变量/契约零变化; v1.28: 候选收敛安全集深部{1,6}; 历史见git) |
-| `gw/www/api.sh` | **v2.75** | manifest | `/data/gw/www/api.sh` | v2.75(2026-10-17 架构轮): 模块化拆分 — 收敛为核心(helpers/认证/配置助手)+路由表, 六域模块按端点懒加载(/data/gw/www/api_*.sh, v3httpd v2.6 静态面已拒 *.sh 直出); 每请求只解析所需域(原整文件 ~1550 行全解析); 端点与 JSON 契约零变化; v2.74: 命名中性化; v2.73: status 消费 /tmp/wan_alive; 历史见各域模块头注与git |
-| `gw/www/api_agg.sh` | **v1.0** | manifest | `/data/gw/www/api_agg.sh` | API 聚合+上行域模块(v2.75 拆出: agg/uplink 族; uplink 的 eth0 原生 MAC 还原改调 wifi_macplan.sh 统一实现) |
-| `gw/www/api_cell.sh` | **v1.0** | manifest | `/data/gw/www/api_cell.sh` | API 蜂窝域模块(v2.75 拆出: cellular/sim/pin/netmode/airplane/plmn/bandlock/celllock 族, 最大域) |
+| `gw/www/api.sh` | **v2.76** | manifest | `/data/gw/www/api.sh` | API 核心路由器+helpers; v2.76(日志加密轮): +/tmp/api.log 请求级日志(写端点全记/读端点仅慢或错误, 只含端点/方法/耗时/错误码, 不记 body/token/口令); v2.75: 六域模块懒加载拆分 |
+| `gw/www/api_agg.sh` | **v1.1** | manifest | `/data/gw/www/api_agg.sh` | API 聚合+上行域模块; v1.1(日志加密轮): 权重/模式/钉死/上行档案变更写 api.log(凭证脱敏) |
+| `gw/www/api_cell.sh` | **v1.1** | manifest | `/data/gw/www/api_cell.sh` | API 蜂窝域模块; v1.1(日志加密轮): cells 成败/耗时、锁频/锁小区/制式/飞行/扫描/PIN 动作写 api.log(PIN 值脱敏) |
 | `gw/www/api_lan.sh` | **v1.0** | manifest | `/data/gw/www/api_lan.sh` | API LAN 服务域模块(v2.75 拆出: dhcp/dhcp_static/fw 族; fw_apply.sh 改域内懒加载 — 原对全部请求无条件 source) |
-| `gw/www/api_sms.sh` | **v1.1** | manifest | `/data/gw/www/api_sms.sh` | API 短信域模块; v1.1(RIL 清零轮): 发送改 AT+EMGS 路线(mipc_wan_cli --at_cmd, atcid 通道; 厂商 ql_sms_send_msg 同族 — 反汇编 §12.5), 中文 CSCS=UCS2+hex, 发毕回 CMGF=0; 不再依赖 mipc_cellular/libqlril |
-| `gw/www/api_sys.sh` | **v1.2** | manifest | `/data/gw/www/api_sys.sh` | API 系统/状态域模块; v1.2: /api/traffic 增 if 字段(实际取样口, 多 ccmni 并存时消费方可同口比对); v1.1: 探活实证选口; 历史见git |
+| `gw/www/api_sms.sh` | **v1.2** | manifest | `/data/gw/www/api_sms.sh` | API 短信域模块; v1.2(日志加密轮): 发送成败/长度/模组原始响应写 api.log(号码仅末4位, 内容不落盘); v1.1: AT+EMGS 路线 |
+| `gw/www/api_sys.sh` | **v1.3** | manifest | `/data/gw/www/api_sys.sh` | API 系统/状态域模块; v1.3(日志加密轮): traffic 选口回退/qdisc 缺失留痕; v1.2: /api/traffic 增 if 字段; v1.1: 探活实证选口 |
 | `gw/www/api_wifi.sh` | **v1.0** | manifest | `/data/gw/www/api_wifi.sh` | API WiFi 域模块(v2.75 拆出: wifi/wifi_adv/band_pin/wifiscan 族; 域历史随域迁入头注) |
 | `gw/www/app.js` | **v3.51** | manifest | `/data/gw/www/app.js` | 控制台SPA; v3.51: 移除宵断卡片(先验方案下架); 历史见git |
 | `gw/www/index.html` | **v2.32** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.32: 缓存v66) |
@@ -104,7 +104,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/zz_data_hook` | **v1.1** | manifest | `/data/build/rootfs/etc/init.d/zz_data_hook` | S98数据钩子(v1.1: plain sh——原厂无/etc/rc.common, rc.common式shebang致开机栈全灭; 回归实测发现) |
 | `gw/src/fhstub.c` | **v1.0** | src | `gw/bin/fhstub.so` | FH符号桩库源码 |
 | `gw/src/healthdog.c` | **v1.0** | src | `gw/bin/healthdog.ko` | 看门狗模块源码(版本随产物) |
-| `gw/src/mipc_cellular.c` | **v0.12** | src | `gw/bin/mipc_cellular` | 蜂窝MIPC直连CLI源码; v0.12: 零 RIL 依赖重写(反汇编产物落地); 随产物0.12 |
+| `gw/src/mipc_cellular.c` | **v0.13** | src | `gw/bin/mipc_cellular` | 蜂窝MIPC直连CLI源码; v0.13(日志加密轮): 结构化诊断日志(命令/msgid/端口/rlen/rc/耗时/解码摘要; 60s 限流, 异常与慢调用必记, 256KB 轮转); 随产物0.13 |
 | `gw/src/multiwan_ctl.c` | **v1.1** | src | `gw/bin/multiwan_ctl` | multiwan控制器源码(随产物1.1) |
 | `gw/src/shmsnap.c` | **v1.0** | src | `gw/bin/shmsnap` | cfgmgr快照源码 |
 | `gw/src/v3_fix.c` | **v1.1** | src | `gw/bin/v3_fix.ko` | TTL/解绑模块源码(版本随产物) |
@@ -114,7 +114,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `install/run.sh` | **v1.1** | tool | `-` | raw shell自驱脚本(v1.1: 分区次设备号从/proc/partitions动态解析成布局门禁, RP102/RP103通用; v1.0硬编码259:7等) |
 | `tools/agg_pins.conf.example` | **v1.1** | tool | `-` | MAC钉死表模板(真实表设备侧自管, 含个人MAC不入库) |
 | `tools/build_healthdog.sh` | **v1.0** | tool | `-` | healthdog.ko内核模块构建(内核树) |
-| `tools/build_mipc_cellular.sh` | **v1.0** | tool | `-` | mipc_cellular构建(zig cc aarch64-musl动态) |
+| `tools/build_mipc_cellular.sh` | **v1.1** | tool | `-` | mipc_cellular构建(zig cc aarch64-musl 静态); v1.1: 移除 libqlril 链接(v0.12+ 零 RIL 依赖) |
 | `tools/build_steth.sh` | **v1.0** | tool | `-` | v3_steth.ko构建 |
 | `tools/build_v3fix.sh` | **v1.0** | tool | `-` | v3_fix.ko构建 |
 | `tools/build_v3httpd.sh` | **v1.0** | tool | `-` | v3httpd构建(zig cc aarch64-linux-musl全静态, 同mipc_cellular链) |
@@ -135,7 +135,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/rescue_shadow.py` | **v1.0** | tool | `-` | shadow.override未bind网络救援(getpass旧口令→只读探针: 文件md5/grep行为单测/部署钩子sh -x跟踪→从.bak恢复+重bind; 依赖rc.extend v2.1) |
 | `tools/rotate_toor.py` | **v1.4** | tool | `-` | toor口令轮换器; v1.4: 轮换前存档.bak(rc.extend v2.1回退源); 历史见git |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
-| `tools/selftest.py` | **v2.39** | tool | `-` | v2.39: t_traffic_source 冷启动 qdisc 缺失回退 netdev 同口径; v2.38: if 字段同口比对; v2.37: 缓存+多样探针; 历史见git |
+| `tools/selftest.py` | **v2.40** | tool | `-` | v2.40(日志加密轮): +t_logging_fine(log_keeper 增量落盘+wan_agg/watchdog TICK 持久化); v2.39: 冷启动 qdisc 回退同口径; 历史见git |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |
 | `tools/serial_server.py` | **v1.7** | tool | `-` | 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets) |
 | `tools/upgrade_slot.py` | **v1.0** | tool | `-` | SSH整槽升级器(P3第一档: vercheck/槽位/空间预检→md5门禁→dd备份旧p26→写新镜像→挂载sanity断言(toor/rcS/#v3:/procd)→失败自动整槽还原不重启→清TRY_A→reboot; PC侧轮询日志+回连终检; --dry-run) |
@@ -216,5 +216,6 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `CLM-MIPC-TRANSPORT`@FINDINGS.md | ✅实证 | `gw/src/mipc_cellular.c>=0.9, gw/bin/mipc_cellular>=0.9` | 蜂窝引擎小区列表活着 (P3 终章) | da31456@2026-10-17 | MIPC 帧格式破解(magic/seq/msgid/txid/len; rsp=req+1+txid回显)+cells=0x23空请求→0x24载荷; ttyCMIPC 单开者语义+kill-9 楔端口陷阱; 判决实验: ql_ril_service 死后直连照常应答 — 守护可退的传输前提成立; v0.9 落地传输层+标定取证(输出仍 libqlril 回退, 行为零变化); 记录级解码(rsrp/sinr 编码)未竟, 见 FINDINGS §28 |
 | `CLM-CELLS-DIRECT`@FINDINGS.md | ✅实证 | `gw/bin/mipc_cellular>=0.10` | cells 直连解码 (mipc_cellular 0x23→0x24 TLV) | 53bf1ff@2026-10-17 | 反汇编还原 ql_ril_service 小区解码: TLV 层(tag/len 4对齐)+NR 记录 0xB8 布局+编码公式(rsrp=raw-156, sinr=raw/2-43)+0x4F 的 bw ASCII; 3 对新鲜样本逐字段验证; v0.10 直连主路径(多帧重组+libqlril 回退), 守护死亡态全 JSON 实弹; 顺带修旧 cells pci 错位 bug; 退役前置就绪(写路径 msgid 表在案) |
 | `CLM-RIL-ZERO`@FINDINGS.md | ✅实证 | `gw/rc_netfh.sh>=3.9, gw/bin/mipc_cellular>=0.12, gw/www/api_sms.sh>=1.1` | RIL 守护全退役 (ql_ril_service/netd/submonitor/netagent), 蜂窝写路径直连 (endc/setlock/unlock) | 88f81e6@2026-10-17 | RIL 四件套全退役: 读(cells/getbands)+写(setlock/endc/scan)+短信发送(AT+EMGS, 厂商同族)全部直连 MIPC; mipc_cellular v0.12 移除 libqlril(NEEDED 空); 硬教训: msgid 是 u16/TLV 步进 (4+len+7)&~7/大响应分帧须等齐/AT+EMGS 无负向测试余地(modem 不校验号码, 非法号也投递); 位映射修正旧 off-by-one(N41 曾锁到 N40) |
+| `CLM-LOGGING-FINE`@FINDINGS.md | ✅实证 | `gw/log_keeper.sh>=1.3, gw/wan_agg.sh>=3.2, gw/watchdog.sh>=1.15, gw/bin/mipc_cellular>=0.13, gw/www/api.sh>=2.76` | 日志细粒度与 24h 持久化管线 (log_keeper v1.3 增量) | 36d3fc5@2026-10-17 | 细粒度日志两级设计: 本文件自轮转(TICK/EVT/WARN/REPAIR/DRIFT)+log_keeper v1.3 增量追加(锚行定位/1MB 轮转/resync); 覆盖 wan_agg/wan_eth/ccmni_up/dial_keeper/rc_netfh/watchdog/led_mgr/api/mipc_cellular/wifi_autoch; 日志量约1-2MB/天; 凭证/短信内容/号码(仅末4位)脱敏 |
 
 <!--CLMAUDIT:END-->

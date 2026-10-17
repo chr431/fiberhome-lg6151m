@@ -1,4 +1,6 @@
-# api_cell.sh v1.0 — 蜂窝域模块 (被 api.sh 按端点懒加载; 依赖核心的 helpers/cfg 助手)
+# api_cell.sh v1.1 — 蜂窝域模块 (被 api.sh 按端点懒加载; 依赖核心的 helpers/cfg 助手)
+# v1.1 (2026-10-17 日志加密轮): cells 成败/耗时、锁频/锁小区/制式/飞行/扫描/PIN 动作
+#   全部写 /tmp/api.log(PIN 值脱敏) — GUI 操作与模组实际响应可对照。
 # v1.0 (2026-10-17 架构轮): 自 api.sh v2.74 拆出 — cellular/sim/pin/netmode/airplane/
 #   plmn_scan/bandlock/celllock 端点族 + cfgmgr 树访问助手。域历史(自 api.sh 头注迁入):
 # v2.63: netmode_set 变更时后台自动重附(cfun循环) — 实弹实证 LTE→NR-SA 不自发重选,
@@ -39,9 +41,12 @@ get_cellular() {
     CELL_ENGINE=mipc
     [ -r $GWDATA/cellular_engine.conf ] && . $GWDATA/cellular_engine.conf
     if [ "$CELL_ENGINE" = mipc ] && [ -x /data/gw/mipc_cellular ]; then
+        _t0=$(date +%s)
         CJ=$(/data/gw/mipc_cellular cells 2>/dev/null | head -1)
+        _ms=$(( $(date +%s) - _t0 ))
         case "$CJ" in
         '"serving"'*|'{"serving"'*)
+            [ "$_ms" -ge 2 ] && alog "INFO cellular cells ok ${_ms}s"
             CSQ=$(mipc_wan_cli --at_cmd "AT+CSQ" 2>/dev/null | grep -oE "[0-9]+, ?99" | cut -d, -f1)
             RSSI=""; case "$CSQ" in ''|0) RSSI="未知";; *) RSSI="$(( -113 + CSQ * 2 )) dBm";; esac
             CJ=${CJ#\{}; CJ=${CJ%\}}
@@ -62,7 +67,9 @@ get_cellular() {
             done
             ENTRIES=${ENTRIES%,}
             printf '{"operator":{"plmn":"%s","name":"%s"},%s,"bandlock":{"enable":"%s","lte":"%s","nr":"%s"},"celllock":{"enable":"%s","entries":[%s]},"engine":"mipc","ts":%d}'                 "${COPSR:-}" "$(op_name "$COPSR")" "$CJ" "${BAND_EN:-0}" "${LTE_MASK:-}" "${NR_MASK:-}" "${CELL_EN:-0}" "$ENTRIES" "$(date +%s)"
-            return
+            return ;;
+        *)
+            alog "WARN cellular cells failed ${_ms}s out=$(printf '%s' "$CJ" | head -c 120)" ;;
         esac
     fi
     R=$FH_TREE.RadioSignalParameter
@@ -146,6 +153,7 @@ apply_bandlock() {
         [ "$EN" = 1 ] && LTES=${LTE:-all} && NRS=${NR:-all} || { LTES=all; NRS=all; }
         R=$(/data/gw/mipc_cellular setlock lte="$LTES" nr="$NRS" 2>&1)
         RET=$(printf '%s' "$R" | grep -oE 'ret=[0-9-]+' | tail -1 | cut -d= -f2)
+        alog "INFO bandlock en=$EN lte=${LTE:-all} nr=${NR:-all} ret=${RET:-?}"
         [ "$RET" = 0 ] || jerr mipc_fail
         # 状态持久化到自管 conf (mipc 模式不写树; 树同步由 mobilenetwork 上报被动跟随)
         # v2.60: 整文件覆盖改 cell_set upsert — 原写法冲掉 NM_MODE 与 CELL_i 表(跨功能状态互毁)
@@ -244,6 +252,7 @@ apply_celllock() {
         celllock_forget_env
         . "$CONF"
         N=$(celllock_send_all)
+        alog "INFO celllock op=$OP entries=$N band_en=${BAND_EN:-0}"
         ok_json '"engine":"mipc","cells":'$N',"note":"modem重扫约20-60s"'
         return
     fi
@@ -345,6 +354,7 @@ apply_pin() {
         OUT=$(mipc_wan_cli --at_cmd "$ATCMD" 2>/dev/null)
         printf '%s' "$OUT" | grep -qiE 'error|CME' && jerr pin_fail
         printf '%s' "$OUT" | grep -qi OK || jerr pin_fail
+        alog "INFO pin action=$ACT ok (values redacted)"
         ok_json '"engine":"mipc"'
         return
     fi
@@ -423,6 +433,7 @@ apply_netmode() {
         #   LTE→NR-SA 不自发重选, 重发 nwmode 也不触发, 不重附则新值不生效(2026-10-09 实弹);
         #   CFUN 循环=厂商飞行同款恢复路径, keeper 约 40s 自动重拨。幂等重应用不重附。
         if [ "$OM" != "$M" ] || { [ -n "$EC" ] && [ "$OE" != "$EC" ]; }; then
+            alog "INFO netmode reattach (mode $OM->$M endc $OE->${EC:-keep})"
             ( sleep 2
               mipc_wan_cli --at_cmd "AT+cfun=0" >/dev/null 2>&1
               sleep 8
@@ -430,6 +441,7 @@ apply_netmode() {
             ok_json '"engine":"mipc","erat":"'"$E"'","note":"reattaching"'
             return
         fi
+        alog "INFO netmode mode=$M erat=$E (idempotent, no reattach)"
         ok_json '"engine":"mipc","erat":"'"$E"'"'
         return
     fi
@@ -450,6 +462,7 @@ apply_airplane() {
             R=$(mipc_wan_cli --at_cmd "AT+cfun=1" 2>/dev/null | grep -c OK)
         fi
         [ "$R" -ge 1 ] || jerr at_fail
+        alog "INFO airplane on=$V (dial_keeper will re-dial after OFF)"
         ok_json '"engine":"mipc","note":"OFF后dial_keeper约40s自动重拨"'
         return
     fi
@@ -458,10 +471,13 @@ apply_airplane() {
 }
 net_plmn_scan() {
     # v2.32 (P4.1 完成): ql_nw_network_scan 原生扫描(C 组逆向, 异步回调+0x1288
-    # 结构), mipc_cellular v0.4 封装为同步 JSON 输出。扫描 10-60s。
+    #   结构), mipc_cellular v0.4 封装为同步 JSON 输出。扫描 10-60s。
+    _t0=$(date +%s)
     R=$(/data/gw/mipc_cellular scan 60 2>/dev/null | head -1)
+    _ms=$(( $(date +%s) - _t0 ))
     case "$R" in
-        '"count"'*|'{"count"'*) printf '%s' "$R" ;;
-        *) printf '{"error":"scan_failed","detail":"%s"}' "${R:-tool_missing}" ;;
+        '"count"'*|'{"count"'*) alog "INFO plmn_scan ok ${_ms}s $R"; printf '%s' "$R" ;;
+        *) alog "WARN plmn_scan failed ${_ms}s out=$(printf '%s' "$R" | head -c 120)"
+           printf '{"error":"scan_failed","detail":"%s"}' "${R:-tool_missing}" ;;
     esac
 }

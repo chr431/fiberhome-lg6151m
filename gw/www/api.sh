@@ -1,5 +1,7 @@
 #!/bin/sh
-# api.sh v2.75 (v2.75, 2026-10-17 架构轮: 模块化拆分 — 本文件收敛为 核心(helpers/
+# api.sh v2.76 (v2.76, 2026-10-17 日志加密轮: +请求级日志 /tmp/api.log — 写端点
+#   全记、读端点仅慢请求/错误, 只含端点/方法/耗时/错误码, 不记 body/token/口令;
+#   v2.75, 2026-10-17 架构轮: 模块化拆分 — 本文件收敛为 核心(helpers/
 #   认证/配置助手) + 路由表, 六个域模块按端点懒加载($APID/api_{sys,wifi,lan,agg,
 #   cell,sms}.sh); 每请求只解析所需域(原整文件 ~1550 行全解析); 域历史随域迁入
 #   各模块头注。模块与 api.sh 同目录, v3httpd v2.6 静态面已拒 *.sh 直出(GET 返回
@@ -15,8 +17,24 @@ GWDATA=/data/gw   # v2.12: 基座路径统一到 /data/gw
 APID=$GWDATA/www  # v2.75: 域模块目录(与 api.sh 同目录; 静态面被 v3httpd 拒直出)
 TOKDIR=/tmp/gui_tokens
 
+# ---------- v2.76: 请求级日志 (24h 分析用) ----------
+# 只记端点/方法/耗时/错误码, 绝不记 body/token/口令。写端点全记(低频); GET 仅
+# 慢请求(>=2s)或错误记 — 状态页 2s 轮询不刷屏。本文件日志自轮转 512KB→1000 行。
+API_LOG=/tmp/api.log
+API_T0=$(date +%s)
+API_EP="${1:-?}"
+API_M="${V3_METHOD:-GET}"
+alog() {
+    echo "$(date '+%m-%d %H:%M:%S') $*" >> $API_LOG
+    [ "$(wc -c < $API_LOG 2>/dev/null || echo 0)" -gt 524288 ] && {
+        tail -n 1000 $API_LOG > $API_LOG.tmp && mv $API_LOG.tmp $API_LOG; }
+}
+
 # ---------- tiny helpers ----------
-jerr() { printf '{"error":"%s"}' "$1"; exit 0; }
+jerr() {
+    alog "ERR ep=$API_EP m=$API_M code=$1 ms=$(( $(date +%s) - API_T0 ))"
+    printf '{"error":"%s"}' "$1"; exit 0
+}
 
 urldec() {  # $1 -> stdout decoded (纯awk, busybox可靠)
     printf '%s' "$1" | awk '
@@ -50,7 +68,14 @@ form_kv() {
     urldec "$_raw"
 }
 
-ok_json() { printf '{"ok":true%s}' "${1:+,$1}"; }
+ok_json() {
+    _ms=$(( $(date +%s) - API_T0 ))
+    # v2.76: 写端点全记; 读端点只记慢请求(>=2s) — 保持日志低噪
+    if [ "$API_M" = POST ] || [ "$_ms" -ge 2 ]; then
+        alog "OK ep=$API_EP m=$API_M ms=$_ms"
+    fi
+    printf '{"ok":true%s}' "${1:+,$1}"
+}
 
 esc() { sed 's/\\/\\\\/g;s/"/\\"/g;s/\t/\\t/g;s/\r//g;s/$/\\n/' | tr -d '\n'; }
 

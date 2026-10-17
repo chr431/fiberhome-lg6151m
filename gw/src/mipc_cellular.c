@@ -1,5 +1,9 @@
-/* mipc_cellular.c v0.12 -- 蜂窝 MIPC 直连工具（零 RIL 依赖）
+/* mipc_cellular.c v0.13 -- 蜂窝 MIPC 直连工具（零 RIL 依赖）
  *
+ * v0.13 (2026-10-17 日志加密轮): 结构化诊断日志 /tmp/mipc_cellular.log —
+ *   每次调用至多一行(命令/msgid/端口/响应长度/rc/耗时/解码摘要); 正常调用
+ *   60s 限流, 异常(rc!=0)与慢调用(>=800ms)必记; 256KB 轮转。MIPC_LOG 可改
+ *   路径, MIPC_NOLOG=1 关闭。
  * v0.12 (2026-10-17 RIL 清零轮·终章): 彻底移除 libqlril/ubus 依赖 —
  *   全部读/写路径直连 modem（/dev/ttyCMIPC 裸帧）。ql_ril_service 退役,
  *   本工具不再 dlopen 任何厂商 RIL 客户端库。
@@ -39,8 +43,65 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <poll.h>
+#include <sys/stat.h>
+#include <sys/time.h>
 
 static const unsigned char MIPC_MAGIC[4] = { 0x84, 0x19, 0x54, 0x24 };
+
+/* ---------- v0.13: 结构化诊断日志 ----------
+ * 每次调用至多一行 /tmp/mipc_cellular.log。限流: 正常且 <800ms 的调用每 60s
+ * 至多一行(日志文件 mtime 判); 异常(rc!=0)或慢调用(>=800ms)必记。这样 GUI
+ * 2s 轮询 cells 不会刷爆, 但超时/解码失败/端口占用全部留痕。 */
+static const char *g_logpath = "/tmp/mipc_cellular.log";
+static int g_log_on = 1;
+static char g_cmd[32] = "?";
+static char g_detail[192] = "";
+static unsigned g_first_msgid = 0, g_last_msgid = 0;
+static int g_last_rlen = 0, g_last_rc = 0, g_last_port = -1;
+static long g_last_ms = 0;
+
+static long now_ms(void)
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (long)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+}
+
+static void mlog_init(const char *cmd)
+{
+    const char *p = getenv("MIPC_LOG");
+    if (p && *p) g_logpath = p;
+    if (getenv("MIPC_NOLOG")) g_log_on = 0;
+    snprintf(g_cmd, sizeof g_cmd, "%s", cmd ? cmd : "?");
+}
+
+static void mlog_finish(int rc)
+{
+    if (!g_log_on) return;
+    struct stat st;
+    int have = (stat(g_logpath, &st) == 0);
+    time_t now = time(NULL);
+    int anomaly = (rc != 0) || (g_last_ms >= 800);
+    if (!anomaly && have && now - st.st_mtime < 60) return;
+    char ts[32];
+    struct tm *tm = localtime(&now);
+    strftime(ts, sizeof ts, "%m-%d %H:%M:%S", tm);
+    unsigned prim = g_first_msgid ? g_first_msgid : g_last_msgid;
+    char line[512];
+    snprintf(line, sizeof line,
+             "%s %s msgid=0x%04x last=0x%04x port=%d rlen=%d rc=%d ms=%ld detail=%s\n",
+             ts, g_cmd, prim, g_last_msgid, g_last_port, g_last_rlen, rc, g_last_ms,
+             g_detail[0] ? g_detail : "-");
+    int fd = open(g_logpath, O_WRONLY | O_CREAT | O_APPEND, 0600);
+    if (fd < 0) return;
+    ssize_t w = write(fd, line, strlen(line)); (void)w;
+    close(fd);
+    if (stat(g_logpath, &st) == 0 && st.st_size > 262144) {
+        char old[256];
+        snprintf(old, sizeof old, "%s.1", g_logpath);
+        rename(g_logpath, old);
+    }
+}
 
 static int hex2bin(const char *hex, unsigned char *out, int max)
 {
@@ -81,17 +142,29 @@ static int mipc_xfer(unsigned msgid, const unsigned char *pl, int plen,
                      unsigned char *out, int outmax, int to_ms)
 {
     static const int ports[] = { 11, 12, 8, 7, 6, 5, 4, 3, 0, 14, 13 };
-    int fd = -1;
+    long t0 = now_ms();
+    int fd = -1, used_port = -1;
     for (unsigned i = 0; i < sizeof ports / sizeof ports[0]; i++) {
         char dev[32];
         snprintf(dev, sizeof dev, "/dev/ttyCMIPC%d", ports[i]);
         fd = open(dev, O_RDWR | O_NONBLOCK);
-        if (fd >= 0) break;
+        if (fd >= 0) { used_port = ports[i]; break; }
     }
-    if (fd < 0) return -1;
+    if (fd < 0) {
+        g_last_msgid = msgid; g_last_port = -1; g_last_rlen = 0;
+        g_last_rc = -1; g_last_ms = now_ms() - t0;
+        if (!g_first_msgid) g_first_msgid = msgid;
+        return -1;
+    }
     unsigned char req[16 + 1024];
     int rl = 16 + (plen > 0 ? plen : 0);
-    if (plen > 1024) { close(fd); return -2; }
+    if (plen > 1024) {
+        close(fd);
+        g_last_msgid = msgid; g_last_port = used_port; g_last_rlen = 0;
+        g_last_rc = -2; g_last_ms = now_ms() - t0;
+        if (!g_first_msgid) g_first_msgid = msgid;
+        return -2;
+    }
     memset(req, 0, sizeof req);
     memcpy(req, MIPC_MAGIC, 4);
     req[8] = 0x10; req[9] = 0x00;                       /* type 0x0010 */
@@ -101,7 +174,13 @@ static int mipc_xfer(unsigned msgid, const unsigned char *pl, int plen,
     req[14] = (unsigned char)(plen & 0xff);
     req[15] = (unsigned char)((plen >> 8) & 0xff);
     if (plen > 0) memcpy(req + 16, pl, plen);
-    if (write(fd, req, rl) != rl) { close(fd); return -2; }
+    if (write(fd, req, rl) != rl) {
+        close(fd);
+        g_last_msgid = msgid; g_last_port = used_port; g_last_rlen = 0;
+        g_last_rc = -2; g_last_ms = now_ms() - t0;
+        if (!g_first_msgid) g_first_msgid = msgid;
+        return -2;
+    }
 
     unsigned char buf[16384];
     int have = 0, got = 0;
@@ -138,6 +217,9 @@ static int mipc_xfer(unsigned msgid, const unsigned char *pl, int plen,
         if (pos > 0) { memmove(buf, buf + pos, have - pos); have -= pos; }
     }
     close(fd);
+    g_last_msgid = msgid; g_last_port = used_port; g_last_rlen = got;
+    g_last_rc = got > 0 ? 0 : -3; g_last_ms = now_ms() - t0;
+    if (!g_first_msgid) g_first_msgid = msgid;
     return got > 0 ? got : -3;
 }
 
@@ -245,11 +327,17 @@ static int do_cells(void)
     static unsigned char dpay[16384], bpay[8192];
     static struct cellrec cr[24];
     int dn = mipc_xfer(0x0423, NULL, 0, dpay, sizeof dpay, 2500);
-    if (dn <= 0) { printf("{\"error\":\"direct %d\"}\n", dn); return 3; }
+    if (dn <= 0) {
+        snprintf(g_detail, sizeof g_detail, "direct=%d", dn);
+        printf("{\"error\":\"direct %d\"}\n", dn); return 3;
+    }
     int fd = open("/tmp/cells_direct.bin", O_WRONLY | O_CREAT | O_TRUNC, 0600);
     if (fd >= 0) { ssize_t w = write(fd, dpay, dn); (void)w; close(fd); }
     int k = cells_decode(dpay, dn, cr, 24);
-    if (k <= 0) { printf("{\"error\":\"decode %d\"}\n", k); return 3; }
+    if (k <= 0) {
+        snprintf(g_detail, sizeof g_detail, "decode=%d plen=%d", k, dn);
+        printf("{\"error\":\"decode %d\"}\n", k); return 3;
+    }
     struct cellrec *sv = NULL;
     for (int i = 0; i < k; i++) if (cr[i].serving) { sv = &cr[i]; break; }
     if (!sv) sv = &cr[0];
@@ -275,6 +363,9 @@ static int do_cells(void)
         first = 0;
     }
     printf("],\"n\":%d}\n", k - 1);
+    snprintf(g_detail, sizeof g_detail,
+             "n=%d band=N%u arfcn=%u bw=%s rsrp=%d sinr=%d plmn=%s",
+             k - 1, sv->band, sv->arfcn, bw, sv->rsrp, sv->sinr, sv->plmn);
     return 0;
 }
 
@@ -317,8 +408,12 @@ static int do_setlock(const char *lte, const char *nr, const char *umts)
     int rn = mipc_xfer(0x0433, pl, off, rsp, sizeof rsp, 2500);
     printf("lte[%08x %08x] nr[%08x %08x %08x] umts[%08x]\n",
            lw[0], lw[1], nw[0], nw[1], nw[2], uw[0]);
-    if (rn <= 0) { printf("ret=%d (0x%x)\n", rn, rn); return 3; }
+    if (rn <= 0) {
+        snprintf(g_detail, sizeof g_detail, "setlock lte=%s nr=%s rsp=%d", lte, nr, rn);
+        printf("ret=%d (0x%x)\n", rn, rn); return 3;
+    }
     int ok = rsp_result_ok(rsp, rn);
+    snprintf(g_detail, sizeof g_detail, "setlock lte=%s nr=%s ret=%d", lte, nr, ok ? 0 : -1);
     printf("ret=%d (0x%x)\n", ok ? 0 : -1, ok ? 0 : 0xffffffff);
     return ok ? 0 : 3;
 }
@@ -328,10 +423,15 @@ static int do_endc(int argc, char **argv)
     static unsigned char rsp[2048];
     if (argc >= 3 && !strcmp(argv[2], "get")) {
         int rn = mipc_xfer(0x0451, NULL, 0, rsp, sizeof rsp, 2000);
-        if (rn <= 0) { printf("{\"ret\":%d}\n", rn); return 3; }
+        if (rn <= 0) {
+            snprintf(g_detail, sizeof g_detail, "endc get rsp=%d", rn);
+            printf("{\"ret\":%d}\n", rn); return 3;
+        }
         const unsigned char *v; int len;
         int mode = -1;
         if (tlv_find(rsp, rn, 0x0100, &v, &len) == 0 && len >= 1) mode = v[0];
+        snprintf(g_detail, sizeof g_detail, "endc get raw=%d endc=%d", mode,
+                 mode == 3 ? 1 : mode == 5 ? 2 : mode == 7 ? 3 : -1);
         printf("{\"ret\":0,\"nr_disable_mode\":%d,\"endc\":%d}\n", mode,
                mode == 3 ? 1 : mode == 5 ? 2 : mode == 7 ? 3 : -1);
         return 0;
@@ -343,7 +443,10 @@ static int do_endc(int argc, char **argv)
         unsigned char pl[8];
         int off = tlv_put(pl, 0, 0x0100, &target, 1);
         int rn = mipc_xfer(0x042d, pl, off, rsp, sizeof rsp, 2500);
-        if (rn <= 0) { printf("{\"ret\":%d}\n", rn); return 3; }
+        if (rn <= 0) {
+            snprintf(g_detail, sizeof g_detail, "endc set=%d rsp=%d", target, rn);
+            printf("{\"ret\":%d}\n", rn); return 3;
+        }
         int ok = rsp_result_ok(rsp, rn);
         int rb = -1;
         rn = mipc_xfer(0x0451, NULL, 0, rsp, sizeof rsp, 2000);
@@ -351,6 +454,7 @@ static int do_endc(int argc, char **argv)
             const unsigned char *v; int len;
             if (tlv_find(rsp, rn, 0x0100, &v, &len) == 0 && len >= 1) rb = v[0];
         }
+        snprintf(g_detail, sizeof g_detail, "endc set=%d ret=%d readback=%d", target, ok ? 0 : 3, rb);
         printf("{\"ret\":%d,\"set\":%d,\"readback\":%d}\n", ok ? 0 : 3, target, rb);
         return ok ? 0 : 3;
     }
@@ -379,6 +483,7 @@ static int do_getbands(void)
     memcpy(bi + 2, &nr_band, 2);
     memcpy(bi + 0x25, &cqi, 1);
     memcpy(bi + 0x34, &nr_arfcn, 4);
+    snprintf(g_detail, sizeof g_detail, "getbands cqi=%d band=%u arfcn=%u", cqi, nr_band, nr_arfcn);
     printf("ret=0\n");
     dump(bi, 256);
     return 0;
@@ -395,11 +500,13 @@ static int do_scan(int timeout_s)
         if (tlv_find(rsp, rn, 0x0100, &v, &len) == 0 && len >= 4) {
             unsigned cnt = R32(v);
             if (cnt > 0 && cnt <= 32) {
+                snprintf(g_detail, sizeof g_detail, "scan count=%u rlen=%d", cnt, rn);
                 printf("{\"count\":%u,\"networks\":[]}\n", cnt);
                 return 0;
             }
         }
     }
+    snprintf(g_detail, sizeof g_detail, "scan timeout=%ds rsp=%d", timeout_s, rn);
     printf("{\"error\":\"timeout_%ds\"}\n", timeout_s);
     return 4;
 }
@@ -413,21 +520,23 @@ int main(int argc, char **argv)
              "                scan [timeout_s] | cellraw-direct [msgid [hex]]");
         return 1;
     }
-    if (!strcmp(argv[1], "cells")) return do_cells();
-    if (!strcmp(argv[1], "getbands")) return do_getbands();
-    if (!strcmp(argv[1], "unlock")) return do_setlock("all", "all", "all");
-    if (!strcmp(argv[1], "setlock") && argc >= 3) {
+    mlog_init(argv[1]);
+    int rc = 1;
+    if (!strcmp(argv[1], "cells")) rc = do_cells();
+    else if (!strcmp(argv[1], "getbands")) rc = do_getbands();
+    else if (!strcmp(argv[1], "unlock")) rc = do_setlock("all", "all", "all");
+    else if (!strcmp(argv[1], "setlock") && argc >= 3) {
         const char *lte = "all", *nr = "all", *umts = "all";
         for (int i = 2; i < argc; i++) {
             if (!strncmp(argv[i], "lte=", 4)) lte = argv[i] + 4;
             else if (!strncmp(argv[i], "nr=", 3)) nr = argv[i] + 3;
             else if (!strncmp(argv[i], "umts=", 5)) umts = argv[i] + 5;
         }
-        return do_setlock(lte, nr, umts);
+        rc = do_setlock(lte, nr, umts);
     }
-    if (!strcmp(argv[1], "endc")) return do_endc(argc, argv);
-    if (!strcmp(argv[1], "scan")) return do_scan(argc >= 3 ? atoi(argv[2]) : 60);
-    if (!strcmp(argv[1], "cellraw-direct")) {
+    else if (!strcmp(argv[1], "endc")) rc = do_endc(argc, argv);
+    else if (!strcmp(argv[1], "scan")) rc = do_scan(argc >= 3 ? atoi(argv[2]) : 60);
+    else if (!strcmp(argv[1], "cellraw-direct")) {
         static unsigned char dpay[16384], req[512];
         int reqlen = 0;
         unsigned msgid = 0x0423;
@@ -435,11 +544,20 @@ int main(int argc, char **argv)
         if (msgid < 0x0100) msgid |= 0x0400;      /* 兼容旧的 8 位写法(0x23→0x0423) */
         if (argc >= 4) reqlen = hex2bin(argv[3], req, sizeof req);
         int dn = mipc_xfer(msgid, reqlen > 0 ? req : NULL, reqlen, dpay, sizeof dpay, 2000);
-        if (dn <= 0) { printf("directerr %d\n", dn); return 4; }
-        for (int i = 0; i < dn; i++) printf("%02x", dpay[i]);
-        printf("\n");
-        return 0;
+        if (dn <= 0) {
+            snprintf(g_detail, sizeof g_detail, "cellraw msgid=0x%04x rsp=%d", msgid, dn);
+            printf("directerr %d\n", dn); rc = 4;
+        } else {
+            for (int i = 0; i < dn; i++) printf("%02x", dpay[i]);
+            printf("\n");
+            snprintf(g_detail, sizeof g_detail, "cellraw msgid=0x%04x len=%d", msgid, dn);
+            rc = 0;
+        }
     }
-    puts("unknown command");
-    return 1;
+    else {
+        snprintf(g_detail, sizeof g_detail, "unknown command");
+        puts("unknown command");
+    }
+    mlog_finish(rc);
+    return rc;
 }

@@ -1,5 +1,8 @@
 #!/bin/sh
-# ccmni_up.sh v1.0 — MIPC 数据呼叫 + ccmni 接口落地 (netagent-lite, 自研替代)
+# ccmni_up.sh v1.1 — MIPC 数据呼叫 + ccmni 接口落地 (netagent-lite, 自研替代)
+# v1.1 (2026-10-17 日志加密轮): 全程阶段留痕 — 入口/旧地址清单、deact rc+耗时、
+#   act rc+耗时+关键响应、flush 清单、逐条 add/up rc、最终 exit code。拨号失败时
+#   不再只有一行 "dial FAIL", 而是能定位到 deact/act/解析/落地哪一段。
 # usage: ccmni_up.sh <apn>
 #   deact+act(与 dial_keeper v1.0 起实弹验证的同款配方) → 解析响应 → 落地。
 #
@@ -17,8 +20,9 @@
 # 退出码: 0=落地成功(打印 ifname); 2=拨号失败/超时; 3=响应解析失败; 4=落地失败
 LOG=/tmp/ccmni_up.log
 MTO=15
+MAXL=240
 log() { echo "$(date '+%m-%d %H:%M:%S') $*" >> $LOG; }
-[ -s $LOG ] && [ "$(wc -l < $LOG)" -gt 120 ] && { tail -60 $LOG > $LOG.tmp && mv $LOG.tmp $LOG; }
+[ -s $LOG ] && [ "$(wc -l < $LOG 2>/dev/null || echo 0)" -gt $MAXL ] && { tail -n $((MAXL/2)) $LOG > $LOG.tmp && mv $LOG.tmp $LOG; }
 
 # 硬超时封装(dial_keeper mto 同款; 设备无 timeout 命令)
 mto() {
@@ -39,25 +43,39 @@ jf() {  # $1=字段名 -> 从 $RESP 提取(字符串/数值均带引号容忍)
 
 APN=$1
 [ -n "$APN" ] || { echo "usage: ccmni_up.sh <apn>" >&2; exit 1; }
+T_ALL=$(date +%s)
+OLD=$(ip -o -4 addr show 2>/dev/null | grep ccmni | awk '{print $2":"$4}' | tr '\n' ',')
+log "EVT start apn=$APN old=[${OLD%,}]"
+T0=$(date +%s)
 mto --data_call_deact_apn "$APN" >/dev/null 2>&1
+DRC=$?
+log "EVT deact apn=$APN rc=$DRC elapsed=$(( $(date +%s) - T0 ))s"
+T0=$(date +%s)
 RESP=$(mto --data_call_act_type \
     "{\"apn\":\"$APN\",\"apn_type\":0,\"ip_type\":3,\"roaming_type\":3,\"auth_type\":0,\"username\":\"\",\"password\":\"\",\"bearer_bitmask\":\"0xfffdffff\",\"mtu\":1400,\"mode\":1}" \
     2>/dev/null)
-case $? in 124) log "dial TIMEOUT apn=$APN"; exit 2 ;; esac
+ARC=$?
+_el=$(( $(date +%s) - T0 ))
+log "EVT act apn=$APN rc=$ARC elapsed=${_el}s resp=$(printf '%s' "$RESP" | tr '\n' ' ' | head -c 200)"
+case $ARC in 124) log "dial TIMEOUT apn=$APN"; exit 2 ;; esac
 printf '%s' "$RESP" | grep -q '"result": *0' || {
-    log "dial FAIL apn=$APN resp=$(printf '%s' "$RESP" | head -c 120)"
+    log "dial FAIL apn=$APN resp=$(printf '%s' "$RESP" | head -c 160)"
     exit 2
 }
 IF=$(jf ifname); V4=$(jf v4_addr); M4=$(jf v4_mask)
 V6=$(jf v6_addr); P6=$(jf v6_prefix); MU=$(jf v4_mtu)
-[ -n "$IF" ] && [ -n "$V4" ] || { log "parse FAIL: ifname/v4_addr missing: $(printf '%s' "$RESP" | head -c 120)"; exit 3; }
+[ -n "$IF" ] && [ -n "$V4" ] || { log "parse FAIL: ifname/v4_addr missing: $(printf '%s' "$RESP" | head -c 160)"; exit 3; }
+log "EVT act-ok if=$IF v4=$V4/${M4:-32} v6=${V6:-none}/${P6:-64} mtu=${MU:-1400}"
 # 落地: flush 僵尸 IP(v4+v6 一并) → 新地址 → mtu → up。
 # /32 兜底: ccmni 是点对点形态, 出向走 dev 路由, 掩码缺席不阻断(NAT 只用源地址)。
+FLUSHED=$(ip -o addr show dev $IF 2>/dev/null | awk '{print $3":"$4}' | tr '\n' ',')
 ip addr flush dev $IF
-ip addr add "$V4/${M4:-32}" dev $IF 2>/dev/null
-[ -n "$V6" ] && ip -6 addr add "$V6/${P6:-64}" dev $IF 2>/dev/null
-ip link set $IF mtu "${MU:-1400}" up 2>/dev/null
+log "EVT land $IF flush=[${FLUSHED%,}]"
+ip addr add "$V4/${M4:-32}" dev $IF 2>/dev/null; R4=$?
+R6=0; [ -n "$V6" ] && { ip -6 addr add "$V6/${P6:-64}" dev $IF 2>/dev/null; R6=$?; }
+ip link set $IF mtu "${MU:-1400}" up 2>/dev/null; RUP=$?
+log "EVT land $IF add_v4_rc=$R4 add_v6_rc=$R6 link_up_rc=$RUP"
 ip -o -4 addr show $IF 2>/dev/null | grep -q inet || { log "land FAIL: no v4 on $IF after add"; exit 4; }
-log "up $IF v4=$V4/${M4:-32} v6=${V6:-none} mtu=${MU:-1400}"
+log "EVT up $IF v4=$V4/${M4:-32} v6=${V6:-none} mtu=${MU:-1400} total=$(( $(date +%s) - T_ALL ))s"
 echo "$IF"
 exit 0

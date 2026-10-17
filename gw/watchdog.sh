@@ -1,5 +1,9 @@
 #!/bin/sh
-# watchdog.sh v1.14 -- on-device continuous invariant monitor.
+# watchdog.sh v1.15 -- on-device continuous invariant monitor.
+# v1.15 (2026-10-17 日志加密轮): 失败检查附 rc/输出摘要; 每 2 环循(60s)一行
+#   TICK 全量状态; 每 10 环循(5min)一行 HEALTH(load/mem//data//tmp/进程/僵尸/
+#   conntrack/蜂窝统计双口径); 自愈重启记录原因与旧 PID; cells 查询失败附
+#   rc/输出长度; qdisc Sent 缺失(冷启动)显式留痕。
 # v1.14 (RIL 清零轮): cell 查询恢复提示改直连语义(ql_ril_service 已退役)。
 # v1.13 (RIL 收尾轮): cell 查询面恢复消息修正 — ql_netd 已退役, 恢复只需
 #   restart ql_ril_service。
@@ -42,7 +46,8 @@ STATE=/tmp/watchdog_state
 #   误导数据面; WAN 灯(292/5g_evb_voice)写权归 led_mgr 独占, 本脚本不再碰。
 ALED=/sys/class/gpio/gpio473/value
 CYCLE=30
-MAX_LOG=200
+MAX_LOG=500
+CYC_TICK=0; QNODISC=""
 
 log() { echo "$(date '+%m-%d %H:%M:%S') $*" >> $LOG; }
 
@@ -95,11 +100,14 @@ set_state() {  # $1=key $2=0(ok)|1(fail) $3=label
 
 check() {  # $1=key $3=label, $2=check command
     KEY=$1; CMD=$2; LABEL=$3
-    if eval "$CMD" >/dev/null 2>&1; then
+    _out=$(eval "$CMD" 2>&1); _rc=$?
+    if [ $_rc -eq 0 ]; then
         set_state "$KEY" 0 "$LABEL"
     else
         set_state "$KEY" 1 "$LABEL"
         FAILS=$((FAILS+1))
+        # v1.15: 失败证据 — 命令输出/rc 一并留痕(此前只有 label, 排障需重跑)
+        log "FAIL detail $KEY rc=$_rc out=$(printf '%s' "$_out" | tr '\n' ' ' | head -c 160)"
     fi
 }
 
@@ -114,6 +122,9 @@ run_cycle() {
     check wan_agg   "pgrep -f wan_agg.sh"            "aggregation supervisor"
     check wan_eth   "pgrep -f wan_eth.sh"            "wired-WAN iface keeper"
     check fan_mgr   "pgrep -f fan_mgr.sh"            "fan manager"
+    # v1.15: 自研工具在位性 — 缺失时相关功能会静默降级(ccmni 落地/蜂窝直连)
+    check mipc_tool "[ -x /data/gw/mipc_cellular ]"  "cellular direct tool"
+    check ccmni_up  "[ -x /data/gw/ccmni_up.sh ]"    "ccmni landing tool"
 
     # ---- data plane invariants ----
     # v1.4: 模式无关 — weight 模式有 sport 分界, 优先/仅模式为单路 MARK 规则
@@ -158,6 +169,7 @@ run_cycle() {
         fi
         set_state keeper 1 "dial keeper"
         FAILS=$((FAILS+1))
+        log "EVT restart dial_keeper (alive=$_kalive stale=$_dstale old_pid=${_kp:-none} hb=${_dhb:-none} up=${_dup})"
         # 只杀锁指向的实例(cmdline 复核) — 不打模式匹配, 防误伤旁观进程
         if [ -n "$_kp" ] && kill -0 "$_kp" 2>/dev/null \
            && grep -qa dial_keeper /proc/$_kp/cmdline 2>/dev/null; then
@@ -173,6 +185,7 @@ run_cycle() {
     else
         set_state logk 1 "log keeper"
         FAILS=$((FAILS+1))
+        log "EVT restart log_keeper (no live instance)"
         nohup sh /data/gw/log_keeper.sh >/dev/null 2>&1 &
     fi
     # led_mgr: 显示器守护(v1.7 自愈拉) — 静默死亡=指示灯无声谎报(10-14 事故
@@ -182,6 +195,7 @@ run_cycle() {
     else
         set_state led_mgr 1 "LED manager"
         FAILS=$((FAILS+1))
+        log "EVT restart led_mgr (no live instance; lock=$(cat /tmp/led_mgr.lock 2>/dev/null || echo none))"
         nohup sh /data/gw/led_mgr.sh >/dev/null 2>&1 &
         logger -t watchdog "restarted led_mgr"
     fi
@@ -192,6 +206,7 @@ run_cycle() {
     else
         set_state wan_eth 1 "wired-WAN iface keeper"
         FAILS=$((FAILS+1))
+        log "EVT restart wan_eth (no live instance)"
         nohup sh /data/gw/wan_eth.sh >/dev/null 2>&1 &
         logger -t watchdog "restarted wan_eth"
     fi
@@ -211,6 +226,7 @@ run_cycle() {
     else
         set_state atcid 1 "atcid daemon"
         FAILS=$((FAILS+1))
+        log "EVT restart atcid (no live instance)"
         /usr/bin/atcid >/var/atcid.log 2>&1 &
     fi
     # CFUN 探测同时充当通道活性探针; airplane(CFUN:4)时跳过注册态断言
@@ -276,7 +292,12 @@ run_cycle() {
     if [ -n "$CIF" ]; then
         CN=$(cat /sys/class/net/$CIF/statistics/tx_bytes 2>/dev/null || echo 0)
         CQ=$(tc -s qdisc show dev $CIF 2>/dev/null | awk '/Sent/{print $2; exit}')
-        [ -n "$CQ" ] || CQ=$CN
+        if [ -z "$CQ" ]; then
+            CQ=$CN
+            [ "$QNODISC" = 1 ] || { log "WARN qdisc Sent missing on $CIF (cold boot/no qdisc) -> netdev fallback"; QNODISC=1; }
+        else
+            [ "$QNODISC" = 1 ] && { log "EVT qdisc Sent restored on $CIF"; QNODISC=""; }
+        fi
         if [ -r /tmp/cellstat_prev ]; then
             . /tmp/cellstat_prev
             DN=$((CN - PN)); [ $DN -lt 0 ] && DN=$CN
@@ -300,8 +321,27 @@ run_cycle() {
     #   代价高于收益; 可见化 + 文档化手工恢复是当前最稳做法。每 10 环循(~5min)探一次。
     CQ_TICK=$(( ${CQ_TICK:-0} + 1 ))
     if [ $((CQ_TICK % 10)) -eq 1 ]; then
-        /data/gw/mipc_cellular cells 2>/dev/null | grep -q '"serving"' || \
-            log "WARN  cell query path dead (cells 无 serving 字段) — 直连 MIPC 查询失败(数据面可能正常); 恢复(v1.14: RIL 守护已全部退役): 检查 /dev/ttyCMIPC 端口占用与 modem 状态, 见 docs/FINDINGS §27/§29"
+        _co=$(/data/gw/mipc_cellular cells 2>&1); _crc=$?
+        printf '%s' "$_co" | grep -q '"serving"' || \
+            log "WARN  cell query path dead (rc=$_crc len=${#_co} out=$(printf '%s' "$_co" | tr '\n' ' ' | head -c 100)) — 直连 MIPC 查询失败(数据面可能正常); 恢复: 检查 /dev/ttyCMIPC 端口占用与 modem 状态, 见 docs/FINDINGS §27/§29"
+    fi
+
+    # ---- v1.15: periodic summaries (24h 分析主干) ----
+    CYC_TICK=$((CYC_TICK + 1))
+    if [ $((CYC_TICK % 2)) -eq 0 ] || [ "$FAILS" -gt 0 ]; then
+        log "TICK fails=$FAILS up=$(cut -d. -f1 /proc/uptime)s state=[$(tr '\n' ' ' < $STATE 2>/dev/null)]"
+    fi
+    if [ $((CYC_TICK % 10)) -eq 0 ]; then
+        _load=$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null)
+        _mf=$(awk '/^MemFree:/{print $2}' /proc/meminfo 2>/dev/null)
+        _ma=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo 2>/dev/null)
+        _df=$(df -k /data 2>/dev/null | tail -1 | awk '{print $4}')
+        _tf=$(df -k /tmp 2>/dev/null | tail -1 | awk '{print $4}')
+        _np=$(ls /proc 2>/dev/null | grep -c '^[0-9]')
+        _nz=$(ps 2>/dev/null | awk '$4 ~ /^Z/{n++} END{print n+0}')
+        _ct=$(cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null)
+        log "HEALTH up=$(cut -d. -f1 /proc/uptime)s load=$_load memfree=${_mf:-?}KB memavail=${_ma:-?}KB data_free=${_df:-?}KB tmp_free=${_tf:-?}KB procs=$_np zombies=$_nz conntrack=${_ct:-n/a} cell_if=${CIF:-none} netdev=${CN:-0} qdisc=${CQ:-0}"
+        [ "${_df:-0}" -lt 102400 ] 2>/dev/null && log "WARN /data free low: ${_df}KB (<100MB)"
     fi
 
     # ---- visual alert ----
@@ -332,8 +372,8 @@ run_cycle() {
 
 # ---- main ----
 touch $LOG $STATE
-log "===== watchdog v1.14 start (alert LED 5G orange; WAN LED owned by led_mgr; +wan_eth keeper +cell stats divergence +cell query liveness) ====="
-logger -t watchdog "watchdog v1.14 start"
+log "===== watchdog v1.15 start (alert LED 5G orange; WAN LED owned by led_mgr; +wan_eth keeper +cell stats divergence +cell query liveness; fine-log TICK/HEALTH) ====="
+logger -t watchdog "watchdog v1.15 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

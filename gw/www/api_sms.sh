@@ -1,4 +1,6 @@
-# api_sms.sh v1.0 — 短信域模块 (被 api.sh 按端点懒加载; 依赖核心的 helpers)
+# api_sms.sh v1.2 — 短信域模块 (被 api.sh 按端点懒加载; 依赖核心的 helpers)
+# v1.2 (2026-10-17 日志加密轮): 发送成败/长度/模组原始响应写 /tmp/api.log
+#   (号码只留末 4 位, 内容不落盘)。
 # v1.0 (2026-10-17 架构轮): 自 api.sh v2.74 拆出 — sms/sms_send 端点族。
 # 域历史(自 api.sh 头注迁入):
 # v2.53(2026-10-07 实弹): CMGL 全线弃用 — ql_ril 的 CMGL 未读列表路径段错误
@@ -104,7 +106,12 @@ apply_sms_send() {
         R=$(mipc_wan_cli --at_cmd "AT+EMGS=\"$NUM\",\"$TXT\"" 2>&1) ;;
     esac
     mipc_wan_cli --at_cmd "AT+CMGF=0" >/dev/null 2>&1   # 厂商同款收尾(回 PDU 模式)
-    printf '%s' "$R" | grep -qi 'ERROR' && jerr send_fail
-    printf '%s' "$R" | grep -qi 'OK' || jerr send_fail
+    _ntail=$(printf '%s' "$NUM" | tail -c 4)
+    if printf '%s' "$R" | grep -qi 'ERROR' || ! printf '%s' "$R" | grep -qi 'OK'; then
+        # 失败留原始响应(截断) — 模组错误码是唯一线索; 号码只留末4位
+        alog "WARN sms send failed num=***${_ntail} len=${#TXT} resp=$(printf '%s' "$R" | tr '\n' ' ' | head -c 160)"
+        jerr send_fail
+    fi
+    alog "INFO sms send ok num=***${_ntail} len=${#TXT} route=at"
     ok_json '"via":"at-emgs"'
 }

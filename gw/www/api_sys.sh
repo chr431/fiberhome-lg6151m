@@ -1,4 +1,6 @@
-# api_sys.sh v1.0 — 系统/状态域模块 (被 api.sh 按端点懒加载; 依赖核心的 helpers)
+# api_sys.sh v1.3 — 系统/状态域模块 (被 api.sh 按端点懒加载; 依赖核心的 helpers)
+# v1.3 (2026-10-17 日志加密轮): traffic 选口回退/qdisc 缺失留痕(api.log)。
+# v1.2: /api/traffic 增 if 字段; v1.1: 探活实证选口。
 # v1.0 (2026-10-17 架构轮): 自 api.sh v2.74 拆出 — status/clients/sys/logs/sse/fan/
 #   led/ntp/reboot_sched/traffic 族端点。域历史(自 api.sh 头注迁入):
 # v2.73(2026-10-16 宵断实弹): status 的 home.dp/wan5g.dp 改消费 wan_agg 发布的
@@ -28,12 +30,16 @@ get_traffic() {
             ping -4 -I $_c -c1 -W1 -s1 $_t 2>/dev/null | grep -q ttl && { IF=$_c; break 2; }
         done
     done
-    [ -n "$IF" ] || IF=$(ip -o -4 addr show 2>/dev/null | grep -m1 'ccmni.*inet' | awk '{print $2}')
+    if [ -z "$IF" ]; then
+        IF=$(ip -o -4 addr show 2>/dev/null | grep -m1 'ccmni.*inet' | awk '{print $2}')
+        [ -n "$IF" ] && alog "WARN traffic iface fallback=$IF (no probe-passing ccmni)"
+    fi
     RX=0; TX=0; ERX=0; ETX=0
     if [ -n "$IF" ]; then
         RX=$(cat /sys/class/net/$IF/statistics/rx_bytes 2>/dev/null)
         TX=$(tc -s qdisc show dev $IF 2>/dev/null | awk '/Sent/{print $2; exit}')
-        [ -n "$TX" ] || TX=$(cat /sys/class/net/$IF/statistics/tx_bytes 2>/dev/null)
+        [ -n "$TX" ] || { TX=$(cat /sys/class/net/$IF/statistics/tx_bytes 2>/dev/null); \
+            alog "WARN traffic qdisc Sent missing on $IF -> netdev tx"; }
     fi
     ERX=$(cat /sys/class/net/eth0/statistics/rx_bytes 2>/dev/null)
     ETX=$(cat /sys/class/net/eth0/statistics/tx_bytes 2>/dev/null)

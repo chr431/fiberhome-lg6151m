@@ -844,3 +844,40 @@ ql_ril_service / mipc_submonitor）**全部退场**，在场原厂蜂窝件只�
 **selftest v2.35**：`t_ril_single` 改"四件全退役"（进程+procd 服务面零残留）、
 `t_ril_thin` 纳入 ril_service、新增 `t_cell_ops_direct`（写路径直连）。
 <!--CLM:CLM-RIL-ZERO-->
+
+## 30. 日志加密轮：细粒度取证 + 24h 持久化（2026-10-17）
+
+**动机**：RIL 清零后自研组件成为唯一路径，但日志仍以"状态迁移"为主 ——
+TICK 级输入（探活逐目标、ccmni 清单、authd 年龄、租约耗时、拨号 rc）没有留痕，
+事故只能靠"最终状态不对"倒推。且 `log_keeper` 对 `/tmp/*.log` 是 **tail 32K
+覆盖快照**：加密后的日志会在数分钟内被覆盖，24h 分析不可行。
+
+**两级设计**：
+
+1. **本文件自轮转**：每个守护保留最近 240–600 行（约 1–2 小时高频段），
+   `/tmp` 不被写爆；`log_keeper` 负责长期历史。
+2. **增量持久化（log_keeper v1.3）**：`/tmp/*.log` 以锚行定位，只把新增行追加到
+   `/data/gw/logs/tmp/<name>`；每文件 1MB 上限，超限轮转 `.1`（单代）。本地轮转
+   导致锚行消失时写 `-- resync --` 标记 + tail 120 重同步（重复段有显式分界）。
+   非日志状态文件（`*.out`/`wifi_autoch`/`watchdog_state`/`dial_keeper.hb`）仍是
+   覆盖快照（要当前态，不要历史）。上一 boot 整体转存 `tmp.prev` 的语义不变。
+
+**新增取证点（按组件）**：
+
+| 组件 | 新增行 | 回答的问题 |
+|---|---|---|
+| wan_agg v3.2 | 每 10 环循 TICK（s/ns/d/u/authd 年龄/w2 ready/cw/prim/mode/slp）、探活逐目标结果、硬截止触发、ccmni 清单变化、authd/W2_READY 边沿、主路写失败 | 为什么转移/为什么没转移；僵尸口何时出现 |
+| wan_agg_lib v1.2 | `REPAIR`：每条被外力蒸发的 fwmark/低 8 位/护盾规则补装 + rc | 外部写方活跃度与规则稳定性 |
+| wan_eth v1.1 | 租约尝试/结果/耗时、carrier/IP/gw/RA gw 边沿、NAT/FORWARD/表200 的 REPAIR、每 60s TICK | 家宽侧静默劣化（租约失败/规则被冲） |
+| ccmni_up v1.1 | 入口旧地址清单、deact/act rc+耗时+响应、flush 清单、逐条 add/up rc、总耗时 | 拨号失败到底卡在哪一段；cid 轮换窗口 |
+| dial_keeper v1.5 | 每 60s TICK（has_ip/cell_alive/wan_alive 原文+年龄/down/backoff/APN/cci）、僵尸 IP 边沿、modem 未就绪原因、飞行切换、ccmni_up rc+输出 | 僵尸 IP 何时被识别；重拨为何没发生 |
+| rc_netfh v3.10 | 每相位 `PHASE t+Ns`、settle 每 10s 的 ccmni 清单、route/NAT REPAIR、fw_apply rc、总耗时 | 开机链路是没起来还是起来后被拆 |
+| watchdog v1.15 | 失败检查 rc+输出摘要、每 60s TICK 全量状态、每 5min HEALTH（load/mem//data//tmp/进程/僵尸/conntrack/双口径流量）、自愈重启原因与旧 PID | 资源泄漏、僵尸进程、静默自愈 |
+| led_mgr v2.4 | 每次外部写导致的 `DRIFT gpio 旧->应为`、状态变化附 ccmni/wan_alive 原文 | 灯不符实际的外部扰动来源 |
+| api.sh v2.76 + 域模块 | `/tmp/api.log`：写端点全记、读端点仅慢/错误；端点/方法/耗时/错误码；蜂窝/短信/聚合动作（凭证与内容脱敏） | GUI 操作与模组实际响应是否一致 |
+| mipc_cellular v0.13 | `/tmp/mipc_cellular.log`：命令/msgid/端口/响应长度/rc/耗时/解码摘要；正常 60s 限流，异常与慢调用必记，256KB 轮转 | MIPC 层超时/端口占用/解码失败 |
+| wifi_autoch v1.1 | `# scan/choose` 注释行（扫描规模、候选、评分） | 选道依据与 IDC 安全集 |
+
+**日志量预算**：wan_agg ≈2 行/30s、watchdog ≈1 行/60s + HEALTH 1 行/5min、
+其余按事件；合计约 1–2MB/天，`/data` 2GB 可用，单文件 1MB×2 代足够覆盖 24h。
+<!--CLM:CLM-LOGGING-FINE-->

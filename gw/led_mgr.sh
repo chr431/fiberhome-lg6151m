@@ -1,5 +1,8 @@
 #!/bin/sh
-# led_mgr.sh v2.3 — 原厂风格指示灯状态守护 (绝对电平驱动 + 自愈 + 全灯覆盖)
+# led_mgr.sh v2.4 — 原厂风格指示灯状态守护 (绝对电平驱动 + 自愈 + 全灯覆盖)
+# v2.4 (2026-10-17 日志加密轮): 每次外部写导致的电平漂移都记 DRIFT(旧值->应为值),
+#   状态变化时附 ccmni 清单/载波/wan_alive 原文与年龄; 本文件日志轮转(400 行)。
+#   灯是"显示反映实际"的仪器 — 漂移频率直接反映外部写方(内核 trigger/watchdog)活跃度。
 # v2.3 (2026-10-17): 单实例 PID 锁 — 开机 rc19 与 watchdog 自愈可并发各起一份,
 #   两个实例同时写灯虽值相同(绝对电平)但日志/告警重复且浪费; 同 dial_keeper
 #   教训(CLM-KEEPER-LOCK): pgrep 判据不如 PID 锁+cmdline 复核可靠。
@@ -41,7 +44,10 @@
 #   = 谎报"5G 在"。现: 绿=ccmni 有 IPv4; 其余一律全灭; 未注册/无承载/模组
 #   离线三态只写日志。
 LOG=/tmp/led_mgr.log
+MAXL=400
 llog() { echo "$(date '+%m-%d %H:%M:%S') $*" >> $LOG; }
+log_rot() { [ -s $LOG ] && [ "$(wc -l < $LOG 2>/dev/null || echo 0)" -gt $MAXL ] && \
+    { tail -n $((MAXL/2)) $LOG > $LOG.tmp && mv $LOG.tmp $LOG; }; }
 B=$(cd "$(dirname "$0")" && pwd)   # /data/gw
 SYS=/sys/class/gpio
 WANLED=/sys/class/leds/5g_evb_voice
@@ -55,7 +61,8 @@ G4_NOPIN_LOGGED=""
 #   这是自愈的核心: 不比较状态串, 只比较"应为值 vs 当前实况"。
 set_led() {
     g=$1; v=$2; d=$SYS/gpio$1; bad=""
-    if [ -r "$d/value" ] && [ "$(cat $d/value 2>/dev/null)" = "$v" ]; then
+    _old=$(cat $d/value 2>/dev/null)
+    if [ -r "$d/value" ] && [ "$_old" = "$v" ]; then
         return 0
     fi
     [ -d "$d" ] || echo $g > $SYS/export 2>>$LOG || bad="export"
@@ -63,14 +70,22 @@ set_led() {
         echo out > $d/direction 2>>$LOG || bad="direction"
         echo $v > $d/value 2>>$LOG || bad="value"
     fi
-    [ -n "$bad" ] && llog "gpio$g $bad FAIL"
+    if [ -n "$bad" ]; then
+        llog "gpio$g $bad FAIL (want=$v old=${_old:-?})"
+    else
+        # v2.4: 外部写方(内核 trigger/watchdog 抢写)造成的漂移 = 可观测事件
+        llog "DRIFT gpio$g ${_old:-?}->$v"
+    fi
 }
 set_wan() {
     if [ -d $WANLED ]; then
-        if [ -r $WANLED/brightness ] && [ "$(cat $WANLED/brightness 2>/dev/null)" = "$1" ]; then
+        _old=$(cat $WANLED/brightness 2>/dev/null)
+        if [ -r $WANLED/brightness ] && [ "$_old" = "$1" ]; then
             return 0
         fi
-        echo $1 > $WANLED/brightness 2>>$LOG || llog "wan brightness FAIL"
+        echo $1 > $WANLED/brightness 2>>$LOG; _rc=$?
+        if [ $_rc -eq 0 ]; then llog "DRIFT wan_led ${_old:-?}->$1"
+        else llog "wan brightness FAIL (want=$1 old=${_old:-?})"; fi
     else
         set_led $WAN $1
     fi
@@ -166,11 +181,13 @@ if [ -n "$_lp" ] && kill -0 "$_lp" 2>/dev/null    && grep -qa led_mgr /proc/$_lp
 fi
 echo $$ > $LOCK
 
-llog "===== led_mgr v2.3 start (absolute-level drive + self-heal + 2s poll; pid-lock) ====="
+llog "===== led_mgr v2.4 start (absolute-level drive + self-heal + 2s poll; pid-lock; pid=$$) ====="
 BCN_LAST=""   # v1.6: 固件信标事件计数(RE实证三条权威标志)
 ST=""         # 仅用于日志: 状态串变化才写日志(灯写入已不依赖它)
 POLL=${LED_POLL:-2}
+LCYC=0
 while :; do
+    LCYC=$((LCYC+1)); [ $((LCYC % 60)) -eq 0 ] && log_rot
     # v1.3: 夜间模式($B/led_mode.conf=1) — 全灭; 电源灯归bootloader不管
     # v1.6: 配置统一 — defaults+settings 叠加(回退旧led_mode.conf)
     [ -r $B/defaults.conf ] && . $B/defaults.conf
@@ -191,7 +208,12 @@ while :; do
     NS="w$WIFI c$C5 b$BB p$BBP"
     apply_state "$NS" 1
     if [ "$NS" != "$ST" ]; then
-        llog "state: $NS 5g=$(cell_sub) wan_led=$BB (carrier=$BBP)"
+        # v2.4: 状态变化附原始输入 — 灯判据争议时可直接对照现场
+        _cinv=$(ip -o -4 addr show 2>/dev/null | grep ccmni | awk '{print $2":"$4}' | tr '\n' ',')
+        _wa=$(cat /tmp/wan_alive 2>/dev/null)
+        _wt=$(printf '%s' "$_wa" | sed -n 's/.*ts=\([0-9]*\).*/\1/p')
+        _wage=-1; [ -n "$_wt" ] && _wage=$(( $(date +%s) - _wt ))
+        llog "state: $NS 5g=$(cell_sub) wan_led=$BB (carrier=$BBP) ccmni=[${_cinv%,}] wan_alive=[${_wa:-none}] age=${_wage}s"
         ST=$NS
     fi
     # v1.6: 信标看门狗 — 驱动固件权威事件增量触发 no_bcn 重装(与wifi_up F2同原语)

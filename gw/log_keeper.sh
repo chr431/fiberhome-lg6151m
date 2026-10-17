@@ -1,7 +1,14 @@
 #!/bin/sh
-# log_keeper.sh v1.2 -- 日志持久化守护（日志改善专项轮; v1.2: 上一 boot 的 /tmp 快照
-#   转存 logs/tmp.prev — v1.1"变化才写"会让新 boot 的守护日志在 +90s 内覆盖事故现场
-#   (10-14 模组 EE 事故: dial_keeper/watchdog 现场因此丢失); 心跳文件入快照清单。
+# log_keeper.sh v1.3 -- 日志持久化守护（日志改善专项轮）
+#   v1.3 (2026-10-17 日志加密轮): /tmp/*.log 由"tail 32K 覆盖快照"改为**增量追加**
+#   (锚行定位; 本文件被本地轮转/截断 → resync 标记 + tail 120 重同步)。此前
+#   /data/gw/logs/tmp 只保留每个日志的最后 32K, 加密后的 TICK/EVT 会被迅速覆盖,
+#   24h 分析不可行。现每文件独立 1MB 上限, 超限轮转 .1(单代), 上一 boot 整体
+#   转存 tmp.prev 的语义不变。非 .log 状态文件(*.out/wifi_autoch/watchdog_state/
+#   dial_keeper.hb)仍用覆盖快照(它们要的是当前态, 不是历史)。
+#   v1.2: 上一 boot 的 /tmp 快照转存 logs/tmp.prev — v1.1"变化才写"会让新 boot 的
+#   守护日志在 +90s 内覆盖事故现场(10-14 模组 EE 事故: dial_keeper/watchdog 现场
+#   因此丢失); 心跳文件入快照清单。
 #   v1.1: 轮转后重写 boot 上下文 — selftest 实弹抓获轮转后 BOOT 分隔丢失）
 # 痛点：/tmp 日志重启即失（信道取证丢失）；logread 环被刷爆（ql_wifi_sample 实测
 #   18 秒深）；dmesg 被蜂窝噪声淹没；日志散落二十余处无统一现场。
@@ -26,7 +33,7 @@ delta() { # $1=ring file $2=last-anchor
         hold { B[++n] = $0 }
         END { if (hold) for (i = 1; i <= n; i++) print B[i] }' "$1"
 }
-append_cap() { # stdin → $1 镜像, 单轮限流 512K, 容量轮转 $2
+append_cap() { # stdin → $1 镜像, 单轮限流 512K, 容量轮转 $2; $3=noboot 跳过 BOOT 重写
     tail -c 524288 >> "$1"
     SZ=$(wc -c < "$1" 2>/dev/null)
     if [ "${SZ:-0}" -gt "$2" ]; then
@@ -34,10 +41,26 @@ append_cap() { # stdin → $1 镜像, 单轮限流 512K, 容量轮转 $2
         : > "$1"
         # v1.1: 轮转后重写 boot 上下文 — 否则新生代无 BOOT 分隔行(取证分界丢失;
         #   selftest 护栏实弹抓获: syslog 4MB 轮转后 boot_marks=0)
-        echo "-- rotated ($SZ B → .1), boot context re-marked --" >> "$1"
-        bootmark
+        echo "-- rotated ($SZ B → .1) --" >> "$1"
+        [ "$3" = noboot ] || bootmark
         lk "rotate $1 (${SZ}B)"
     fi
+}
+# v1.3: 增量追加一个 /tmp 日志 → logs/tmp/<name>(锚行定位, 本地轮转即重同步)
+STREAM_CAP=1048576
+stream() { # $1=/tmp/xxx.log
+    f=$1; [ -s "$f" ] || return 0
+    b=$(basename "$f"); dst=$DIR/tmp/$b; anchor=$DIR/.last.$b
+    LAST=$(cat "$anchor" 2>/dev/null)
+    if [ -n "$LAST" ] && grep -Fqx "$LAST" "$f" 2>/dev/null; then
+        NEW=$(delta "$f" "$LAST")
+        [ -n "$NEW" ] && printf '%s\n' "$NEW" | append_cap "$dst" $STREAM_CAP noboot
+    else
+        { echo "-- resync $b $(date '+%F %T') (anchor missing: local rotate/truncate) --"; \
+          tail -n 120 "$f"; } | append_cap "$dst" $STREAM_CAP noboot
+        lk "stream resync $b"
+    fi
+    tail -n 1 "$f" > "$anchor"
 }
 bootmark() {
     B="===== BOOT $(date '+%F %T %z') up=$(cut -d. -f1 /proc/uptime)s slot=$(tr ' ' '\n' < /proc/cmdline | sed -n 's/^bootslot=//p') kern=$(uname -r) ====="
@@ -59,6 +82,8 @@ esac
 if [ "$_rot" = 1 ]; then
     [ -d $DIR/tmp ] && { rm -rf $DIR/tmp.prev; mv $DIR/tmp $DIR/tmp.prev; }
     mkdir -p $DIR/tmp
+    rm -f $DIR/.last.*   # v1.3: 锚点属于上一 boot 的 /tmp 文件, 必须失效
+    lk "new boot: tmp -> tmp.prev, anchors reset"
 fi
 echo "${U0:-0}" > $DIR/.snap_up
 lk "start"
@@ -109,13 +134,22 @@ while :; do
         tail -n 1 /tmp/lk_ring > $DIR/.dmesg.last
     fi
 
-    # -- /tmp 快照(变化才写) --
-    for f in /tmp/*.log /tmp/*.out /tmp/wifi_autoch /tmp/watchdog_state /tmp/dial_keeper.hb; do
+    # -- /tmp 日志增量追加(v1.3: 24h 历史; 每文件 1MB → .1) --
+    for f in /tmp/*.log; do stream "$f"; done
+    # -- 非日志状态快照(变化才写; 它们要的是当前态不是历史) --
+    for f in /tmp/*.out /tmp/wifi_autoch /tmp/watchdog_state /tmp/dial_keeper.hb; do
         [ -s "$f" ] || continue
         b=$(basename "$f")
         tail -c 32768 "$f" > /tmp/lk_snap
         cmp -s /tmp/lk_snap $DIR/tmp/$b || { mv /tmp/lk_snap $DIR/tmp/$b; }
     done
+    # -- 每 10 轮(5min)落一行汇总: 持久化规模可观测 --
+    CYC=$(( ${CYC:-0} + 1 ))
+    if [ $((CYC % 10)) -eq 0 ]; then
+        _nf=$(ls $DIR/tmp/*.log 2>/dev/null | wc -l)
+        _nb=$(cat $DIR/tmp/*.log 2>/dev/null | wc -c)
+        lk "stream summary: files=$_nf bytes=$_nb"
+    fi
 
     # -- 每次开机一份诊断包(+180s, 只做一次) --
     if [ -z "$DIAG_DONE" ] && [ "$U" -ge 180 ]; then

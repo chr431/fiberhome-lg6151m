@@ -11,6 +11,9 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
+v2.35 (RIL 清零轮·终章): t_ril_single 改"RIL 守护全退役"(四件进程+procd 服务
+  面零残留) + t_ril_thin 纳入 ql_ril_service + 新增 t_cell_ops_direct(写路径
+  直连: endc get/cells 无 fallback + setlock/unlock 结构护栏)。
 v2.34 (cells 直连轮): +t_cells_direct(直连解码护栏: 直连预取在位 + 无 fallback
   + JSON 形状完整 — mipc_cellular v0.10, 0x24 TLV 解码)。
 v2.33 (RIL 收尾轮): t_ril_single 改"保留件单实例"(仅 ql_ril_service, 含 procd
@@ -845,7 +848,7 @@ category("cellular")
 #   数据面 (ccmni/DNS) + 控制面 (AT/mipc) + 翻译层 (树/自管conf) + GUI 层
 
 
-@test("RIL 保留件单实例 (ql_ril_service)")
+@test("RIL 守护全退役 (ql_ril_service/netd/submonitor/netagent)")
 def t_ril_single():
     # v2.30 (2026-10-17 实弹发现): rc_netfh 开机"清场重拉"致 mtk_netagent/
     #   ql_netd/ql_ril_service 各存活两套(rc.d S22/S85 + rc_netfh 各一套) —
@@ -855,19 +858,20 @@ def t_ril_single():
     #   且 rc_netfh 与 S22/S85 并发起跑); rc_netfh v3.6 终版 = 收编制(等 rc.d
     #   套就绪只补缺席)。本护栏断言四件各恰 1 实例。
     #   (pidof 按 comm 匹配, 远端包装 shell comm="sh" 无自匹配问题。)
-    # v2.33 (RIL 收尾轮): 名单只剩 ql_ril_service(拔管实验唯一不可约依赖);
-    #   ql_netd/mipc_submonitor 退役断言归 t_ril_thin。procd 服务面在位 =
-    #   respawn 保护仍在(静默死亡形态的兜底)。
+    # v2.35 (RIL 清零轮·终章): 读路径(cells/getbands)+写路径(setlock/endc/scan/
+    #   短信)已全部直连 MIPC(mipc_cellular v0.11), ql_ril_service 与其余 RIL
+    #   守护全部退役。断言: 四件进程零残留 + procd 服务面零残留。
     bad = []
-    c = dev("pidof ql_ril_service | wc -w").strip()
-    if c != "1":
-        bad.append(f"ql_ril_service x{c or '0'}")
-    svc = dev("ubus call service list 2>/dev/null | grep -c '\"ql_ril_service\"'").strip()
-    if svc in ("", "0"):
-        bad.append("procd-svc-absent")
-    ok = not bad
-    record(t_ril_single._test_name, "cellular", ok,
-           f"x1+respawn" if ok else "; ".join(bad))
+    for n, svc in (("ql_ril_service", "ql_ril_service"), ("ql_netd", "ql_netd"),
+                   ("mipc_submonitor", "mipc_submonitor.init"), ("mtk_netagent", "mtk_netagent")):
+        c = dev(f"pidof {n} | wc -w").strip()
+        if c != "0":
+            bad.append(f"{n}x{c}")
+        s = dev(f"ubus call service list 2>/dev/null | grep -c '\"{svc}\"'").strip()
+        if s not in ("", "0"):
+            bad.append(f"{svc}-svc")
+    record(t_ril_single._test_name, "cellular", not bad,
+           "all retired (proc=0 svc=0)" if not bad else "; ".join(bad))
 
 
 @test("RIL 瘦身终态 (ql_netd/mipc_submonitor 退役)")
@@ -879,7 +883,8 @@ def t_ril_thin():
     #   ql_nw 路径唯一依赖 — 拔之 cells 恒返 -2147024889)。
     # 断言: ① 两件进程+procd 服务面双缺席; ② cells 查询活(保留件功能性)。
     bad = []
-    for n, svc in (("ql_netd", "ql_netd"), ("mipc_submonitor", "mipc_submonitor.init")):
+    for n, svc in (("ql_ril_service", "ql_ril_service"), ("ql_netd", "ql_netd"),
+                   ("mipc_submonitor", "mipc_submonitor.init")):
         c = dev(f"pidof {n} | wc -w").strip()
         s = dev(f"ubus call service list 2>/dev/null | grep -c '\"{svc}\"'").strip()
         if c != "0":
@@ -911,6 +916,23 @@ def t_cells_direct():
     record(t_cells_direct._test_name, "cellular", ok,
            f"bin={bin_ok} fallback={'no' if 'fallback' not in err else 'YES'} n={n.group(1) if n else '?'}"
            if ok else f"bin={bin_ok} err={err[:40]} out={out[:40]}")
+
+
+@test("蜂窝写路径直连 (endc/setlock/unlock)")
+def t_cell_ops_direct():
+    # v2.35 (RIL 清零轮): 写路径 setlock 0x33 / endc get 0x51 / endc set 0x2D 已
+    #   直连(线上格式抓包实证, 位映射 n-1/n-33/n-65 修正旧 off-by-one)。
+    #   断言(只读语义): ① endc get 返回 ret=0 且含 nr_disable_mode; ② cells 无
+    #   fallback; ③ unlock 幂等成功(ret=0)。
+    eg = dev("/data/gw/mipc_cellular endc get 2>/dev/null").strip()
+    cells = dev("/data/gw/mipc_cellular cells 2>/tmp/ce.err | head -c 40").strip()
+    err = dev("cat /tmp/ce.err 2>/dev/null").strip()
+    ul = dev("/data/gw/mipc_cellular unlock 2>&1 | grep -c 'ret=0'").strip()
+    ok = ('"ret":0' in eg and 'nr_disable_mode' in eg
+          and '"serving"' in cells and 'fallback' not in err
+          and ul not in ("", "0"))
+    record(t_cell_ops_direct._test_name, "cellular", ok,
+           f"endc={eg[:34]} unlock={ul}" if ok else f"endc={eg[:30]} cells={cells[:24]} ul={ul}")
 
 
 @test("mtk_netagent 退役 (ccmni_up 接管落地)")

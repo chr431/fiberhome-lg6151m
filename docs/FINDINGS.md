@@ -804,3 +804,43 @@ tag 0x0100/len 1/val 02 选 NR）。此前抓的 0x31 实为 get_band_mode 的�
 同族）——写路径迁移的请求格式顺带到手。实弹修正：0x0109 值内偏移存在 ±2
 漂移，解码器改整个值内 ASCII 扫描（对布局漂移鲁棒）。
 <!--CLM:CLM-CELLS-DIRECT-->
+
+## 29. RIL 清零终章：ql_ril_service 退役，全部读/写路径直连（2026-10-17）
+
+**收官**：`ql_ril_service` 退役。至此 RIL 侧四个原厂件（mtk_netagent / ql_netd /
+ql_ril_service / mipc_submonitor）**全部退场**，在场原厂蜂窝件只剩 ccci 三件
+（modem 生命线）、thermal_core（温控）、atcid 对（AT 通道）。
+
+**迁移矩阵（守护死亡态逐项实证）**：
+
+| 路径 | 旧实现 | 新实现 | 线上证据 |
+|---|---|---|---|
+| cells | libqlril→ubus→RIL | 0x0423→0x0424 TLV 解码 | §28 反汇编+样本 |
+| getbands | libqlril | 0x044f ×2, tag 0x0109 | §11 |
+| setlock/unlock | libqlril→168B | 0x0433, TLV 位图 | 抓包+锁 NR41 实证 |
+| endc get/set | libqlril | 0x0451 / 0x042d | 抓包+读回 |
+| scan | libqlril 异步 | 0x0409（同超时语义） | 与厂商同态 |
+| 短信发送 | libqlril→AT+EMGS | mipc_wan_cli --at_cmd AT+EMGS | 反汇编 §12.5 + 实弹 CMGS 接受 |
+| 短信读取 | AT+CMGR | 不变（atcid） | — |
+| 拨号/重建 | mipc_wan_cli 直连 | 不变（本就独立） | 守护死亡态 DIAL OK |
+
+**三个实现层面的硬教训**：
+
+1. **msgid 是 u16**：帧偏移 10 是 msgid 低字节、11 是高字节（0x0423/0x0605），
+   旧实现把 byte11 写死 0x04 —— 只够 0x04xx 族。
+2. **TLV 步进 = (4+len+7)&~7**（不是 4+align(len)）：误算导致 0x0100 len1 之后
+   全盘错位（endc/-1、bw/?）——就是本节修掉的那个 bug。
+3. **大响应分帧**：cells 响应 3336B 分两次 read 到达（3000+352）；"帧未收齐"
+   必须保留 pos 等下一次 read，越界钳位曾把半帧丢掉（-3 超时的真因）。
+   另修：脏帧长度导致 memmove 负长度 → SIGSEGV 的边界缺陷。
+4. **AT+EMGS 无负向测试余地**：对 "000" 也返回 +CMGS——modem 不校验号码有效性，
+   "拿非法号码试一下"会真的投递一条短信。测试纪律：AT 发送路径只能靠读回/
+   CMGF 状态与厂商同类路径等价性论证，不做"假发送"。
+
+**mipc_cellular v0.12**：彻底移除 libqlril（readelf NEEDED 为空），二进制零动态
+依赖；写路径位映射按权威 VENDOR_MAP 修正（w0=n-1 / w1=n-33 / w2=n-65）——旧
+168B 路径 base=34 存在 off-by-one（band≥34 全部错一位，N41 实际锁到 N40）。
+
+**selftest v2.35**：`t_ril_single` 改"四件全退役"（进程+procd 服务面零残留）、
+`t_ril_thin` 纳入 ril_service、新增 `t_cell_ops_direct`（写路径直连）。
+<!--CLM:CLM-RIL-ZERO-->

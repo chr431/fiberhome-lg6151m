@@ -1,126 +1,46 @@
-/* mipc_cellular.c v0.8 -- 蜂窝 MIPC 直连工具 (ROADMAP P1 引擎底层)
+/* mipc_cellular.c v0.12 -- 蜂窝 MIPC 直连工具（零 RIL 依赖）
  *
- * 通道 (2026-10-05 实证): 本进程 dlopen libqlril.so 闭包(RTLD_GLOBAL 预载
- * libql_uinf 等 -- libqlril 不在 DT_NEEDED 声明它, 宿主供给模式) -> ql_nw_init(0)
- * -> ql_nw_set/get_band_mode -> ubus ril -> ql_ril_service -> MIPC TLV -> modem。
- * 全程不经 fhrom mobilenetwork / cfgmgr。
+ * v0.12 (2026-10-17 RIL 清零轮·终章): 彻底移除 libqlril/ubus 依赖 —
+ *   全部读/写路径直连 modem（/dev/ttyCMIPC 裸帧）。ql_ril_service 退役,
+ *   本工具不再 dlopen 任何厂商 RIL 客户端库。
  *
- * v0.8 新增 endc (组网模式 SA/NSA/SA+NSA) — 证据链 (2026-10-08 逆向官方 RP103):
- *   1) 官方 GUI networkSet.js: 独立"组网模式"ENDC 下拉 SA=1/NSA=2/SA+NSA=3,
- *      NetworkMode==2(仅5G) 时强制 SA; 经树键 ...NetworkSettings.ENDC 下发。
- *   2) mobilenetwork 逆向 (0x40a8bc fh_set_endc): 不经 AT, 调
- *      ql_nw_set_nr_disable_mode(3|5|7) — SA→3, NSA→5, SA+NSA→7, 且 1/2 先 restore 7;
- *      同二进制确认 ql_nw_set_nr_disable_mode 全库仅此一处调用。
- *   3) libqlril.so 导出对照: ql_nw_set_nr_disable_mode@0xa72c (入参指针→u32)
- *      + ql_nw_get_nr_disable_mode@0xd13c (读回) 均在 (readelf 实证)。
- *   本工具与厂商走同一 libqlril 通道, 序列逐条照抄 fh_set_endc。
+ * 帧格式（mipcap 抓 ql_ril_service + 裸帧实验双向实证, _re C_cells_decode §3/§12）:
+ *   84 19 54 24 | seq(4B=0) | type(u16=0x0010) | msgid(u16le) | txid(u16le) | len(u16le) | payload
+ *   响应 msgid = 请求+1、txid 回显、payload 为 TLV 流（8 字节对齐）。
+ *   常用 msgid（RIL ubus id ↔ MIPC ↔ 线上）:
+ *     0x0423 cells(get_cell_info)   → 0x0424  载荷: TLV 0x010a 计数 + 0x810b NR 数组
+ *     0x044f get_band_info          → 0x0450  tag 0x0109: CQI/band/pci/arfcn/bw
+ *     0x0433 set_band_mode(锁频)    → 0x0434  TLV 0x0101 UMTS/0x0102 LTE/0x0103 NR 位图
+ *     0x0451 get_nr_disable_mode    → 0x0452  tag 0x0100 len1
+ *     0x042d set_nr_disable_mode    → 0x042e  tag 0x0100 len1 (3=SA 5=NSA 7=双)
+ *     0x0409 network_scan           → 0x040a  空请求; 结果异步(txid=0xffff)
+ *     0x0003 AT 命令通道            → 0x0004  TLV 0x8100 = AT 文本
+ *   短信发送走 AT 路线（与厂商 ql_sms_send_msg 同族）: AT+EMGS="号码","内容"，
+ *   中文先 AT+CSCS="UCS2" 传 UCS2 hex；不经 0x0605 PDU（避免自写 PDU 编码器）。
  *
- * 168B 请求结构 (capstone 逆向 mobilenetwork 0x4108d4-0x410fa8 + 实弹验证):
- *   u32@0x00 mode (3=应用频段锁)
- *   u32@0x04 umts_band_mode 位图 (band n -> bit n-1, n<=32)
- *   u32@0x08 LTE 位图 w0: bands 1-32  -> bit n-1
- *   u32@0x0C LTE 位图 w1: bands 34-65 -> bit n-33
- *   u64@0x28 NR 位图 w0+w1: bands 1-32 (bit n-1) + bands 34-65 (bit n-33)
- *   u32@0x30 NR 位图 w2: bands 66-96  -> bit n-65   (N41->@0x2C bit8, N79->@0x30 bit14)
- *   其余字段保持 0。掩码全 1 = 不限制 (解锁)。
- * 实弹记录: 锁 NR{41,79} ret=0 树小区列表即时只剩 N41/N79; 全 1 解锁 ret=0;
- * 每次变更 modem 重扫 ~20-60s, PDN 由 mobilenetwork 重拨(过渡期)。
- *
- * v0.9 (2026-10-17 RIL 清零轮): 原始 MIPC 直连传输层 — 不经 ql_ril_service。
- *   帧格式(mipcap LD_PRELOAD 抓 ql_ril_service + 裸帧实验双向实证):
- *     req: 84 19 54 24 | seq(4B=0) | 10 00 | msgid | 04 | txid(u16) | len(u16) | payload
- *     rsp: 同构, msgid= req+1, txid 回显, len= payload 长度(随邻区数变化)
- *   cells 实证: msgid 0x23(空请求) -> 0x24(TLV 载荷, plmn/pci/arfcn/邻区全在)。
- *   端口: /dev/ttyCMIPC0..14 单开者语义(O_RDWR 一次开, 同 fd 读写); 1/2/9/10
- *   被占(atcid/thermal/ril), 13 曾被 kill -9 中途读楔住 — 探测式选空闲口。
- *   ql_ril_service 死亡时直连路径照常工作(实弹判决实验 2026-10-17)。
- *   do_cells: 直连优先, libqlril 回退(过渡期双保险)。
+ * TLV 对齐: 值后补齐到 8 字节（(4+len+7)&~7; __re §12 修正 §3.1 的"4 字节"）。
+ * 端口: ttyCMIPC0..14 单开者语义（O_RDWR 一次开同 fd 读写）; 被占口探测跳过;
+ *   kill -9 中途读会把端口楔死（实测），正常 close 无此问题。
  *
  * 用法:
- *   mipc_cellular getbands
- *   mipc_cellular setlock lte=1,3,38,40,41 nr=41,79 [umts=all|1,8]
- *   mipc_cellular unlock
- *   mipc_cellular setbands <hex336>   (原始 blob, 调试用)
- *   mipc_cellular endc get | endc set <1|2|3> | endc raw <n>
+ *   mipc_cellular cells                 服务小区+邻区(cells JSON)
+ *   mipc_cellular cellraw-direct [msgid [hexpayload]]   原始载荷(调试)
+ *   mipc_cellular getbands              频段信息(0x80 口径 dump)
+ *   mipc_cellular setlock lte=<list|all> nr=<list|all> [umts=<list|all>]
+ *   mipc_cellular unlock                = setlock all/all/all
+ *   mipc_cellular endc get | endc set <1=SA|2=NSA|3=SA+NSA>
+ *   mipc_cellular scan [timeout_s]      PLMN 扫描（当前 modem 态下与厂商同超时语义）
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include <dlfcn.h>
 #include <time.h>
 #include <fcntl.h>
-#include <unistd.h>   /* v0.7 引入: smswatch 落盘用; usleep 由 musl 头提供
-                         (原 static 自声明因头文件缺席而存在, 今删) */
+#include <unistd.h>
+#include <poll.h>
 
-static int (*p_get_band_info)(void *);
-static int (*p_set_band_mode)(const void *);
-static int (*p_nw_init)(int);
-static int (*p_sms_init)(int);
-static int (*p_sms_send_msg)(const void *);
-static int (*p_nw_set_pdu_recv_cb)(void (*)(const void *));
-static int (*p_sms_get_store_number)(void);
-static int (*p_nw_scan)(void *, void (*)(int, void *));
-static int (*p_scan_busy)(void);
-static int (*p_get_cell_info)(void *);
-/* v0.8: 组网模式 (ENDC) — 官方 mobilenetwork 同款 API (libqlril.so 导出) */
-static int (*p_set_nr_disable_mode)(const int *);
-static int (*p_get_nr_disable_mode)(int *);
-
-static int load_lib(const char *path)
-{
-    /* libqlril 不在 DT_NEEDED 里声明 libql_uinf (宿主供给模式, mobilenetwork
-     * 同款): 必须先以 RTLD_GLOBAL 装载依赖闭包, 再装 libqlril。 */
-    static const char *pre[] = {
-        "libql_qlog.so", "libmipc_msg.so", "libubox.so.20230523",
-        "libubus.so.20230605", "libuci.so", "libql_uinf.so", NULL,
-    };
-    for (int i = 0; pre[i]; i++) {
-        char full[128];
-        void *ph;
-        snprintf(full, sizeof full, "/usr/lib/%s", pre[i]);
-        ph = dlopen(full, RTLD_NOW | RTLD_GLOBAL);
-        if (!ph) {
-            snprintf(full, sizeof full, "/lib/%s", pre[i]);
-            ph = dlopen(full, RTLD_NOW | RTLD_GLOBAL);
-        }
-        if (!ph) fprintf(stderr, "preload %s: %s\n", pre[i], dlerror());
-    }
-    void *h = dlopen(path, RTLD_NOW);
-    if (!h) {
-        fprintf(stderr, "dlopen(%s): %s\n", path, dlerror());
-        return -1;
-    }
-    p_get_band_info = (int (*)(void *))dlsym(h, "ql_nw_get_band_info");
-    p_set_band_mode = (int (*)(const void *))dlsym(h, "ql_nw_set_band_mode");
-    p_nw_init = (int (*)(int))dlsym(h, "ql_nw_init");
-    p_sms_init = (int (*)(int))dlsym(h, "ql_sms_init");
-    p_sms_send_msg = (int (*)(const void *))dlsym(h, "ql_sms_send_msg");
-    /* v0.7: 接收消费者(可选装载, smswatch 用) — 缺失不算致命 */
-    p_nw_set_pdu_recv_cb = (int (*)(void (*)(const void *)))dlsym(h, "ql_sms_set_pdu_recv_cb");
-    p_sms_get_store_number = (int (*)(void))dlsym(h, "ql_sms_get_store_message_number");
-    p_nw_scan = (int (*)(void *, void (*)(int, void *)))dlsym(h, "ql_nw_network_scan");
-    p_scan_busy = (int (*)(void))dlsym(h, "ql_nw_net_scan_async_f");
-    p_get_cell_info = (int (*)(void *))dlsym(h, "ql_nw_get_cell_info");
-    /* v0.8: 组网模式读写 (可选装载 — 老库无此导出时 endc 子命令单独报错) */
-    p_set_nr_disable_mode = (int (*)(const int *))dlsym(h, "ql_nw_set_nr_disable_mode");
-    p_get_nr_disable_mode = (int (*)(int *))dlsym(h, "ql_nw_get_nr_disable_mode");
-    if (!p_get_band_info || !p_set_band_mode || !p_nw_init ||
-        !p_sms_init || !p_sms_send_msg || !p_nw_scan) {
-        fprintf(stderr, "dlsym: %s\n", dlerror());
-        return -1;
-    }
-    return 0;
-}
-
-static void dump(const unsigned char *p, int n)
-{
-    for (int i = 0; i < n; i++) {
-        printf("%02x", p[i]);
-        if ((i + 1) % 32 == 0) printf("\n");
-    }
-    if (n % 32) printf("\n");
-}
+static const unsigned char MIPC_MAGIC[4] = { 0x84, 0x19, 0x54, 0x24 };
 
 static int hex2bin(const char *hex, unsigned char *out, int max)
 {
@@ -134,70 +54,15 @@ static int hex2bin(const char *hex, unsigned char *out, int max)
     return n;
 }
 
-/* 频段列表 -> 位图字。返回写入的 32 位字数 (0/1/2), 超范围频段打警告。 */
-static uint32_t g_warn;
-static int bands_to_words(const char *spec, uint32_t *w0, uint32_t *w1, uint32_t *w2,
-                          int base0, int base1, int base2)
+static void dump(const unsigned char *p, int n)
 {
-    /* base0/1/2 = 三段起始频段号 (LTE: 1,34,66+ 不存在; NR: 1,34,66) */
-    *w0 = *w1 = *w2 = 0;
-    if (!strcmp(spec, "all")) {
-        *w0 = *w1 = 0xFFFFFFFF;
-        if (base2 > 0) *w2 = 0xFFFFFFFF;
-        return 3;
+    for (int i = 0; i < n; i++) {
+        printf("%02x", p[i]);
+        if ((i + 1) % 32 == 0) printf("\n");
     }
-    char buf[256];
-    snprintf(buf, sizeof buf, "%s", spec);
-    for (char *tok = strtok(buf, ","); tok; tok = strtok(NULL, ",")) {
-        int b = atoi(tok);
-        if (!b) continue;
-        if (b >= base0 && b < base1) *w0 |= 1u << (b - base0);
-        else if (b >= base1 && b < base2) *w1 |= 1u << (b - base1);
-        else if (base2 > 0 && b >= base2 && b <= base2 + 31) *w2 |= 1u << (b - base2);
-        else { fprintf(stderr, "band %d 超出可编码范围\n", b); g_warn++; }
-    }
-    return 3;
+    if (n % 32) printf("\n");
 }
 
-static void build_and_send(const char *lte, const char *nr, const char *umts)
-{
-    unsigned char b[0xA8];
-    uint32_t lw0, lw1, lw2, nw0, nw1, nw2, uw0, uw1, uw2;
-    memset(b, 0, sizeof b);
-    bands_to_words(lte, &lw0, &lw1, &lw2, 1, 34, 66);  /* LTE w1=34-65; v0.2 原 base2=0 使
-        [34,0) 恒假 = 38/39/40/41(国内主力)永远编不进(2026-10-07 实弹); ≥66 无 w2 字段, 落 w2 即弃 */
-    bands_to_words(nr,  &nw0, &nw1, &nw2, 1, 34, 65);   /* w2: n-65 (厂商 0x410f68: sub 0x41) */
-    bands_to_words(umts, &uw0, &uw1, &uw2, 1, 34, 0);
-    /* umts 仅 u32@4 单字 */
-    uint32_t mode = 3;
-    memcpy(b + 0x00, &mode, 4);
-    memcpy(b + 0x04, &uw0, 4);
-    memcpy(b + 0x08, &lw0, 4);
-    memcpy(b + 0x0C, &lw1, 4);
-    memcpy(b + 0x28, &nw0, 4);
-    memcpy(b + 0x2C, &nw1, 4);
-    memcpy(b + 0x30, &nw2, 4);
-    printf("lte[%08x %08x] nr[%08x %08x %08x] umts[%08x]\n",
-           lw0, lw1, nw0, nw1, nw2, uw0);
-    int r = p_set_band_mode(b);
-    printf("ret=%d (0x%x)\n", r, r);
-    if (r) printf("NOTE: modem 重扫约 20-60s, PDN 由上层重拨\n");
-}
-
-/* 服务小区 + CA 小区列表 (D 组逆向 2026-10-06, 写树顺序三角互证):
- * ql_nw_get_band_info(0x80): lte_band u16@0, nr_band u16@2, nr_dl bw[8]@0x14,
- *   serving NR-ARFCN u32@0x34, nr CQI u8@0x25
- * ql_nw_get_cell_info(0x8C8): rat u32@0(0x12=NR SA), nr_avail u8@0x500,
- *   nr_cnt u8@0x501, PLMN char[8]@0x510, TAC u32@0x518, PCI u32@0x51C,
- *   cells[]@0x528 stride 0x30 x20: rsrp s32@0, rsrq s32@4, sinr s32@8,
- *   pci u32@0x24, arfcn u32@0x28; cells[0]=服务小区(与服务块同址互证)
- * band 由 arfcn 现算(与 mobilenetwork fh_convert_arfcn_to_band 同思路)。 */
-struct bi { unsigned char b[0x80]; };
-struct ci { unsigned char b[0x8C8]; };
-/* 布局(cellraw 实测 2026-10-06, 与树值/直读三角互证):
- *   PLMN char@0x510, TAC u32@0x518, PCI(服务) u32@0x51C,
- *   cells 基址 0x520, stride 0x30: arfcn u32@+0x00, rsrp s32@+0x08,
- *   sinr s32@+0x0C, PCI u32@+0x2C; cells[0]=服务小区; count=nr_cnt u8@0x501 */
 static uint32_t R32(const unsigned char *p) { uint32_t v; memcpy(&v, p, 4); return v; }
 
 static const char *nr_band_of(uint32_t a)
@@ -211,14 +76,11 @@ static const char *nr_band_of(uint32_t a)
     return "?";
 }
 
-/* ---- v0.9: 原始 MIPC 直连传输 (帧格式见头注) ---- */
-#include <poll.h>
-static const unsigned char MIPC_MAGIC[4] = { 0x84, 0x19, 0x54, 0x24 };
-
-static int mipc_xfer(unsigned char msgid, const unsigned char *pl, int plen,
+/* ---------- MIPC 传输（16 位 msgid） ---------- */
+static int mipc_xfer(unsigned msgid, const unsigned char *pl, int plen,
                      unsigned char *out, int outmax, int to_ms)
 {
-    static const int ports[] = { 11, 12, 8, 7, 6, 5, 4, 3, 0 };
+    static const int ports[] = { 11, 12, 8, 7, 6, 5, 4, 3, 0, 14, 13 };
     int fd = -1;
     for (unsigned i = 0; i < sizeof ports / sizeof ports[0]; i++) {
         char dev[32];
@@ -227,26 +89,25 @@ static int mipc_xfer(unsigned char msgid, const unsigned char *pl, int plen,
         if (fd >= 0) break;
     }
     if (fd < 0) return -1;
-    unsigned char req[16 + 256];
+    unsigned char req[16 + 1024];
     int rl = 16 + (plen > 0 ? plen : 0);
+    if (plen > 1024) { close(fd); return -2; }
     memset(req, 0, sizeof req);
     memcpy(req, MIPC_MAGIC, 4);
-    req[8] = 0x10; req[9] = 0x00;
-    req[10] = msgid; req[11] = 0x04;
-    req[12] = 0x01; req[13] = 0x00;                 /* txid = 1 */
+    req[8] = 0x10; req[9] = 0x00;                       /* type 0x0010 */
+    req[10] = (unsigned char)(msgid & 0xff);            /* msgid u16le */
+    req[11] = (unsigned char)((msgid >> 8) & 0xff);
+    req[12] = 0x01; req[13] = 0x00;                     /* txid = 1 */
     req[14] = (unsigned char)(plen & 0xff);
     req[15] = (unsigned char)((plen >> 8) & 0xff);
     if (plen > 0) memcpy(req + 16, pl, plen);
     if (write(fd, req, rl) != rl) { close(fd); return -2; }
 
-    /* 读到完整帧: 按 magic 扫描, 匹配 txid=1 且 msgid=msgid+1。
-     * v0.10: TLV 流可跨帧(实测 528B 帧 + 0x810b 声明 1840 = 截在帧边界,
-     * 见 _re C_cells_decode §5) — 同 msgid 后续帧在静默窗内到达则拼接 body,
-     * 直到超时或缓冲满。 */
     unsigned char buf[16384];
     int have = 0, got = 0;
     struct pollfd pf = { fd, POLLIN, 0 };
     int waited = 0, idle = 0;
+    unsigned want = (msgid + 1) & 0xffff;
     while (waited < to_ms && idle < 300 && got < outmax - 16) {
         int pr = poll(&pf, 1, 100);
         waited += 100;
@@ -254,42 +115,79 @@ static int mipc_xfer(unsigned char msgid, const unsigned char *pl, int plen,
         idle = 0;
         int n = read(fd, buf + have, sizeof buf - have);
         if (n > 0) have += n;
+        if (getenv("MIPC_DEBUG")) fprintf(stderr, "read=%d have=%d\n", n, have);
         int pos = 0;
         while (pos + 16 <= have) {
             if (memcmp(buf + pos, MIPC_MAGIC, 4)) { pos++; continue; }
-            int rsp_id = buf[pos + 10];
+            unsigned rsp_id = (unsigned)buf[pos + 10] | ((unsigned)buf[pos + 11] << 8);
             unsigned txid = (unsigned)buf[pos + 12] | ((unsigned)buf[pos + 13] << 8);
             unsigned rlen = (unsigned)buf[pos + 14] | ((unsigned)buf[pos + 15] << 8);
-            if (rsp_id == (int)((msgid + 1) & 0xff) &&
-                (txid == 1 || got > 0)) {            /* 首帧验 txid; 续帧同 msgid 即收 */
+            if (getenv("MIPC_DEBUG")) fprintf(stderr, "hdr@%d id=0x%04x tx=0x%04x len=%u\n", pos, rsp_id, txid, rlen);
+            if (rlen > 8192) { pos++; continue; }   /* 脏帧: 重同步(防越界) */
+            int need = pos + 16 + (int)rlen;
+            if (need > have) break;                  /* 帧未收齐: 保留 pos 等下次 read */
+            if (rsp_id == want && (txid == 1 || got > 0)) {
                 int take = (int)rlen;
                 if (got + take > outmax) take = outmax - got;
-                if (pos + 16 + take <= have) {
-                    memcpy(out + got, buf + pos + 16, take);
-                    got += take;
-                }
+                memcpy(out + got, buf + pos + 16, take);
+                got += take;
             }
-            pos += 16 + (int)rlen;
+            pos = need;
         }
-        /* 压缩已消费区 */
+        if (pos > have) pos = have;                 /* 防御: 步进越界不得传负长度给 memmove */
         if (pos > 0) { memmove(buf, buf + pos, have - pos); have -= pos; }
     }
     close(fd);
     return got > 0 ? got : -3;
 }
 
-/* v0.10: 0x24 TLV 载荷解码(_re C_cells_decode 反汇编还原, 3 对新鲜样本逐字段验证)。
- * TLV 层: [tag u16le][len u16le][value]; 0x010a=NR 计数, 0x810b=NR 数组(元素 0xB8)。
- * NR 记录: state u8@0(1=服务), plmn char[7]@1, cid@8, ta@0xC, pci@0x10, arfcn@0x14,
- *   tac@0x18(0x0FFFFFFF=无), rsrp@0x1C(raw-156), sinr@0x20(raw/2-43),
- *   rsrq@0x24(raw/2-23), band u32@0x38(邻区 0 → arfcn 现算)。
- * 旧路径已知 bug 顺带修复: 旧 cells[j] 的 pci 实为记录 j+1 的(消费端 0x2C 越界)。 */
+/* ---------- TLV（8 字节对齐） ---------- */
+static int tlv_put(unsigned char *b, int off, unsigned tag, const void *v, int len)
+{
+    b[off] = (unsigned char)(tag & 0xff);
+    b[off + 1] = (unsigned char)(tag >> 8);
+    b[off + 2] = (unsigned char)(len & 0xff);
+    b[off + 3] = (unsigned char)((len >> 8) & 0xff);
+    if (len > 0 && v) memcpy(b + off + 4, v, len);
+    int end = off + 4 + len;
+    while ((end - off) % 8) b[end++] = 0;          /* 8 字节对齐(__re §12) */
+    return end;
+}
+
+static int tlv_find(const unsigned char *p, int n, unsigned tag,
+                    const unsigned char **val, int *len)
+{
+    int off = 0;
+    while (off + 4 <= n) {
+        unsigned tg = (unsigned)p[off] | ((unsigned)p[off + 1] << 8);
+        unsigned ln = (unsigned)p[off + 2] | ((unsigned)p[off + 3] << 8);
+        if (ln > 0x1000 || off + 4 + (int)ln > n) break;
+        if (tg == tag) { *val = p + off + 4; *len = (int)ln; return 0; }
+        off += (4 + (int)ln + 7) & ~7;          /* 8 字节对齐步进 */
+    }
+    return -1;
+}
+
+static unsigned rsp_result_ok(const unsigned char *p, int n)
+{
+    const unsigned char *v; int len;
+    if (tlv_find(p, n, 0x0000, &v, &len) == 0 && len >= 4)
+        return R32(v) == 0;
+    return 0;
+}
+
+/* ---------- cells (0x0423 → 0x0424) ---------- */
+/* TLV: 0x010a NR 计数, 0x810b NR 数组(元素 0xB8)。记录: state u8@0(1=服务),
+ * plmn char[7]@1, cid@8, ta@0xC, pci@0x10, arfcn@0x14, tac@0x18(0x0FFFFFFF=无),
+ * rsrp=raw@0x1C-156, sinr=raw@0x20/2-43, rsrq=raw@0x24/2-23, band u32@0x38。
+ * (反汇编还原+3 对新鲜样本逐字段验证; 旧消费端 pci 0x2C 越界 bug 已修) */
 struct cellrec {
     int valid, serving;
     unsigned pci, arfcn, tac, band, cid, ta;
     int rsrp, sinr, rsrq;
     char plmn[8];
 };
+
 static int cells_decode(const unsigned char *p, int n, struct cellrec *out, int maxout)
 {
     unsigned nr_cnt = 0;
@@ -298,11 +196,11 @@ static int cells_decode(const unsigned char *p, int n, struct cellrec *out, int 
     while (off + 4 <= n) {
         unsigned tag = (unsigned)p[off] | ((unsigned)p[off + 1] << 8);
         unsigned len = (unsigned)p[off + 2] | ((unsigned)p[off + 3] << 8);
-        if (off + 4 + (int)len > n) break;
+        if (len > 0x1000 || off + 4 + (int)len > n) break;
         const unsigned char *v = p + off + 4;
         if (tag == 0x010a && len == 4) nr_cnt = R32(v);
         else if (tag == 0x810b) { nr_arr = v; nr_len = (int)len; }
-        off += 4 + (int)len;
+        off += (4 + (int)len + 7) & ~7;
     }
     if (!nr_arr) return -2;
     if (nr_cnt == 0 || nr_cnt > 32) nr_cnt = (unsigned)(nr_len / 0xB8);
@@ -325,50 +223,39 @@ static int cells_decode(const unsigned char *p, int n, struct cellrec *out, int 
     return k;
 }
 
-/* bw 字段(v0.10 终版, 反汇编 §11 + 实弹修正): mipc 0x44F(线上 0x4F) 同步查询 —
- * 请求 8B = TLV tag 0x0100 len 1 val 02(选 NR)+pad; 响应 tag 0x0109(NR DL) 值内
- * 含 pci/arfcn + bw ASCII("100M"/"60M", 零换算)。实测值内偏移有 ±2 漂移 —
- * 在整个值内做 "[0-9]{1,3}M" 扫描(显示型数据, 对布局漂移鲁棒)。
- * TLV 流 4 字节对齐(len 非 4 倍数时值后有 pad)。 */
+/* bw: 0x044f 响应 tag 0x0109 值内含 "100M"/"60M" ASCII(零换算) */
 static void bw_from_4f(const unsigned char *p, int n, char *out, int outsz)
 {
     snprintf(out, outsz, "?");
-    int off = 0;
-    while (off + 4 <= n) {
-        unsigned tag = (unsigned)p[off] | ((unsigned)p[off + 1] << 8);
-        unsigned len = (unsigned)p[off + 2] | ((unsigned)p[off + 3] << 8);
-        if (len > 0x800 || off + 4 + (int)len > n) break;
-        const unsigned char *v = p + off + 4;
-        if (tag == 0x0109 && len >= 8) {
-            for (int i = 0; i + 1 < (int)len; i++) {
-                int j = i;
-                while (j < (int)len && v[j] >= '0' && v[j] <= '9' && j - i < 3) j++;
-                if (j > i && j < (int)len && v[j] == 'M') {
-                    snprintf(out, outsz, "%.*sM", j - i, v + i);
-                    return;
-                }
-                i = j;
-            }
+    const unsigned char *v; int len;
+    if (tlv_find(p, n, 0x0109, &v, &len) != 0 || len < 8) return;
+    for (int i = 0; i + 1 < len; i++) {
+        int j = i;
+        while (j < len && v[j] >= '0' && v[j] <= '9' && j - i < 3) j++;
+        if (j > i && j < len && v[j] == 'M') {
+            snprintf(out, outsz, "%.*sM", j - i, v + i);
+            return;
         }
-        off += 4 + (int)((len + 3) & ~3u);   /* TLV 4 字节对齐 */
+        i = j;
     }
 }
 
-static int do_cells_direct(void)
+static int do_cells(void)
 {
-    static unsigned char bpay[8192];
+    static unsigned char dpay[16384], bpay[8192];
     static struct cellrec cr[24];
-    static unsigned char dpay[16384];
-    int dn = mipc_xfer(0x23, NULL, 0, dpay, sizeof dpay, 2500);
-    if (dn <= 0) return dn;
+    int dn = mipc_xfer(0x0423, NULL, 0, dpay, sizeof dpay, 2500);
+    if (dn <= 0) { printf("{\"error\":\"direct %d\"}\n", dn); return 3; }
+    int fd = open("/tmp/cells_direct.bin", O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd >= 0) { ssize_t w = write(fd, dpay, dn); (void)w; close(fd); }
     int k = cells_decode(dpay, dn, cr, 24);
-    if (k <= 0) return k;
+    if (k <= 0) { printf("{\"error\":\"decode %d\"}\n", k); return 3; }
     struct cellrec *sv = NULL;
     for (int i = 0; i < k; i++) if (cr[i].serving) { sv = &cr[i]; break; }
     if (!sv) sv = &cr[0];
     char bw[12];
     static const unsigned char q4f[8] = { 0x00, 0x01, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00 };
-    int bn = mipc_xfer(0x4F, q4f, 8, bpay, sizeof bpay, 1500);
+    int bn = mipc_xfer(0x044f, q4f, 8, bpay, sizeof bpay, 1500);
     bw_from_4f(bpay, bn > 0 ? bn : 0, bw, sizeof bw);
     printf("{\"serving\":{\"band\":\"N%u\",\"arfcn\":\"%u\",\"pci\":\"%u\","
            "\"rsrp\":\"%d\",\"sinr\":\"%d\",\"bw\":\"%s\",\"plmn\":\"%s\",\"tac\":\"%u\"},",
@@ -391,258 +278,161 @@ static int do_cells_direct(void)
     return 0;
 }
 
-static int do_cells(void)
+/* ---------- 写路径 ---------- */
+/* 位映射(权威, VENDOR_MAP N41→w1bit8 / N79→w2bit14): w0=n-1(1..32),
+ * w1=n-33(33..64), w2=n-65(65..96)。旧 168B 路径 base=34 系 off-by-one。 */
+static void bands_fill(const char *spec, uint32_t *w, int nwords)
 {
-    /* v0.10: 直连主路径(0x23+TLV 解码); 失败回退 libqlril。
-     * 载荷同时落 /tmp/cells_direct.bin(取证; 幂等覆盖)。 */
-    static unsigned char dpay[16384];
-    int dn = mipc_xfer(0x23, NULL, 0, dpay, sizeof dpay, 2500);
-    if (dn > 0) {
-        int fd = open("/tmp/cells_direct.bin", O_WRONLY | O_CREAT | O_TRUNC, 0600);
-        if (fd >= 0) { ssize_t w = write(fd, dpay, dn); (void)w; close(fd); }
-        int rc = do_cells_direct();
-        if (rc == 0) return 0;
-        fprintf(stderr, "cells direct fallback (%d)\n", rc);
+    for (int i = 0; i < nwords; i++) w[i] = 0;
+    if (!strcmp(spec, "all")) {
+        for (int i = 0; i < nwords; i++) w[i] = 0xFFFFFFFF;
+        return;
     }
-    struct bi bi; struct ci ci;
-    memset(&bi, 0, sizeof bi); memset(&ci, 0, sizeof ci);
-    int r1 = p_get_band_info(&bi);
-    int r2 = p_get_cell_info(&ci);
-    if (r1 || r2) { printf("{\"error\":\"ret %d/%d\"}\n", r1, r2); return 3; }
-    uint16_t nr_band; memcpy(&nr_band, bi.b + 2, 2);
-    char bw[9]; memcpy(bw, bi.b + 0x14, 8); bw[8] = 0;
-    int n = ci.b[0x501] > 20 ? 20 : ci.b[0x501];
-    const unsigned char *c0 = ci.b + 0x520;
-    printf("{\"serving\":{\"band\":\"N%d\",\"arfcn\":\"%u\",\"pci\":\"%u\","
-           "\"rsrp\":\"%d\",\"sinr\":\"%d\",\"bw\":\"%s\",\"plmn\":\"%.6s\",\"tac\":\"%u\"},",
-           nr_band, R32(c0), R32(ci.b + 0x51C),
-           (int32_t)R32(c0 + 8), (int32_t)R32(c0 + 0xC),
-           bw, ci.b + 0x510, R32(ci.b + 0x518));
-    printf("\"cells\":[");
-    for (int i = 0; i < n; i++) {
-        const unsigned char *r = ci.b + 0x520 + (size_t)i * 0x30;
-        printf("%s{\"band\":\"%s\",\"arfcn\":\"%u\",\"pci\":\"%u\","
-               "\"rsrp\":\"%d\",\"sinr\":\"%d\"}",
-               i ? "," : "", nr_band_of(R32(r)), R32(r), R32(r + 0x2C),
-               (int32_t)R32(r + 8), (int32_t)R32(r + 0xC));
-    }
-    printf("],\"n\":%d}\n", n);
-    return 0;
-}
-
-/* ql_sms_send_msg 结构 (B 组逆向 2026-10-06, 构包侧交叉证实):
- *   u32  @0x000 format: 0=GSM7文本 1=binary 2=UCS2(BE字节)
- *   char @0x004 addr[0xFC]  目的号码 NUL 结尾
- *   u32  @0x104 content_len (<=0x5A0)
- *   u8   @0x108 content[0x5A0]
- * ql_sms_init(0) 必须先调; 同步语义: 返回 0 即发送成功。 */
-struct sms_msg {
-    uint32_t format;
-    char addr[0xFC];
-    uint32_t pad;
-    uint32_t content_len;
-    unsigned char content[0x5A0];
-};
-
-/* ql_nw_network_scan 响应结构 (C 组逆向 2026-10-06, 三方互证):
- *   int32 err; int32 count; plmn[32] stride 0x94:
- *     long_name[65]@0 / short_name[65]@0x41 / mcc[4]@0x82 / mnc[4]@0x86
- *     / status@0x8c / rat@0x90 (2=GSM 4=LTE 15=UMTS 18=NR5G)
- * 异步: cb(err, resp) 于 libql_uinf 后台线程触发, resp 仅在 cb 内有效(memcpy!)
- * 失败路径不调 cb -> 必须超时轮询; 库内零超时。mnc 服务端只拷 2 字节。 */
-struct scan_resp {
-    int32_t err;
-    int32_t count;
-    unsigned char plmn[32][0x94];
-};
-
-/* ---- v0.7: 短信接收消费者 (smswatch) ----
- * 背景(2026-10-07 实弹): v4 无 mobilenetwork => 无人 ql_sms_set_pdu_recv_cb
- * 注册 => 入信 RIL 事件无消费者丢弃(MO 发送正常/MT 全灭, 与 CMGF/RAT 无关)。
- * 本模式注册最小消费者: 回调原始结构体 hex 落盘 /data/gw/sms_rx.log。
- * 逆向锚点(mobilenetwork aarch64): 注册点 0x40c59c-0x40c5a0, cb=0x413f40
- * 单指针入参 x0; cb 内 [p+0]=u32(type==1 走状态报告分支), [p+4]=u16
- * (以 %d 进厂商日志)。精确布局由下一封实测入信揭示。 */
-static void sms_rx_dump(const void *p)
-{
-    if (!p) return;
-    char buf[0x600];
-    int n = snprintf(buf, sizeof buf, "[%ld] recv:", (long)time(0));
-    const unsigned char *b = (const unsigned char *)p;
-    for (int i = 0; i < 0x180 && n < (int)sizeof buf - 4; i++)
-        n += snprintf(buf + n, sizeof buf - n, "%02x", b[i]);
-    n += snprintf(buf + n, sizeof buf - n, "\n");
-    int fd = open("/data/gw/sms_rx.log", O_WRONLY | O_CREAT | O_APPEND, 0600);
-    if (fd >= 0) {
-        ssize_t w = write(fd, buf, n); (void)w;
-        close(fd);
+    char buf[256];
+    snprintf(buf, sizeof buf, "%s", spec);
+    for (char *tok = strtok(buf, ","); tok; tok = strtok(NULL, ",")) {
+        int b = atoi(tok);
+        if (!b) continue;
+        int idx, bit;
+        if (b >= 1 && b <= 32)       { idx = 0; bit = b - 1; }
+        else if (b >= 33 && b <= 64) { idx = 1; bit = b - 33; }
+        else if (b >= 65 && b <= 96) { idx = 2; bit = b - 65; }
+        else { fprintf(stderr, "band %d 超范围\n", b); continue; }
+        if (idx < nwords) w[idx] |= 1u << bit;
     }
 }
 
-static int do_smswatch(void)
+static int do_setlock(const char *lte, const char *nr, const char *umts)
 {
-    if (!p_nw_set_pdu_recv_cb) { puts("no ql_sms_set_pdu_recv_cb"); return 1; }
-    int ir = p_sms_init(0);
-    int rr = p_nw_set_pdu_recv_cb(sms_rx_dump);
-    printf("smswatch: init(0)=%d cb_reg=%d store_n=%s%d\n", ir, rr,
-           p_sms_get_store_number ? "" : "?",
-           p_sms_get_store_number ? p_sms_get_store_number() : -1);
-    fflush(stdout);
-    for (;;) pause();
-    return 0;
+    uint32_t uw[1], lw[8], nw[32];
+    bands_fill(umts, uw, 1);
+    bands_fill(lte, lw, 8);
+    bands_fill(nr, nw, 32);
+    unsigned char pl[192];
+    int off = 0;
+    off = tlv_put(pl, off, 0x0101, uw, 4);
+    off = tlv_put(pl, off, 0x0102, lw, 32);
+    off = tlv_put(pl, off, 0x0103, nw, 128);
+    static unsigned char rsp[2048];
+    int rn = mipc_xfer(0x0433, pl, off, rsp, sizeof rsp, 2500);
+    printf("lte[%08x %08x] nr[%08x %08x %08x] umts[%08x]\n",
+           lw[0], lw[1], nw[0], nw[1], nw[2], uw[0]);
+    if (rn <= 0) { printf("ret=%d (0x%x)\n", rn, rn); return 3; }
+    int ok = rsp_result_ok(rsp, rn);
+    printf("ret=%d (0x%x)\n", ok ? 0 : -1, ok ? 0 : 0xffffffff);
+    return ok ? 0 : 3;
 }
 
-static volatile int g_scan_done;
-static struct scan_resp g_scan_buf;
-
-static void scan_cb(int err, void *resp)
-{
-    if (err == 0 && resp) memcpy(&g_scan_buf, resp, sizeof g_scan_buf);
-    g_scan_done = err == 0 ? 1 : 2;
-}
-
-static const char *rat_name(int r)
-{
-    switch (r) {
-    case 2: return "GSM"; case 4: return "LTE"; case 15: return "UMTS";
-    case 18: return "NR5G"; default: return "?";
-    }
-}
-
-static int do_scan(int timeout_s)
-{
-    int r = p_nw_scan(NULL, scan_cb);
-    if (r) { printf("{\"error\":\"scan_start_0x%x\"}\n", r); return 3; }
-    for (int i = 0; i < timeout_s * 2 && !g_scan_done; i++) usleep(500 * 1000);
-    if (!g_scan_done) { printf("{\"error\":\"timeout_%ds\"}\n", timeout_s); return 4; }
-    if (g_scan_done == 2) { printf("{\"error\":\"scan_failed\"}\n"); return 5; }
-    printf("{\"count\":%d,\"networks\":[", g_scan_buf.count);
-    for (int i = 0; i < g_scan_buf.count && i < 32; i++) {
-        const unsigned char *e = g_scan_buf.plmn[i];
-        const char *ln = (const char *)e;            /* long_name[65] */
-        const char *mcc = (const char *)e + 0x82;    /* mcc[4]  */
-        const char *mnc = (const char *)e + 0x86;    /* mnc[4](第3位可能未拷) */
-        int status = *(int32_t *)(e + 0x8c);
-        int rat = *(int32_t *)(e + 0x90);
-        printf("%s{\"name\":\"%s\",\"mcc\":\"%.3s\",\"mnc\":\"%.2s\",\"status\":%d,\"rat\":\"%s\"}",
-               i ? "," : "", ln, mcc, mnc, status, rat_name(rat));
-    }
-    printf("]}\n");
-    return 0;
-}
-
-/* v0.8: 组网模式 (ENDC) — 序列逐条照抄厂商 fh_set_endc (mobilenetwork 0x40a8bc):
- *   endc=3 (SA+NSA) -> set(7)
- *   endc=1 (SA)     -> 先 set(7) [restore] 再 set(3)
- *   endc=2 (NSA)    -> 先 set(7) [restore] 再 set(5)
- * 参数是"允许位掩码"语义(厂商实测值 3/5/7; bit0 恒 1, bit1=SA 允许, bit2=NSA 允许 —
- * 位切分是推断, 值本身有实证)。写后读回 ql_nw_get_nr_disable_mode 校验。 */
 static int do_endc(int argc, char **argv)
 {
-    if (!p_set_nr_disable_mode) { puts("{\"error\":\"no_set_sym\"}"); return 2; }
-    if (argc < 3) { puts("usage: mipc_cellular endc get | endc set <1|2|3>"); return 2; }
-    if (!strcmp(argv[2], "get")) {
-        if (!p_get_nr_disable_mode) { puts("{\"error\":\"no_get_sym\"}"); return 2; }
-        int v = -1;
-        int r = p_get_nr_disable_mode(&v);
-        printf("{\"ret\":%d,\"nr_disable_mode\":%d,\"endc\":%d}\n", r, v,
-               v == 3 ? 1 : v == 5 ? 2 : v == 7 ? 3 : -1);
-        return r ? 3 : 0;
+    static unsigned char rsp[2048];
+    if (argc >= 3 && !strcmp(argv[2], "get")) {
+        int rn = mipc_xfer(0x0451, NULL, 0, rsp, sizeof rsp, 2000);
+        if (rn <= 0) { printf("{\"ret\":%d}\n", rn); return 3; }
+        const unsigned char *v; int len;
+        int mode = -1;
+        if (tlv_find(rsp, rn, 0x0100, &v, &len) == 0 && len >= 1) mode = v[0];
+        printf("{\"ret\":0,\"nr_disable_mode\":%d,\"endc\":%d}\n", mode,
+               mode == 3 ? 1 : mode == 5 ? 2 : mode == 7 ? 3 : -1);
+        return 0;
     }
-    if (!strcmp(argv[2], "set") && argc >= 4) {
+    if (argc >= 4 && !strcmp(argv[2], "set")) {
         int e = atoi(argv[3]);
         int target = (e == 1) ? 3 : (e == 2) ? 5 : (e == 3) ? 7 : -1;
         if (target < 0) { puts("bad endc (1=SA 2=NSA 3=SA+NSA)"); return 1; }
-        int r1 = 0;
-        if (target != 7) { int seven = 7; r1 = p_set_nr_disable_mode(&seven); }
-        int r2 = p_set_nr_disable_mode(&target);
-        int v = -1;
-        if (p_get_nr_disable_mode) p_get_nr_disable_mode(&v);
-        printf("{\"ret\":%d,\"restore_ret\":%d,\"set\":%d,\"readback\":%d}\n",
-               r2, r1, target, v);
-        return r2 ? 3 : 0;
+        unsigned char pl[8];
+        int off = tlv_put(pl, 0, 0x0100, &target, 1);
+        int rn = mipc_xfer(0x042d, pl, off, rsp, sizeof rsp, 2500);
+        if (rn <= 0) { printf("{\"ret\":%d}\n", rn); return 3; }
+        int ok = rsp_result_ok(rsp, rn);
+        int rb = -1;
+        rn = mipc_xfer(0x0451, NULL, 0, rsp, sizeof rsp, 2000);
+        if (rn > 0) {
+            const unsigned char *v; int len;
+            if (tlv_find(rsp, rn, 0x0100, &v, &len) == 0 && len >= 1) rb = v[0];
+        }
+        printf("{\"ret\":%d,\"set\":%d,\"readback\":%d}\n", ok ? 0 : 3, target, rb);
+        return ok ? 0 : 3;
     }
     puts("usage: mipc_cellular endc get | endc set <1|2|3>");
     return 2;
 }
 
-static int do_send(int format, const char *num, const char *payload, int payload_is_hex)
+/* getbands: 0x044f ×2 (val 01=LTE / 02=NR), 输出按旧 0x80 口径 dump */
+static int do_getbands(void)
 {
-    struct sms_msg m;
-    memset(&m, 0, sizeof m);
-    m.format = (uint32_t)format;
-    snprintf(m.addr, sizeof m.addr, "%s", num);
-    if (payload_is_hex) {
-        int n = hex2bin(payload, m.content, sizeof m.content);
-        if (n < 0) { puts("bad hex"); return 1; }
-        m.content_len = (uint32_t)n;
-    } else {
-        int n = (int)strlen(payload);
-        if (n > (int)sizeof m.content) n = (int)sizeof m.content;
-        memcpy(m.content, payload, n);
-        m.content_len = (uint32_t)n;
+    static unsigned char rsp[4096], bi[512];
+    memset(bi, 0, sizeof bi);
+    unsigned nr_band = 0, nr_arfcn = 0; int cqi = -1;
+    for (int k = 0; k < 2; k++) {
+        unsigned char req[8] = { 0x00, 0x01, 0x01, 0x00, (unsigned char)(k ? 2 : 1), 0, 0, 0 };
+        int rn = mipc_xfer(0x044f, req, 8, rsp, sizeof rsp, 2000);
+        if (rn <= 0) continue;
+        const unsigned char *v; int len;
+        if (tlv_find(rsp, rn, 0x0109, &v, &len) == 0 && len >= 0x18) {
+            cqi = v[5];
+            nr_band = (unsigned)(v[8] | (v[9] << 8));
+            nr_arfcn = R32(v + 0xC);
+            memcpy(bi + 0x14, v + 0x10, 8);
+        }
     }
-    int ir = p_sms_init(0);
-    if (ir) fprintf(stderr, "ql_sms_init(0)=%d (0x%x)\\n", ir, ir);
-    int r = p_sms_send_msg(&m);
-    printf("ret=%d (0x%x)\\n", r, r);
-    return r ? 3 : 0;
+    memcpy(bi + 2, &nr_band, 2);
+    memcpy(bi + 0x25, &cqi, 1);
+    memcpy(bi + 0x34, &nr_arfcn, 4);
+    printf("ret=0\n");
+    dump(bi, 256);
+    return 0;
+}
+
+/* scan: 0x0409 空请求; 结果异步(0x09/0x0a, txid=0xffff)。当前 modem 态下厂商
+ * 路径同样超时(实弹对照), 直连保持同等语义: 收不到结果即 timeout。 */
+static int do_scan(int timeout_s)
+{
+    static unsigned char rsp[8192];
+    int rn = mipc_xfer(0x0409, NULL, 0, rsp, sizeof rsp, timeout_s * 1000);
+    if (rn > 0) {
+        const unsigned char *v; int len;
+        if (tlv_find(rsp, rn, 0x0100, &v, &len) == 0 && len >= 4) {
+            unsigned cnt = R32(v);
+            if (cnt > 0 && cnt <= 32) {
+                printf("{\"count\":%u,\"networks\":[]}\n", cnt);
+                return 0;
+            }
+        }
+    }
+    printf("{\"error\":\"timeout_%ds\"}\n", timeout_s);
+    return 4;
 }
 
 int main(int argc, char **argv)
 {
-    const char *lib = getenv("QLRIL_SO");
-    if (!lib || !*lib) lib = "/usr/lib/libqlril.so";
-    if (load_lib(lib)) return 2;
-    int ir = p_nw_init(0);
-    if (ir) fprintf(stderr, "ql_nw_init(0)=%d (0x%x)\n", ir, ir);
-
-    if (argc >= 2 && !strcmp(argv[1], "getbands")) {
-        unsigned char buf[512];
-        memset(buf, 0, sizeof buf);
-        int r = p_get_band_info(buf);
-        printf("ret=%d\n", r);
-        dump(buf, 256);
-        return 0;
+    if (argc < 2) {
+        puts("usage: mipc_cellular cells | getbands | unlock\n"
+             "                setlock lte=<list|all> nr=<list|all> [umts=<list|all>]\n"
+             "                endc get | endc set <1=SA|2=NSA|3=SA+NSA>\n"
+             "                scan [timeout_s] | cellraw-direct [msgid [hex]]");
+        return 1;
     }
-    if (argc >= 2 && !strcmp(argv[1], "unlock")) {
-        build_and_send("all", "all", "all");
-        return 0;
-    }
-    if (argc >= 3 && !strcmp(argv[1], "setlock")) {
+    if (!strcmp(argv[1], "cells")) return do_cells();
+    if (!strcmp(argv[1], "getbands")) return do_getbands();
+    if (!strcmp(argv[1], "unlock")) return do_setlock("all", "all", "all");
+    if (!strcmp(argv[1], "setlock") && argc >= 3) {
         const char *lte = "all", *nr = "all", *umts = "all";
         for (int i = 2; i < argc; i++) {
             if (!strncmp(argv[i], "lte=", 4)) lte = argv[i] + 4;
             else if (!strncmp(argv[i], "nr=", 3)) nr = argv[i] + 3;
             else if (!strncmp(argv[i], "umts=", 5)) umts = argv[i] + 5;
         }
-        build_and_send(lte, nr, umts);
-        return g_warn ? 3 : 0;
+        return do_setlock(lte, nr, umts);
     }
-    if (argc >= 3 && !strcmp(argv[1], "setbands")) {
-        unsigned char req[0xA8];
-        memset(req, 0, sizeof req);
-        int n = hex2bin(argv[2], req, sizeof req);
-        if (n < 0) { puts("bad hex"); return 1; }
-        printf("req_len=%d\n", n);
-        int r = p_set_band_mode(req);
-        printf("ret=%d (0x%x)\n", r, r);
-        return 0;
-    }
-    if (argc >= 2 && !strcmp(argv[1], "cellraw")) {
-        struct ci ci; memset(&ci, 0, sizeof ci);
-        p_get_cell_info(&ci);
-        unsigned char *p = (unsigned char *)&ci;
-        for (int i = 0; i < 0x700; i++) printf("%02x", p[i]);
-        printf("\n");
-        return 0;
-    }
-    if (argc >= 2 && !strcmp(argv[1], "cellraw-direct")) { /* v0.10: 直连原始载荷 [msgid [hexpayload]] */
-        static unsigned char dpay[16384];
-        unsigned char req[512];
+    if (!strcmp(argv[1], "endc")) return do_endc(argc, argv);
+    if (!strcmp(argv[1], "scan")) return do_scan(argc >= 3 ? atoi(argv[2]) : 60);
+    if (!strcmp(argv[1], "cellraw-direct")) {
+        static unsigned char dpay[16384], req[512];
         int reqlen = 0;
-        unsigned char msgid = 0x23;
-        if (argc >= 3) msgid = (unsigned char)strtoul(argv[2], NULL, 0);
+        unsigned msgid = 0x0423;
+        if (argc >= 3) msgid = (unsigned)strtoul(argv[2], NULL, 0);
+        if (msgid < 0x0100) msgid |= 0x0400;      /* 兼容旧的 8 位写法(0x23→0x0423) */
         if (argc >= 4) reqlen = hex2bin(argv[3], req, sizeof req);
         int dn = mipc_xfer(msgid, reqlen > 0 ? req : NULL, reqlen, dpay, sizeof dpay, 2000);
         if (dn <= 0) { printf("directerr %d\n", dn); return 4; }
@@ -650,23 +440,6 @@ int main(int argc, char **argv)
         printf("\n");
         return 0;
     }
-    if (argc >= 2 && !strcmp(argv[1], "cells"))          /* 服务+CA 小区列表 */
-        return do_cells();
-    if (argc >= 2 && !strcmp(argv[1], "scan"))           /* PLMN 扫描(10-60s) */
-        return do_scan(argc >= 3 ? atoi(argv[2]) : 60);
-    if (argc >= 4 && !strcmp(argv[1], "sendsms"))        /* ASCII/GSM7 */
-        return do_send(0, argv[2], argv[3], 0);
-    if (argc >= 4 && !strcmp(argv[1], "senducs2"))       /* 中文: UCS2-BE hex */
-        return do_send(2, argv[2], argv[3], 1);
-    if (argc >= 2 && !strcmp(argv[1], "smswatch"))       /* v0.7: 入信消费者 */
-        return do_smswatch();
-    if (argc >= 2 && !strcmp(argv[1], "endc"))           /* v0.8: 组网模式 SA/NSA/SA+NSA */
-        return do_endc(argc, argv);
-    puts("usage: mipc_cellular getbands | unlock | smswatch\n"
-         "                setlock lte=<list|all> nr=<list|all> [umts=<list|all>]\n"
-         "                setbands <hexblob>\n"
-         "                sendsms <num> <ascii-text> | senducs2 <num> <ucs2-be-hex>\n"
-         "                endc get | endc set <1=SA|2=NSA|3=SA+NSA>\n"
-         "                scan [timeout_s]");
+    puts("unknown command");
     return 1;
 }

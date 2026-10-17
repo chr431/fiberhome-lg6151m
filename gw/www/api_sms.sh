@@ -81,16 +81,30 @@ apply_sms_send() {
     NUM=$(form_kv num); TXT=$(form_kv text)
     printf '%s' "$NUM" | grep -qE '^\+?[0-9]{5,20}$' || jerr bad_num
     [ -n "$TXT" ] || jerr empty_text
+    # v1.1 (RIL 清零轮): 发送走 AT 路线 — 与厂商 ql_sms_send_msg 同族
+    #   (反汇编 §12.5: 服务端拼 AT+EMGS 经 AT 通道发出), 现由 mipc_wan_cli
+    #   --at_cmd 直接下发(atcid 通道, 与 ql_ril_service 无关)。
+    #   前置序列照抄厂商: CMGF=1 文本模式; 中文 CSCS="UCS2"(内容为 UCS2-BE hex);
+    #   CSMP DCS=241(fmt0/1) / 25(UCS2)。发毕还原 CMGF=0(留在 PDU 模式)。
     case "$TXT" in
       ucs2:*)
         H=${TXT#ucs2:}
         echo "$H" | grep -qE '^[0-9a-fA-F]{4,560}$' || jerr bad_ucs2
-        R=$(/data/gw/mipc_cellular senducs2 "$NUM" "$H" 2>&1) ;;
+        mipc_wan_cli --at_cmd "AT+CMGF=1" >/dev/null 2>&1
+        mipc_wan_cli --at_cmd "AT+CSCS=\"UCS2\"" >/dev/null 2>&1
+        mipc_wan_cli --at_cmd "AT+CSMP=37,71,0,25" >/dev/null 2>&1
+        R=$(mipc_wan_cli --at_cmd "AT+EMGS=\"$NUM\",\"$H\"" 2>&1) ;;
       *)
-        printf '%s' "$TXT" | grep -qE '[-ÿ]' && jerr need_ucs2
+        printf '%s' "$TXT" | grep -qE '[^ -~]' && jerr need_ucs2
         [ ${#TXT} -gt 480 ] && jerr too_long
-        R=$(/data/gw/mipc_cellular sendsms "$NUM" "$TXT" 2>&1) ;;
+        case "$TXT" in *'"'*) jerr bad_chars ;; esac   # 引号破坏 AT 参数结构
+        mipc_wan_cli --at_cmd "AT+CMGF=1" >/dev/null 2>&1
+        mipc_wan_cli --at_cmd "AT+CSCS=\"GSM\"" >/dev/null 2>&1
+        mipc_wan_cli --at_cmd "AT+CSMP=37,71,0,241" >/dev/null 2>&1
+        R=$(mipc_wan_cli --at_cmd "AT+EMGS=\"$NUM\",\"$TXT\"" 2>&1) ;;
     esac
-    printf '%s' "$R" | grep -q 'ret=0' || jerr send_fail
-    ok_json
+    mipc_wan_cli --at_cmd "AT+CMGF=0" >/dev/null 2>&1   # 厂商同款收尾(回 PDU 模式)
+    printf '%s' "$R" | grep -qi 'ERROR' && jerr send_fail
+    printf '%s' "$R" | grep -qi 'OK' || jerr send_fail
+    ok_json '"via":"at-emgs"'
 }

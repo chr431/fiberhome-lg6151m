@@ -67,15 +67,9 @@ pidof atcid >/dev/null || { /usr/bin/atci_service >/dev/null 2>&1 & sleep 1; /us
 glog "atcid=$(pidof atcid) at_ch=$(mipc_wan_cli --at_cmd 'AT+CSQ' 2>/dev/null | grep -c '+CSQ:')"
 # v3.8: 收编制(清场思路废弃, 见头注)。有界等待 rc.d 套就绪 — 本脚本经
 #   zz_data_hook/rc.extend 在 procd rc.d 链末段起跑, S85 的管道件在前后数秒内
-#   由 procd 拉起并**持续看护**(respawn)。2s×10 覆盖实证时序(S85@+30s);
-#   等不齐只补缺席者(兜底 rc.d 链异常), 绝不多起一份。
-#   名单只剩 ql_ril_service(v3.8 拔管实验: 唯一不可约依赖, cells 路径)。
-_i=0
-while [ $_i -lt 10 ] && [ -z "$(pidof ql_ril_service)" ]; do
-    sleep 2; _i=$((_i+1))
-done
-pidof ql_ril_service  >/dev/null || /usr/bin/ql_ril_service  >/dev/null 2>&1 &
-sleep 2
+#   由 procd 拉起并**持续看护**(respawn)。
+#   v3.9: 名单清空 — RIL 守护不再需要等待/补齐(全部退役, 见下)。
+sleep 1
 # v3.7: mtk_netagent 退役(摘除试验实证其为 ccmni IP 执行者, 职能已由
 #   ccmni_up.sh 承接)。停法 = service delete(procd 不再看护); 若仍在(竞态)
 #   补一刀 SIGKILL(此时已无 respawn, 杀得死)。ccmni_up 缺席 = 保留 netagent
@@ -90,20 +84,18 @@ if [ -x /data/gw/ccmni_up.sh ]; then
 else
     glog "WARN ccmni_up.sh absent — netagent kept (fallback)"
 fi
-# v3.8: ql_netd + mipc_submonitor 退役(拔管实验零依赖, 见头注); 同款 service
-#   delete + SIGKILL 收尾。注: submonitor 的 procd 服务名带 .init 后缀。
-for _svc in ql_netd mipc_submonitor.init; do
+# v3.9: RIL 三守护 + submonitor 全部退役(读/写路径已直连 mipc_cellular, 见头注);
+#   同款 service delete + SIGKILL 收尾。注: submonitor 的 procd 服务名带 .init 后缀。
+for _svc in ql_ril_service ql_netd mipc_submonitor.init; do
     ubus call service delete "{\"name\":\"$_svc\"}" >/dev/null 2>&1
 done
 sleep 1
-for p in $(pidof ql_netd mipc_submonitor); do kill -9 $p 2>/dev/null; done
+for p in $(pidof ql_ril_service ql_netd mipc_submonitor); do kill -9 $p 2>/dev/null; done
 sleep 1
-[ -z "$(pidof ql_netd mipc_submonitor)" ] && glog "ql_netd+mipc_submonitor retired (zero-dep, drill-proven)" \
-    || glog "WARN ql_netd/submonitor alive after retire: $(pidof ql_netd mipc_submonitor)"
-glog "plumbing (adopted, waited $((_i*2))s) ril=$(pidof ql_ril_service) netd=$(pidof ql_netd | wc -w) submon=$(pidof mipc_submonitor | wc -w)"
-# 保留件数量复核(≠1 记警 — selftest t_ril_single 回归护栏)
-_c=$(pidof ql_ril_service | wc -w)
-[ "$_c" = "1" ] || glog "WARN plumbing ql_ril_service x${_c} (want 1)"
+[ -z "$(pidof ql_ril_service ql_netd mipc_submonitor)" ] \
+    && glog "RIL daemons retired (ril_service+netd+submonitor; read/write paths direct)" \
+    || glog "WARN RIL daemon alive after retire: $(pidof ql_ril_service ql_netd mipc_submonitor)"
+glog "RIL state: ril=$(pidof ql_ril_service | wc -w) netd=$(pidof ql_netd | wc -w) submon=$(pidof mipc_submonitor | wc -w) (all want 0)"
 
 # 3. THE stock dialer (army spawn form, taskset like process_start_list)
 if [ "$KEEP_TREE" = 1 ]; then

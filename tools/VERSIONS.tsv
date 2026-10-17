@@ -16,13 +16,13 @@ gw/v3_babysit_v2.sh	2.0	manifest	/data/gw/babysit_v2.sh	启动保姆(T1杀rcS/T2
 gw/night_report.sh	1.0	manifest	/data/gw/night_report.sh	夜间体检报告
 gw/wifi_guard.sh	1.0	manifest	/data/gw/wifi_guard.sh	BA/TX 停滞自动恢复守卫
 gw/mipc_dial_trace.sh	1.0	manifest	/data/gw/mipc_dial_trace.sh	5G 拨号取证(xtrace 抓真参)
-gw/dial_5g.sh	1.5	manifest	/data/gw/dial_5g.sh	生产 5G 拨号器; v1.5: ubus 冷启动引导去掉 ql_netd(退役); v1.4: 拨号+落地统一走 ccmni_up; 历史见git
+gw/dial_5g.sh	1.6	manifest	/data/gw/dial_5g.sh	生产 5G 拨号器; v1.6: ubus 冷启动引导不再拉起 ql_ril_service(已退役); 历史见git
 gw/ccmni_up.sh	1.0	manifest	/data/gw/ccmni_up.sh	netagent-lite: MIPC 拨号+ccmni 接口落地(deact+act→解析 v4/v6 地址→flush+add+mtu); 实证 netagent 是 IP 执行者(act 响应含全套地址而无人落地), 本脚本是它退役的前提; 不写路由/NAT(单写方纪律: main 表归 wan_agg)
 gw/consfeed.sh	1.0	manifest	/data/gw/consfeed.sh	v2 控制台喂食器(无setsid,v2_access拉起)
-gw/rc_netfh.sh	3.8	manifest	/data/gw/rc_netfh.sh	路线A: FH modem栈环境; v3.8(RIL 收尾轮, 拔管实验): ql_netd+mipc_submonitor 退役(8 项功能矩阵零依赖+飞行往返拨号终证 t+61s), 收编制名单收敛为 ql_ril_service 一件(不可约: mipc_cellular cells 路径唯一依赖); v3.7: netagent 退役; 历史见git
+gw/rc_netfh.sh	3.9	manifest	/data/gw/rc_netfh.sh	路线A: FH modem栈环境; v3.9(RIL 清零轮·终章): ql_ril_service 退役 — 读路径(cells/getbands)+写路径(setlock/endc/scan/短信)全部直连 MIPC(mipc_cellular v0.11); RIL 三守护+submonitor 全清零; 历史见git
 gw/radvd.conf	1.0	manifest	/data/gw/radvd.conf	IPv6 SLAAC+RDNSS通告(br-lan, ULA fd42:9ac1:7e50::/64)
 gw/capture_ubus.sh	1.1	manifest	/data/gw/capture_ubus.sh	stock拨号一次性捕获(ubus monitor+ccmni采样)
-gw/dial_variant.sh	1.2	manifest	/data/gw/dial_variant.sh	5G 拨号参数变体实验器; v1.2: ubus 引导同步去掉 ql_netd(退役)
+gw/dial_variant.sh	1.3	manifest	/data/gw/dial_variant.sh	5G 拨号参数变体实验器; v1.3: ubus 引导同步去除 ql_ril_service
 gw/v2_access.sh	6.1	manifest	/data/gw/v2_access.sh	v2 极简访问层(串口/SSH/DHCP/防火墙22,零守护干涉)
 gw/bin/healthdog.ko	1.0	manifest	/data/gw/healthdog.ko	取证看门狗内核模块(forensic=1)
 gw/bin/v3_fix.ko	1.1	manifest	/data/gw/v3_fix.ko	TTL伪装/PPE解绑内核模块(wan_if/ttl_mode/unhook)
@@ -47,7 +47,7 @@ gw/www/api_wifi.sh	1.0	manifest	/data/gw/www/api_wifi.sh	API WiFi 域模块(v2.7
 gw/www/api_lan.sh	1.0	manifest	/data/gw/www/api_lan.sh	API LAN 服务域模块(v2.75 拆出: dhcp/dhcp_static/fw 族; fw_apply.sh 改域内懒加载 — 原对全部请求无条件 source)
 gw/www/api_agg.sh	1.0	manifest	/data/gw/www/api_agg.sh	API 聚合+上行域模块(v2.75 拆出: agg/uplink 族; uplink 的 eth0 原生 MAC 还原改调 wifi_macplan.sh 统一实现)
 gw/www/api_cell.sh	1.0	manifest	/data/gw/www/api_cell.sh	API 蜂窝域模块(v2.75 拆出: cellular/sim/pin/netmode/airplane/plmn/bandlock/celllock 族, 最大域)
-gw/www/api_sms.sh	1.0	manifest	/data/gw/www/api_sms.sh	API 短信域模块(v2.75 拆出: sms/sms_send; UCS2 解码与多段合并)
+gw/www/api_sms.sh	1.1	manifest	/data/gw/www/api_sms.sh	API 短信域模块; v1.1(RIL 清零轮): 发送改 AT+EMGS 路线(mipc_wan_cli --at_cmd, atcid 通道; 厂商 ql_sms_send_msg 同族 — 反汇编 §12.5), 中文 CSCS=UCS2+hex, 发毕回 CMGF=0; 不再依赖 mipc_cellular/libqlril
 gw/www/api.sh	2.75	manifest	/data/gw/www/api.sh	v2.75(2026-10-17 架构轮): 模块化拆分 — 收敛为核心(helpers/认证/配置助手)+路由表, 六域模块按端点懒加载(/data/gw/www/api_*.sh, v3httpd v2.6 静态面已拒 *.sh 直出); 每请求只解析所需域(原整文件 ~1550 行全解析); 端点与 JSON 契约零变化; v2.74: 命名中性化; v2.73: status 消费 /tmp/wan_alive; 历史见各域模块头注与git
 gw/www/index.html	2.32	manifest	/data/gw/www/index.html	v3控制台页面(v2.32: 缓存v66)
 gw/www/style.css	2.1	manifest	/data/gw/www/style.css	控制台主题
@@ -92,11 +92,11 @@ gw/defaults.conf	1.8	manifest	/data/gw/defaults.conf	统一配置只读出厂基
 tools/leak_check.py	2.2	tool	-	敏感词零命中门禁; v2.2: --history 全量扫提交正文(%B, 原仅扫标题%s可漏检消息体); v2.1: 修复 PAT_PARTS NameError; 历史见git
 docs/ARCHITECTURE.md	1.1	doc	-	架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针)
 docs/GUI_TERMINOLOGY.md	1.2	doc	-	GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git
-gw/watchdog.sh	1.13	manifest	/data/gw/watchdog.sh	持续不变量看门狗; v1.13(RIL 收尾轮): cell 查询面恢复消息修正(ql_netd 已退役, 恢复只需 restart ql_ril_service); v1.12: +wan_eth 自愈; 历史见git
-tools/selftest.py	2.34	tool	-	v2.34(cells 直连轮): +t_cells_direct(直连预取在位+无fallback+JSON形状); v2.33: t_ril_thin; 历史见git
+gw/watchdog.sh	1.14	manifest	/data/gw/watchdog.sh	持续不变量看门狗; v1.14(RIL 清零轮): cell 查询恢复提示改直连语义(RIL 守护已全退役); 历史见git
+tools/selftest.py	2.35	tool	-	v2.35(RIL 清零轮): t_ril_single 改全退役语义 + t_ril_thin 纳入 ril_service + t_cell_ops_direct(写路径直连); 历史见git
 tools/doc_audit.py	1.1	tool	-	台账↔文档内联标记双向审计(v1.1: 标记扫描纳入台账引用的docs/外文档如install/README.md; v1.0: 版本绑定+TEST-MISSING/STALE-CODE/UNREGISTERED-CLAIM)
-gw/src/mipc_cellular.c	0.10	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源码(P1); v0.10: cells_decode 直连解码器+多帧重组(报告 _re C_cells_decode); 随产物0.10
-gw/bin/mipc_cellular	0.10	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI; v0.10(反编译攻坚轮): cells 直连主路径上线 — 0x24 TLV 解码(反汇编还原: NR 记录 0xB8 布局, rsrp=raw-156/sinr=raw/2-43, 3 对新鲜样本逐字段验证) + mipc_xfer 多帧重组(TLV 流跨帧) + 旧邻区 pci 错位 bug 修复; libqlril 仅回退; 守护死亡态全 JSON 实弹验证; 历史见git
+gw/src/mipc_cellular.c	0.12	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源码; v0.12: 零 RIL 依赖重写(反汇编产物落地); 随产物0.12
+gw/bin/mipc_cellular	0.12	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI; v0.12(RIL 清零终章): 彻底移除 libqlril(NEEDED 空), 零动态依赖; msgid u16; cells/getbands/setlock/endc/scan 全直连; 修 TLV 步进/大响应分帧/脏帧越界三缺陷; 位映射修正 off-by-one; 历史见git
 tools/build_mipc_cellular.sh	1.0	tool	-	mipc_cellular构建(zig cc aarch64-musl动态)
 gw/dial_keeper.sh	1.4	manifest	/data/gw/dial_keeper.sh	拨号自持守护; v1.4(netagent 摘除轮): dial 改走 ccmni_up(拨号+落地一体, 缺席回退旧配方) + 触发条件叠加数据面(消费 wan_alive 堵僵尸 IP 洞 — 实弹: 飞行往返后 IP 在而数据死, 旧 IP-only 判据被骗过整夜) + 飞行模式守卫(CFUN=0 不盲拨); 历史见git
 gw/guest_fw.sh	1.6	manifest	/data/gw/guest_fw.sh	访客隔离防火墙v1.6(审计P0: GUEST_ISOLATE开关删除=强制隔离; 兼容需求改由主WiFi终端频段锁定承接; 历史版本见git)

@@ -45,7 +45,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/agg_pins.default` | **v1.0** | manifest | `/data/gw/agg_pins.default` | MAC钉死表出厂缺省基线(只读, 不含任何MAC; 设备侧活文件 agg_pins.conf 由 wan_agg 缺省才写地播种, 个人MAC不入库) |
 | `gw/bin/fhstub.so` | **v1.0** | manifest | `/data/gw/fhstub.so` | FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径) |
 | `gw/bin/healthdog.ko` | **v1.0** | manifest | `/data/gw/healthdog.ko` | 取证看门狗内核模块(forensic=1) |
-| `gw/bin/mipc_cellular` | **v0.9** | manifest | `/data/gw/mipc_cellular` | 蜂窝MIPC直连CLI; v0.9(RIL 清零轮): +原始 MIPC 直连传输层(帧格式破解: magic 84195424+seq+1000+msgid+04+txid+len; cells=0x23空请求→0x24 TLV载荷; 空闲端口探测式开启; 守护死亡时实弹验证可用) + cellraw-direct/cells_direct.bin 标定取证子命令; 输出仍走 libqlril(回退), 载荷解码标定中; 历史见git |
+| `gw/bin/mipc_cellular` | **v0.10** | manifest | `/data/gw/mipc_cellular` | 蜂窝MIPC直连CLI; v0.10(反编译攻坚轮): cells 直连主路径上线 — 0x24 TLV 解码(反汇编还原: NR 记录 0xB8 布局, rsrp=raw-156/sinr=raw/2-43, 3 对新鲜样本逐字段验证) + mipc_xfer 多帧重组(TLV 流跨帧) + 旧邻区 pci 错位 bug 修复; libqlril 仅回退; 守护死亡态全 JSON 实弹验证; 历史见git |
 | `gw/bin/multiwan_ctl` | **v1.1** | manifest | `/data/gw/multiwan_ctl` | 原厂multiwan引擎ioctl控制器(zig动态链libfhdrv_net_api,36B结构体) |
 | `gw/bin/shmsnap` | **v1.0** | manifest | `/data/gw/shmsnap` | cfgmgr树共享内存快照工具(save/load 16MB原始字节, gzip后127KB, 开机恢复锁定状态) |
 | `gw/bin/v3_fix.ko` | **v1.1** | manifest | `/data/gw/v3_fix.ko` | TTL伪装/PPE解绑内核模块(wan_if/ttl_mode/unhook) |
@@ -104,7 +104,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/zz_data_hook` | **v1.1** | manifest | `/data/build/rootfs/etc/init.d/zz_data_hook` | S98数据钩子(v1.1: plain sh——原厂无/etc/rc.common, rc.common式shebang致开机栈全灭; 回归实测发现) |
 | `gw/src/fhstub.c` | **v1.0** | src | `gw/bin/fhstub.so` | FH符号桩库源码 |
 | `gw/src/healthdog.c` | **v1.0** | src | `gw/bin/healthdog.ko` | 看门狗模块源码(版本随产物) |
-| `gw/src/mipc_cellular.c` | **v0.9** | src | `gw/bin/mipc_cellular` | 蜂窝MIPC直连CLI源码(P1); v0.9: 原始帧传输层+直连取证(载荷解码待标定); 随产物0.9 |
+| `gw/src/mipc_cellular.c` | **v0.10** | src | `gw/bin/mipc_cellular` | 蜂窝MIPC直连CLI源码(P1); v0.10: cells_decode 直连解码器+多帧重组(报告 _re C_cells_decode); 随产物0.10 |
 | `gw/src/multiwan_ctl.c` | **v1.1** | src | `gw/bin/multiwan_ctl` | multiwan控制器源码(随产物1.1) |
 | `gw/src/shmsnap.c` | **v1.0** | src | `gw/bin/shmsnap` | cfgmgr快照源码 |
 | `gw/src/v3_fix.c` | **v1.1** | src | `gw/bin/v3_fix.ko` | TTL/解绑模块源码(版本随产物) |
@@ -135,7 +135,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/rescue_shadow.py` | **v1.0** | tool | `-` | shadow.override未bind网络救援(getpass旧口令→只读探针: 文件md5/grep行为单测/部署钩子sh -x跟踪→从.bak恢复+重bind; 依赖rc.extend v2.1) |
 | `tools/rotate_toor.py` | **v1.4** | tool | `-` | toor口令轮换器; v1.4: 轮换前存档.bak(rc.extend v2.1回退源); 历史见git |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
-| `tools/selftest.py` | **v2.33** | tool | `-` | v2.33(RIL 收尾轮): t_ril_single 改保留件(含 procd respawn 断言) + t_ril_thin(netd/submon 退役+cells 活); v2.32: t_netagent_retired; 历史见git |
+| `tools/selftest.py` | **v2.34** | tool | `-` | v2.34(cells 直连轮): +t_cells_direct(直连预取在位+无fallback+JSON形状); v2.33: t_ril_thin; 历史见git |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |
 | `tools/serial_server.py` | **v1.7** | tool | `-` | 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets) |
 | `tools/upgrade_slot.py` | **v1.0** | tool | `-` | SSH整槽升级器(P3第一档: vercheck/槽位/空间预检→md5门禁→dd备份旧p26→写新镜像→挂载sanity断言(toor/rcS/#v3:/procd)→失败自动整槽还原不重启→清TRY_A→reboot; PC侧轮询日志+回连终检; --dry-run) |
@@ -214,5 +214,6 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `CLM-NETAGENT-RETIRE`@FINDINGS.md | ✅实证 | `gw/rc_netfh.sh>=3.7, gw/ccmni_up.sh>=1.0, gw/dial_keeper.sh>=1.4, gw/dial_5g.sh>=1.4` | mtk_netagent 退役 (ccmni_up 接管落地), RIL 瘦身终态 (ql_netd/mipc_submonitor 退役) | 9d6a410@2026-10-17 | 实证 netagent 是 ccmni IP 执行者(act 响应含 v4/v6 全套地址而无人落地; proto mipc.sh 同样无落地语句, 两条拨号路径都靠它); 无它时拨号 result:0+僵尸 IP(飞行往返实弹); 退役=开机 service delete+SIGKILL; ccmni_up(解析落地)+keeper 数据面触发(堵僵尸洞)承接; 附带发现: 旧'IP already applied by the proto'注释错误归属已纠正 |
 | `CLM-RIL-THIN`@FINDINGS.md | ✅实证 | `gw/rc_netfh.sh>=3.8` | RIL 瘦身终态 (ql_netd/mipc_submonitor 退役), RIL 保留件单实例 (ql_ril_service) | 4f4dbdf@2026-10-17 | 拔管实验(8 项功能矩阵逐件 service delete): ql_netd 与 mipc_submonitor 零依赖(全矩阵绿) — 含拨号路径(目标终态飞行往返 t+61s 自愈, dial=mipc_wan_cli 直连不经 ql_netd); ql_ril_service 不可约 — 拔之 mipc_cellular cells 恒返 -2147024889(GUI 小区卡/SSE 消费的 ql_nw 路径唯一依赖), 保留并靠 procd respawn+watchdog v1.11 护栏; submonitor 的 procd 服务名带 .init 后缀(易踩坑) |
 | `CLM-MIPC-TRANSPORT`@FINDINGS.md | ✅实证 | `gw/src/mipc_cellular.c>=0.9, gw/bin/mipc_cellular>=0.9` | 蜂窝引擎小区列表活着 (P3 终章) | da31456@2026-10-17 | MIPC 帧格式破解(magic/seq/msgid/txid/len; rsp=req+1+txid回显)+cells=0x23空请求→0x24载荷; ttyCMIPC 单开者语义+kill-9 楔端口陷阱; 判决实验: ql_ril_service 死后直连照常应答 — 守护可退的传输前提成立; v0.9 落地传输层+标定取证(输出仍 libqlril 回退, 行为零变化); 记录级解码(rsrp/sinr 编码)未竟, 见 FINDINGS §28 |
+| `CLM-CELLS-DIRECT`@FINDINGS.md | ✅实证 | `gw/bin/mipc_cellular>=0.10` | cells 直连解码 (mipc_cellular 0x23→0x24 TLV) | 53bf1ff@2026-10-17 | 反汇编还原 ql_ril_service 小区解码: TLV 层(tag/len 4对齐)+NR 记录 0xB8 布局+编码公式(rsrp=raw-156, sinr=raw/2-43)+0x4F 的 bw ASCII; 3 对新鲜样本逐字段验证; v0.10 直连主路径(多帧重组+libqlril 回退), 守护死亡态全 JSON 实弹; 顺带修旧 cells pci 错位 bug; 退役前置就绪(写路径 msgid 表在案) |
 
 <!--CLMAUDIT:END-->

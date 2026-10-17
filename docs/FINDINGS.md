@@ -796,3 +796,11 @@ JSON 值无线性关系（43/61/28 一族值待解）；ql_ril_service 的
 **ql_ril_service 退役前置就绪**：读路径（cells/getbands）已直连；余下写路径
 （setlock/endc/scan/短信发送）msgid 已知，迁移后即可退役最后一个 RIL 守护。
 <!--CLM:CLM-MIPC-TRANSPORT-->
+
+bw 字段终解（反汇编 §11）：**bw 本是 ASCII 零换算**，藏在 mipc 0x44F（线上
+0x4F）同步查询的响应 tag 0x0109 值内（与 pci/arfcn 同记录；请求 8B =
+tag 0x0100/len 1/val 02 选 NR）。此前抓的 0x31 实为 get_band_mode 的频段锁
+位图（0x0100 UMTS/0x0101+0x0102 LTE/0x0103 NR 位图，与 setlock 168B 请求
+同族）——写路径迁移的请求格式顺带到手。实弹修正：0x0109 值内偏移存在 ±2
+漂移，解码器改整个值内 ASCII 扫描（对布局漂移鲁棒）。
+<!--CLM:CLM-CELLS-DIRECT-->

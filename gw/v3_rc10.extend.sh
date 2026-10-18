@@ -1,5 +1,7 @@
 #!/bin/sh
-# rc19.sh v2 (=local v3_rc10.extend.sh) v2.29 -- Frankenstein v3.1: br-lan world + WiFi.
+# rc19.sh v2 (=local v3_rc10.extend.sh) v2.30 -- Frankenstein v3.1: br-lan world + WiFi.
+# v2.30: v3_fix insmod 参数 wan_if 钉死 ccmni2 → 空(全接口; 承载口漂移不再使
+#        TTL 伪装静默失效) + insmod 失败显式回显(rc19.log 可见);
 # v2.29: +wan_eth 有线 WAN 接口管理守护(架构轮自 wan_agg ensure_lease 拆出 —
 #        eth0 租约/NAT/路由看门狗独立于聚合存活, udhcpc 不再阻塞探活 FSM);
 #        wan_agg v3.0 同轮改为 source wan_agg_lib.sh(引擎落地层)。
@@ -60,7 +62,11 @@ fi
 
 # --- our modules
 insmod /data/gw/healthdog.ko forensic=1 armed=0 2>/dev/null
-insmod /data/gw/v3_fix.ko wan_if=ccmni2 ttl_mode=1 unhook=1 2>/dev/null
+# v2.30: wan_if 从钉死 ccmni2 改为空(全接口) — 承载口在 ccmni2/3 间漂移
+#   (2026-10-18 24h 日志实证), 钉死单口=漂移后 TTL 伪装静默失效; TTL++ 对
+#   eth0 出向同样无害(同样是"撤销本机路由减一"语义)。insmod 失败不再静默:
+#   失败输出进 /tmp/rc19.log(KLOG 计数仍保留, selftest t_v3fix_loaded 护栏)。
+insmod /data/gw/v3_fix.ko wan_if= ttl_mode=1 unhook=1 || echo "WARN insmod v3_fix failed rc=$?"
 insmod /data/gw/v3_steth.ko bias=0x08110000 interval_s=5 2>/dev/null
 KLOG "mods hd=$(grep -c healthdog /proc/modules) fix=$(grep -c v3_fix /proc/modules) steth=$(grep -c v3_steth /proc/modules)"
 

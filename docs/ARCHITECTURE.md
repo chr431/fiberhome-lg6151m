@@ -48,7 +48,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/bin/mipc_cellular` | **v0.17** | manifest | `/data/gw/mipc_cellular` | 蜂窝MIPC直连CLI; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘 |
 | `gw/bin/multiwan_ctl` | **v1.1** | manifest | `/data/gw/multiwan_ctl` | 原厂multiwan引擎ioctl控制器(zig动态链libfhdrv_net_api,36B结构体) |
 | `gw/bin/shmsnap` | **v1.0** | manifest | `/data/gw/shmsnap` | cfgmgr树共享内存快照工具(save/load 16MB原始字节, gzip后127KB, 开机恢复锁定状态) |
-| `gw/bin/v3_fix.ko` | **v1.1** | manifest | `/data/gw/v3_fix.ko` | TTL伪装/PPE解绑内核模块(wan_if/ttl_mode/unhook) |
+| `gw/bin/v3_fix.ko` | **v1.2** | manifest | `/data/gw/v3_fix.ko` | TTL伪装/PPE解绑内核模块(wan_if/ttl_mode/unhook); v1.2(24h 日志轮): 重建产物 — 旧文件 ELF 节表错位 1B 致每次开机 insmod 静默失败(type 768), 实测 rc=0/TTL/RX 解绑在位 |
 | `gw/bin/v3_steth.ko` | **v1.0** | manifest | `/data/gw/v3_steth.ko` | hook槽位听诊器(bias/interval) |
 | `gw/bin/v3httpd` | **v2.6** | manifest | `/data/gw/v3httpd` | 网关GUI HTTP服务; v2.6(P2): 静态面拒*.sh(免认证源码泄露)+Host头校验(根治DNS rebinding) |
 | `gw/bin/wpapmk` | **v1.0** | manifest | `/data/gw/wpapmk` | WPA口令转PMK(纯C PBKDF2-SHA1; fh魔改hostapd只吃wpa_psk) |
@@ -80,7 +80,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/udhcpc_wan.script` | **v1.0** | manifest | `/data/gw/udhcpc_wan.script` | WAN口 udhcpc 事件钩子(接口无关化) |
 | `gw/v2_access.sh` | **v6.1** | manifest | `/data/gw/v2_access.sh` | v2 极简访问层(串口/SSH/DHCP/防火墙22,零守护干涉) |
 | `gw/v3_babysit_v2.sh` | **v2.0** | manifest | `/data/gw/babysit_v2.sh` | 启动保姆(T1杀rcS/T2核爆回B) |
-| `gw/v3_rc10.extend.sh` | **v2.29** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2; v2.29: +wan_eth 接线(架构轮); 历史见git |
+| `gw/v3_rc10.extend.sh` | **v2.30** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2; v2.30: v3_fix wan_if 钉死改全接口(承载口漂移)+insmod 失败显式回显; v2.29: +wan_eth 接线 |
 | `gw/wan_agg.sh` | **v3.3** | manifest | `/data/gw/wan_agg.sh` | 双上行聚合主管; v3.2(日志加密轮): TICK(30s)汇总+探活逐目标+硬截止/authd/W2_READY 边沿+主路写失败留痕; v3.1: 探活实证选承载口(僵尸口); 历史见git; v3.3(日志加密轮补): 日志行补 epoch 时间基准(跨日志关联) |
 | `gw/wan_agg_lib.sh` | **v1.2** | manifest | `/data/gw/wan_agg_lib.sh` | 聚合引擎落地层+conf 管理库; v1.2(日志加密轮): ensure_rules 每次补装记 REPAIR+rc(规则被外力蒸发不再静默); v1.1: +cell_iface_pick(探活实证选承载口) |
 | `gw/wan_eth.sh` | **v1.2** | manifest | `/data/gw/wan_eth.sh` | 有线 WAN(eth0) 接口管理守护(自 wan_agg ensure_lease 拆出): 链路+one-shot udhcpc+to-LAN 护盾+备用默认+表200+NAT/FORWARD 看门狗; v1.1(日志加密轮): 租约结果/耗时、carrier/IP/gw 边沿、REPAIR、60s TICK; v1.2(日志加密轮补): 日志行补 epoch 时间基准(跨日志关联) |
@@ -107,7 +107,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/src/mipc_cellular.c` | **v0.17** | src | `gw/bin/mipc_cellular` | 蜂窝MIPC直连CLI源码; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘 |
 | `gw/src/multiwan_ctl.c` | **v1.1** | src | `gw/bin/multiwan_ctl` | multiwan控制器源码(随产物1.1) |
 | `gw/src/shmsnap.c` | **v1.0** | src | `gw/bin/shmsnap` | cfgmgr快照源码 |
-| `gw/src/v3_fix.c` | **v1.1** | src | `gw/bin/v3_fix.ko` | TTL/解绑模块源码(版本随产物) |
+| `gw/src/v3_fix.c` | **v1.2** | src | `gw/bin/v3_fix.ko` | TTL/解绑模块源码(版本随产物); v1.2 随产物重建 |
 | `gw/src/v3_steth.c` | **v1.0** | src | `gw/bin/v3_steth.ko` | 听诊器模块源码(版本随产物) |
 | `gw/src/v3httpd.c` | **v2.6** | src | `gw/bin/v3httpd` | GUI HTTP服务源码; v2.6: 同产物 |
 | `gw/src/wpapmk.c` | **v1.0** | src | `gw/bin/wpapmk` | WPA PMK转换源码(纯C PBKDF2) |
@@ -116,7 +116,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/build_healthdog.sh` | **v1.0** | tool | `-` | healthdog.ko内核模块构建(内核树) |
 | `tools/build_mipc_cellular.sh` | **v1.1** | tool | `-` | mipc_cellular构建(zig cc aarch64-musl 静态); v1.1: 移除 libqlril 链接(v0.12+ 零 RIL 依赖) |
 | `tools/build_steth.sh` | **v1.0** | tool | `-` | v3_steth.ko构建 |
-| `tools/build_v3fix.sh` | **v1.0** | tool | `-` | v3_fix.ko构建 |
+| `tools/build_v3fix.sh` | **v1.1** | tool | `-` | v3_fix.ko构建; v1.1: 路径修正当前布局 + uapi/asm junction 失效改就地复制 + 记录产物错位事故 |
 | `tools/build_v3httpd.sh` | **v1.0** | tool | `-` | v3httpd构建(zig cc aarch64-linux-musl全静态, 同mipc_cellular链) |
 | `tools/deploy.py` | **v2.19** | tool | `-` | v2.19: MANIFEST +ccmni_up.sh(netagent-lite, dial 族共用); 历史见git |
 | `tools/device_local.py.example` | **v1.0** | tool | `-` | 凭证模板(真件gitignored) |
@@ -135,7 +135,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/rescue_shadow.py` | **v1.0** | tool | `-` | shadow.override未bind网络救援(getpass旧口令→只读探针: 文件md5/grep行为单测/部署钩子sh -x跟踪→从.bak恢复+重bind; 依赖rc.extend v2.1) |
 | `tools/rotate_toor.py` | **v1.4** | tool | `-` | toor口令轮换器; v1.4: 轮换前存档.bak(rc.extend v2.1回退源); 历史见git |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
-| `tools/selftest.py` | **v2.40** | tool | `-` | v2.40(日志加密轮): +t_logging_fine(log_keeper 增量落盘+wan_agg/watchdog TICK 持久化); v2.39: 冷启动 qdisc 回退同口径; 历史见git |
+| `tools/selftest.py` | **v2.41** | tool | `-` | v2.41(24h 日志轮): +t_v3fix_loaded(模块在位护栏); v2.40: t_logging_fine; 历史见git |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |
 | `tools/serial_server.py` | **v1.7** | tool | `-` | 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets) |
 | `tools/upgrade_slot.py` | **v1.0** | tool | `-` | SSH整槽升级器(P3第一档: vercheck/槽位/空间预检→md5门禁→dd备份旧p26→写新镜像→挂载sanity断言(toor/rcS/#v3:/procd)→失败自动整槽还原不重启→清TRY_A→reboot; PC侧轮询日志+回连终检; --dry-run) |
@@ -217,5 +217,6 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `CLM-CELLS-DIRECT`@FINDINGS.md | ✅实证 | `gw/bin/mipc_cellular>=0.10` | cells 直连解码 (mipc_cellular 0x23→0x24 TLV) | 9b816ea@2026-10-17 | 反汇编还原 ql_ril_service 小区解码: TLV 层(tag/len 4对齐)+NR 记录 0xB8 布局+编码公式(rsrp=raw-156, sinr=raw/2-43)+0x4F 的 bw ASCII; 3 对新鲜样本逐字段验证; v0.10 直连主路径(多帧重组+libqlril 回退), 守护死亡态全 JSON 实弹; 顺带修旧 cells pci 错位 bug; 退役前置就绪(写路径 msgid 表在案); v0.16 实弹: 数组 tag 双变体 0x810b/0x010b(19 邻区响应用 0x010b, 旧码间歇 decode=-2; /tmp/cells_decode_fail.bin 原始载荷取证) |
 | `CLM-RIL-ZERO`@FINDINGS.md | ✅实证 | `gw/rc_netfh.sh>=3.9, gw/bin/mipc_cellular>=0.12, gw/www/api_sms.sh>=1.1` | RIL 守护全退役 (ql_ril_service/netd/submonitor/netagent), 蜂窝写路径直连 (endc/setlock/unlock) | 88f81e6@2026-10-17 | RIL 四件套全退役: 读(cells/getbands)+写(setlock/endc/scan)+短信发送(AT+EMGS, 厂商同族)全部直连 MIPC; mipc_cellular v0.12 移除 libqlril(NEEDED 空); 硬教训: msgid 是 u16/TLV 步进 (4+len+7)&~7/大响应分帧须等齐/AT+EMGS 无负向测试余地(modem 不校验号码, 非法号也投递); 位映射修正旧 off-by-one(N41 曾锁到 N40) |
 | `CLM-LOGGING-FINE`@FINDINGS.md | ✅实证 | `gw/log_keeper.sh>=1.3, gw/wan_agg.sh>=3.2, gw/watchdog.sh>=1.15, gw/bin/mipc_cellular>=0.13, gw/www/api.sh>=2.76` | 日志细粒度与 24h 持久化管线 (log_keeper v1.3 增量) | 9b816ea@2026-10-17 | 细粒度日志两级设计: 本文件自轮转(TICK/EVT/WARN/REPAIR/DRIFT)+log_keeper v1.3 增量追加(锚行定位/1MB 轮转/resync); 覆盖 wan_agg/wan_eth/ccmni_up/dial_keeper/rc_netfh/watchdog/led_mgr/api/mipc_cellular/wifi_autoch; 日志量约1-2MB/天; 凭证/短信内容/号码(仅末4位)脱敏 |
+| `CLM-V3FIX-CORRUPT`@FINDINGS.md | ✅实证 | `gw/bin/v3_fix.ko>=1.2, gw/v3_rc10.extend.sh>=2.30` | v3_fix 内核模块在位 (TTL 伪装/RX 解绑) | 3d18f6e@2026-10-18 | 旧产物 ELF 节表错位 1B → 每次开机 insmod 静默失败(type 768), TTL 伪装/RX 解绑长期死亡; 由 syslog 镜像的 daemon.err 捕获; 重建(内核树+zig cc)实测 rc=0, wan_if 改全接口(承载口 ccmni2↔3 漂移), selftest t_v3fix_loaded 护栏 |
 
 <!--CLMAUDIT:END-->

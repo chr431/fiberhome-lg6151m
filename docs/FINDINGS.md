@@ -892,3 +892,39 @@ TICK 级输入（探活逐目标、ccmni 清单、authd 年龄、租约耗时、
 只认前者，GUI 小区卡因此间歇失败。v0.16 已接受双变体；连续 20 次查询 0 失败。
 该案例说明"把输入与失败原因写下来"比"只记最终状态"更快定位问题。
 <!--CLM:CLM-LOGGING-FINE-->
+
+## 31. 24h 日志首日分析：v3_fix.ko 损坏（每次开机静默加载失败）等发现（2026-10-18）
+
+**头号发现（已修复）**：`/data/gw/v3_fix.ko` 的 ELF 节表整体**错位 1 字节**（文件
+在头部之后某处被插入 1B；按 +1 偏移解析所有字段完全合法），内核模块加载器报
+`Invalid ELF section hdr(type 768)` 拒载 —— 即**每次开机的 `insmod v3_fix.ko`
+都在静默失败**（stderr 被 rc19 丢弃），TTL 伪装与 RX 解绑两个功能长期处于死亡态。
+这是典型 L13（功能静默坏掉直到人工检查），也是日志加密轮"把输入与失败原因写下
+来"的直接收益：`daemon.err insmod: failed to insert` 被 syslog 镜像捕获后才暴露。
+
+**修复**（当日实弹验证）：
+- `gw/bin/v3_fix.ko` v1.2 = 从 `gw/src/v3_fix.c` 重建（zig cc, 内核树
+  `_local/legacy/linux-5.15.134`），vermagic `5.15.134 SMP modUnload aarch64`，
+  实测 `insmod` rc=0、`/proc/modules` 在位、`TTL mode 1`、`RX hooks cleared
+  (ppe=… quec=0)`。构建脚本 v1.1 修正路径到当前布局，并记录 uapi/asm junction
+  指向旧绝对路径已失效、改用就地复制。
+- `rc19` v2.30：`wan_if=ccmni2`（钉死单口）→ `wan_if=`（全接口）——24h 内承载口
+  发生过 ccmni2→ccmni3 漂移，钉死单口会让 TTL 伪装在漂移后静默失效；TTL++ 对
+  eth0 出向是同一"撤销本机路由减一"语义，无害。insmod 失败改为显式回显。
+- `selftest` v2.41 `t_v3fix_loaded`：/proc/modules 必须恰 1 实例（回归护栏）。
+<!--CLM:CLM-V3FIX-CORRUPT-->
+
+**其余发现（观察项，未改动）**：
+
+| 发现 | 证据 | 判读 |
+|---|---|---|
+| 04:00 前后整机重启，无软件指纹 | syslog 在 04:00:05 后戛然而止（温度线正常），无 panic/干净重启记录；reboot_sched 无动作 | 疑似外部断电/硬件级复位；建议留意是否有同时段市电事件 |
+| dial_keeper 心跳文件消失一次 | 10:51:43 watchdog `hb=none`（文件不在而非过期），keeper 进程存活且 5s 前刚写 TICK | 单次 /tmp 读异常即触发杀+拉（5s 空窗、无拨号中断）；护栏可改为连续两次 stale 才动手（待办） |
+| dmesg 以 ~2MB/90min 速度被 CCCI 调试刷写 | dmesg 镜像 8 次轮转全是 `ccci1/net`/`dpmaif` txq dump | 轮转护栏吸收了它，但内核环历史只剩 ~90min；如需更深的 dmesg 取证需做内核降噪 |
+| syslog 主要噪音 = thermal_core(5s 一条温度) + mipc_cli(每次 MIPC 调用两条) | 24h 镜像内 15407+11048 行，占 ~85% | 不影响功能；想让 syslog 环更深可考虑给两者降噪（待办，非本轮） |
+| 家宽数据面 3~4 次微中断(3-10s) | led_mgr `DRIFT wan_led 1->0→0->1` 成对出现 | LED 如实反映 wan_alive 短暂判死，属上游瞬断，无需动作 |
+| WiFi 信道漂移 6 次/天 | watchdog `channel drift … adopted live` | 驱动 IDC 共存避让的正常行为，护栏在位 |
+| 模组 AT 注册态短暂丢失 1 次 | watchdog `modem NOT registered`，COPS 空响应，30s 内自愈 | 上行接入网注册抖动；已有 per-30s 取证，继续观察 |
+| 资源面健康 | memfree 全天 ~1.27-1.29GB 平坦、/data 空闲 ~2.0GB、僵尸进程 0、conntrack 数百量级 | 无泄漏迹象 |
+| 蜂窝零 MIPC 失败 | mipc_cellular.log 全天 `prc=0`（tag 双变体修复后 20 连发亦 0 失败） | v0.16/v0.17 修复生效 |
+| GUI 仅 2 条 sse need_login | token 8h 过期后的浏览器重连 | 正常 |

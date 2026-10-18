@@ -11,6 +11,8 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
+v2.41 (24h 日志轮): +t_v3fix_loaded — v3_fix.ko 必须恰 1 实例在 /proc/modules
+  (旧产物 ELF 错位 1B 致每次开机 insmod 静默失败的回归护栏)。
 v2.40 (日志加密轮): +t_logging_fine — log_keeper v1.3 增量落盘(stream/1MB 轮转/
   resync) + wan_agg/watchdog 持久化副本含 TICK/EVT 主干行; 24h 分析管线回归护栏。
 v2.36 (RIL 清零轮收尾): t_agg_route_landmine 的探活路由断言改"指向任一存活
@@ -1805,6 +1807,18 @@ def run_all(filter_cats=None, json_out=False):
     if _c:
         _c.close()
     return 0 if failed == 0 else 1
+
+
+@test("v3_fix 内核模块在位 (TTL 伪装/RX 解绑)")
+def t_v3fix_loaded():
+    # v2.41 (24h 日志轮, 2026-10-18): 旧产物 ELF 节表整体错位 1 字节(文件在某处
+    #   被插入 1B), 内核 "Invalid ELF section hdr(type 768)" 拒载 — 每次开机
+    #   insmod 都静默失败, TTL 伪装/RX 解绑长期死着无人知晓(典型 L13)。
+    #   重建修复; 本护栏断言模块恰 1 实例在 /proc/modules。
+    n = dev("grep -c v3_fix /proc/modules").strip()
+    ok = n == "1"
+    record(t_v3fix_loaded._test_name, "system", ok,
+           f"/proc/modules v3_fix={n}" + ("" if ok else " (rc19 insmod failed? see rc19.log)"))
 
 
 @test("日志细粒度与 24h 持久化管线 (log_keeper v1.3 增量)")

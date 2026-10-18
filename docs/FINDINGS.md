@@ -928,3 +928,14 @@ TICK 级输入（探活逐目标、ccmni 清单、authd 年龄、租约耗时、
 | 资源面健康 | memfree 全天 ~1.27-1.29GB 平坦、/data 空闲 ~2.0GB、僵尸进程 0、conntrack 数百量级 | 无泄漏迹象 |
 | 蜂窝零 MIPC 失败 | mipc_cellular.log 全天 `prc=0`（tag 双变体修复后 20 连发亦 0 失败） | v0.16/v0.17 修复生效 |
 | GUI 仅 2 条 sse need_login | token 8h 过期后的浏览器重连 | 正常 |
+
+**04:00 重启定案（同日手动对照实验）**：是 `reboot_sched` 的**每日 04:00 定时重启**
+（defaults.conf 出厂 `REBOOT_EN=1 REBOOT_TIME=04:00`）。实锤 = `/data/gw/reboot_sched.last`
+内容为当日日期；用户确认无断电。手动触发 `reboot` 做对照：**软件重启在持久日志里
+同样零指纹**（syslog 停在断前最后一条温度行、无任何关机痕迹；log_keeper 30s 周期
++ logd 随内核即死，最后几秒必然丢失）——所以"零指纹"不能区分正常/异常复位。
+复位后的区分线索：`reboot_sched.last`（持久）、cmdline `boot.reason`（已并入 BOOT
+标记）。观测缺口修复：reboot_sched v1.2 触发行先落 `/data/gw/logs/reboots.log` +
+sync 再 reboot；log_keeper v1.5 BOOT 标记附 `reason=`。本次手动重启同时验证了
+v3_fix 修复件的**首次冷启动**（rc19 t+68.8s `TTL mode 1 on egress '<all>'` +
+`RX hooks cleared`）。

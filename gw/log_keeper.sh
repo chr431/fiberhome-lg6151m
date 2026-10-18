@@ -1,5 +1,7 @@
 #!/bin/sh
-# log_keeper.sh v1.4 -- 日志持久化守护（日志改善专项轮）
+# log_keeper.sh v1.5 -- 日志持久化守护（日志改善专项轮）
+#   v1.5 (2026-10-18): BOOT 标记附 boot.reason(cmdline; 04:00 复位源排查的教训) —
+#   软件重启与异常复位在持久日志里同样零指纹, reason 是少数可区分线索。
 #   v1.3 (2026-10-17 日志加密轮): /tmp/*.log 由"tail 32K 覆盖快照"改为**增量追加**
 #   (锚行定位; 本文件被本地轮转/截断 → resync 标记 + tail 120 重同步)。此前
 #   /data/gw/logs/tmp 只保留每个日志的最后 32K, 加密后的 TICK/EVT 会被迅速覆盖,
@@ -63,7 +65,8 @@ stream() { # $1=/tmp/xxx.log
     tail -n 1 "$f" > "$anchor"
 }
 bootmark() {
-    B="===== BOOT epoch=$(date +%s) $(date '+%F %T %z') up=$(cut -d. -f1 /proc/uptime)s slot=$(tr ' ' '\n' < /proc/cmdline | sed -n 's/^bootslot=//p') kern=$(uname -r) ====="
+    # v1.5: 附 boot.reason(cmdline, LK 传入; 空=未知) — 复位源取证的免费证据
+    B="===== BOOT epoch=$(date +%s) $(date '+%F %T %z') up=$(cut -d. -f1 /proc/uptime)s slot=$(tr ' ' '\n' < /proc/cmdline | sed -n 's/^bootslot=//p') reason=$(tr ' ' '\n' < /proc/cmdline | sed -n 's/^boot.reason=//p' | tr -d ' ') kern=$(uname -r) ====="
     echo "$B" >> $DIR/syslog.log
     echo "$B" >> $DIR/dmesg.log
     lk "$B"

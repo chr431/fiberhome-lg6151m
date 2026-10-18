@@ -1,7 +1,11 @@
 #!/bin/sh
-# reboot_sched.sh v1.1 -- 定时重启守护(出厂默认: 每日 04:00)
+# reboot_sched.sh v1.2 -- 定时重启守护(出厂默认: 每日 04:00)
 # 配置: defaults.conf(只读出厂) 叠 settings.conf(用户稀疏覆盖), 与 NTP/WiFi 族同源;
 #   每轮重读 → GUI 改配置无需重启本守护。
+# v1.2 (2026-10-18 04:00 事件复盘): 触发行同时落 /data/gw/logs/reboots.log(持久) —
+#   原先只写 /tmp, reboot 后 tmpfs 即失, log_keeper 30s 周期大概率赶不上最后几秒,
+#   结果"每天 04:00 定时重启"在所有持久日志里零指纹, 被当成疑似异常断电排查了一轮。
+#   实锤判据当时只剩 reboot_sched.last 的当日日期。今后 /data 落盘 + sync 先行。
 # v1.1: 每轮先自应用时区(/etc/TZ→/tmp/TZ 重启即失) — 本守护按本地时间比对窗口,
 #   不能依赖别的守护的时序(ntp_keeper 也做, 幂等双保险)。
 # 护栏(缺一不发; 每一条都对应一种真实故障):
@@ -11,10 +15,12 @@
 #   3) 已运行 >= 300s                   -- 重启后本守护再启动, 时钟未校准时也不复触发
 #   4) 命中窗口 [目标时刻, +5min)       -- 容忍 30s 轮询抖动与对时跳变
 #   5) 当日未执行(last 文件比对)        -- 跨重启持久(/data), 杜绝同日二次重启
-# 触发序: 落盘 last → sync → reboot。reboot 即 api.sh sys_reboot 同一命令(手动
-#   重启按钮同源), 槽位保活由 rc.extend.sh 开机清 TRY_A 承担, 无需额外处理。
+# 触发序: 落盘 last → 触发行落 /data + sync → reboot。reboot 即 api.sh sys_reboot
+#   同一命令(手动重启按钮同源), 槽位保活由 rc.extend.sh 开机清 TRY_A 承担。
 LOG=/tmp/reboot_sched.log
 LAST=/data/gw/reboot_sched.last
+REBOOTS=/data/gw/logs/reboots.log
+mkdir -p /data/gw/logs
 rg() { echo "$(date '+%m-%d %H:%M:%S') $*" >> $LOG; }
 rg "start"
 while :; do
@@ -37,8 +43,9 @@ while :; do
            && [ $DIFF -ge 0 ] && [ $DIFF -lt 5 ] \
            && [ "$(cat $LAST 2>/dev/null)" != "$D" ]; then
             echo "$D" > $LAST
+            echo "$(date '+%F %T') REBOOT target=$REBOOT_TIME late=${DIFF}min uptime=${U}s" >> $REBOOTS
             sync
-            rg "REBOOT now=$(date '+%H:%M') target=$REBOOT_TIME (late=${DIFF}min)"
+            rg "REBOOT now=$(date '+%H:%M') target=$REBOOT_TIME (late=${DIFF}min, durable=$REBOOTS)"
             reboot
             sleep 120   # reboot 未生效(极少)则当日不再重复发; last 已挡
         fi

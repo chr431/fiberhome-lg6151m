@@ -939,3 +939,12 @@ TICK 级输入（探活逐目标、ccmni 清单、authd 年龄、租约耗时、
 sync 再 reboot；log_keeper v1.5 BOOT 标记附 `reason=`。本次手动重启同时验证了
 v3_fix 修复件的**首次冷启动**（rc19 t+68.8s `TTL mode 1 on egress '<all>'` +
 `RX hooks cleared`）。
+
+**镜像降噪（2026-10-18，log_keeper v1.6）**：24h 实测 syslog 77–78% 行数是
+thermal_core 5s 温度报、mipc_cli 每调用 start/end 两行、mtk_monitor_hang；
+dmesg 字节大头是 cci rxq/isr 计数器 dump、SPM MCUSYSOFF ~900B 寄存器 dump、
+mtk_eth MAC 表 debug、WiFi DPD 良性校准噪声、以及自家 mipc_cellular 的
+ttyCMIPC 端口开合回声。这些模式在**持久镜像落盘前丢弃**（丢弃量计数进 5min
+汇总，不静默）；RAM 环（logread/dmesg 实时）不受影响。看门狗踢狗行**刻意保留**
+（踢狗何时停止是复位取证的关键）。dmesg 镜像容量 2MB→4MB。实测效果：syslog
+增速 ~4MB/天 → ~0.4MB/天（4MB 上限≈10 天历史），dmesg 增速降约 60%。

@@ -1829,15 +1829,17 @@ def t_logging_fine():
     st = dev("grep -c 'STREAM_CAP=1048576' /data/gw/log_keeper.sh 2>/dev/null").strip()
     sm = dev("grep -c 'stream()' /data/gw/log_keeper.sh 2>/dev/null").strip()
     rs = dev("grep -c 'stream resync' /data/gw/log_keeper.sh 2>/dev/null").strip()
+    dn = dev("grep -c 'SYSLOG_DROP' /data/gw/log_keeper.sh 2>/dev/null").strip()
     wa = dev("wc -c < /data/gw/logs/tmp/wan_agg.log 2>/dev/null || echo 0").strip()
     wt = dev("tail -n 300 /data/gw/logs/tmp/wan_agg.log 2>/dev/null | grep -cE 'TICK|EVT'").strip()
     wd = dev("wc -c < /data/gw/logs/tmp/watchdog.log 2>/dev/null || echo 0").strip()
     wdt = dev("tail -n 300 /data/gw/logs/tmp/watchdog.log 2>/dev/null | grep -c 'TICK'").strip()
     ok = (st not in ("", "0") and sm not in ("", "0") and rs not in ("", "0")
+          and dn not in ("", "0")
           and int(wa or 0) > 0 and int(wt or 0) > 0
           and int(wd or 0) > 0 and int(wdt or 0) > 0)
     record(t_logging_fine._test_name, "system", ok,
-           f"cap={st} stream={sm} resync={rs} wan={wa}B/{wt}evt wd={wd}B/{wdt}tick")
+           f"cap={st} stream={sm} resync={rs} denoise={dn} wan={wa}B/{wt}evt wd={wd}B/{wdt}tick")
 
 
 def main():

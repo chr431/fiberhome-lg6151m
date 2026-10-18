@@ -1,5 +1,11 @@
 #!/bin/sh
-# log_keeper.sh v1.5 -- 日志持久化守护（日志改善专项轮）
+# log_keeper.sh v1.6 -- 日志持久化守护（日志改善专项轮）
+#   v1.6 (2026-10-18 日志降噪轮): 镜像层降噪 — 24h 实测 syslog 78% 音量来自
+#   thermal_core 5s 温度行 + mipc_cli 每调用 2 行 + mtk_monitor_hang; dmesg 字节
+#   大头是 cci 计数器 dump(rxq/isr 全列表)、SPM MCUSYSOFF 寄存器 dump(~900B/行)、
+#   mtk_eth MAC 表 debug。这些行在**持久镜像**落盘前丢弃(丢弃量计数进 5min 汇总,
+#   不静默); RAM 环(logread/dmesg 实时)不受影响, 现场排查仍可实时看。dmesg 镜像
+#   容量 2MB->4MB(滤后同容量可留 ~2 天)。OOPS/panic/authpriv/自研守护日志全保留。
 #   v1.5 (2026-10-18): BOOT 标记附 boot.reason(cmdline; 04:00 复位源排查的教训) —
 #   软件重启与异常复位在持久日志里同样零指纹, reason 是少数可区分线索。
 #   v1.3 (2026-10-17 日志加密轮): /tmp/*.log 由"tail 32K 覆盖快照"改为**增量追加**
@@ -27,6 +33,10 @@
 LOG=/tmp/log_keeper.log
 DIR=/data/gw/logs
 lk() { echo "$(date '+%m-%d %H:%M:%S') $*" >> $LOG; }
+# v1.6: 镜像降噪模式(仅作用于持久镜像; busybox grep -E 实测兼容)
+SYSLOG_DROP='thermal_core\[[0-9]+\]: interval=|mipc_cli\[[0-9]+\]: main:mipc operation (start|end)|mtk_monitor_hang\[[0-9]+\]:|\[ccci[0-9]+/(net|dpmaif|cif)\]|\[ccci[0-9]+/chr\]port ttyCMIPC[0-9]+ (open|close)'
+DMESG_DROP='\[ccci[0-9]+/(net|dpmaif|cif)\]|MCUSYSOFF wake up|mtk_eth_search_port_by_mac_table|mt7992_apply_dpd_flatness_data|\[ccci[0-9]+/chr\]port ttyCMIPC[0-9]+ (open|close)'
+DROP_S=0; DROP_D=0; DROP_S0=0; DROP_D0=0
 # 增量抽取: 以 last 锚行在环内定位, 输出其后全部新增行(标准 busybox awk)
 delta() { # $1=ring file $2=last-anchor
     grep -Fqx "$2" "$1" 2>/dev/null || return 1
@@ -103,36 +113,44 @@ while :; do
     fi
     PREV_UP=$U
 
-    # -- syslog 镜像 --
+    # -- syslog 镜像(v1.6: 降噪 — 高频低值行不落盘, 丢弃量计数入汇总) --
     logread 2>/dev/null > /tmp/lk_ring
     if [ -s /tmp/lk_ring ]; then
         LAST=$(cat $DIR/.syslog.last 2>/dev/null)
         if [ -n "$LAST" ]; then
             if NEW=$(delta /tmp/lk_ring "$LAST"); then
-                [ -n "$NEW" ] && printf '%s\n' "$NEW" | append_cap $DIR/syslog.log 4194304
+                if [ -n "$NEW" ]; then
+                    _d=$(printf '%s\n' "$NEW" | grep -cE "$SYSLOG_DROP")
+                    [ "${_d:-0}" -gt 0 ] && { NEW=$(printf '%s\n' "$NEW" | grep -vE "$SYSLOG_DROP"); DROP_S=$((DROP_S + _d)); }
+                    [ -n "$NEW" ] && printf '%s\n' "$NEW" | append_cap $DIR/syslog.log 4194304
+                fi
             else
-                { echo "-- logread 环溢出/轮转, resync --"; tail -n 400 /tmp/lk_ring; } | append_cap $DIR/syslog.log 4194304
+                { echo "-- logread 环溢出/轮转, resync --"; tail -n 400 /tmp/lk_ring | grep -vE "$SYSLOG_DROP"; } | append_cap $DIR/syslog.log 4194304
                 lk "syslog ring resync"
             fi
         else
-            tail -c 65536 /tmp/lk_ring >> $DIR/syslog.log
+            tail -c 65536 /tmp/lk_ring | grep -vE "$SYSLOG_DROP" >> $DIR/syslog.log
         fi
         tail -n 1 /tmp/lk_ring > $DIR/.syslog.last
     fi
 
-    # -- dmesg 镜像 --
+    # -- dmesg 镜像(v1.6: 降噪 + 容量 2MB->4MB: 噪声滤除后同容量可留 ~2 天) --
     dmesg 2>/dev/null > /tmp/lk_ring
     if [ -s /tmp/lk_ring ]; then
         LAST=$(cat $DIR/.dmesg.last 2>/dev/null)
         if [ -n "$LAST" ]; then
             if NEW=$(delta /tmp/lk_ring "$LAST"); then
-                [ -n "$NEW" ] && printf '%s\n' "$NEW" | append_cap $DIR/dmesg.log 2097152
+                if [ -n "$NEW" ]; then
+                    _d=$(printf '%s\n' "$NEW" | grep -cE "$DMESG_DROP")
+                    [ "${_d:-0}" -gt 0 ] && { NEW=$(printf '%s\n' "$NEW" | grep -vE "$DMESG_DROP"); DROP_D=$((DROP_D + _d)); }
+                    [ -n "$NEW" ] && printf '%s\n' "$NEW" | append_cap $DIR/dmesg.log 4194304
+                fi
             else
-                { echo "-- dmesg 环溢出/轮转, resync --"; tail -n 400 /tmp/lk_ring; } | append_cap $DIR/dmesg.log 2097152
+                { echo "-- dmesg 环溢出/轮转, resync --"; tail -n 400 /tmp/lk_ring | grep -vE "$DMESG_DROP"; } | append_cap $DIR/dmesg.log 4194304
                 lk "dmesg ring resync"
             fi
         else
-            tail -c 65536 /tmp/lk_ring >> $DIR/dmesg.log
+            tail -c 65536 /tmp/lk_ring | grep -vE "$DMESG_DROP" >> $DIR/dmesg.log
         fi
         tail -n 1 /tmp/lk_ring > $DIR/.dmesg.last
     fi
@@ -146,12 +164,14 @@ while :; do
         tail -c 32768 "$f" > /tmp/lk_snap
         cmp -s /tmp/lk_snap $DIR/tmp/$b || { mv /tmp/lk_snap $DIR/tmp/$b; }
     done
-    # -- 每 10 轮(5min)落一行汇总: 持久化规模可观测 --
+    # -- 每 10 轮(5min)落一行汇总: 持久化规模 + 降噪丢弃量可观测(不静默) --
     CYC=$(( ${CYC:-0} + 1 ))
     if [ $((CYC % 10)) -eq 0 ]; then
         _nf=$(ls $DIR/tmp/*.log 2>/dev/null | wc -l)
         _nb=$(cat $DIR/tmp/*.log 2>/dev/null | wc -c)
-        lk "stream summary: files=$_nf bytes=$_nb"
+        _ds=$((DROP_S - DROP_S0)); _dd=$((DROP_D - DROP_D0))
+        DROP_S0=$DROP_S; DROP_D0=$DROP_D
+        lk "stream summary: files=$_nf bytes=$_nb denoise_dropped: syslog=$_ds dmesg=$_dd (cum s=$DROP_S d=$DROP_D)"
     fi
 
     # -- 每次开机一份诊断包(+180s, 只做一次) --

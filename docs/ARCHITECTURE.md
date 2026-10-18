@@ -67,7 +67,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/guest_fw.sh` | **v1.6** | manifest | `/data/gw/guest_fw.sh` | 访客隔离防火墙v1.6(审计P0: GUEST_ISOLATE开关删除=强制隔离; 兼容需求改由主WiFi终端频段锁定承接; 历史版本见git) |
 | `gw/healthdog.sh` | **v1.1** | manifest | `/data/gw/healthdog.sh` | 看门狗用户态心跳 |
 | `gw/led_mgr.sh` | **v2.5** | manifest | `/data/gw/led_mgr.sh` | 原厂风格LED守护(绝对电平+自愈); v2.4(日志加密轮): 外部写导致的 DRIFT 旧值->应为值、状态变化附 ccmni/wan_alive 原文; v2.3: 单实例 PID 锁; v2.1: 判活消费 wan_alive; v2.5(日志加密轮补): 日志行补 epoch 时间基准(跨日志关联) |
-| `gw/log_keeper.sh` | **v1.5** | manifest | `/data/gw/log_keeper.sh` | 日志持久化守护; v1.5: BOOT 标记附 boot.reason; v1.4: /tmp/*.log 增量追加(1MB 轮转); 上一boot 转存 tmp.prev |
+| `gw/log_keeper.sh` | **v1.6** | manifest | `/data/gw/log_keeper.sh` | 日志持久化守护; v1.6: 镜像降噪(thermal/mipc_cli/cci dump/SPM dump/eth debug/WiFi DPD/mipc 端口回声不落盘, 丢弃量入汇总; RAM 环不受影响)+dmesg 镜像 4MB; v1.5: BOOT 附 boot.reason |
 | `gw/mipc_dial_trace.sh` | **v1.0** | manifest | `/data/gw/mipc_dial_trace.sh` | 5G 拨号取证(xtrace 抓真参) |
 | `gw/night_report.sh` | **v1.0** | manifest | `/data/gw/night_report.sh` | 夜间体检报告 |
 | `gw/ntp_keeper.sh` | **v1.2** | manifest | `/data/gw/ntp_keeper.sh` | 每小时NTP守时(多源; 设备无RTC; v1.2: +时区自愈(/etc/TZ→tmpfs重启即失, 每轮重应用); v1.1: 首选 NTP_SERVER 自管配置) |

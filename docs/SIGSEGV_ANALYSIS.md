@@ -232,6 +232,9 @@ tb[2]=0x7facc7fc30 (libubox 区)
 
 ### P1 — 自建静态日志采集器（根治 logread 主链路 + 掐断 aee 放大源）
 
+> **已落地**（`gw/src/logc.c` → `gw/bin/logc` v1.0，静态 95KB；log_keeper v1.8 /
+> diag_dump v1.2 已切换）。执行与验证见 §9。
+
 用 zig `aarch64-linux-musl` 静态构建（先例：mipc_cellular v12 静态版），
 走同一 ubus fd 流，但：
 
@@ -245,6 +248,10 @@ tb[2]=0x7facc7fc30 (libubox 区)
 
 ### P2 — 守护脚本工具链静态化（根治家族的暴露面）
 
+> **已落地**（`gw/bin/busybox` 1.36.1-r31 + `gw/bin/ip` 6.3.0 静态；
+> `gw/toolchain_init.sh` 建 `/data/gw/sbin` 农场，rc.extend v2.3 前置 PATH；
+> 已观测到全部常驻守护的 `/proc/<pid>/exe` = 静态 busybox）。执行与验证见 §9。
+
 busybox（grep/awk/sh…）与 ip-full 全部动态链厂商 musl。构建静态
 busybox（zig/自有 musl，defconfig+所需 applet）与静态 ip 子集，
 放 `/data/gw/bin/` 并在守护脚本 PATH 前置。脚本零改动；
@@ -253,12 +260,19 @@ selftest 增加静态工具存在性与行为等价校验。分批灰度：
 
 ### P3 — 家族 core 捕获 trap（闭环 §5-2）
 
+> **已落地**（`gw/core_trap.sh` v1.0，每日 03:20 起 600s；rc.extend 抬
+> RLIMIT_CORE=unlimited；watchdog v1.24 自愈）。窗口机制已用静态 crashme
+> 实测抓取并归档到 `/data/gw/logs/cores/20261019/core.8220`。见 §9。
+
 低频窗口方案：每日一个 10 分钟窗口把 core_pattern 切到
 `/tmp/core.%p`（ulimit 配套），窗口结束由 log_keeper 附带把
 `/tmp/core.*` 搬 `/data/gw/logs/cores/` 并恢复 aee 管道；
 拿到家族 core 后按本文件 §1 的方法提取 libc 偏移对齐验证同源性。
 
 ### P4 — 判据与监控修正
+
+> **已落地**（watchdog v1.24：dmesg 行增量 + `aee db_history` 行增量双判据；
+> 实测 20:47:01 / 20:53:48 两条 `WARN aee NE +1`，含进程名/信号/时间原文）。
 
 - watchdog fault 判据从"dmesg 行增量"改为/加上"aee db_history
   行数增量"（用 stat mtime+行数，避免读内容）。

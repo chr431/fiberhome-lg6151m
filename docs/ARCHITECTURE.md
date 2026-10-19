@@ -76,7 +76,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/night_report.sh` | **v1.0** | manifest | `/data/gw/night_report.sh` | 夜间体检报告 |
 | `gw/ntp_keeper.sh` | **v1.2** | manifest | `/data/gw/ntp_keeper.sh` | 每小时NTP守时(多源; 设备无RTC; v1.2: +时区自愈(/etc/TZ→tmpfs重启即失, 每轮重应用); v1.1: 首选 NTP_SERVER 自管配置) |
 | `gw/radvd.conf` | **v1.0** | manifest | `/data/gw/radvd.conf` | IPv6 SLAAC+RDNSS通告(br-lan, ULA fd42:9ac1:7e50::/64) |
-| `gw/rc.extend.sh` | **v2.3** | manifest | `/data/rc.extend.sh` | 槽位调度器; v2.3: TZ 兜底(/etc/TZ→defaults.conf TZ); v2.2(SIGSEGV P2/P3): 静态工具链 PATH/TZ 导出 + RLIMIT_CORE unlimited(每日 core 窗口前置); v2.1(P3): shadow.override 合法性校验+.bak回退自愈; 历史见git |
+| `gw/rc.extend.sh` | **v2.4** | manifest | `/data/rc.extend.sh` | 槽位调度器; v2.4: TZ 解析提前到 toolchain_init 前(自举日志时区一致); v2.3: TZ 兜底(/etc/TZ→defaults.conf TZ); v2.2(SIGSEGV P2/P3): 静态工具链 PATH/TZ 导出 + RLIMIT_CORE unlimited(每日 core 窗口前置); v2.1(P3): shadow.override 合法性校验+.bak回退自愈; 历史见git |
 | `gw/rc_netfh.sh` | **v3.11** | manifest | `/data/gw/rc_netfh.sh` | 路线A: FH modem栈环境; v3.10(日志加密轮): 相位计时+settle 每10s ccmni 清单+route/NAT REPAIR+fw_apply rc+总耗时; v3.9: RIL 四件套全退役, 读/写路径直连; v3.11(日志加密轮补): 日志行补 epoch 时间基准(跨日志关联) |
 | `gw/reboot_sched.sh` | **v1.2** | manifest | `/data/gw/reboot_sched.sh` | 定时重启守护; v1.2(04:00 事件复盘): 触发行先落 /data/gw/logs/reboots.log+sync 再 reboot — 原只写 /tmp, 30s 持久化周期赶不上, 每日定时重启在持久日志零指纹 |
 | `gw/toolchain_init.sh` | **v1.0** | manifest | `/data/gw/toolchain_init.sh` | 静态工具链自举: /data/gw/sbin 符号链接农场(busybox 305 applet + 静态 iproute2 ip), 原子换入/失败回退 vendor; rc.extend 开机调用 |
@@ -85,11 +85,11 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/udhcpc_wan.script` | **v1.0** | manifest | `/data/gw/udhcpc_wan.script` | WAN口 udhcpc 事件钩子(接口无关化) |
 | `gw/v2_access.sh` | **v6.1** | manifest | `/data/gw/v2_access.sh` | v2 极简访问层(串口/SSH/DHCP/防火墙22,零守护干涉) |
 | `gw/v3_babysit_v2.sh` | **v2.0** | manifest | `/data/gw/babysit_v2.sh` | 启动保姆(T1杀rcS/T2核爆回B) |
-| `gw/v3_rc10.extend.sh` | **v2.31** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2; v2.31(SIGSEGV P2/P3): 静态 PATH/TZ 兜底 + core_trap 接线 + br-lan 创建 brctl 回退; v2.30: v3_fix wan_if 钉死改全接口+insmod 失败显式回显; 历史见git |
+| `gw/v3_rc10.extend.sh` | **v2.32** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2; v2.32: PATH 幂等(不重复拼接); v2.31(SIGSEGV P2/P3): 静态 PATH/TZ 兜底 + core_trap 接线 + br-lan 创建 brctl 回退; v2.30: v3_fix wan_if 钉死改全接口+insmod 失败显式回显; 历史见git |
 | `gw/wan_agg.sh` | **v3.3** | manifest | `/data/gw/wan_agg.sh` | 双上行聚合主管; v3.2(日志加密轮): TICK(30s)汇总+探活逐目标+硬截止/authd/W2_READY 边沿+主路写失败留痕; v3.1: 探活实证选承载口(僵尸口); 历史见git; v3.3(日志加密轮补): 日志行补 epoch 时间基准(跨日志关联) |
 | `gw/wan_agg_lib.sh` | **v1.2** | manifest | `/data/gw/wan_agg_lib.sh` | 聚合引擎落地层+conf 管理库; v1.2(日志加密轮): ensure_rules 每次补装记 REPAIR+rc(规则被外力蒸发不再静默); v1.1: +cell_iface_pick(探活实证选承载口) |
 | `gw/wan_eth.sh` | **v1.2** | manifest | `/data/gw/wan_eth.sh` | 有线 WAN(eth0) 接口管理守护(自 wan_agg ensure_lease 拆出): 链路+one-shot udhcpc+to-LAN 护盾+备用默认+表200+NAT/FORWARD 看门狗; v1.1(日志加密轮): 租约结果/耗时、carrier/IP/gw 边沿、REPAIR、60s TICK; v1.2(日志加密轮补): 日志行补 epoch 时间基准(跨日志关联) |
-| `gw/watchdog.sh` | **v1.24** | manifest | `/data/gw/watchdog.sh` | 持续不变量看门狗; v1.24: spawn stdin=/dev/null+锁排除自身 pid 配套; v1.23: 单实例/自愈锁判据收紧(绝对路径+非僵尸, 锁 pid 复用不再误判); v1.22(SIGSEGV P3/P4): fault 判据+aee db_history 行增量(printk 限流下不低估)+core_trap 自愈+dial_keeper 重启保留静态 PATH; v1.21: fault 计数移出 state; v1.20: alive() 双判据+单实例锁+fan_mgr 自愈; 历史见git |
+| `gw/watchdog.sh` | **v1.25** | manifest | `/data/gw/watchdog.sh` | 持续不变量看门狗; v1.25: wan_agg 开机 180s 宽限(防与 rc19 启动竞态双实例); v1.24: spawn stdin=/dev/null+锁排除自身 pid 配套; v1.23: 单实例/自愈锁判据收紧(绝对路径+非僵尸, 锁 pid 复用不再误判); v1.22(SIGSEGV P3/P4): fault 判据+aee db_history 行增量(printk 限流下不低估)+core_trap 自愈+dial_keeper 重启保留静态 PATH; v1.21: fault 计数移出 state; v1.20: alive() 双判据+单实例锁+fan_mgr 自愈; 历史见git |
 | `gw/webs_revive.sh` | **v1.3** | manifest | `/data/gw/webs_revive.sh` | 原厂GUI复活器(自足nginx conf; 手动拉起) |
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_autoch.sh` | **v1.1** | manifest | `/data/gw/wifi_autoch.sh` | WiFi 自动选道器; v1.1(日志加密轮): 输出 # 注释行记录扫描规模/候选/评分(源码时无害) — 选道依据可复盘; IDC 安全掩码+候选{1,6} |
@@ -144,7 +144,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/rescue_shadow.py` | **v1.0** | tool | `-` | shadow.override未bind网络救援(getpass旧口令→只读探针: 文件md5/grep行为单测/部署钩子sh -x跟踪→从.bak恢复+重bind; 依赖rc.extend v2.1) |
 | `tools/rotate_toor.py` | **v1.4** | tool | `-` | toor口令轮换器; v1.4: 轮换前存档.bak(rc.extend v2.1回退源); 历史见git |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
-| `tools/selftest.py` | **v2.46** | tool | `-` | v2.46: t_watchdog_aee 版本锚点随 watchdog v1.24; v2.45: t_watchdog_aee 版本锚点随 watchdog v1.23; v2.44(SIGSEGV 根治轮): +t_static_toolchain/t_logc/t_core_trap/t_watchdog_aee; v2.43: 5G 灯测试只数常驻 led_mgr; v2.42: t_logging_fine; 历史见git |
+| `tools/selftest.py` | **v2.47** | tool | `-` | v2.47: t_watchdog_aee 版本锚点随 watchdog v1.25; v2.46: t_watchdog_aee 版本锚点随 watchdog v1.24; v2.45: t_watchdog_aee 版本锚点随 watchdog v1.23; v2.44(SIGSEGV 根治轮): +t_static_toolchain/t_logc/t_core_trap/t_watchdog_aee; v2.43: 5G 灯测试只数常驻 led_mgr; v2.42: t_logging_fine; 历史见git |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |
 | `tools/serial_server.py` | **v1.7** | tool | `-` | 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets) |
 | `tools/upgrade_slot.py` | **v1.0** | tool | `-` | SSH整槽升级器(P3第一档: vercheck/槽位/空间预检→md5门禁→dd备份旧p26→写新镜像→挂载sanity断言(toor/rcS/#v3:/procd)→失败自动整槽还原不重启→清TRY_A→reboot; PC侧轮询日志+回连终检; --dry-run) |

@@ -1,5 +1,8 @@
 #!/bin/sh
-# watchdog.sh v1.24 -- on-device continuous invariant monitor.
+# watchdog.sh v1.25 -- on-device continuous invariant monitor.
+# v1.25 (2026-10-19 SIGSEGV 根治轮): wan_agg 开机 180s 宽限期 — rc19 在启动
+#   配方 ~60s 后才拉起 wan_agg, 看门狗 90s 周期曾抢跑拉出第二个实例(冷启动
+#   实测两个 `sh wan_agg.sh` 并存, 双写路由)。宽限期内只记 SKIP 不算失败。
 # v1.24 (2026-10-19 SIGSEGV 根治轮): spawn() 给子进程 stdin 接 /dev/null;
 #   配合 led_mgr v2.7/dial_keeper v1.8 的"排除自身 pid"修复 — watchdog 预写
 #   子进程 pid 到锁文件后, 守护不应把自己判成 duplicate 而退出。
@@ -332,6 +335,13 @@ run_cycle() {
     #   原实现只 check 不拉(与 hostapd v1.18 前的缺口同型)。死则按启动配方拉起。
     if alive 'wan_agg[.]sh' wan_agg wan_agg.sh; then
         set_state wan_agg 0 "aggregation supervisor"
+    elif [ "$(cut -d. -f1 /proc/uptime)" -lt 180 ]; then
+        # v1.25 (boot duplicate real hit): rc19 starts wan_agg only after its
+        # ~60s recipe; a 90s uptime watchdog cycle would spawn a second
+        # instance before rc19's own startup (observed two `sh wan_agg.sh`).
+        # Boot grace: don't race rc19, and don't raise a false failure.
+        set_state wan_agg 0 "aggregation supervisor (boot pending)"
+        log "SKIP  wan_agg recovery (boot in progress; rc19 owns startup)"
     else
         set_state wan_agg 1 "aggregation supervisor"
         FAILS=$((FAILS+1))
@@ -551,8 +561,8 @@ if [ -n "$_wp" ] && [ "$_wp" != "$$" ] && kill -0 "$_wp" 2>/dev/null && \
     exit 0
 fi
 echo $$ > /tmp/watchdog.lock
-log "===== watchdog v1.24 start (alert LED 5G orange; WAN LED owned by led_mgr; +hostapd/wan_agg/fan_mgr/core_trap recovery +single-instance locks +user-fault/aee counters; fine-log TICK/HEALTH) ====="
-logger -t watchdog "watchdog v1.24 start"
+log "===== watchdog v1.25 start (alert LED 5G orange; WAN LED owned by led_mgr; +hostapd/wan_agg/fan_mgr/core_trap recovery +single-instance locks +user-fault/aee counters; fine-log TICK/HEALTH) ====="
+logger -t watchdog "watchdog v1.25 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

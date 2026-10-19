@@ -1,8 +1,8 @@
 # VERSIONS.tsv (public export -- rows filtered to exported set)
 #VER-REGISTRY
 gw/agg_pins.default	1.0	manifest	/data/gw/agg_pins.default	MAC钉死表出厂缺省基线(只读, 不含任何MAC; 设备侧活文件 agg_pins.conf 由 wan_agg 缺省才写地播种, 个人MAC不入库)
-gw/rc.extend.sh	2.3	manifest	/data/rc.extend.sh	槽位调度器; v2.3: TZ 兜底(/etc/TZ→defaults.conf TZ); v2.2(SIGSEGV P2/P3): 静态工具链 PATH/TZ 导出 + RLIMIT_CORE unlimited(每日 core 窗口前置); v2.1(P3): shadow.override 合法性校验+.bak回退自愈; 历史见git
-gw/v3_rc10.extend.sh	2.31	manifest	/data/gw/rc19.sh	v3 启动编排 rc19v2; v2.31(SIGSEGV P2/P3): 静态 PATH/TZ 兜底 + core_trap 接线 + br-lan 创建 brctl 回退; v2.30: v3_fix wan_if 钉死改全接口+insmod 失败显式回显; 历史见git
+gw/rc.extend.sh	2.4	manifest	/data/rc.extend.sh	槽位调度器; v2.4: TZ 解析提前到 toolchain_init 前(自举日志时区一致); v2.3: TZ 兜底(/etc/TZ→defaults.conf TZ); v2.2(SIGSEGV P2/P3): 静态工具链 PATH/TZ 导出 + RLIMIT_CORE unlimited(每日 core 窗口前置); v2.1(P3): shadow.override 合法性校验+.bak回退自愈; 历史见git
+gw/v3_rc10.extend.sh	2.32	manifest	/data/gw/rc19.sh	v3 启动编排 rc19v2; v2.32: PATH 幂等(不重复拼接); v2.31(SIGSEGV P2/P3): 静态 PATH/TZ 兜底 + core_trap 接线 + br-lan 创建 brctl 回退; v2.30: v3_fix wan_if 钉死改全接口+insmod 失败显式回显; 历史见git
 gw/wifi_macplan.sh	1.0	manifest	/data/gw/wifi_macplan.sh	出厂 MAC 派生计划(自 wifi_up v1.29 拆出; api uplink 的 eth0 原生 MAC 还原同步收敛到此唯一实现 — 原内联副本缺两级兜底属算法漂移实例)
 gw/wifi_autoch.sh	1.1	manifest	/data/gw/wifi_autoch.sh	WiFi 自动选道器; v1.1(日志加密轮): 输出 # 注释行记录扫描规模/候选/评分(源码时无害) — 选道依据可复盘; IDC 安全掩码+候选{1,6}
 gw/wifi_up.sh	1.29	manifest	/data/gw/wifi_up.sh	mt7992 AP 工厂配方(v1.29 架构轮: MAC 派生拆出 wifi_macplan.sh + 自动选道拆出 wifi_autoch.sh, 主文件收敛为拉起配方本体, 变量/契约零变化; v1.28: 候选收敛安全集深部{1,6}; 历史见git)
@@ -92,8 +92,8 @@ gw/defaults.conf	1.8	manifest	/data/gw/defaults.conf	统一配置只读出厂基
 tools/leak_check.py	2.2	tool	-	敏感词零命中门禁; v2.2: --history 全量扫提交正文(%B, 原仅扫标题%s可漏检消息体); v2.1: 修复 PAT_PARTS NameError; 历史见git
 docs/ARCHITECTURE.md	1.1	doc	-	架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针)
 docs/GUI_TERMINOLOGY.md	1.2	doc	-	GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git
-gw/watchdog.sh	1.24	manifest	/data/gw/watchdog.sh	持续不变量看门狗; v1.24: spawn stdin=/dev/null+锁排除自身 pid 配套; v1.23: 单实例/自愈锁判据收紧(绝对路径+非僵尸, 锁 pid 复用不再误判); v1.22(SIGSEGV P3/P4): fault 判据+aee db_history 行增量(printk 限流下不低估)+core_trap 自愈+dial_keeper 重启保留静态 PATH; v1.21: fault 计数移出 state; v1.20: alive() 双判据+单实例锁+fan_mgr 自愈; 历史见git
-tools/selftest.py	2.46	tool	-	v2.46: t_watchdog_aee 版本锚点随 watchdog v1.24; v2.45: t_watchdog_aee 版本锚点随 watchdog v1.23; v2.44(SIGSEGV 根治轮): +t_static_toolchain/t_logc/t_core_trap/t_watchdog_aee; v2.43: 5G 灯测试只数常驻 led_mgr; v2.42: t_logging_fine; 历史见git
+gw/watchdog.sh	1.25	manifest	/data/gw/watchdog.sh	持续不变量看门狗; v1.25: wan_agg 开机 180s 宽限(防与 rc19 启动竞态双实例); v1.24: spawn stdin=/dev/null+锁排除自身 pid 配套; v1.23: 单实例/自愈锁判据收紧(绝对路径+非僵尸, 锁 pid 复用不再误判); v1.22(SIGSEGV P3/P4): fault 判据+aee db_history 行增量(printk 限流下不低估)+core_trap 自愈+dial_keeper 重启保留静态 PATH; v1.21: fault 计数移出 state; v1.20: alive() 双判据+单实例锁+fan_mgr 自愈; 历史见git
+tools/selftest.py	2.47	tool	-	v2.47: t_watchdog_aee 版本锚点随 watchdog v1.25; v2.46: t_watchdog_aee 版本锚点随 watchdog v1.24; v2.45: t_watchdog_aee 版本锚点随 watchdog v1.23; v2.44(SIGSEGV 根治轮): +t_static_toolchain/t_logc/t_core_trap/t_watchdog_aee; v2.43: 5G 灯测试只数常驻 led_mgr; v2.42: t_logging_fine; 历史见git
 tools/doc_audit.py	1.1	tool	-	台账↔文档内联标记双向审计(v1.1: 标记扫描纳入台账引用的docs/外文档如install/README.md; v1.0: 版本绑定+TEST-MISSING/STALE-CODE/UNREGISTERED-CLAIM)
 gw/src/mipc_cellular.c	0.17	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源码; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘
 gw/bin/mipc_cellular	0.17	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘

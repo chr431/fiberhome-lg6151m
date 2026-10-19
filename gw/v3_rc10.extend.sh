@@ -1,5 +1,6 @@
 #!/bin/sh
-# rc19.sh v2 (=local v3_rc10.extend.sh) v2.31 -- Frankenstein v3.1: br-lan world + WiFi.
+# rc19.sh v2 (=local v3_rc10.extend.sh) v2.32 -- Frankenstein v3.1: br-lan world + WiFi.
+# v2.32 (SIGSEGV 根治轮): PATH 幂等(rc.extend 已前置时不重复拼接)。
 # v2.31 (SIGSEGV P2/P3): static userland PATH/TZ fallback (manual runs inherit
 #        the same tools as boot), +core_trap daily core-capture daemon,
 #        br-lan creation falls back to brctl if the static ip is unavailable.
@@ -30,7 +31,11 @@ KLOG() { echo "RC19: $*" > /dev/kmsg 2>/dev/null; }
 
 # v2.31 (SIGSEGV P2): when started by hand (rc.extend already exports these),
 # make the static toolchain and the image timezone available to every child.
-PATH=/data/gw/sbin:/data/gw/bin:$PATH
+# v2.32: 幂等 — rc.extend 已前置时不重复拼 PATH。
+case ":$PATH:" in
+*:/data/gw/sbin:*) ;;
+*) PATH=/data/gw/sbin:/data/gw/bin:$PATH ;;
+esac
 export PATH
 [ -z "${TZ:-}" ] && [ -r /etc/TZ ] && TZ=$(cat /etc/TZ 2>/dev/null) && export TZ
 

@@ -1,5 +1,6 @@
 #!/bin/sh
-# rc.extend.sh v2.3 -- slot-aware dispatcher (shared /data between v2/v3)
+# rc.extend.sh v2.4 -- slot-aware dispatcher (shared /data between v2/v3)
+# v2.4: TZ 解析提前到 toolchain_init 之前(静态工具链自举日志也走镜像时区)。
 # v2.3: TZ 兜底 — /etc/TZ 尚未就绪时从 defaults.conf 取 TZ(静态 musl 工具时区一致)
 # v2.2 (SIGSEGV P2/P3): static userland bootstrap — toolchain_init.sh builds
 #   /data/gw/sbin (busybox applets + static iproute2), PATH is prefixed so every
@@ -27,9 +28,8 @@ grep -q healthdog /proc/modules 2>/dev/null || true
 # Static busybox/iproute2 remove the vendor-musl crash surface for every
 # daemon child (grep/awk/sh/ip/pgrep/...). toolchain_init is idempotent and
 # fails closed (removes the farm -> vendor fallback) if the binary is missing.
-[ -x /data/gw/toolchain_init.sh ] && /data/gw/toolchain_init.sh
-PATH=/data/gw/sbin:/data/gw/bin:$PATH
-export PATH
+# v2.4: TZ is resolved BEFORE toolchain_init so its early log lines are in
+# image time too (vendor date was UTC here when /etc/TZ was not ready yet).
 # TZ fallback: /etc/TZ -> /tmp/TZ is created by the vendor boot before this
 # point on every observed image; defaults.conf carries the same zone if it is
 # not readable yet (otherwise static-musl tools format UTC).
@@ -38,6 +38,9 @@ if [ -z "${TZ:-}" ]; then
     [ -n "$TZ" ] || TZ=$(sed -n 's/^TZ=//p' /data/gw/defaults.conf 2>/dev/null | head -1)
     [ -n "$TZ" ] && export TZ
 fi
+[ -x /data/gw/toolchain_init.sh ] && /data/gw/toolchain_init.sh
+PATH=/data/gw/sbin:/data/gw/bin:$PATH
+export PATH
 # core_trap (P3) needs unlimited RLIMIT_CORE on the daemons it watches; hard
 # limit is unlimited on this image, soft limit is 0 by default.
 ulimit -c unlimited 2>/dev/null

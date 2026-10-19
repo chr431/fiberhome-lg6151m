@@ -11,7 +11,7 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
-v2.46: t_watchdog_aee 版本锚点随 watchdog v1.24; v2.45: v2.44 (SIGSEGV 根治轮): +t_static_toolchain / t_logc /
+v2.47: t_watchdog_aee 版本锚点随 watchdog v1.25; v2.46: v2.45: v2.44 (SIGSEGV 根治轮): +t_static_toolchain / t_logc /
   t_core_trap / t_watchdog_aee — P1 静态采集器、P2 静态工具链与 PATH 接管、
   P3 core 窗口守护、P4 aee 台账增量判据的回归护栏。
 v2.41 (24h 日志轮): +t_v3fix_loaded — v3_fix.ko 必须恰 1 实例在 /proc/modules
@@ -1931,7 +1931,7 @@ def t_watchdog_aee():
     cnt = dev("cat /tmp/watchdog_aeecount 2>/dev/null").strip()
     hist = dev("wc -l < /data/log/aee_exp/db_history 2>/dev/null").strip()
     st = dev("grep -c '^coretrap=' /tmp/watchdog_state 2>/dev/null").strip()
-    ver = dev("grep -c 'watchdog v1.24 start' /tmp/watchdog.log 2>/dev/null").strip()
+    ver = dev("grep -c 'watchdog v1.25 start' /tmp/watchdog.log 2>/dev/null").strip()
     ok = False
     if code not in ("", "0") and cnt.isdigit() and hist.isdigit():
         ok = abs(int(cnt) - int(hist)) <= 2 and int(st or 0) > 0 and int(ver or 0) > 0

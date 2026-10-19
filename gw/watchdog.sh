@@ -1,5 +1,8 @@
 #!/bin/sh
-# watchdog.sh v1.23 -- on-device continuous invariant monitor.
+# watchdog.sh v1.24 -- on-device continuous invariant monitor.
+# v1.24 (2026-10-19 SIGSEGV 根治轮): spawn() 给子进程 stdin 接 /dev/null;
+#   配合 led_mgr v2.7/dial_keeper v1.8 的"排除自身 pid"修复 — watchdog 预写
+#   子进程 pid 到锁文件后, 守护不应把自己判成 duplicate 而退出。
 # v1.23 (2026-10-19 SIGSEGV 根治轮): 单实例/自愈判据收紧 — 锁 pid 必须命中
 #   本守护的绝对路径且非僵尸(旧判据 grep 子串, 锁 pid 被复用给含同名子串的
 #   命令时会把死守护误判为活; led_mgr/dial_keeper/watchdog 三处同型修复)。
@@ -89,7 +92,8 @@ alive() { # $1=pgrep pattern  $2=lock name  $3=cmdline token
 }
 spawn() { # $1=lock name  $2=log file  $3...=command
     _sl=$1; _so=$2; shift 2
-    nohup "$@" >"$_so" 2>&1 &
+    # v1.24: stdin 接 /dev/null — 被拉起的守护不再继承调用方的管道
+    nohup "$@" >"$_so" 2>&1 </dev/null &
     echo $! > /tmp/$_sl.lock
 }
 
@@ -547,8 +551,8 @@ if [ -n "$_wp" ] && [ "$_wp" != "$$" ] && kill -0 "$_wp" 2>/dev/null && \
     exit 0
 fi
 echo $$ > /tmp/watchdog.lock
-log "===== watchdog v1.23 start (alert LED 5G orange; WAN LED owned by led_mgr; +hostapd/wan_agg/fan_mgr/core_trap recovery +single-instance locks +user-fault/aee counters; fine-log TICK/HEALTH) ====="
-logger -t watchdog "watchdog v1.23 start"
+log "===== watchdog v1.24 start (alert LED 5G orange; WAN LED owned by led_mgr; +hostapd/wan_agg/fan_mgr/core_trap recovery +single-instance locks +user-fault/aee counters; fine-log TICK/HEALTH) ====="
+logger -t watchdog "watchdog v1.24 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

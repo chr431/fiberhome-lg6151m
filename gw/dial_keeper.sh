@@ -1,6 +1,8 @@
 #!/bin/sh
-# dial_keeper.sh v1.7 -- 拨号自持守护 (ROADMAP P2, 2026-10-06)
+# dial_keeper.sh v1.8 -- 拨号自持守护 (ROADMAP P2, 2026-10-06)
 #
+# v1.8 (2026-10-19 SIGSEGV 根治轮): 单实例锁排除自身 pid(watchdog spawn 预写
+#   子进程 pid 时不误判 duplicate)。
 # v1.7 (2026-10-19 SIGSEGV 根治轮): 单实例锁判据收紧(绝对路径+非僵尸) — 与
 #   led_mgr v2.6 同型修复, 防锁 pid 复用时新实例永久误判 duplicate。
 # v1.5 (2026-10-17 日志加密轮): 每 60s TICK(has_ip/cell_alive/wan_alive 原文与
@@ -64,10 +66,11 @@ log_rot() { [ -s $LOG ] && [ "$(wc -l < $LOG 2>/dev/null || echo 0)" -gt $MAXL ]
     { tail -n $((MAXL/2)) $LOG > $LOG.tmp && mv $LOG.tmp $LOG; }; }
 
 # v1.3: 单实例守 — PID 锁 + cmdline 复核(无模式匹配; 供 watchdog 精确取实例 PID)
+# v1.8: 排除自身 pid — watchdog spawn 的预写锁可能是本进程 pid, 不自匹配。
 # v1.7: 锁判据收紧 — 必须命中本脚本绝对路径且非僵尸(锁 pid 复用给含
 #   dial_keeper 字样的其它命令时, 旧判据会让新实例误判 duplicate 永久退出)。
 _lp=$(cat $LOCK 2>/dev/null)
-if [ -n "$_lp" ] && kill -0 "$_lp" 2>/dev/null \
+if [ -n "$_lp" ] && [ "$_lp" != "$$" ] && kill -0 "$_lp" 2>/dev/null \
    && ! grep -q '^State:.*Z' /proc/$_lp/status 2>/dev/null \
    && grep -qa '/data/gw/dial_keeper.sh' /proc/$_lp/cmdline 2>/dev/null; then
     log "duplicate instance pid=$_lp alive — exit (single-instance lock)"
@@ -165,8 +168,8 @@ ee_count() { ls -d /data/log/aee_exp/db.*.EE 2>/dev/null | wc -l; }
 DOWN=0; B=$MINB
 CYC=0; ZOMBIE=0; APN_LAST=""; APN_SRC_LAST=""; CFUN_LAST=""
 EE_N=$(ee_count)
-log "===== keeper v1.7 start (grace=${GRACE}s poll=${POLL}s mto=${MTO}s ee=${EE_N}; ccmni_up=netagent-lite; trigger=ip+dataplane; fine-log) ====="
-logger -t dial_keeper "keeper v1.7 start (grace=${GRACE}s mto=${MTO}s ee=${EE_N})"
+log "===== keeper v1.8 start (grace=${GRACE}s poll=${POLL}s mto=${MTO}s ee=${EE_N}; ccmni_up=netagent-lite; trigger=ip+dataplane; fine-log) ====="
+logger -t dial_keeper "keeper v1.8 start (grace=${GRACE}s mto=${MTO}s ee=${EE_N})"
 while :; do
     hb; CYC=$((CYC+1)); [ $((CYC % 12)) -eq 0 ] && log_rot
     # v1.1: 模组 EE 事件 = 复位信号 → 强制重拨路径(不等被动宽限)

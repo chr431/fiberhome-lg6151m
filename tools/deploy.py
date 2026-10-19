@@ -121,6 +121,7 @@ DEVICE_SET = {remote for _, remote in MANIFEST}
 EXTRA_KEEP = ["DEPLOY_MANIFEST", "ppe_reg",
               "udhcpc_eth1.script", "portal_auth", "restore_wan.sh",
               "bin", "sbin",       # static toolchain dirs (P2; toolchain_init.sh owns them)
+              "settings.conf",   # device-side sparse override of defaults.conf (api gw_set; not deployed)
               "agg_pins.conf",   # 含用户MAC的钉死表: 设备侧自管(模板见 agg_pins.conf.example)
               "dropbear_keys",   # rc.extend v1.8 唯一属主启动的宿主密钥目录(设备侧生成)
               "shadow.override", # rc.extend v1.9 bind 的 shadow 覆盖(rotate_toor 生成的运行态)

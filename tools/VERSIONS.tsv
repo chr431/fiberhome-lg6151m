@@ -30,7 +30,7 @@ gw/bin/v3_steth.ko	1.0	manifest	/data/gw/v3_steth.ko	hook槽位听诊器(bias/in
 gw/src/healthdog.c	1.0	src	gw/bin/healthdog.ko	看门狗模块源码(版本随产物)
 gw/src/v3_fix.c	1.2	src	gw/bin/v3_fix.ko	TTL/解绑模块源码(版本随产物); v1.2 随产物重建
 gw/src/v3_steth.c	1.0	src	gw/bin/v3_steth.ko	听诊器模块源码(版本随产物)
-tools/deploy.py	2.21	tool	-	v2.21: EXTRA_KEEP +bin/sbin(静态工具链运行目录, doctor 引用检查); v2.20: MANIFEST +P1/P2/P3 资产(toolchain_init/busybox/ip/logc/core_trap); 历史见git
+tools/deploy.py	2.22	tool	-	v2.22: EXTRA_KEEP +settings.conf(设备侧稀疏覆盖, rc.extend TZ 读取); v2.21: EXTRA_KEEP +bin/sbin(静态工具链运行目录, doctor 引用检查); v2.20: MANIFEST +P1/P2/P3 资产(toolchain_init/busybox/ip/logc/core_trap); 历史见git
 tools/serial_server.py	1.7	tool	-	常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets)
 tools/serial_cmd.py	1.3	tool	-	串口命令瘦客户端(marker输出捕获; v1.3示例路径更新)
 tools/lk_flip2.py	1.1	tool	-	LK 一键翻槽(a|b, misc[2060]字节)

@@ -126,7 +126,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/build_steth.sh` | **v1.0** | tool | `-` | v3_steth.ko构建 |
 | `tools/build_v3fix.sh` | **v1.1** | tool | `-` | v3_fix.ko构建; v1.1: 路径修正当前布局 + uapi/asm junction 失效改就地复制 + 记录产物错位事故 |
 | `tools/build_v3httpd.sh` | **v1.0** | tool | `-` | v3httpd构建(zig cc aarch64-linux-musl全静态, 同mipc_cellular链) |
-| `tools/deploy.py` | **v2.21** | tool | `-` | v2.21: EXTRA_KEEP +bin/sbin(静态工具链运行目录, doctor 引用检查); v2.20: MANIFEST +P1/P2/P3 资产(toolchain_init/busybox/ip/logc/core_trap); 历史见git |
+| `tools/deploy.py` | **v2.22** | tool | `-` | v2.22: EXTRA_KEEP +settings.conf(设备侧稀疏覆盖, rc.extend TZ 读取); v2.21: EXTRA_KEEP +bin/sbin(静态工具链运行目录, doctor 引用检查); v2.20: MANIFEST +P1/P2/P3 资产(toolchain_init/busybox/ip/logc/core_trap); 历史见git |
 | `tools/device_local.py.example` | **v1.0** | tool | `-` | 凭证模板(真件gitignored) |
 | `tools/doc_audit.py` | **v1.1** | tool | `-` | 台账↔文档内联标记双向审计(v1.1: 标记扫描纳入台账引用的docs/外文档如install/README.md; v1.0: 版本绑定+TEST-MISSING/STALE-CODE/UNREGISTERED-CLAIM) |
 | `tools/fetch_static_busybox.sh` | **v1.0** | tool | `-` | Alpine busybox-static 1.36.1-r31 拉取+SHA256 钉死(解包到 gw/bin/busybox) |

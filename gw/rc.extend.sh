@@ -1,5 +1,6 @@
 #!/bin/sh
-# rc.extend.sh v2.2 -- slot-aware dispatcher (shared /data between v2/v3)
+# rc.extend.sh v2.3 -- slot-aware dispatcher (shared /data between v2/v3)
+# v2.3: TZ 兜底 — /etc/TZ 尚未就绪时从 defaults.conf 取 TZ(静态 musl 工具时区一致)
 # v2.2 (SIGSEGV P2/P3): static userland bootstrap — toolchain_init.sh builds
 #   /data/gw/sbin (busybox applets + static iproute2), PATH is prefixed so every
 #   daemon launched below runs the static shell/tools; TZ is exported from
@@ -29,7 +30,14 @@ grep -q healthdog /proc/modules 2>/dev/null || true
 [ -x /data/gw/toolchain_init.sh ] && /data/gw/toolchain_init.sh
 PATH=/data/gw/sbin:/data/gw/bin:$PATH
 export PATH
-[ -z "${TZ:-}" ] && [ -r /etc/TZ ] && TZ=$(cat /etc/TZ 2>/dev/null) && export TZ
+# TZ fallback: /etc/TZ -> /tmp/TZ is created by the vendor boot before this
+# point on every observed image; defaults.conf carries the same zone if it is
+# not readable yet (otherwise static-musl tools format UTC).
+if [ -z "${TZ:-}" ]; then
+    TZ=$(cat /etc/TZ 2>/dev/null)
+    [ -n "$TZ" ] || TZ=$(sed -n 's/^TZ=//p' /data/gw/defaults.conf 2>/dev/null | head -1)
+    [ -n "$TZ" ] && export TZ
+fi
 # core_trap (P3) needs unlimited RLIMIT_CORE on the daemons it watches; hard
 # limit is unlimited on this image, soft limit is 0 by default.
 ulimit -c unlimited 2>/dev/null

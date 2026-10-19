@@ -1,5 +1,8 @@
 #!/bin/sh
-# watchdog.sh v1.18 -- on-device continuous invariant monitor.
+# watchdog.sh v1.19 -- on-device continuous invariant monitor.
+# v1.19 (2026-10-19 wan_agg 静默死亡实弹): wan_agg 只检不拉 — 16:26 其子命令连续
+#   SIGSEGV 后脚本退出, /tmp/wan_alive 停更; led_mgr 按 30s 新鲜度灭 WAN 灯、
+#   GUI 判有线离线, 而 eth0 carrier=1/有 IP/默认路由/实际有流量。现补自愈拉起。
 # v1.18 (2026-10-19 hostapd 崩溃实弹): hostapd 只检不拉 — 12:41 SIGSEGV 后无人
 #   重启, ra0/rai0 仍按驱动 apcfg 发信标, 手机 assoc 成功但 4-way 无 EAPOL
 #   (authorized:no) → 10s 后 reason=3 自断重试, 静默 3.5h。现补崩溃自愈:
@@ -135,7 +138,7 @@ run_cycle() {
     check v3httpd   "netstat -tln 2>/dev/null | grep -q ':80.*LISTEN'"  "GUI httpd"
     check dnsmasq   "pidof dnsmasq"                  "DHCP/DNS"
     check dropbear  "netstat -tln 2>/dev/null | grep -q ':22.*LISTEN'"  "SSH"
-    check wan_agg   "pgrep -f wan_agg.sh"            "aggregation supervisor"
+    # wan_agg 不走 check(): v1.19 起由下方自愈块负责(死则按启动配方拉起)
     check wan_eth   "pgrep -f wan_eth.sh"            "wired-WAN iface keeper"
     check fan_mgr   "pgrep -f fan_mgr.sh"            "fan manager"
     # v1.15: 自研工具在位性 — 缺失时相关功能会静默降级(ccmni 落地/蜂窝直连)
@@ -263,6 +266,19 @@ run_cycle() {
         else
             log "WARN  hostapd down; recovery budget exhausted (3/h) — alert only"
         fi
+    fi
+    # wan_agg: 双上行聚合主管(v1.19 崩溃自愈) — 实弹 2026-10-19 16:26: 子命令
+    #   连续 SIGSEGV 后脚本静默退出, /tmp/wan_alive 过期 → led_mgr(30s 新鲜度)
+    #   灭 WAN 灯、GUI 线路状态判"离线", 而 eth0 carrier=1/有 IP/默认路由/实际有流量。
+    #   原实现只 check 不拉(与 hostapd v1.18 前的缺口同型)。死则按启动配方拉起。
+    if pgrep -f wan_agg.sh >/dev/null 2>&1; then
+        set_state wan_agg 0 "aggregation supervisor"
+    else
+        set_state wan_agg 1 "aggregation supervisor"
+        FAILS=$((FAILS+1))
+        log "EVT restart wan_agg (no live instance; wan_alive=$(cat /tmp/wan_alive 2>/dev/null))"
+        nohup sh /data/gw/wan_agg.sh >/tmp/wagg.out 2>&1 &
+        logger -t watchdog "restarted wan_agg"
     fi
     # wan_eth: 有线 WAN 接口管理守护(v1.12, 架构轮拆分自 wan_agg ensure_lease);
     #   死则拉起 — eth0 租约续订/NAT/FORWARD 看门狗停摆 = 家宽侧静默劣化
@@ -440,7 +456,7 @@ run_cycle() {
 
 # ---- main ----
 touch $LOG $STATE
-log "===== watchdog v1.18 start (alert LED 5G orange; WAN LED owned by led_mgr; +hostapd crash recovery +wan_eth keeper +cell stats divergence +cell query liveness; fine-log TICK/HEALTH) ====="
+log "===== watchdog v1.19 start (alert LED 5G orange; WAN LED owned by led_mgr; +hostapd/wan_agg crash recovery +wan_eth keeper +cell stats divergence +cell query liveness; fine-log TICK/HEALTH) ====="
 logger -t watchdog "watchdog v1.16 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine

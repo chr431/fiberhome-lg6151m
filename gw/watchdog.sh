@@ -1,5 +1,7 @@
 #!/bin/sh
-# watchdog.sh v1.20 -- on-device continuous invariant monitor.
+# watchdog.sh v1.21 -- on-device continuous invariant monitor.
+# v1.21 (2026-10-19): 用户态 fault 计数移出 $STATE(独立 /tmp/watchdog_faultcount) —
+#   放进 state 会被 selftest 当 0/1 故障键误判(faults=1 报"未恢复故障")。
 # v1.20 (2026-10-19 单实例/风扇轮): ① 自愈拉起统一走 alive() 双判据(pgrep 失败时
 #   回退锁文件 pid + /proc cmdline 复核) — SIGSEGV 家族会打死 pgrep 自身, 仅凭
 #   pgrep 会重复拉起(现场 3×wan_eth / 2×log_keeper / 2×watchdog); ② 看门狗自身
@@ -384,13 +386,12 @@ run_cycle() {
     # 未根除(厂商 syslog 管线/短命工具随机 SIGSEGV), 至少让"又崩了"进日志:
     # 内核 fault 行计数增量; dmesg 环回卷导致计数回退时只重置不告警。
     FLT=$(dmesg | grep -c 'unhandled exception')
-    FLT_PREV=$(grep '^faults=' $STATE 2>/dev/null | tail -1 | cut -d= -f2)
+    FLT_PREV=$(cat /tmp/watchdog_faultcount 2>/dev/null)
     if [ -n "$FLT_PREV" ] && [ "$FLT" -gt "$FLT_PREV" ] 2>/dev/null; then
         log "WARN  user-fault +$((FLT-FLT_PREV)) (ring total $FLT) — SIGSEGV family"
     fi
-    grep -v '^faults=' $STATE 2>/dev/null > $STATE.tmp
-    echo "faults=$FLT" >> $STATE.tmp
-    mv $STATE.tmp $STATE
+    # v1.21: 计数走独立文件 — 放 state 会被 selftest 当 0/1 故障键误判(faults=1)
+    echo "$FLT" > /tmp/watchdog_faultcount
 
     # ---- wifi channel consistency (v1.5) ----
     # 驱动 IDC(LTE 共存避让)可在运行期自行搬道(实测), hostapd 生成配置的 channel=
@@ -507,7 +508,7 @@ if [ -n "$_wp" ] && [ "$_wp" != "$$" ] && kill -0 "$_wp" 2>/dev/null && \
     exit 0
 fi
 echo $$ > /tmp/watchdog.lock
-log "===== watchdog v1.20 start (alert LED 5G orange; WAN LED owned by led_mgr; +hostapd/wan_agg/fan_mgr recovery +single-instance locks +user-fault counter; fine-log TICK/HEALTH) ====="
+log "===== watchdog v1.21 start (alert LED 5G orange; WAN LED owned by led_mgr; +hostapd/wan_agg/fan_mgr recovery +single-instance locks +user-fault counter; fine-log TICK/HEALTH) ====="
 logger -t watchdog "watchdog v1.16 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine

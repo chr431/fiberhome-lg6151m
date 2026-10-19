@@ -1,12 +1,13 @@
 #!/bin/sh
-# rc.extend.sh v2.4 -- slot-aware dispatcher (shared /data between v2/v3)
+# rc.extend.sh v2.5 -- slot-aware dispatcher (shared /data between v2/v3)
+# v2.5: TZ 取自自管配置(settings>defaults)而非早期 /etc/TZ(厂商 boot 会先写 UTC)。
 # v2.4: TZ 解析提前到 toolchain_init 之前(静态工具链自举日志也走镜像时区)。
-# v2.3: TZ 兜底 — /etc/TZ 尚未就绪时从 defaults.conf 取 TZ(静态 musl 工具时区一致)
 # v2.2 (SIGSEGV P2/P3): static userland bootstrap — toolchain_init.sh builds
 #   /data/gw/sbin (busybox applets + static iproute2), PATH is prefixed so every
-#   daemon launched below runs the static shell/tools; TZ is exported from
-#   /etc/TZ (static musl reads TZ, vendor musl reads /etc/TZ); RLIMIT_CORE is
-#   raised to unlimited so the daily core_trap window can capture family cores.
+#   daemon launched below runs the static shell/tools; TZ is exported from the
+#   self-managed config (static musl reads TZ, vendor musl reads /etc/TZ);
+#   RLIMIT_CORE is raised to unlimited so the daily core_trap window can
+#   capture family cores.
 # v2.1(P3): shadow.override 合法性校验+.bak回退自愈(坏文件不再锁死登录)
 # v2.0: +clear /tmp/gui_tokens/* at boot (P2/L-7 stale token survival)
 # v1.9: /etc/shadow bind 覆盖钩子(审计P0-5 凭据轮换前置; 见文件内注释)
@@ -28,14 +29,19 @@ grep -q healthdog /proc/modules 2>/dev/null || true
 # Static busybox/iproute2 remove the vendor-musl crash surface for every
 # daemon child (grep/awk/sh/ip/pgrep/...). toolchain_init is idempotent and
 # fails closed (removes the farm -> vendor fallback) if the binary is missing.
+# v2.5: prefer the self-managed config (settings > defaults) over /etc/TZ —
+# the vendor boot leaves an intermediate UTC value in /tmp/TZ before the board
+# timezone is applied; reading it first made the bootstrap log line UTC.
 # v2.4: TZ is resolved BEFORE toolchain_init so its early log lines are in
 # image time too (vendor date was UTC here when /etc/TZ was not ready yet).
-# TZ fallback: /etc/TZ -> /tmp/TZ is created by the vendor boot before this
-# point on every observed image; defaults.conf carries the same zone if it is
-# not readable yet (otherwise static-musl tools format UTC).
-if [ -z "${TZ:-}" ]; then
+# TZ fallback: /etc/TZ -> defaults.conf carries the same zone if it is not
+# readable yet (otherwise static-musl tools format UTC).
+TZ_CFG=$(sed -n 's/^TZ=//p' /data/gw/defaults.conf /data/gw/settings.conf 2>/dev/null | tail -1)
+if [ -n "$TZ_CFG" ]; then
+    TZ=$TZ_CFG
+    export TZ
+elif [ -z "${TZ:-}" ]; then
     TZ=$(cat /etc/TZ 2>/dev/null)
-    [ -n "$TZ" ] || TZ=$(sed -n 's/^TZ=//p' /data/gw/defaults.conf 2>/dev/null | head -1)
     [ -n "$TZ" ] && export TZ
 fi
 [ -x /data/gw/toolchain_init.sh ] && /data/gw/toolchain_init.sh

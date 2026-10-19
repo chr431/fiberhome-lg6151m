@@ -1,7 +1,7 @@
 # VERSIONS.tsv (public export -- rows filtered to exported set)
 #VER-REGISTRY
 gw/agg_pins.default	1.0	manifest	/data/gw/agg_pins.default	MAC钉死表出厂缺省基线(只读, 不含任何MAC; 设备侧活文件 agg_pins.conf 由 wan_agg 缺省才写地播种, 个人MAC不入库)
-gw/rc.extend.sh	2.4	manifest	/data/rc.extend.sh	槽位调度器; v2.4: TZ 解析提前到 toolchain_init 前(自举日志时区一致); v2.3: TZ 兜底(/etc/TZ→defaults.conf TZ); v2.2(SIGSEGV P2/P3): 静态工具链 PATH/TZ 导出 + RLIMIT_CORE unlimited(每日 core 窗口前置); v2.1(P3): shadow.override 合法性校验+.bak回退自愈; 历史见git
+gw/rc.extend.sh	2.5	manifest	/data/rc.extend.sh	槽位调度器; v2.5: TZ 取自自管配置(settings>defaults, 避开厂商 boot 早期 UTC); v2.4: TZ 解析提前到 toolchain_init 前; v2.3: TZ 兜底; v2.2(SIGSEGV P2/P3): 静态工具链 PATH/TZ 导出 + RLIMIT_CORE unlimited(每日 core 窗口前置); v2.1(P3): shadow.override 合法性校验+.bak回退自愈; 历史见git
 gw/v3_rc10.extend.sh	2.32	manifest	/data/gw/rc19.sh	v3 启动编排 rc19v2; v2.32: PATH 幂等(不重复拼接); v2.31(SIGSEGV P2/P3): 静态 PATH/TZ 兜底 + core_trap 接线 + br-lan 创建 brctl 回退; v2.30: v3_fix wan_if 钉死改全接口+insmod 失败显式回显; 历史见git
 gw/wifi_macplan.sh	1.0	manifest	/data/gw/wifi_macplan.sh	出厂 MAC 派生计划(自 wifi_up v1.29 拆出; api uplink 的 eth0 原生 MAC 还原同步收敛到此唯一实现 — 原内联副本缺两级兜底属算法漂移实例)
 gw/wifi_autoch.sh	1.1	manifest	/data/gw/wifi_autoch.sh	WiFi 自动选道器; v1.1(日志加密轮): 输出 # 注释行记录扫描规模/候选/评分(源码时无害) — 选道依据可复盘; IDC 安全掩码+候选{1,6}

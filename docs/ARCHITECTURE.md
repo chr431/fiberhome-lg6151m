@@ -76,7 +76,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/night_report.sh` | **v1.0** | manifest | `/data/gw/night_report.sh` | 夜间体检报告 |
 | `gw/ntp_keeper.sh` | **v1.2** | manifest | `/data/gw/ntp_keeper.sh` | 每小时NTP守时(多源; 设备无RTC; v1.2: +时区自愈(/etc/TZ→tmpfs重启即失, 每轮重应用); v1.1: 首选 NTP_SERVER 自管配置) |
 | `gw/radvd.conf` | **v1.0** | manifest | `/data/gw/radvd.conf` | IPv6 SLAAC+RDNSS通告(br-lan, ULA fd42:9ac1:7e50::/64) |
-| `gw/rc.extend.sh` | **v2.4** | manifest | `/data/rc.extend.sh` | 槽位调度器; v2.4: TZ 解析提前到 toolchain_init 前(自举日志时区一致); v2.3: TZ 兜底(/etc/TZ→defaults.conf TZ); v2.2(SIGSEGV P2/P3): 静态工具链 PATH/TZ 导出 + RLIMIT_CORE unlimited(每日 core 窗口前置); v2.1(P3): shadow.override 合法性校验+.bak回退自愈; 历史见git |
+| `gw/rc.extend.sh` | **v2.5** | manifest | `/data/rc.extend.sh` | 槽位调度器; v2.5: TZ 取自自管配置(settings>defaults, 避开厂商 boot 早期 UTC); v2.4: TZ 解析提前到 toolchain_init 前; v2.3: TZ 兜底; v2.2(SIGSEGV P2/P3): 静态工具链 PATH/TZ 导出 + RLIMIT_CORE unlimited(每日 core 窗口前置); v2.1(P3): shadow.override 合法性校验+.bak回退自愈; 历史见git |
 | `gw/rc_netfh.sh` | **v3.11** | manifest | `/data/gw/rc_netfh.sh` | 路线A: FH modem栈环境; v3.10(日志加密轮): 相位计时+settle 每10s ccmni 清单+route/NAT REPAIR+fw_apply rc+总耗时; v3.9: RIL 四件套全退役, 读/写路径直连; v3.11(日志加密轮补): 日志行补 epoch 时间基准(跨日志关联) |
 | `gw/reboot_sched.sh` | **v1.2** | manifest | `/data/gw/reboot_sched.sh` | 定时重启守护; v1.2(04:00 事件复盘): 触发行先落 /data/gw/logs/reboots.log+sync 再 reboot — 原只写 /tmp, 30s 持久化周期赶不上, 每日定时重启在持久日志零指纹 |
 | `gw/toolchain_init.sh` | **v1.0** | manifest | `/data/gw/toolchain_init.sh` | 静态工具链自举: /data/gw/sbin 符号链接农场(busybox 305 applet + 静态 iproute2 ip), 原子换入/失败回退 vendor; rc.extend 开机调用 |

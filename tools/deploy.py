@@ -48,6 +48,10 @@ MGMT_CANDIDATES = ["192.168.9.1", "192.168.1.1", "192.168.8.1", "192.168.3.75"]
 # local (relative to repo) -> device path. Order = boot-time order.
 MANIFEST = [
     ("gw/rc.extend.sh", "/data/rc.extend.sh"),         # slot dispatcher (boot entry)
+    ("gw/toolchain_init.sh", "/data/gw/toolchain_init.sh"),  # static userland bootstrap (P2)
+    ("gw/bin/busybox", "/data/gw/bin/busybox"),         # static busybox 1.36.1 applets (P2)
+    ("gw/bin/ip", "/data/gw/bin/ip"),                   # static iproute2 6.3.0 (P2)
+    ("gw/bin/logc", "/data/gw/bin/logc"),               # static syslog collector (P1)
     ("gw/v3_rc10.extend.sh", "/data/gw/rc19.sh"),         # rc19v2: br-lan+wifi+wan stack
     ("gw/wifi_macplan.sh", "/data/gw/wifi_macplan.sh"),  # factory MAC plan (wifi_up BSSIDs + api uplink native-MAC restore; v1.29 split)
     ("gw/wifi_autoch.sh", "/data/gw/wifi_autoch.sh"),    # auto-channel scanner (wifi_up CH=0 path; v1.29 split)
@@ -106,6 +110,7 @@ MANIFEST = [
     ("gw/defaults.conf", "/data/gw/defaults.conf"),
     ("gw/watchdog.sh", "/data/gw/watchdog.sh"),  # L13: continuous invariant monitor
     ("gw/log_keeper.sh", "/data/gw/log_keeper.sh"),  # log persistence daemon (syslog/dmesg mirror + /tmp snapshots)
+    ("gw/core_trap.sh", "/data/gw/core_trap.sh"),  # daily user-space core capture window (P3)
     ("gw/diag_dump.sh", "/data/gw/diag_dump.sh"),  # one-shot redacted diagnostics bundle
     ("gw/wedge_watch.sh", "/data/gw/wedge_watch.sh"),
     ("gw/zz_data_hook", "/data/build/rootfs/etc/init.d/zz_data_hook"),     # hook-slot watchdog (stethoscope)

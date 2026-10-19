@@ -1,5 +1,8 @@
 #!/bin/sh
-# rc19.sh v2 (=local v3_rc10.extend.sh) v2.30 -- Frankenstein v3.1: br-lan world + WiFi.
+# rc19.sh v2 (=local v3_rc10.extend.sh) v2.31 -- Frankenstein v3.1: br-lan world + WiFi.
+# v2.31 (SIGSEGV P2/P3): static userland PATH/TZ fallback (manual runs inherit
+#        the same tools as boot), +core_trap daily core-capture daemon,
+#        br-lan creation falls back to brctl if the static ip is unavailable.
 # v2.30: v3_fix insmod 参数 wan_if 钉死 ccmni2 → 空(全接口; 承载口漂移不再使
 #        TTL 伪装静默失效) + insmod 失败显式回显(rc19.log 可见);
 # v2.29: +wan_eth 有线 WAN 接口管理守护(架构轮自 wan_agg ensure_lease 拆出 —
@@ -24,6 +27,12 @@
 # Known quirk: after bridge churn TCP/UDP to a wifi client can die while ICMP
 # lives (BA/TX-agg wedge); recovery = ifconfig rai0 down/up + client reconnect.
 KLOG() { echo "RC19: $*" > /dev/kmsg 2>/dev/null; }
+
+# v2.31 (SIGSEGV P2): when started by hand (rc.extend already exports these),
+# make the static toolchain and the image timezone available to every child.
+PATH=/data/gw/sbin:/data/gw/bin:$PATH
+export PATH
+[ -z "${TZ:-}" ] && [ -r /etc/TZ ] && TZ=$(cat /etc/TZ 2>/dev/null) && export TZ
 
 # --- babysitter boot.done race fix (marker must mean verified-healthy)
 rm -f /tmp/boot.done
@@ -73,7 +82,9 @@ KLOG "mods hd=$(grep -c healthdog /proc/modules) fix=$(grep -c v3_fix /proc/modu
 # --- LAN: br-lan world (eth0 real bridge port; no more forward-hack)
 # power-loss boot 2026-10-02 proved netifd does NOT reliably build br-lan:
 # create it ourselves if absent (idempotent).
-ip link show br-lan >/dev/null 2>&1 || ip link add br-lan type bridge
+ip link show br-lan >/dev/null 2>&1 || {
+    ip link add br-lan type bridge 2>/dev/null || brctl addbr br-lan
+}
 ip link set br-lan up 2>/dev/null
 ip addr add 192.168.9.1/24 dev br-lan 2>/dev/null
 # v2.5 (2026-10-03): role swap per case silkscreen -- eth0 (丝印 LAN1/WAN 口)
@@ -146,6 +157,9 @@ pgrep -f watchdog.sh >/dev/null || nohup sh /data/gw/watchdog.sh >/dev/null 2>&1
 # v2.28: 日志持久化守护(专项轮: /tmp 重启即失 + logread/dmesg 环被刷爆 →
 #   syslog/dmesg 增量镜像落 /data/gw/logs + /tmp 快照 + 开机诊断包)
 pgrep -f log_keeper.sh >/dev/null || nohup sh /data/gw/log_keeper.sh >/dev/null 2>&1 &
+# v2.31 (SIGSEGV P3): daily core-capture window (aee core_pattern owner).
+#   watchdog restarts it if killed; it self-heals a stale window at start.
+pgrep -f core_trap.sh >/dev/null || nohup sh /data/gw/core_trap.sh >/dev/null 2>&1 &
 
 # --- dual-uplink aggregation last (v2.8: wan_agg supersedes wan_policy2;
 #     vendor quecadp kernel split via /proc/multi_wan + fwmark policy routing;

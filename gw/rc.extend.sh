@@ -1,5 +1,10 @@
 #!/bin/sh
-# rc.extend.sh v2.1 -- slot-aware dispatcher (shared /data between v2/v3)
+# rc.extend.sh v2.2 -- slot-aware dispatcher (shared /data between v2/v3)
+# v2.2 (SIGSEGV P2/P3): static userland bootstrap — toolchain_init.sh builds
+#   /data/gw/sbin (busybox applets + static iproute2), PATH is prefixed so every
+#   daemon launched below runs the static shell/tools; TZ is exported from
+#   /etc/TZ (static musl reads TZ, vendor musl reads /etc/TZ); RLIMIT_CORE is
+#   raised to unlimited so the daily core_trap window can capture family cores.
 # v2.1(P3): shadow.override 合法性校验+.bak回退自愈(坏文件不再锁死登录)
 # v2.0: +clear /tmp/gui_tokens/* at boot (P2/L-7 stale token survival)
 # v1.9: /etc/shadow bind 覆盖钩子(审计P0-5 凭据轮换前置; 见文件内注释)
@@ -16,6 +21,19 @@
 # v1.5: flag-gated one-shot capture launch (capture_ubus.sh) BEFORE slot case
 #   -- must precede FH's mobilenetwork dial to record the stock datacall blob.
 grep -q healthdog /proc/modules 2>/dev/null || true
+
+# --- v2.2 (SIGSEGV P2/P3): static userland + timezone + core dumps ----------
+# Static busybox/iproute2 remove the vendor-musl crash surface for every
+# daemon child (grep/awk/sh/ip/pgrep/...). toolchain_init is idempotent and
+# fails closed (removes the farm -> vendor fallback) if the binary is missing.
+[ -x /data/gw/toolchain_init.sh ] && /data/gw/toolchain_init.sh
+PATH=/data/gw/sbin:/data/gw/bin:$PATH
+export PATH
+[ -z "${TZ:-}" ] && [ -r /etc/TZ ] && TZ=$(cat /etc/TZ 2>/dev/null) && export TZ
+# core_trap (P3) needs unlimited RLIMIT_CORE on the daemons it watches; hard
+# limit is unlimited on this image, soft limit is 0 by default.
+ulimit -c unlimited 2>/dev/null
+logger -t rc.extend "static toolchain: PATH=$PATH TZ=${TZ:-unset} core=$(ulimit -c 2>/dev/null)" 2>/dev/null
 
 # --- v2.0(P2/L-7): session tokens cleared at boot -- /tmp is not tmpfs, stale
 # tokens survive reboots (bad after password rotation); v3httpd/rc19 start

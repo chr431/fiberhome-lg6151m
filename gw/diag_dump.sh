@@ -1,5 +1,7 @@
 #!/bin/sh
-# diag_dump.sh v1.1 -- 一键诊断包（日志改善专项轮; v1.1: 结束行带生成时刻 — 尾部展示时"上次生成"可读)
+# diag_dump.sh v1.2 -- 一键诊断包（日志改善专项轮; v1.1: 结束行带生成时刻 — 尾部展示时"上次生成"可读)
+# v1.2 (2026-10-19 SIGSEGV P1/P2): 环读取改静态 logc（不再调用厂商 logread）;
+#   增加静态工具链自述（busybox/ip/logc 版本与 PATH 解析结果）。
 # 用途: 问题诊断所需现场一次收集, 输出 stdout(GUI/SSH 重定向归档均可)。
 #   log_keeper 每次开机 +180s 落 diag_boot.txt; api diag_gen 落 diag_last.txt。
 # 脱敏(凭证红线): WPAPSK/GUEST_PASS/AUTHD_CMD/wpa_psk 等凭据行与 URL token
@@ -37,9 +39,12 @@ ip rule 2>/dev/null
 ip route show 2>/dev/null; ip route show table 200 2>/dev/null
 iptables -t nat -S POSTROUTING 2>/dev/null | head -6
 iptables -S WANAGG 2>/dev/null | head -4
+echo "== 静态工具链 =="
+echo "busybox=$(/data/gw/bin/busybox 2>&1 | head -1) ip=$(/data/gw/bin/ip -V 2>&1) logc=$(/data/gw/bin/logc -V 2>&1)"
+echo "grep=$(command -v grep) sh=$(command -v sh) ip=$(command -v ip)"
 echo "== 日志 =="
-echo "-- logread(ring tail 300)"
-logread 2>/dev/null | tail -300
+echo "-- logc(ring tail 300)"
+/data/gw/bin/logc 2>/dev/null | tail -300
 echo "-- dmesg(tail 200)"
 dmesg 2>/dev/null | tail -200
 for f in /tmp/*.log /tmp/*.out /tmp/rc19.log /tmp/watchdog_state /tmp/wifi_autoch; do

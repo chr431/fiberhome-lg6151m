@@ -1,0 +1,1068 @@
+/*
+ * logc.c -- static, defensive replacement for the vendor logread(8).
+ *
+ * Why: the vendor logread consumes logd's ubus fd stream with no frame
+ * validation (it trusts blob_attr lengths blindly) and then feeds untrusted
+ * bytes into the vendor musl printf/ctime path.  A single frame desync turns
+ * into a SIGSEGV in libc (see docs/SIGSEGV_ANALYSIS.md).  This collector
+ * speaks the same ubus protocol, but:
+ *
+ *   - every record is length-checked against the input window and the
+ *     enclosing record before a single byte is trusted;
+ *   - every blobmsg attribute is name/type/length checked; all five
+ *     attributes (time,msg,id,priority,source) must be present exactly once
+ *     and the attribute walk must end exactly at the record boundary;
+ *   - timestamps are range-checked before formatting (no ctime/asctime_r:
+ *     the time string is produced with localtime_r+strftime into a large
+ *     buffer);
+ *   - any violation drops the record, resynchronises at the next plausible
+ *     record boundary and increments counters (surfaced via --stats-file).
+ *
+ * It is linked statically (zig cc -target aarch64-linux-musl) so the vendor
+ * libc is not part of this process at all.
+ *
+ * CLI (compatible subset of logread):
+ *   -l N        only the last N records
+ *   -f          follow (stream, no oneshot)
+ *   -F FILE     append to FILE instead of stdout
+ *   -S KB       rotate FILE when it grows beyond KB (logread -S)
+ *   -t          prepend [epoch.millis] like logread -t
+ *   -e REGEX    only print records whose msg matches REGEX
+ *   -s PATH     ubus socket (default /var/run/ubus/ubus.sock)
+ *   --stats-file FILE   write key=value counters at exit / every 4096 frames
+ *   --stdin     parse a raw record stream from stdin (offline test mode)
+ *   -V          version
+ *
+ * v1.0 -- initial defensive collector.
+ */
+
+#define _GNU_SOURCE
+#include <ctype.h>
+#include <endian.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <getopt.h>
+#include <poll.h>
+#include <regex.h>
+#include <signal.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/un.h>
+#include <time.h>
+#include <unistd.h>
+
+#define LOGC_VERSION "1.0"
+
+/* ---- ubus wire protocol (only what we need) ---------------------------- */
+
+struct ubus_hdr {
+	uint8_t version;
+	uint8_t type;
+	uint16_t seq;	/* BE on wire */
+	uint32_t peer;	/* BE on wire */
+} __attribute__((packed));
+
+enum {
+	UBUS_MSG_HELLO = 0,
+	UBUS_MSG_STATUS = 1,
+	UBUS_MSG_DATA = 2,
+	UBUS_MSG_PING = 3,
+	UBUS_MSG_LOOKUP = 4,
+	UBUS_MSG_INVOKE = 5,
+};
+
+enum {
+	UBUS_ATTR_STATUS = 1,
+	UBUS_ATTR_OBJPATH = 2,
+	UBUS_ATTR_OBJID = 3,
+	UBUS_ATTR_METHOD = 4,
+	UBUS_ATTR_DATA = 7,
+};
+
+#define UBUS_MAX_MSG 65536
+
+/* blob_attr: BE32 (id<<24 | len); len includes the 4-byte header. */
+#define BLOB_EXTENDED 0x80000000u
+#define BLOB_ID_MASK  0x7f000000u
+#define BLOB_LEN_MASK 0x00ffffffu
+
+/* blobmsg types */
+enum {
+	BLOBMSG_TYPE_UNSPEC = 0,
+	BLOBMSG_TYPE_ARRAY = 1,
+	BLOBMSG_TYPE_TABLE = 2,
+	BLOBMSG_TYPE_STRING = 3,
+	BLOBMSG_TYPE_INT64 = 4,
+	BLOBMSG_TYPE_INT32 = 5,
+	BLOBMSG_TYPE_INT16 = 6,
+	BLOBMSG_TYPE_INT8 = 7,
+};
+
+static inline uint16_t rd_be16(const void *p)
+{
+	uint16_t v;
+	memcpy(&v, p, sizeof(v));
+	return be16toh(v);
+}
+
+static inline uint32_t rd_be32(const void *p)
+{
+	uint32_t v;
+	memcpy(&v, p, sizeof(v));
+	return be32toh(v);
+}
+
+static inline uint64_t rd_be64(const void *p)
+{
+	uint64_t v;
+	memcpy(&v, p, sizeof(v));
+	return be64toh(v);
+}
+
+/* ---- counters / logging ------------------------------------------------ */
+
+static struct {
+	unsigned long long frames;
+	unsigned long long bytes;
+	unsigned long long bad_frames;
+	unsigned long long resyncs;
+	unsigned long long dropped_bytes;
+	unsigned long long bad_time;
+	unsigned long long bad_attrs;
+	unsigned long long filtered;
+	unsigned long long io_errors;
+} st;
+
+static int debug;
+static const char *stats_file;
+static volatile sig_atomic_t stop_flag;
+
+static void dbg(const char *fmt, ...)
+{
+	va_list ap;
+
+	if (!debug)
+		return;
+	va_start(ap, fmt);
+	fprintf(stderr, "logc: ");
+	vfprintf(stderr, fmt, ap);
+	fputc('\n', stderr);
+	va_end(ap);
+}
+
+static void write_stats(void)
+{
+	char tmp[256];
+	int fd, n;
+
+	if (!stats_file)
+		return;
+	n = snprintf(tmp, sizeof(tmp),
+		     "frames=%llu bytes=%llu bad_frames=%llu resyncs=%llu "
+		     "dropped_bytes=%llu bad_time=%llu bad_attrs=%llu "
+		     "filtered=%llu io_errors=%llu\n",
+		     st.frames, st.bytes, st.bad_frames, st.resyncs,
+		     st.dropped_bytes, st.bad_time, st.bad_attrs,
+		     st.filtered, st.io_errors);
+	fd = open(stats_file, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+	if (fd < 0)
+		return;
+	if (write(fd, tmp, (size_t)n) != n)
+		(void)0;
+	close(fd);
+}
+
+static void on_signal(int sig)
+{
+	(void)sig;
+	stop_flag = 1;
+}
+
+static int write_all(int fd, const void *buf, size_t len)
+{
+	const uint8_t *p = buf;
+
+	while (len) {
+		ssize_t n = write(fd, p, len);
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			return -1;
+		}
+		if (n == 0)
+			return -1;
+		p += n;
+		len -= (size_t)n;
+	}
+	return 0;
+}
+
+/* ---- output ------------------------------------------------------------ */
+
+static int out_fd = STDOUT_FILENO;
+static const char *out_path;
+static long out_limit;		/* bytes, 0 = no rotation */
+
+static int open_output(void)
+{
+	if (!out_path)
+		return 0;
+	out_fd = open(out_path, O_CREAT | O_WRONLY | O_APPEND, 0600);
+	if (out_fd < 0) {
+		fprintf(stderr, "logc: open %s: %s\n", out_path, strerror(errno));
+		return -1;
+	}
+	return 0;
+}
+
+static void maybe_rotate(void)
+{
+	struct stat sb;
+	char *old;
+
+	if (!out_path || !out_limit)
+		return;
+	if (fstat(out_fd, &sb) != 0 || sb.st_size <= out_limit)
+		return;
+	old = malloc(strlen(out_path) + 5);
+	if (!old)
+		return;
+	sprintf(old, "%s.old", out_path);
+	close(out_fd);
+	rename(out_path, old);
+	free(old);
+	if (open_output() != 0)
+		out_fd = STDOUT_FILENO;
+}
+
+/* ---- timezone ---------------------------------------------------------- */
+
+/* The vendor libc reads the POSIX TZ string from /etc/TZ; zig's musl reads
+ * TZ or /etc/localtime.  This image keeps the TZ string in /etc/TZ (symlink
+ * to /tmp/TZ) and has no /etc/localtime data file, so seed TZ ourselves to
+ * keep output byte-identical with logread. */
+static void init_timezone(void)
+{
+	char buf[128];
+	FILE *f;
+
+	if (getenv("TZ")) {
+		tzset();
+		return;
+	}
+	f = fopen("/etc/TZ", "r");
+	if (f) {
+		if (fgets(buf, sizeof(buf), f)) {
+			size_t n = strlen(buf);
+			while (n && (buf[n - 1] == '\n' || buf[n - 1] == '\r' ||
+				     buf[n - 1] == ' ' || buf[n - 1] == '\t'))
+				buf[--n] = 0;
+			if (n)
+				setenv("TZ", buf, 1);
+		}
+		fclose(f);
+	}
+	tzset();
+}
+
+/* ---- syslog name tables (same text as libc facilitynames/prioritynames) */
+
+static const char *const facility_name[24] = {
+	"kern", "user", "mail", "daemon", "auth", "syslog", "lpr", "news",
+	"uucp", "cron", "authpriv", "ftp", "ntp", "security", "console",
+	"solaris-cron", "local0", "local1", "local2", "local3", "local4",
+	"local5", "local6", "local7",
+};
+
+static const char *const priority_name[8] = {
+	"emerg", "alert", "crit", "err", "warning", "notice", "info", "debug",
+};
+
+static const char *fac_name(unsigned int fac)
+{
+	return fac < 24 ? facility_name[fac] : "<unknown>";
+}
+
+static const char *pri_name(unsigned int pri)
+{
+	return pri < 8 ? priority_name[pri] : "<unknown>";
+}
+
+/* ---- record model ------------------------------------------------------ */
+
+struct record {
+	uint64_t time_ms;
+	uint32_t id;
+	uint32_t priority;
+	uint32_t source;
+	const char *msg;
+	size_t msg_len;
+};
+
+#define MIN_FRAME 32
+#define MAX_FRAME 65536
+#define MAX_MSG 8192
+
+/* 1 = attribute list ends exactly at end, 0 = malformed */
+static int parse_record(const uint8_t *p, size_t avail, struct record *r)
+{
+	uint32_t hdr, flen;
+	size_t off, end;
+	int seen_time = 0, seen_msg = 0, seen_id = 0, seen_prio = 0, seen_src = 0;
+
+	if (avail < 4)
+		return 0;
+	hdr = rd_be32(p);
+	if ((hdr & BLOB_EXTENDED) || ((hdr & BLOB_ID_MASK) >> 24) != 0)
+		return 0;
+	flen = hdr & BLOB_LEN_MASK;
+	if (flen < 4 || flen > MAX_FRAME || flen > avail)
+		return 0;
+
+	off = 4;
+	end = flen;
+	memset(r, 0, sizeof(*r));
+
+	while (off < end) {
+		uint32_t ahdr, alen, plen, type;
+		const uint8_t *attr, *data;
+		size_t hlen, dlen, nl;
+		const char *name;
+
+		if (end - off < 4)
+			return 0;
+		ahdr = rd_be32(p + off);
+		if (!(ahdr & BLOB_EXTENDED))
+			return 0;
+		type = (ahdr & BLOB_ID_MASK) >> 24;
+		alen = ahdr & BLOB_LEN_MASK;
+		if (alen < 4 + 3 || alen > end - off)
+			return 0;
+		attr = p + off + 4;
+		plen = alen - 4;
+		nl = rd_be16(attr);
+		if (nl == 0 || nl > plen - 3)
+			return 0;
+		if (attr[2 + nl] != 0)
+			return 0;
+		name = (const char *)(attr + 2);
+		hlen = (2 + nl + 1 + 3) & ~(size_t)3;
+		if (hlen > plen)
+			return 0;
+		data = attr + hlen;
+		dlen = plen - hlen;
+
+		if (!strcmp(name, "time")) {
+			if (seen_time++ || type != BLOBMSG_TYPE_INT64 || dlen != 8)
+				return 0;
+			r->time_ms = rd_be64(data);
+			/* Accept 1970..2100: pre-NTP boot records legitimately
+			 * carry a 1970-ish wall clock.  Corrupted "msg bytes as
+			 * timestamp" values are ~1e16 ms, far above this. */
+			if (r->time_ms > 4102444800000ULL) {
+				st.bad_time++;
+				return 0;
+			}
+		} else if (!strcmp(name, "msg")) {
+			if (seen_msg++ || type != BLOBMSG_TYPE_STRING ||
+			    dlen < 1 || dlen > MAX_MSG)
+				return 0;
+			if (data[dlen - 1] != 0)
+				return 0;
+			if (memchr(data, 0, dlen - 1) != NULL)
+				return 0;
+			r->msg = (const char *)data;
+			r->msg_len = dlen - 1;
+		} else if (!strcmp(name, "id")) {
+			if (seen_id++ || type != BLOBMSG_TYPE_INT32 || dlen != 4)
+				return 0;
+			r->id = rd_be32(data);
+		} else if (!strcmp(name, "priority")) {
+			if (seen_prio++ || type != BLOBMSG_TYPE_INT32 || dlen != 4)
+				return 0;
+			r->priority = rd_be32(data);
+			if (r->priority > 0xff) {
+				st.bad_attrs++;
+				return 0;
+			}
+		} else if (!strcmp(name, "source")) {
+			if (seen_src++ || type != BLOBMSG_TYPE_INT32 || dlen != 4)
+				return 0;
+			r->source = rd_be32(data);
+			if (r->source > 2) {
+				st.bad_attrs++;
+				return 0;
+			}
+		} else {
+			return 0;	/* unknown attribute: reject the frame */
+		}
+
+		off += (alen + 3) & ~(size_t)3;
+	}
+
+	if (off != end)
+		return 0;
+	if (!seen_time || !seen_msg || !seen_id || !seen_prio || !seen_src)
+		return 0;
+	return 1;
+}
+
+/* Format one record exactly like logread's stdout path:
+ *   "<ctime> <facility>.<priority>[ kernel:] <msg>\n"
+ * (ctime is rebuilt with localtime_r/strftime; no asctime_r/ctime call).
+ */
+static int emit_record(const struct record *r, int with_ts, regex_t *re)
+{
+	char tbuf[64];
+	char line[8192];
+	struct tm tm;
+	time_t sec = (time_t)(r->time_ms / 1000);
+	size_t n;
+	int len;
+
+	if (re && regexec(re, r->msg, 0, NULL, 0) == REG_NOMATCH) {
+		st.filtered++;
+		return 0;
+	}
+	if (!localtime_r(&sec, &tm))
+		return -1;
+	if (!strftime(tbuf, sizeof(tbuf), "%a %b %e %H:%M:%S %Y", &tm))
+		return -1;
+
+	len = snprintf(line, sizeof(line), "%s ", tbuf);
+	if (len < 0 || (size_t)len >= sizeof(line))
+		return -1;
+	if (with_ts) {
+		int k = snprintf(line + len, sizeof(line) - (size_t)len,
+				 "[%lld.%03u] ", (long long)sec,
+				 (unsigned)(r->time_ms % 1000));
+		if (k < 0 || (size_t)k >= sizeof(line) - (size_t)len)
+			return -1;
+		len += k;
+	}
+	n = (size_t)len;
+	len = snprintf(line + n, sizeof(line) - n, "%s.%s%s %s\n",
+		       fac_name((r->priority >> 3) & 0x1f),
+		       pri_name(r->priority & 7),
+		       r->source == 0 ? " kernel:" : "",
+		       r->msg);
+	if (len < 0 || (size_t)len >= sizeof(line) - n)
+		return -1;
+	n += (size_t)len;
+
+	maybe_rotate();
+	if (write_all(out_fd, line, n) != 0) {
+		st.io_errors++;
+		return -1;
+	}
+	st.frames++;
+	st.bytes += n;
+	if ((st.frames & 0xfff) == 0)
+		write_stats();
+	return 0;
+}
+
+/* Consume as many complete records as possible. Returns bytes consumed,
+ * or SIZE_MAX on a fatal output error. */
+static size_t consume_records(const uint8_t *buf, size_t len, int with_ts,
+			      regex_t *re, int at_eof)
+{
+	size_t off = 0;
+	int in_sync = 1;
+
+	while (off + 4 <= len) {
+		uint32_t hdr = rd_be32(buf + off);
+		uint32_t flen = hdr & BLOB_LEN_MASK;
+		struct record r;
+
+		if ((hdr & BLOB_EXTENDED) || ((hdr & BLOB_ID_MASK) >> 24) != 0 ||
+		    flen < MIN_FRAME || flen > MAX_FRAME) {
+			/* not a plausible record header: resync byte-wise */
+			if (in_sync) {
+				st.bad_frames++;
+				in_sync = 0;
+			}
+			off++;
+			st.dropped_bytes++;
+			continue;
+		}
+		if (off + flen > len) {
+			if (!in_sync || at_eof) {
+				/* during resync / at EOF a plausible-looking
+				 * length is not a reason to wait forever */
+				if (in_sync) {
+					st.bad_frames++;
+					in_sync = 0;
+				}
+				off++;
+				st.dropped_bytes++;
+				continue;
+			}
+			break;	/* wait for the rest of the record */
+		}
+
+		if (!parse_record(buf + off, len - off, &r)) {
+			if (in_sync) {
+				st.bad_frames++;
+				in_sync = 0;
+			}
+			off++;
+			st.dropped_bytes++;
+			continue;
+		}
+
+		if (!in_sync) {
+			st.resyncs++;
+			in_sync = 1;
+			dbg("resynchronised at offset %zu (frame len %u)", off, flen);
+		}
+		if (emit_record(&r, with_ts, re) != 0)
+			return SIZE_MAX;
+		off += flen;
+	}
+
+	return off;
+}
+
+/* ---- ubus client ------------------------------------------------------- */
+
+struct mbuf {
+	uint8_t *p;
+	size_t len;
+	size_t cap;
+};
+
+static int mb_reserve(struct mbuf *b, size_t add)
+{
+	if (b->len + add > b->cap)
+		return -1;
+	return 0;
+}
+
+static int mb_attr(struct mbuf *b, unsigned int id, const void *data, size_t len)
+{
+	uint32_t v = htobe32(((id & 0x7f) << 24) | (uint32_t)(len + 4));
+	size_t pad = ((len + 4) + 3) & ~(size_t)3;
+
+	if (mb_reserve(b, pad))
+		return -1;
+	memcpy(b->p + b->len, &v, 4);
+	if (len)
+		memcpy(b->p + b->len + 4, data, len);
+	memset(b->p + b->len + 4 + len, 0, pad - 4 - len);
+	b->len += pad;
+	return 0;
+}
+
+static int mb_str(struct mbuf *b, unsigned int id, const char *s)
+{
+	return mb_attr(b, id, s, strlen(s) + 1);
+}
+
+static int mb_u32(struct mbuf *b, unsigned int id, uint32_t v)
+{
+	uint32_t be = htobe32(v);
+	return mb_attr(b, id, &be, 4);
+}
+
+/* blobmsg named attribute (extended flag + name header) */
+static int bm_attr(struct mbuf *b, unsigned int type, const char *name,
+		   const void *data, size_t len)
+{
+	size_t nl = strlen(name);
+	size_t hlen = (2 + nl + 1 + 3) & ~(size_t)3;
+	size_t plen = hlen + len;
+	size_t pad = (plen + 4 + 3) & ~(size_t)3;
+	uint32_t v = htobe32(BLOB_EXTENDED | ((type & 0x7f) << 24) |
+			     (uint32_t)(plen + 4));
+	uint16_t nlen = htobe16((uint16_t)nl);
+
+	if (mb_reserve(b, pad))
+		return -1;
+	memcpy(b->p + b->len, &v, 4);
+	memcpy(b->p + b->len + 4, &nlen, 2);
+	memcpy(b->p + b->len + 6, name, nl);
+	memset(b->p + b->len + 6 + nl, 0, hlen - 2 - nl);
+	if (len)
+		memcpy(b->p + b->len + 4 + hlen, data, len);
+	memset(b->p + b->len + 4 + hlen + len, 0, pad - 4 - plen);
+	b->len += pad;
+	return 0;
+}
+
+static int bm_u32(struct mbuf *b, const char *name, uint32_t v)
+{
+	uint32_t be = htobe32(v);
+	return bm_attr(b, BLOBMSG_TYPE_INT32, name, &be, 4);
+}
+
+static int bm_u8(struct mbuf *b, const char *name, uint8_t v)
+{
+	return bm_attr(b, BLOBMSG_TYPE_INT8, name, &v, 1);
+}
+
+static int send_msg(int fd, uint8_t type, uint16_t seq, uint32_t peer,
+		    const uint8_t *attrs, size_t alen)
+{
+	struct ubus_hdr h;
+	uint8_t buf[8 + 4 + UBUS_MAX_MSG];
+	size_t total;
+	uint32_t v = htobe32((uint32_t)alen + 4);
+
+	if (alen + 4 > UBUS_MAX_MSG)
+		return -1;
+	memset(&h, 0, sizeof(h));
+	h.version = 0;
+	h.type = type;
+	h.seq = htobe16(seq);
+	h.peer = htobe32(peer);
+	memcpy(buf, &h, 8);
+	memcpy(buf + 8, &v, 4);
+	memcpy(buf + 12, attrs, alen);
+	total = 12 + alen;
+	return write_all(fd, buf, total);
+}
+
+/* Read one ubus message. Returns 0 on success, -1 on error/EOF. */
+static int recv_msg(int fd, struct ubus_hdr *h, uint8_t *payload, size_t cap,
+		    size_t *plen, int *fd_out)
+{
+	uint8_t first[12];
+	struct iovec iov;
+	struct msghdr mh;
+	uint8_t cbuf[CMSG_SPACE(sizeof(int))];
+	struct cmsghdr *cmsg;
+	ssize_t n;
+	uint32_t v, alen;
+	size_t need;
+
+	if (fd_out)
+		*fd_out = -1;
+	memset(&mh, 0, sizeof(mh));
+	memset(cbuf, 0, sizeof(cbuf));
+	iov.iov_base = first;
+	iov.iov_len = sizeof(first);
+	mh.msg_iov = &iov;
+	mh.msg_iovlen = 1;
+	mh.msg_control = cbuf;
+	mh.msg_controllen = sizeof(cbuf);
+	do {
+		n = recvmsg(fd, &mh, MSG_WAITALL);
+	} while (n < 0 && errno == EINTR);
+	if (n != (ssize_t)sizeof(first))
+		return -1;
+
+	if (fd_out) {
+		for (cmsg = CMSG_FIRSTHDR(&mh); cmsg; cmsg = CMSG_NXTHDR(&mh, cmsg)) {
+			if (cmsg->cmsg_level == SOL_SOCKET &&
+			    cmsg->cmsg_type == SCM_RIGHTS &&
+			    cmsg->cmsg_len >= CMSG_LEN(sizeof(int))) {
+				memcpy(fd_out, CMSG_DATA(cmsg), sizeof(int));
+			}
+		}
+	}
+
+	memcpy(h, first, 8);
+	h->seq = be16toh(h->seq);
+	h->peer = be32toh(h->peer);
+	v = rd_be32(first + 8);
+	alen = v & BLOB_LEN_MASK;
+	if (h->version != 0 || (v & BLOB_EXTENDED) ||
+	    ((v & BLOB_ID_MASK) >> 24) != 0 || alen < 4 || alen > cap + 4)
+		return -1;
+	need = alen - 4;
+	if (need) {
+		size_t got = 0;
+		while (got < need) {
+			ssize_t k = read(fd, payload + got, need - got);
+			if (k < 0 && errno == EINTR)
+				continue;
+			if (k <= 0)
+				return -1;
+			got += (size_t)k;
+		}
+	}
+	*plen = need;
+	return 0;
+}
+
+/* Find a top-level ubus attribute (plain blob, no name) by id. */
+static const uint8_t *find_attr(const uint8_t *p, size_t len, unsigned int id,
+				size_t *out_len)
+{
+	size_t off = 0;
+
+	while (off + 4 <= len) {
+		uint32_t v = rd_be32(p + off);
+		uint32_t alen = v & BLOB_LEN_MASK;
+		unsigned int aid = (v & BLOB_ID_MASK) >> 24;
+
+		if (alen < 4 || alen > len - off)
+			return NULL;
+		if (aid == id && !(v & BLOB_EXTENDED)) {
+			if (out_len)
+				*out_len = alen - 4;
+			return p + off + 4;
+		}
+		off += (alen + 3) & ~(size_t)3;
+	}
+	return NULL;
+}
+
+static int connect_ubus(const char *path)
+{
+	struct sockaddr_un sa;
+	int fd;
+
+	fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (fd < 0)
+		return -1;
+	memset(&sa, 0, sizeof(sa));
+	sa.sun_family = AF_UNIX;
+	if (strlen(path) >= sizeof(sa.sun_path)) {
+		close(fd);
+		return -1;
+	}
+	strcpy(sa.sun_path, path);
+	if (connect(fd, (struct sockaddr *)&sa, sizeof(sa)) != 0) {
+		close(fd);
+		return -1;
+	}
+	return fd;
+}
+
+static int ubus_hello(int fd)
+{
+	struct ubus_hdr h;
+	uint8_t payload[UBUS_MAX_MSG];
+	size_t plen;
+	int rfd;
+
+	if (recv_msg(fd, &h, payload, sizeof(payload), &plen, &rfd) != 0)
+		return -1;
+	if (rfd >= 0)
+		close(rfd);
+	if (h.type != UBUS_MSG_HELLO)
+		return -1;
+	return 0;
+}
+
+static int ubus_lookup(int fd, const char *path, uint32_t *id)
+{
+	uint8_t attrs[256], payload[UBUS_MAX_MSG];
+	struct mbuf b = { attrs, 0, sizeof(attrs) };
+	struct ubus_hdr h;
+	size_t plen;
+	int rfd, tries;
+
+	if (mb_str(&b, UBUS_ATTR_OBJPATH, path) != 0)
+		return -1;
+	if (send_msg(fd, UBUS_MSG_LOOKUP, 1, 0, attrs, b.len) != 0)
+		return -1;
+
+	for (tries = 0; tries < 16; tries++) {
+		const uint8_t *a;
+		size_t alen;
+		if (recv_msg(fd, &h, payload, sizeof(payload), &plen, &rfd) != 0)
+			return -1;
+		if (rfd >= 0)
+			close(rfd);
+		if (h.type == UBUS_MSG_DATA && h.seq == 1) {
+			a = find_attr(payload, plen, UBUS_ATTR_OBJID, &alen);
+			if (!a || alen != 4)
+				return -1;
+			*id = rd_be32(a);
+			return 0;
+		}
+		if (h.type == UBUS_MSG_STATUS && h.seq == 1)
+			return -1;
+	}
+	return -1;
+}
+
+/* Ask logd for a stream fd. Returns fd >= 0 or -1. */
+static int ubus_open_log_stream(int fd, uint32_t objid, int follow,
+				unsigned int lines, int *out_fd)
+{
+	uint8_t inner[128], attrs[512], payload[UBUS_MAX_MSG];
+	struct mbuf ib = { inner, 0, sizeof(inner) };
+	struct mbuf b = { attrs, 0, sizeof(attrs) };
+	struct ubus_hdr h;
+	size_t plen;
+	int rfd, tries, got = -1;
+
+	if (bm_u8(&ib, "stream", 1) != 0 ||
+	    bm_u8(&ib, "oneshot", follow ? 0 : 1) != 0)
+		return -1;
+	if (lines || follow) {
+		if (bm_u32(&ib, "lines", lines) != 0)
+			return -1;
+	}
+	if (mb_u32(&b, UBUS_ATTR_OBJID, objid) != 0 ||
+	    mb_str(&b, UBUS_ATTR_METHOD, "read") != 0 ||
+	    mb_attr(&b, UBUS_ATTR_DATA, inner, ib.len) != 0)
+		return -1;
+	if (send_msg(fd, UBUS_MSG_INVOKE, 2, objid, attrs, b.len) != 0)
+		return -1;
+
+	for (tries = 0; tries < 16; tries++) {
+		if (recv_msg(fd, &h, payload, sizeof(payload), &plen, &rfd) != 0) {
+			if (got >= 0)
+				close(got);
+			return -1;
+		}
+		if (rfd >= 0) {
+			if (got >= 0)
+				close(got);
+			got = rfd;
+		}
+		if (h.type == UBUS_MSG_STATUS && h.seq == 2) {
+			const uint8_t *a;
+			size_t alen;
+			a = find_attr(payload, plen, UBUS_ATTR_STATUS, &alen);
+			if (a && alen == 4 && rd_be32(a) == 0 && got >= 0) {
+				*out_fd = got;
+				return 0;
+			}
+			if (got >= 0)
+				close(got);
+			return -1;
+		}
+	}
+	if (got >= 0)
+		close(got);
+	return -1;
+}
+
+/* ---- stream reader ----------------------------------------------------- */
+
+static int read_stream_fd(int fd, int with_ts, regex_t *re)
+{
+	uint8_t *buf;
+	size_t cap = 1 << 20, len = 0;
+	int eof = 0;
+
+	buf = malloc(cap);
+	if (!buf)
+		return -1;
+
+	for (;;) {
+		size_t used;
+
+		if (stop_flag)
+			break;
+		used = consume_records(buf, len, with_ts, re, eof);
+
+		if (used == SIZE_MAX) {
+			st.io_errors++;
+			free(buf);
+			return -1;
+		}
+		if (used) {
+			memmove(buf, buf + used, len - used);
+			len -= used;
+		}
+		if (eof) {
+			if (len)
+				dbg("discarding %zu trailing bytes at EOF", len);
+			break;
+		}
+		if (len == cap) {
+			/* no progress on a full buffer: drop the oldest byte */
+			memmove(buf, buf + 1, cap - 1);
+			len--;
+			st.dropped_bytes++;
+			continue;
+		}
+
+		{
+			struct pollfd pfd = { .fd = fd, .events = POLLIN };
+			int pr = poll(&pfd, 1, 1000);
+			ssize_t n;
+			if (pr < 0) {
+				if (errno == EINTR)
+					continue;
+				break;
+			}
+			if (pr == 0)
+				continue;	/* follow mode idle */
+			if (stop_flag)
+				break;
+			n = read(fd, buf + len, cap - len);
+			if (n < 0) {
+				if (errno == EINTR || errno == EAGAIN)
+					continue;
+				st.io_errors++;
+				break;
+			}
+			if (n == 0) {
+				eof = 1;
+				continue;
+			}
+			len += (size_t)n;
+		}
+	}
+
+	/* final partial data is never trusted */
+	if (len)
+		st.dropped_bytes += len;
+	free(buf);
+	return 0;
+}
+
+/* ---- main -------------------------------------------------------------- */
+
+static void usage(FILE *f)
+{
+	fprintf(f,
+		"Usage: logc [options]\n"
+		"  -l N        only the last N records\n"
+		"  -f          follow (stream, no oneshot)\n"
+		"  -F FILE     append to FILE instead of stdout\n"
+		"  -S KB       rotate FILE above KB kilobytes\n"
+		"  -t          prepend [epoch.millis]\n"
+		"  -e REGEX    only records whose msg matches REGEX\n"
+		"  -s PATH     ubus socket (default /var/run/ubus/ubus.sock)\n"
+		"  -d          debug to stderr\n"
+		"  --stats-file FILE   write counters (key=value)\n"
+		"  --stdin     parse raw records from stdin (offline test)\n"
+		"  -V          version\n");
+}
+
+int main(int argc, char **argv)
+{
+	const char *sock_path = "/var/run/ubus/ubus.sock";
+	const char *regex_str = NULL;
+	unsigned int lines = 0;
+	int follow = 0, with_ts = 0, use_stdin = 0;
+	int ubus_fd = -1, stream_fd = -1;
+	uint32_t objid = 0;
+	regex_t re, *re_p = NULL;
+	int ch, rc = 1;
+
+	signal(SIGPIPE, SIG_IGN);
+	signal(SIGTERM, on_signal);
+	signal(SIGINT, on_signal);
+	init_timezone();
+
+	while (1) {
+		static const struct option long_opts[] = {
+			{ "stdin", no_argument, NULL, 1000 },
+			{ "stats-file", required_argument, NULL, 1001 },
+			{ NULL, 0, NULL, 0 },
+		};
+		int lidx = 0;
+
+		ch = getopt_long(argc, argv, "l:fF:S:te:s:dV",
+				 long_opts, &lidx);
+		if (ch == -1)
+			break;
+		switch (ch) {
+		case 'l':
+			lines = (unsigned int)strtoul(optarg, NULL, 10);
+			break;
+		case 'f':
+			follow = 1;
+			break;
+		case 'F':
+			out_path = optarg;
+			break;
+		case 'S':
+			out_limit = strtol(optarg, NULL, 10) * 1024L;
+			if (out_limit < 0)
+				out_limit = 0;
+			break;
+		case 't':
+			with_ts = 1;
+			break;
+		case 'e':
+			regex_str = optarg;
+			break;
+		case 's':
+			sock_path = optarg;
+			break;
+		case 'd':
+			debug = 1;
+			break;
+		case 'V':
+			printf("logc %s\n", LOGC_VERSION);
+			return 0;
+		case 1000:
+			use_stdin = 1;
+			break;
+		case 1001:
+			stats_file = optarg;
+			break;
+		default:
+			usage(stderr);
+			return 1;
+		}
+	}
+	if (optind < argc) {
+		fprintf(stderr, "logc: unexpected argument %s\n", argv[optind]);
+		return 1;
+	}
+
+	if (regex_str) {
+		if (regcomp(&re, regex_str, REG_EXTENDED | REG_NOSUB) != 0) {
+			fprintf(stderr, "logc: bad regex\n");
+			return 1;
+		}
+		re_p = &re;
+	}
+
+	if (open_output() != 0)
+		return 1;
+
+	if (use_stdin) {
+		rc = read_stream_fd(STDIN_FILENO, with_ts, re_p) == 0 ? 0 : 1;
+		goto out;
+	}
+
+	ubus_fd = connect_ubus(sock_path);
+	if (ubus_fd < 0 && !strcmp(sock_path, "/var/run/ubus/ubus.sock")) {
+		ubus_fd = connect_ubus("/var/run/ubus.sock");
+	}
+	if (ubus_fd < 0) {
+		fprintf(stderr, "logc: cannot connect to ubus (%s): %s\n",
+			sock_path, strerror(errno));
+		goto out;
+	}
+	if (ubus_hello(ubus_fd) != 0) {
+		fprintf(stderr, "logc: bad ubus hello\n");
+		goto out;
+	}
+	if (ubus_lookup(ubus_fd, "log", &objid) != 0) {
+		fprintf(stderr, "logc: ubus object 'log' not found\n");
+		goto out;
+	}
+	if (ubus_open_log_stream(ubus_fd, objid, follow, lines, &stream_fd) != 0) {
+		fprintf(stderr, "logc: logd refused the stream request\n");
+		goto out;
+	}
+
+	rc = read_stream_fd(stream_fd, with_ts, re_p) == 0 ? 0 : 1;
+
+out:
+	if (stream_fd >= 0)
+		close(stream_fd);
+	if (ubus_fd >= 0)
+		close(ubus_fd);
+	if (out_fd != STDOUT_FILENO)
+		close(out_fd);
+	if (re_p)
+		regfree(re_p);
+	write_stats();
+	if (debug)
+		fprintf(stderr, "logc: frames=%llu bytes=%llu bad=%llu resync=%llu "
+			"dropped=%llu bad_time=%llu bad_attrs=%llu filtered=%llu\n",
+			st.frames, st.bytes, st.bad_frames, st.resyncs,
+			st.dropped_bytes, st.bad_time, st.bad_attrs, st.filtered);
+	return rc;
+}

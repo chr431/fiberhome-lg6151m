@@ -1,5 +1,10 @@
 #!/bin/sh
-# watchdog.sh v1.21 -- on-device continuous invariant monitor.
+# watchdog.sh v1.22 -- on-device continuous invariant monitor.
+# v1.22 (2026-10-19 SIGSEGV P3/P4): ① fault 判据加 aee db_history 行数增量
+#   (内核 DABT 行被 printk 限流后 dmesg 计数会低估, aee 是唯一仍在记录的
+#   NE 台账); ② core_trap 守护自愈(日窗口采集家族 core, 死则拉起);
+#   ③ dial_keeper 重启 PATH 前置静态工具链(原实现整段覆盖 PATH, 会把静态
+#   工具链从重启实例里抹掉)。
 # v1.21 (2026-10-19): 用户态 fault 计数移出 $STATE(独立 /tmp/watchdog_faultcount) —
 #   放进 state 会被 selftest 当 0/1 故障键误判(faults=1 报"未恢复故障")。
 # v1.20 (2026-10-19 单实例/风扇轮): ① 自愈拉起统一走 alive() 双判据(pgrep 失败时
@@ -217,7 +222,7 @@ run_cycle() {
             kill -9 "$_kp" 2>/dev/null
         fi
         export LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib
-        export PATH=/usr/sbin:/usr/bin:/sbin:/bin:/fhrom/bin:/fhrom/fhshell
+        export PATH=/data/gw/sbin:/data/gw/bin:/usr/sbin:/usr/bin:/sbin:/bin:/fhrom/bin:/fhrom/fhshell
         nohup sh /data/gw/dial_keeper.sh >/dev/null 2>&1 &
     fi
     # log_keeper: 日志持久化(专项轮); 死则拉起 — 日志连续性=诊断生命线
@@ -228,6 +233,17 @@ run_cycle() {
         FAILS=$((FAILS+1))
         log "EVT restart log_keeper (no live instance; lock=$(cat /tmp/log_keeper.lock 2>/dev/null || echo none))"
         spawn log_keeper /dev/null sh /data/gw/log_keeper.sh
+    fi
+    # core_trap: daily user-space core window (SIGSEGV P3) — dead means the
+    # family core gap can never close; restart it.  On start it also repairs a
+    # stale /tmp/core_trap.active left by a kill -9 mid-window.
+    if alive 'core_trap[.]sh' core_trap core_trap.sh; then
+        set_state coretrap 0 "core capture window"
+    else
+        set_state coretrap 1 "core capture window"
+        FAILS=$((FAILS+1))
+        log "EVT restart core_trap (no live instance; pattern=$(cat /proc/sys/kernel/core_pattern 2>/dev/null))"
+        spawn core_trap /dev/null sh /data/gw/core_trap.sh
     fi
     # led_mgr: 显示器守护(v1.7 自愈拉) — 静默死亡=指示灯无声谎报(10-14 事故
     # 里用户对"灯还亮着"的判读是第一手症状, 灯不能哑)
@@ -393,6 +409,22 @@ run_cycle() {
     # v1.21: 计数走独立文件 — 放 state 会被 selftest 当 0/1 故障键误判(faults=1)
     echo "$FLT" > /tmp/watchdog_faultcount
 
+    # ---- v1.22: aee NE 台账增量 (P4) ----
+    # 内核 DABT 行会被 printk 限流(dmesg 镜像 18:14 后无新增行), 但 aee 仍在
+    # 追加 db_history —— dmesg 计数会低估。以行数为增量判据, 回退(轮转/重置)
+    # 时只重置基线不告警。末行含进程名/信号/时间, 直接进 WARN 供复盘。
+    AEEH=/data/log/aee_exp/db_history
+    if [ -r "$AEEH" ]; then
+        AEE_N=$(wc -l < "$AEEH" 2>/dev/null)
+        AEE_PREV=$(cat /tmp/watchdog_aeecount 2>/dev/null)
+        case "$AEE_N" in ''|*[!0-9]*) AEE_N=0 ;; esac
+        case "$AEE_PREV" in ''|*[!0-9]*) AEE_PREV=$AEE_N ;; esac
+        if [ "$AEE_N" -gt "$AEE_PREV" ]; then
+            log "WARN  aee NE +$((AEE_N-AEE_PREV)) (total $AEE_N): $(tail -n 1 "$AEEH" 2>/dev/null)"
+        fi
+        echo "$AEE_N" > /tmp/watchdog_aeecount
+    fi
+
     # ---- wifi channel consistency (v1.5) ----
     # 驱动 IDC(LTE 共存避让)可在运行期自行搬道(实测), hostapd 生成配置的 channel=
     # 会与实况脱节("配置写 ch1 而实况 ch11")。实况为权威: 漂移时回写生成配置
@@ -508,8 +540,8 @@ if [ -n "$_wp" ] && [ "$_wp" != "$$" ] && kill -0 "$_wp" 2>/dev/null && \
     exit 0
 fi
 echo $$ > /tmp/watchdog.lock
-log "===== watchdog v1.21 start (alert LED 5G orange; WAN LED owned by led_mgr; +hostapd/wan_agg/fan_mgr recovery +single-instance locks +user-fault counter; fine-log TICK/HEALTH) ====="
-logger -t watchdog "watchdog v1.16 start"
+log "===== watchdog v1.22 start (alert LED 5G orange; WAN LED owned by led_mgr; +hostapd/wan_agg/fan_mgr/core_trap recovery +single-instance locks +user-fault/aee counters; fine-log TICK/HEALTH) ====="
+logger -t watchdog "watchdog v1.22 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

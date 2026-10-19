@@ -1,8 +1,8 @@
 # VERSIONS.tsv (public export -- rows filtered to exported set)
 #VER-REGISTRY
 gw/agg_pins.default	1.0	manifest	/data/gw/agg_pins.default	MAC钉死表出厂缺省基线(只读, 不含任何MAC; 设备侧活文件 agg_pins.conf 由 wan_agg 缺省才写地播种, 个人MAC不入库)
-gw/rc.extend.sh	2.1	manifest	/data/rc.extend.sh	槽位调度器; v2.1(P3): shadow.override合法性校验+.bak回退自愈(坏文件不再锁死SSH+串口); v2.0: 开机清token; 历史见git
-gw/v3_rc10.extend.sh	2.30	manifest	/data/gw/rc19.sh	v3 启动编排 rc19v2; v2.30: v3_fix wan_if 钉死改全接口(承载口漂移)+insmod 失败显式回显; v2.29: +wan_eth 接线
+gw/rc.extend.sh	2.2	manifest	/data/rc.extend.sh	槽位调度器; v2.2(SIGSEGV P2/P3): 静态工具链 PATH/TZ 导出 + RLIMIT_CORE unlimited(每日 core 窗口前置); v2.1(P3): shadow.override 合法性校验+.bak回退自愈(坏文件不再锁死SSH+串口); 历史见git
+gw/v3_rc10.extend.sh	2.31	manifest	/data/gw/rc19.sh	v3 启动编排 rc19v2; v2.31(SIGSEGV P2/P3): 静态 PATH/TZ 兜底 + core_trap 接线 + br-lan 创建 brctl 回退; v2.30: v3_fix wan_if 钉死改全接口+insmod 失败显式回显; 历史见git
 gw/wifi_macplan.sh	1.0	manifest	/data/gw/wifi_macplan.sh	出厂 MAC 派生计划(自 wifi_up v1.29 拆出; api uplink 的 eth0 原生 MAC 还原同步收敛到此唯一实现 — 原内联副本缺两级兜底属算法漂移实例)
 gw/wifi_autoch.sh	1.1	manifest	/data/gw/wifi_autoch.sh	WiFi 自动选道器; v1.1(日志加密轮): 输出 # 注释行记录扫描规模/候选/评分(源码时无害) — 选道依据可复盘; IDC 安全掩码+候选{1,6}
 gw/wifi_up.sh	1.29	manifest	/data/gw/wifi_up.sh	mt7992 AP 工厂配方(v1.29 架构轮: MAC 派生拆出 wifi_macplan.sh + 自动选道拆出 wifi_autoch.sh, 主文件收敛为拉起配方本体, 变量/契约零变化; v1.28: 候选收敛安全集深部{1,6}; 历史见git)
@@ -30,7 +30,7 @@ gw/bin/v3_steth.ko	1.0	manifest	/data/gw/v3_steth.ko	hook槽位听诊器(bias/in
 gw/src/healthdog.c	1.0	src	gw/bin/healthdog.ko	看门狗模块源码(版本随产物)
 gw/src/v3_fix.c	1.2	src	gw/bin/v3_fix.ko	TTL/解绑模块源码(版本随产物); v1.2 随产物重建
 gw/src/v3_steth.c	1.0	src	gw/bin/v3_steth.ko	听诊器模块源码(版本随产物)
-tools/deploy.py	2.19	tool	-	v2.19: MANIFEST +ccmni_up.sh(netagent-lite, dial 族共用); 历史见git
+tools/deploy.py	2.20	tool	-	v2.20: MANIFEST +P1/P2/P3 资产(toolchain_init/busybox/ip/logc/core_trap); 历史见git
 tools/serial_server.py	1.7	tool	-	常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets)
 tools/serial_cmd.py	1.3	tool	-	串口命令瘦客户端(marker输出捕获; v1.3示例路径更新)
 tools/lk_flip2.py	1.1	tool	-	LK 一键翻槽(a|b, misc[2060]字节)
@@ -62,8 +62,8 @@ gw/bin/shmsnap	1.0	manifest	/data/gw/shmsnap	cfgmgr树共享内存快照工具(s
 gw/webs_revive.sh	1.3	manifest	/data/gw/webs_revive.sh	原厂GUI复活器(自足nginx conf; 手动拉起)
 gw/ntp_keeper.sh	1.2	manifest	/data/gw/ntp_keeper.sh	每小时NTP守时(多源; 设备无RTC; v1.2: +时区自愈(/etc/TZ→tmpfs重启即失, 每轮重应用); v1.1: 首选 NTP_SERVER 自管配置)
 gw/reboot_sched.sh	1.2	manifest	/data/gw/reboot_sched.sh	定时重启守护; v1.2(04:00 事件复盘): 触发行先落 /data/gw/logs/reboots.log+sync 再 reboot — 原只写 /tmp, 30s 持久化周期赶不上, 每日定时重启在持久日志零指纹
-gw/log_keeper.sh	1.7	manifest	/data/gw/log_keeper.sh	日志持久化守护; v1.7: 开机后一次性重启 logd 清 syslog 环(规避厂商 logread 在含开机记录的环上 ~1%/次 SIGSEGV; 旧环清环后 2500 次 0 崩); v1.6: 镜像降噪(thermal/mipc_cli/cci dump/SPM dump/eth debug/WiFi DPD/mipc 端口回声不落盘, 丢弃量入汇总; RAM 环不受影响)+dmesg 镜像 4MB; v1.5: BOOT 附 boot.reason
-gw/diag_dump.sh	1.1	manifest	/data/gw/diag_dump.sh	一键诊断包(脱敏: 配置/无线MLO掩码/网络/全量日志现场; v1.1: 结束行带生成时刻)
+gw/log_keeper.sh	1.8	manifest	/data/gw/log_keeper.sh	日志持久化守护; v1.8(SIGSEGV P1): 环读取改静态 logc(帧校验/重同步/时间戳范围断言, 异常计数入 WARN), logd 清环保留仅为 aee 内置厂商 logread 降险; v1.7: 开机后一次性重启 logd 清环; v1.6: 镜像降噪+dmesg 4MB; 历史见git
+gw/diag_dump.sh	1.2	manifest	/data/gw/diag_dump.sh	一键诊断包(脱敏); v1.2(SIGSEGV P1/P2): 环读取改静态 logc + 静态工具链自述; v1.1: 结束行带生成时刻
 tools/lk_flash_v4_eth1.py	1.1	tool	-	v1.1路径随项目根迁移; eth1刷入实证器(全链条: 陷阱→raw shell→eth1起链[历史疑点:PHY仅ifup后attach]→curl传输→deploy2自驱→重启回v4.1)
 tools/lk_flash_v4.py	1.1	tool	-	v1.1路径随项目根迁移; 终版刷入器(LK陷阱→raw shell→/dev/null修复→curl送deploy2.sh→后台自驱+轮询deploy.log→重启监测; 修三雷: uclient罢工/&需/dev/null/串口前台等待吃首字符)
 tools/identify_fw.py	1.0	tool	-	只读固件身份取证器(release/cmdline/v4标记/挂载表; 前置空格防tty首字符丢失)
@@ -92,8 +92,8 @@ gw/defaults.conf	1.8	manifest	/data/gw/defaults.conf	统一配置只读出厂基
 tools/leak_check.py	2.2	tool	-	敏感词零命中门禁; v2.2: --history 全量扫提交正文(%B, 原仅扫标题%s可漏检消息体); v2.1: 修复 PAT_PARTS NameError; 历史见git
 docs/ARCHITECTURE.md	1.1	doc	-	架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针)
 docs/GUI_TERMINOLOGY.md	1.2	doc	-	GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git
-gw/watchdog.sh	1.21	manifest	/data/gw/watchdog.sh	持续不变量看门狗; v1.21: fault 计数移出 state(独立 /tmp/watchdog_faultcount, 避免 selftest 误判); v1.20: 自愈统一 alive() 双判据(pgrep+锁文件 cmdline 复核, 防重复拉起)+看门狗单实例锁+fan_mgr 自愈+内核用户态 fault 计数 WARN; v1.19: wan_agg 崩溃自愈(子命令 SIGSEGV 退出→按启动配方拉起, 修复 WAN 灯/GUI 误报离线); v1.18: hostapd 崩溃自愈(存活+ENABLED 双判据, MLO 下电等价态重启, 3次/时限频); v1.17: modem_reg/at_chan 失败补 COPS/CFUN 原文; v1.16: epoch 时间基准+时钟跳变; v1.15: 失败 rc/输出、60s TICK、5min HEALTH、自愈重启原因
-tools/selftest.py	2.43	tool	-	v2.43: 5G 灯测试只数常驻 led_mgr(排除 --dry-state 一次性进程, 修 daemon=2 假阳性); v2.42(降噪轮): t_logging_fine +denoise 在位断言; v2.41: t_v3fix_loaded; v2.40: t_logging_fine; 历史见git
+gw/watchdog.sh	1.22	manifest	/data/gw/watchdog.sh	持续不变量看门狗; v1.22(SIGSEGV P3/P4): fault 判据+aee db_history 行增量(printk 限流下不低估)+core_trap 自愈+dial_keeper 重启保留静态 PATH; v1.21: fault 计数移出 state; v1.20: alive() 双判据+单实例锁+fan_mgr 自愈; 历史见git
+tools/selftest.py	2.44	tool	-	v2.44(SIGSEGV 根治轮): +t_static_toolchain/t_logc/t_core_trap/t_watchdog_aee; v2.43: 5G 灯测试只数常驻 led_mgr; v2.42: t_logging_fine; 历史见git
 tools/doc_audit.py	1.1	tool	-	台账↔文档内联标记双向审计(v1.1: 标记扫描纳入台账引用的docs/外文档如install/README.md; v1.0: 版本绑定+TEST-MISSING/STALE-CODE/UNREGISTERED-CLAIM)
 gw/src/mipc_cellular.c	0.17	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源码; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘
 gw/bin/mipc_cellular	0.17	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘
@@ -104,3 +104,12 @@ install/run.sh	1.1	tool	-	raw shell自驱脚本(v1.1: 分区次设备号从/proc
 tools/build_v3httpd.sh	1.0	tool	-	v3httpd构建(zig cc aarch64-linux-musl全静态, 同mipc_cellular链)
 tools/upgrade_slot.py	1.0	tool	-	SSH整槽升级器(P3第一档: vercheck/槽位/空间预检→md5门禁→dd备份旧p26→写新镜像→挂载sanity断言(toor/rcS/#v3:/procd)→失败自动整槽还原不重启→清TRY_A→reboot; PC侧轮询日志+回连终检; --dry-run)
 tools/rescue_shadow.py	1.0	tool	-	shadow.override未bind网络救援(getpass旧口令→只读探针: 文件md5/grep行为单测/部署钩子sh -x跟踪→从.bak恢复+重bind; 依赖rc.extend v2.1)
+gw/toolchain_init.sh	1.0	manifest	/data/gw/toolchain_init.sh	静态工具链自举: /data/gw/sbin 符号链接农场(busybox 305 applet + 静态 iproute2 ip), 原子换入/失败回退 vendor; rc.extend 开机调用
+gw/bin/busybox	1.0	manifest	/data/gw/bin/busybox	静态 aarch64 busybox 1.36.1(Alpine busybox-static 1.36.1-r31, 与厂商同版本); P2 崩溃家族工具链静态化
+gw/bin/ip	1.0	manifest	/data/gw/bin/ip	静态 aarch64 iproute2 6.3.0(与厂商 ip -V 同版本, zig cc musl 重建); 输出与厂商逐字节一致, 保留 link add type bridge
+gw/bin/logc	1.0	manifest	/data/gw/bin/logc	静态日志采集器(P1): 同 logd ubus fd 流, 帧/属性/时间戳全校验+全量重同步, 输出与 logread 兼容; 零厂商 musl 耦合
+gw/src/logc.c	1.0	src	gw/bin/logc	logc 源码(最小 ubus 客户端+防御性帧解析+ctime 安全替代)
+gw/core_trap.sh	1.0	manifest	/data/gw/core_trap.sh	每日 core 捕获窗口(P3): 03:20 起 10min 切 core_pattern=/tmp/core.%p, 结束搬 /data/gw/logs/cores 并恢复 aee; kill -9/重启自愈
+tools/build_logc.sh	1.0	tool	-	logc 静态构建(zig cc aarch64-linux-musl)
+tools/fetch_static_busybox.sh	1.0	tool	-	Alpine busybox-static 1.36.1-r31 拉取+SHA256 钉死(解包到 gw/bin/busybox)
+tools/build_static_ip.sh	1.0	tool	-	iproute2 6.3.0 静态构建(zig cc aarch64-linux-musl, 与厂商同版本)

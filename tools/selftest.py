@@ -11,6 +11,9 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
+v2.44 (SIGSEGV 根治轮, 2026-10-19): +t_static_toolchain / t_logc /
+  t_core_trap / t_watchdog_aee — P1 静态采集器、P2 静态工具链与 PATH 接管、
+  P3 core 窗口守护、P4 aee 台账增量判据的回归护栏。
 v2.41 (24h 日志轮): +t_v3fix_loaded — v3_fix.ko 必须恰 1 实例在 /proc/modules
   (旧产物 ELF 错位 1B 致每次开机 insmod 静默失败的回归护栏)。
 v2.40 (日志加密轮): +t_logging_fine — log_keeper v1.3 增量落盘(stream/1MB 轮转/
@@ -1843,6 +1846,97 @@ def t_logging_fine():
           and int(wd or 0) > 0 and int(wdt or 0) > 0)
     record(t_logging_fine._test_name, "system", ok,
            f"cap={st} stream={sm} resync={rs} denoise={dn} wan={wa}B/{wt}evt wd={wd}B/{wdt}tick")
+
+
+@test("静态工具链在位且守护已切换 (SIGSEGV P2)")
+def t_static_toolchain():
+    # v2.44 (SIGSEGV 根治轮): vendor musl 动态链接的 grep/awk/sh/ip 是崩溃家族
+    #   本体; 静态 busybox(1.36.1)+静态 iproute2(6.3.0) 经 /data/gw/sbin 农场
+    #   接管 PATH。断言: 农场指向正确目标、applet 数量、运行中的 watchdog 解释器
+    #   已是静态 busybox、其 environ 的 PATH 前置了 /data/gw/sbin。
+    bb = dev("test -x /data/gw/bin/busybox && echo y").strip()
+    ipv = dev("/data/gw/bin/ip -V 2>/dev/null").strip()
+    lcv = dev("/data/gw/bin/logc -V 2>/dev/null").strip()
+    shl = dev("readlink /data/gw/sbin/sh 2>/dev/null").strip()
+    ipl = dev("readlink /data/gw/sbin/ip 2>/dev/null").strip()
+    grl = dev("readlink /data/gw/sbin/grep 2>/dev/null").strip()
+    n = dev("/data/gw/bin/busybox --list 2>/dev/null | wc -l").strip()
+    wp = dev("pgrep -f 'watchdog[.]sh' | head -1").strip()
+    exe = dev("readlink /proc/%s/exe 2>/dev/null" % wp).strip() if wp else ""
+    envp = dev("tr '\\0' '\\n' < /proc/%s/environ 2>/dev/null | grep '^PATH=' | head -1" % wp).strip() if wp else ""
+    ok = (bb == "y" and "iproute2-6.3.0" in ipv and "logc" in lcv
+          and shl.endswith("/busybox") and ipl.endswith("/ip")
+          and grl.endswith("/busybox") and int(n or 0) >= 300
+          and exe.endswith("/busybox") and "/data/gw/sbin" in envp)
+    record(t_static_toolchain._test_name, "system", ok,
+           "bb=%s ip=%s logc=%s sh=%s ip=%s grep=%s applets=%s wd_exe=%s path_ok=%s"
+           % (bb, ipv[:18], lcv, shl, ipl, grl, n, exe,
+              "/data/gw/sbin" in envp))
+
+
+@test("logc 静态采集器在位且帧无异常 (SIGSEGV P1)")
+def t_logc():
+    # v2.44: log_keeper/diag_dump 必须走 logc, 不再调用厂商 logread;
+    #   logc 实跑 5 条且 stats 的 bad_frames/resyncs 为 0; 最近一轮守护
+    #   采集的 /tmp/logc.stats 也无异常(证明真实环流解析正常)。
+    v = dev("/data/gw/bin/logc -V 2>/dev/null").strip()
+    use = dev("grep -c '^LOGC=/data/gw/bin/logc' /data/gw/log_keeper.sh 2>/dev/null").strip()
+    old = dev("grep -c '^[[:space:]]*logread ' /data/gw/log_keeper.sh 2>/dev/null").strip()
+    out = dev("/data/gw/bin/logc -l 5 --stats-file /tmp/selftest_logc.stats "
+              ">/tmp/selftest_logc.out 2>/dev/null; echo RC=$?; "
+              "wc -l < /tmp/selftest_logc.out; grep -cE '^[A-Z][a-z]{2} [A-Z][a-z]{2} ' "
+              "/tmp/selftest_logc.out; cat /tmp/selftest_logc.stats 2>/dev/null").strip()
+    lines = out.splitlines()
+    rc = lines[0] if lines else ""
+    nlines = lines[1] if len(lines) > 1 else "0"
+    nfmt = lines[2] if len(lines) > 2 else "0"
+    stats = " ".join(lines[3:])
+    live = dev("cat /tmp/logc.stats 2>/dev/null").strip()
+    ok = (v.startswith("logc") and use not in ("", "0") and old in ("", "0")
+          and rc == "RC=0" and nlines.isdigit() and int(nlines) > 0
+          and nfmt == nlines
+          and "bad_frames=0" in stats and "resyncs=0" in stats
+          and "bad_frames=0" in live and "resyncs=0" in live)
+    record(t_logc._test_name, "system", ok,
+           "ver=%s use=%s old=%s %s lines=%s fmt=%s live_ok=%s"
+           % (v, use, old, rc, nlines, nfmt,
+              ("bad_frames=0" in live and "resyncs=0" in live)))
+
+
+@test("core 捕获窗口守护在位 (SIGSEGV P3)")
+def t_core_trap():
+    # v2.44: core_trap 必须常驻(watchdog 自愈)、持锁、RLIMIT_CORE=unlimited;
+    #   core_pattern 在窗口外必须是 aee 管道(窗口内允许 /tmp/core.%p)。
+    run = dev("pgrep -f 'core_trap[.]sh' | head -1").strip()
+    lock = dev("cat /tmp/core_trap.lock 2>/dev/null").strip()
+    alive = dev("kill -0 %s 2>/dev/null && echo y" % lock).strip() if lock else ""
+    pat = dev("cat /proc/sys/kernel/core_pattern 2>/dev/null").strip()
+    lim = dev("grep -i 'Max core file size' /proc/%s/limits 2>/dev/null | awk '{print $6}'" % run).strip() if run else ""
+    rc19 = dev("grep -c 'core_trap.sh' /data/gw/rc19.sh 2>/dev/null").strip()
+    wd = dev("grep -c 'core_trap' /data/gw/watchdog.sh 2>/dev/null").strip()
+    pat_ok = ("aee_core_forwarder" in pat) or ("/tmp/core.%p" in pat
+              and dev("test -f /tmp/core_trap.active && echo y").strip() == "y")
+    ok = (bool(run) and bool(lock) and alive == "y" and lim == "unlimited"
+          and pat_ok and int(rc19 or 0) > 0 and int(wd or 0) > 0)
+    record(t_core_trap._test_name, "system", ok,
+           "pid=%s lock=%s alive=%s lim=%s pat=%s rc19=%s wd=%s"
+           % (run, lock, alive, lim, pat, rc19, wd))
+
+
+@test("watchdog aee 台账增量判据 (SIGSEGV P4)")
+def t_watchdog_aee():
+    # v2.44: 内核 DABT 行被 printk 限流后 dmesg 计数会低估; watchdog 必须同时
+    #   以 aee db_history 行数增量为判据, 且基线文件与当前行数一致(±1 轮窗口)。
+    code = dev("grep -c 'watchdog_aeecount' /data/gw/watchdog.sh 2>/dev/null").strip()
+    cnt = dev("cat /tmp/watchdog_aeecount 2>/dev/null").strip()
+    hist = dev("wc -l < /data/log/aee_exp/db_history 2>/dev/null").strip()
+    st = dev("grep -c '^coretrap=' /tmp/watchdog_state 2>/dev/null").strip()
+    ver = dev("grep -c 'watchdog v1.22 start' /tmp/watchdog.log 2>/dev/null").strip()
+    ok = False
+    if code not in ("", "0") and cnt.isdigit() and hist.isdigit():
+        ok = abs(int(cnt) - int(hist)) <= 2 and int(st or 0) > 0 and int(ver or 0) > 0
+    record(t_watchdog_aee._test_name, "system", ok,
+           "code=%s base=%s hist=%s state=%s ver=%s" % (code, cnt, hist, st, ver))
 
 
 def main():

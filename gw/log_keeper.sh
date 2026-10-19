@@ -1,5 +1,11 @@
 #!/bin/sh
-# log_keeper.sh v1.7 -- 日志持久化守护（日志改善专项轮）
+# log_keeper.sh v1.8 -- 日志持久化守护（日志改善专项轮）
+#   v1.8 (2026-10-19 SIGSEGV P1): syslog 环读取改用自建静态采集器
+#   /data/gw/bin/logc（同 ubus fd 流, 帧校验+全量重同步+时间戳范围断言,
+#   静态链接=零厂商 musl 耦合）。logread 的帧同步缺陷/ctime 崩溃路径从
+#   本守护的读环路径物理消失; logc 异常计数（bad_frames/resyncs）非零时
+#   写一条 WARN 进本日志。logd 清环保留: 唯一目的是让 aee 转储器内置的
+#   厂商 logread 也读不到开机期毒记录（其无法替换）。
 #   v1.7 (2026-10-19 logread 崩溃轮): 开机后一次性清 syslog 环。厂商 logread 在
 #   含开机期记录的 10MB 环上约 1%/次运行 SIGSEGV(libc ctime→asctime_r→snprintf→
 #   vfprintf 路径, 三份未加密 core 同签名)。实测: 旧环 2500 次读取崩溃约 29 次量级,
@@ -38,6 +44,7 @@
 #   6) 每次开机 +180s 生成一份诊断包（diag_dump.sh → diag_boot.txt）
 LOG=/tmp/log_keeper.log
 DIR=/data/gw/logs
+LOGC=/data/gw/bin/logc
 lk() { echo "$(date '+%m-%d %H:%M:%S') $*" >> $LOG; }
 # v1.6: 镜像降噪模式(仅作用于持久镜像; busybox grep -E 实测兼容)
 SYSLOG_DROP='thermal_core\[[0-9]+\]: interval=|mipc_cli\[[0-9]+\]: main:mipc operation (start|end)|mtk_monitor_hang\[[0-9]+\]:|\[ccci[0-9]+/(net|dpmaif|cif)\]|\[ccci[0-9]+/chr\]port ttyCMIPC[0-9]+ (open|close)'
@@ -119,10 +126,11 @@ while :; do
     fi
     PREV_UP=$U
 
-    # -- v1.7: 开机后一次性清 syslog 环(logread 崩溃规避) --
-    # 触发记录随开机日志进入 logd 环并长期驻留(10MB 环数周才回卷), 期间每次
-    # logread 都有 ~1% 概率在 ctime 格式化路径 SIGSEGV。uptime>=300s 时 boot
-    # 日志已由本守护落盘, 重启 logd 清环即可; btime 标记保证每 boot 只做一次。
+    # -- v1.7: 开机后一次性清 syslog 环 --
+    # v1.8: 本守护自身已改用 logc(静态+全帧校验), 不再需要清环来保护自己;
+    # 保留清环的唯一原因 = aee 转储器内置的厂商 logread 无法替换, 而开机期
+    # 记录是它的已知触发源。uptime>=300s 时 boot 日志已落盘, 重启 logd 清环;
+    # btime 标记保证每 boot 只做一次。
     _bt=$(awk '/^btime/{print $2; exit}' /proc/stat 2>/dev/null)
     if [ "${U:-0}" -ge 300 ] && [ -n "$_bt" ] && [ "$(cat $DIR/.logd_reset_bt 2>/dev/null)" != "$_bt" ]; then
         _lp=$(pidof logd 2>/dev/null)
@@ -135,7 +143,15 @@ while :; do
     fi
 
     # -- syslog 镜像(v1.6: 降噪 — 高频低值行不落盘, 丢弃量计数入汇总) --
-    logread 2>/dev/null > /tmp/lk_ring
+    # v1.8: logc 取代 logread: 静态链接 + 帧校验 + 重同步 + 时间戳范围断言。
+    if ! $LOGC --stats-file /tmp/logc.stats 2>/tmp/logc.err > /tmp/lk_ring; then
+        lk "WARN logc rc=$? err=$(tail -n 1 /tmp/logc.err 2>/dev/null)"
+    fi
+    _bad=$(grep -o 'bad_frames=[0-9]*' /tmp/logc.stats 2>/dev/null | cut -d= -f2)
+    _rs=$(grep -o 'resyncs=[0-9]*' /tmp/logc.stats 2>/dev/null | cut -d= -f2)
+    if [ "${_bad:-0}" -gt 0 ] 2>/dev/null || [ "${_rs:-0}" -gt 0 ] 2>/dev/null; then
+        lk "WARN logc frame anomalies: $(cat /tmp/logc.stats 2>/dev/null)"
+    fi
     if [ -s /tmp/lk_ring ]; then
         LAST=$(cat $DIR/.syslog.last 2>/dev/null)
         if [ -n "$LAST" ]; then

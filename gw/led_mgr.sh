@@ -190,7 +190,7 @@ if [ -n "$_lp" ] && kill -0 "$_lp" 2>/dev/null \
 fi
 echo $$ > $LOCK
 
-llog "===== led_mgr v2.5 start (absolute-level drive + self-heal + 2s poll; pid-lock; pid=$$) ====="
+llog "===== led_mgr v2.6 start (absolute-level drive + self-heal + 2s poll; pid-lock; pid=$$) ====="
 BCN_LAST=""   # v1.6: 固件信标事件计数(RE实证三条权威标志)
 ST=""         # 仅用于日志: 状态串变化才写日志(灯写入已不依赖它)
 POLL=${LED_POLL:-2}

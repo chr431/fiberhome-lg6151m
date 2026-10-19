@@ -165,8 +165,8 @@ ee_count() { ls -d /data/log/aee_exp/db.*.EE 2>/dev/null | wc -l; }
 DOWN=0; B=$MINB
 CYC=0; ZOMBIE=0; APN_LAST=""; APN_SRC_LAST=""; CFUN_LAST=""
 EE_N=$(ee_count)
-log "===== keeper v1.6 start (grace=${GRACE}s poll=${POLL}s mto=${MTO}s ee=${EE_N}; ccmni_up=netagent-lite; trigger=ip+dataplane; fine-log) ====="
-logger -t dial_keeper "keeper v1.6 start (grace=${GRACE}s mto=${MTO}s ee=${EE_N})"
+log "===== keeper v1.7 start (grace=${GRACE}s poll=${POLL}s mto=${MTO}s ee=${EE_N}; ccmni_up=netagent-lite; trigger=ip+dataplane; fine-log) ====="
+logger -t dial_keeper "keeper v1.7 start (grace=${GRACE}s mto=${MTO}s ee=${EE_N})"
 while :; do
     hb; CYC=$((CYC+1)); [ $((CYC % 12)) -eq 0 ] && log_rot
     # v1.1: 模组 EE 事件 = 复位信号 → 强制重拨路径(不等被动宽限)

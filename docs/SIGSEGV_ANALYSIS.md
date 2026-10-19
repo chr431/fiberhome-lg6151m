@@ -294,3 +294,106 @@ P2 的 PATH 切换经 manifest 灰度，上线后冷启动验证。
   备份恢复；注意首次运行失败会残留 /tmp/core.%p，需手动恢复 aee）;
 - `sigsegv_re/busybox.bin / ip-full.bin / logd.bin / libubox.so`：
   家族二进制归档（md5 与设备一致，2026-10-19 拉取）。
+
+## 9. 根治方案执行记录（2026-10-19 晚轮，P1–P4 全部落地）
+
+> 本轮把 §7 的方案完整实施并做设备侧验证。全部变更在公开仓：
+> `11888eb`(P1–P4 主体) → `efd1845`(单实例锁加固) → `7a6bdc0`(启动日志版本)
+> → `c96117d`(watchdog spawn 自锁死循环) → `a422d50`/`9ea4869`/`270cef9`
+> (TZ/启动宽限/PATH 幂等)。版本注册表与 ARCHITECTURE.md 已同步（113 个登记
+> 文件 / MANIFEST 65 项，vercheck 全绿）。
+
+### 9.1 变更清单
+
+| 阶段 | 资产 | 版本 | 设备路径 |
+|---|---|---|---|
+| P1 | `gw/src/logc.c` → `gw/bin/logc` | 1.0 | `/data/gw/bin/logc` |
+| P1 | `gw/log_keeper.sh`（改用 logc） | 1.8 | `/data/gw/log_keeper.sh` |
+| P1 | `gw/diag_dump.sh`（改用 logc） | 1.2 | `/data/gw/diag_dump.sh` |
+| P2 | `gw/bin/busybox`（静态 1.36.1-r31） | 1.0 | `/data/gw/bin/busybox` |
+| P2 | `gw/bin/ip`（静态 iproute2 6.3.0） | 1.0 | `/data/gw/bin/ip` |
+| P2 | `gw/toolchain_init.sh`（符号链接农场） | 1.0 | `/data/gw/toolchain_init.sh` |
+| P2/P3 | `gw/rc.extend.sh`（PATH/TZ/RLIMIT_CORE） | 2.5 | `/data/rc.extend.sh` |
+| P3 | `gw/core_trap.sh`（每日 core 窗口） | 1.0 | `/data/gw/core_trap.sh` |
+| P4 | `gw/watchdog.sh`（aee 增量+core_trap 自愈+启动宽限） | 1.25 | `/data/gw/watchdog.sh` |
+| 构建 | `tools/build_logc.sh` / `tools/build_static_ip.sh` / `tools/fetch_static_busybox.sh` | 1.0 | PC 侧 |
+
+P2 的 busybox 与厂商同为 **1.36.1**（Alpine `busybox-static-1.36.1-r31`，
+SHA-256 钉死在拉取脚本里，305 个 applet）；ip 用 **iproute2 6.3.0**（与厂商
+`ip -V` 同版本）以 zig cc/musl 重建，避免 busybox ip 的输出空格差异与
+`link add ... type bridge` 缺失。两者均为 GPLv2（busybox）/GPLv2（iproute2），
+源码/包 URL 与校验值在构建脚本内。
+
+### 9.2 P1 验证（logc）
+
+- **合成恶意流**：9 条合法记录 + 垃圾插段/越界长度/错误类型/1970 前垃圾/
+  msg 内嵌 NUL 混合。输出恰为 9 条合法记录；坏帧计数与重同步计数逐项对上，
+  进程零崩溃（`--stdin` 离线模式）。
+- **真实环**：`logc --stats-file` 读全环 `frames=694 bad_frames=0 resyncs=0
+  dropped=0 bad_time=0 bad_attrs=0`；与厂商 logread 同窗口 `-l 3` 输出
+  **逐字节 diff 相同**。
+- **稳定性**：220 次 `-l 200` + 20 次全环读取 0 失败；期间 aee `db_history`
+  零新增。清环后 logread 的 1% 崩溃率对 logc 不再适用（无 ctime/asctime_r 调用）。
+- **接线**：log_keeper/diag_dump 的厂商 logread 调用归零（selftest 断言
+  `^LOGC=/data/gw/bin/logc` 且无 `logread ` 行）；logd 清环保留，理由仅为
+  aee 转储器内置的厂商 logread 无法替换。
+
+### 9.3 P2 验证（静态工具链）
+
+- `/data/gw/sbin` 农场 305 个 applet；`sh/grep/awk/sed/ip/...` 均解析到静态件。
+- 常驻守护 `watchdog / led_mgr / dial_keeper / log_keeper / core_trap /
+  wan_agg / wan_eth` 的 `/proc/<pid>/exe` **全部** = `/data/gw/bin/busybox`；
+  其 environ 为 `PATH=/data/gw/sbin:/data/gw/bin:...`、`TZ=CST-8`。
+- `ip` 输出与厂商逐字节一致：`-o -4 addr` / `rule show` / `-6 rule show` /
+  `route show default` / `-6 route show default` / `link show br-lan`；另实测
+  `ip link add <x> type bridge` + `link del` 成功。
+- 静态 busybox `sh -n` 语法检查全部 gw 脚本通过；awk/grep -Fqx/sed/tail/wc/
+  date（带 TZ）抽样与厂商行为一致。
+- 冷启动竞态修复：首个冷启动发现 watchdog 在 rc19 拉起 wan_agg 之前抢跑，
+  产生两个 `sh wan_agg.sh`；v1.25 加 180s 宽限（只记 SKIP 不算失败），
+  第三次冷启动实测 `wagg=1`。
+
+### 9.4 P3 验证（core 窗口）
+
+- 用 `CORETRAP_START=<now> CORETRAP_SECS=120` 模拟窗口：`core_pattern` 切为
+  `/tmp/core.%p`；静态 crashme 触发 SIGSEGV，产生 `core.159744B`；
+  窗口关闭后自动搬至 `/data/gw/logs/cores/20261019/core.8220`，`core_pattern`
+  恢复 aee 管道，日志记录 `aee_lines=173->173`。
+- 冷启动后 core_trap 常驻（watchdog 自愈），守护侧 `Max core file size =
+  unlimited`；正常态 `core_pattern` 保持 aee。
+- 真实家族 core 的捕获要等每日 03:20–03:30 窗口（首个窗口在本轮之后）。
+
+### 9.5 P4 验证（aee 增量判据）
+
+- 20:47:01 `WARN aee NE +1 (total 174): db.05.NE ... SIGSEGV,awk`；
+  20:53:48 `WARN aee NE +1 (total 175): db.01.NE ... SIGSEGV,ip`。
+  两条与 `db_history` 增量、`ZZ_INTERNAL` 进程名/信号/时间**一致**；同期
+  dmesg 的 `unhandled exception` 行已被 printk 限流（0 行），证明单靠 dmesg
+  确实会低估。
+- 三次冷启动 aee 行数保持 175 不变（开机噪声不误报）。
+
+### 9.6 冷启动验证（boot_id `5eabd07c-…`）
+
+- `TRY_A=0f 00`（A 槽优先、TRY 已清零），`boot.done` 在位，slot=a。
+- `toolchain_init` 农场在 21:27:44（**本地时区**）就绪；全部守护静态。
+- 恰一个 `wan_agg`；`SKIP wan_agg recovery (boot in progress)` 为 v1.25
+  宽限生效的直接证据。
+- `logc.stats` 读取 694 帧零异常；`dmesg | grep -c 'unhandled exception'` = 0。
+- **全量 selftest：87 pass / 0 fail**（system 23/23 含 4 个新护栏）。
+
+### 9.7 残余风险与运维约定
+
+1. **aee 仍用厂商 logread**：logd 清环（uptime>=300s 一次）继续保留；ring
+   含开机记录时 aee 转储仍有崩溃可能，但次数已从"每次读环"降到"崩溃转储时"。
+2. **静态工具链只覆盖守护树**：手工 SSH 登录后默认仍是厂商 PATH/工具；需要
+   静态工具时用 `PATH=/data/gw/sbin:/data/gw/bin:$PATH` 或直接绝对路径。
+   若 busybox 缺失/损坏，`toolchain_init` 会移除农场并回退厂商工具（fail-open，
+   不锁死设备）。
+3. **core 窗口**：每日 03:20 起 10 分钟；`/tmp` >80% 提前关闭；核心落
+   `/data/gw/logs/cores/YYYYMMDD/`，每日目录只留最新 20 个；同时段
+   `core_pattern` 从 aee 切走，属于已知取舍（窗口短、有 watchdog 恢复）。
+4. **`ap_auto_logging` 必须保持 0**（§5.3 红线）：否则官方 `logread -f`
+   常驻路径重新点亮，回到旧暴露面。
+5. **P3 真实 core 回收**：需要下一个 03:20 窗口后按 §1 方法解析
+   `/data/gw/logs/cores/`，确认家族 core 与 logread core 同源（libc+0x51ffc
+   或其它触发点），再决定是否扩大窗口/频率。

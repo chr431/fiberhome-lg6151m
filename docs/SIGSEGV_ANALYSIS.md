@@ -380,6 +380,10 @@ SHA-256 钉死在拉取脚本里，305 个 applet）；ip 用 **iproute2 6.3.0**
   宽限生效的直接证据。
 - `logc.stats` 读取 694 帧零异常；`dmesg | grep -c 'unhandled exception'` = 0。
 - **全量 selftest：87 pass / 0 fail**（system 23/23 含 4 个新护栏）。
+- 冷启动后 21:33:55 新增一条 `netstat` NE，定位为**本机 selftest 经 SSH 执行的
+  厂商 netstat**（selftest 的 `dev("netstat -tln ...")` 走 SSH 默认 PATH，不在
+  守护树内）；随后 200 次静态 `netstat` + 100 次厂商 `netstat` 均无复发。
+  守护树内 `netstat` 已解析为 `/data/gw/sbin/netstat` → 静态 busybox。
 
 ### 9.7 残余风险与运维约定
 
@@ -388,7 +392,8 @@ SHA-256 钉死在拉取脚本里，305 个 applet）；ip 用 **iproute2 6.3.0**
 2. **静态工具链只覆盖守护树**：手工 SSH 登录后默认仍是厂商 PATH/工具；需要
    静态工具时用 `PATH=/data/gw/sbin:/data/gw/bin:$PATH` 或直接绝对路径。
    若 busybox 缺失/损坏，`toolchain_init` 会移除农场并回退厂商工具（fail-open，
-   不锁死设备）。
+   不锁死设备）。冷启动验证中唯一一条新 NE（netstat）就是本机 selftest 经 SSH
+   调用厂商工具产生的，印证了"守护树已隔离、PC/手工侧仍是旧暴露面"的边界。
 3. **core 窗口**：每日 03:20 起 10 分钟；`/tmp` >80% 提前关闭；核心落
    `/data/gw/logs/cores/YYYYMMDD/`，每日目录只留最新 20 个；同时段
    `core_pattern` 从 aee 切走，属于已知取舍（窗口短、有 watchdog 恢复）。

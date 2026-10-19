@@ -948,3 +948,9 @@ ttyCMIPC 端口开合回声。这些模式在**持久镜像落盘前丢弃**（�
 汇总，不静默）；RAM 环（logread/dmesg 实时）不受影响。看门狗踢狗行**刻意保留**
 （踢狗何时停止是复位取证的关键）。dmesg 镜像容量 2MB→4MB。实测效果：syslog
 增速 ~4MB/天 → ~0.4MB/天（4MB 上限≈10 天历史），dmesg 增速降约 60%。
+
+**2026-10-19 SIGSEGV 家族与 eth0 误报**：详见 `docs/INCIDENT_2026-10-19.md`。
+要点：厂商 logread 在 `ctime→asctime_r→snprintf→vfprintf` 路径上、对含**开机期记录**
+的 syslog 环有 ~1%/次运行的 SIGSEGV（三份未加密 core 同 PC；清环后 2500 次 0 崩）；
+wan_agg 被子命令 SIGSEGV 打死后 `/tmp/wan_alive` 停更，导致 WAN 灯/GUI 误报有线离线；
+watchdog v1.18–v1.21 补齐 hostapd/wan_agg/fan_mgr 自愈与单实例锁。

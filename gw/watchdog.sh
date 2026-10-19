@@ -1,5 +1,10 @@
 #!/bin/sh
-# watchdog.sh v1.17 -- on-device continuous invariant monitor.
+# watchdog.sh v1.18 -- on-device continuous invariant monitor.
+# v1.18 (2026-10-19 hostapd 崩溃实弹): hostapd 只检不拉 — 12:41 SIGSEGV 后无人
+#   重启, ra0/rai0 仍按驱动 apcfg 发信标, 手机 assoc 成功但 4-way 无 EAPOL
+#   (authorized:no) → 10s 后 reason=3 自断重试, 静默 3.5h。现补崩溃自愈:
+#   按 wifi_up.sh v1.23 的 MLO 在线重应用配方(两带接口下电→冷启动等价态→
+#   单进程 hostapd -B 双 conf→no_bcn 0 重装订信标), 限频 3 次/小时。
 # v1.17 (2026-10-17 日志加密轮补): modem_reg/at_chan 分支此前绕过 check() 直接
 #   set_state, 失败没有 rc/输出证据; 现补 FAIL detail(COPS/CFUN 原文)。
 # v1.15 (2026-10-17 日志加密轮): 失败检查附 rc/输出摘要; 每 2 环循(60s)一行
@@ -126,7 +131,7 @@ run_cycle() {
     LAST_EPOCH=$_NOW; LAST_UP=$_UP
 
     # ---- process invariants (pidof 比 pgrep -x 更可靠, busybox -x 有怪癖) ----
-    check hostapd   "pgrep -f 'hostapd -B'"         "hostapd F3 daemon"
+    # hostapd 不走 check(): v1.18 起由下方自愈块负责(存活+控制面 ENABLED 双判据)
     check v3httpd   "netstat -tln 2>/dev/null | grep -q ':80.*LISTEN'"  "GUI httpd"
     check dnsmasq   "pidof dnsmasq"                  "DHCP/DNS"
     check dropbear  "netstat -tln 2>/dev/null | grep -q ':22.*LISTEN'"  "SSH"
@@ -209,6 +214,55 @@ run_cycle() {
         log "EVT restart led_mgr (no live instance; lock=$(cat /tmp/led_mgr.lock 2>/dev/null || echo none))"
         nohup sh /data/gw/led_mgr.sh >/dev/null 2>&1 &
         logger -t watchdog "restarted led_mgr"
+    fi
+    # hostapd: WPA 安全面(v1.18 崩溃自愈) — 实弹 2026-10-19 12:41 SIGSEGV 后无人
+    #   拉起: ra0/rai0 仍按驱动 apcfg 发信标, 手机看得见且 assoc 成功, 但 4-way
+    #   无 EAPOL(authorized:no) → 10s 后 reason=3 自断重试, 直到人工发现(3.5h)。
+    #   配方 = wifi_up.sh v1.23 的 MLO 在线重应用等价态(接口已 UP 时直接 -B 必死):
+    #   两带接口下电 3s → 单进程 hostapd -B 双 conf → no_bcn 0 重装订信标。
+    #   限频 3 次/小时(tmpfs 窗口文件, 重启清零), 超限只告警不动射频。
+    _ha=0
+    if pgrep -f 'hostapd -B' >/dev/null 2>&1; then
+        hostapd_cli -i ra0 status 2>/dev/null | grep -q '^state=ENABLED' && _ha=1
+    fi
+    if [ "$_ha" = 1 ]; then
+        set_state hostapd 0 "hostapd WPA layer"
+    elif pgrep -f 'wifi_up[.]sh' >/dev/null 2>&1 || [ "$(cut -d. -f1 /proc/uptime)" -lt 180 ]; then
+        # 开机/在线重应用进行中: 不与之抢射频, 只记录
+        set_state hostapd 1 "hostapd WPA layer"
+        FAILS=$((FAILS+1))
+        log "SKIP  hostapd recovery (boot or wifi_up in progress)"
+    else
+        set_state hostapd 1 "hostapd WPA layer"
+        FAILS=$((FAILS+1))
+        _hn=0; _ht=0
+        [ -r /tmp/watchdog_hostapd.rec ] && read _hn _ht < /tmp/watchdog_hostapd.rec
+        _now2=$(date +%s)
+        case "$_hn" in ''|*[!0-9]*) _hn=0 ;; esac
+        case "$_ht" in ''|*[!0-9]*) _ht=$_now2 ;; esac
+        [ $((_now2 - _ht)) -gt 3600 ] && { _hn=0; _ht=$_now2; }
+        if [ "$_hn" -lt 3 ]; then
+            _hn=$((_hn + 1))
+            echo "$_hn $_ht" > /tmp/watchdog_hostapd.rec
+            log "EVT recover hostapd (attempt $_hn/3 this hour; live=$(pgrep -f 'hostapd -B' | tr '\n' ' '))"
+            for _p in $(pgrep -f 'hostapd -B' 2>/dev/null); do kill $_p 2>/dev/null; done
+            for _v in ra0 rai0 ra1 rai1; do ifconfig $_v down 2>/dev/null; done
+            sleep 3
+            brctl addif br-lan ra0 2>/dev/null
+            brctl addif br-lan rai0 2>/dev/null
+            LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib \
+                hostapd -B /var/wlan/hap_2g.conf /var/wlan/hap_5g.conf >>/tmp/watchdog.log 2>&1
+            sleep 5
+            for _v in ra0 rai0; do mwctl dev $_v set no_bcn 0 >/dev/null 2>&1; done
+            if hostapd_cli -i ra0 status 2>/dev/null | grep -q '^state=ENABLED'; then
+                log "OK    hostapd recovered (ra0 ENABLED; clients must re-associate)"
+                set_state hostapd 0 "hostapd WPA layer"
+            else
+                log "FAIL  hostapd recovery did not reach ENABLED"
+            fi
+        else
+            log "WARN  hostapd down; recovery budget exhausted (3/h) — alert only"
+        fi
     fi
     # wan_eth: 有线 WAN 接口管理守护(v1.12, 架构轮拆分自 wan_agg ensure_lease);
     #   死则拉起 — eth0 租约续订/NAT/FORWARD 看门狗停摆 = 家宽侧静默劣化
@@ -386,7 +440,7 @@ run_cycle() {
 
 # ---- main ----
 touch $LOG $STATE
-log "===== watchdog v1.17 start (alert LED 5G orange; WAN LED owned by led_mgr; +wan_eth keeper +cell stats divergence +cell query liveness; fine-log TICK/HEALTH) ====="
+log "===== watchdog v1.18 start (alert LED 5G orange; WAN LED owned by led_mgr; +hostapd crash recovery +wan_eth keeper +cell stats divergence +cell query liveness; fine-log TICK/HEALTH) ====="
 logger -t watchdog "watchdog v1.16 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine

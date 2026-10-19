@@ -1400,7 +1400,10 @@ def t_sys_led_dp():
     # v2.22 (10-15 WAN 灯不亮实弹): v2.0 改绝对电平驱动(每轮无条件写"应为值"),
     #   外部扰动 2s 内自愈 → 不再需要"容忍一拍"的 sleep(轮询 2s)。断言收敛为
     #   **无条件一致**: 不为一致而等待 = 等待本身就是边沿触发病灶的遮羞布。
-    n = dev("pgrep -f 'led_mg[r].sh' | wc -l").strip()
+    # v2.43: 只数常驻实例 — --dry-state 一次性进程(本测试与 WAN 灯测试都会跑)
+    #   会被 pgrep 计入, 造成 daemon=2 假阳性(实测)。
+    n = dev("c=0; for p in $(pgrep -f 'led_mg[r].sh'); do "
+            "grep -qa 'dry-state' /proc/$p/cmdline 2>/dev/null || c=$((c+1)); done; echo $c").strip()
     dry0 = dev("sh /data/gw/led_mgr.sh --dry-state 'w1 c0 b1 p1'").strip()
     dry1 = dev("sh /data/gw/led_mgr.sh --dry-state 'w1 c1 b1 p1'").strip()
     map0 = "g5g=0 g5o=0 g5r=0" in dry0

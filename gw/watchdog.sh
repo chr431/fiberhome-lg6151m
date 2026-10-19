@@ -1,5 +1,8 @@
 #!/bin/sh
-# watchdog.sh v1.22 -- on-device continuous invariant monitor.
+# watchdog.sh v1.23 -- on-device continuous invariant monitor.
+# v1.23 (2026-10-19 SIGSEGV 根治轮): 单实例/自愈判据收紧 — 锁 pid 必须命中
+#   本守护的绝对路径且非僵尸(旧判据 grep 子串, 锁 pid 被复用给含同名子串的
+#   命令时会把死守护误判为活; led_mgr/dial_keeper/watchdog 三处同型修复)。
 # v1.22 (2026-10-19 SIGSEGV P3/P4): ① fault 判据加 aee db_history 行数增量
 #   (内核 DABT 行被 printk 限流后 dmesg 计数会低估, aee 是唯一仍在记录的
 #   NE 台账); ② core_trap 守护自愈(日窗口采集家族 core, 死则拉起);
@@ -80,7 +83,8 @@ alive() { # $1=pgrep pattern  $2=lock name  $3=cmdline token
     pgrep -f "$1" >/dev/null 2>&1 && return 0
     _ap=$(cat /tmp/$2.lock 2>/dev/null)
     [ -n "$_ap" ] && kill -0 "$_ap" 2>/dev/null && \
-        grep -qa "$3" /proc/$_ap/cmdline 2>/dev/null && return 0
+        ! grep -q '^State:.*Z' /proc/$_ap/status 2>/dev/null && \
+        grep -qa "/data/gw/$3" /proc/$_ap/cmdline 2>/dev/null && return 0
     return 1
 }
 spawn() { # $1=lock name  $2=log file  $3...=command
@@ -201,7 +205,8 @@ run_cycle() {
     _kp=$(cat /tmp/dial_keeper.lock 2>/dev/null)
     _kalive=0
     if [ -n "$_kp" ] && kill -0 "$_kp" 2>/dev/null \
-       && grep -qa dial_keeper /proc/$_kp/cmdline 2>/dev/null; then
+       && ! grep -q '^State:.*Z' /proc/$_kp/status 2>/dev/null \
+       && grep -qa '/data/gw/dial_keeper.sh' /proc/$_kp/cmdline 2>/dev/null; then
         _kalive=1
     elif pgrep -f 'dial_keepe[r].sh' >/dev/null 2>&1; then
         _kalive=1   # 回退判据(旧版实例无锁文件)
@@ -218,7 +223,8 @@ run_cycle() {
         log "EVT restart dial_keeper (alive=$_kalive stale=$_dstale old_pid=${_kp:-none} hb=${_dhb:-none} up=${_dup})"
         # 只杀锁指向的实例(cmdline 复核) — 不打模式匹配, 防误伤旁观进程
         if [ -n "$_kp" ] && kill -0 "$_kp" 2>/dev/null \
-           && grep -qa dial_keeper /proc/$_kp/cmdline 2>/dev/null; then
+           && ! grep -q '^State:.*Z' /proc/$_kp/status 2>/dev/null \
+           && grep -qa '/data/gw/dial_keeper.sh' /proc/$_kp/cmdline 2>/dev/null; then
             kill -9 "$_kp" 2>/dev/null
         fi
         export LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib
@@ -535,13 +541,14 @@ touch $LOG $STATE
 # v1.20: 看门狗单实例 — 双实例会重复自愈/告警(现场曾出现 2 个)
 _wp=$(cat /tmp/watchdog.lock 2>/dev/null)
 if [ -n "$_wp" ] && [ "$_wp" != "$$" ] && kill -0 "$_wp" 2>/dev/null && \
-   grep -qa watchdog.sh /proc/$_wp/cmdline 2>/dev/null; then
+   ! grep -q '^State:.*Z' /proc/$_wp/status 2>/dev/null && \
+   grep -qa '/data/gw/watchdog.sh' /proc/$_wp/cmdline 2>/dev/null; then
     echo "watchdog: already running pid=$_wp" >&2
     exit 0
 fi
 echo $$ > /tmp/watchdog.lock
-log "===== watchdog v1.22 start (alert LED 5G orange; WAN LED owned by led_mgr; +hostapd/wan_agg/fan_mgr/core_trap recovery +single-instance locks +user-fault/aee counters; fine-log TICK/HEALTH) ====="
-logger -t watchdog "watchdog v1.22 start"
+log "===== watchdog v1.23 start (alert LED 5G orange; WAN LED owned by led_mgr; +hostapd/wan_agg/fan_mgr/core_trap recovery +single-instance locks +user-fault/aee counters; fine-log TICK/HEALTH) ====="
+logger -t watchdog "watchdog v1.23 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

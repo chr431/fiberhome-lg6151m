@@ -1,6 +1,8 @@
 #!/bin/sh
-# dial_keeper.sh v1.6 -- 拨号自持守护 (ROADMAP P2, 2026-10-06)
+# dial_keeper.sh v1.7 -- 拨号自持守护 (ROADMAP P2, 2026-10-06)
 #
+# v1.7 (2026-10-19 SIGSEGV 根治轮): 单实例锁判据收紧(绝对路径+非僵尸) — 与
+#   led_mgr v2.6 同型修复, 防锁 pid 复用时新实例永久误判 duplicate。
 # v1.5 (2026-10-17 日志加密轮): 每 60s TICK(has_ip/cell_alive/wan_alive 原文与
 #   年龄/DOWN/退避/APN/cci); 僵尸 IP 触发边沿、modem 未就绪原因、飞行模式切换、
 #   APN 来源、ccmni_up 的 rc+输出+耗时全部留痕 — 冷启动 cid 轮换/EE 事故可复盘。
@@ -62,9 +64,12 @@ log_rot() { [ -s $LOG ] && [ "$(wc -l < $LOG 2>/dev/null || echo 0)" -gt $MAXL ]
     { tail -n $((MAXL/2)) $LOG > $LOG.tmp && mv $LOG.tmp $LOG; }; }
 
 # v1.3: 单实例守 — PID 锁 + cmdline 复核(无模式匹配; 供 watchdog 精确取实例 PID)
+# v1.7: 锁判据收紧 — 必须命中本脚本绝对路径且非僵尸(锁 pid 复用给含
+#   dial_keeper 字样的其它命令时, 旧判据会让新实例误判 duplicate 永久退出)。
 _lp=$(cat $LOCK 2>/dev/null)
 if [ -n "$_lp" ] && kill -0 "$_lp" 2>/dev/null \
-   && grep -qa dial_keeper /proc/$_lp/cmdline 2>/dev/null; then
+   && ! grep -q '^State:.*Z' /proc/$_lp/status 2>/dev/null \
+   && grep -qa '/data/gw/dial_keeper.sh' /proc/$_lp/cmdline 2>/dev/null; then
     log "duplicate instance pid=$_lp alive — exit (single-instance lock)"
     exit 0
 fi

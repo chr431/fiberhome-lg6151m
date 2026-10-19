@@ -1,5 +1,8 @@
 #!/bin/sh
-# led_mgr.sh v2.5 — 原厂风格指示灯状态守护 (绝对电平驱动 + 自愈 + 全灯覆盖)
+# led_mgr.sh v2.6 — 原厂风格指示灯状态守护 (绝对电平驱动 + 自愈 + 全灯覆盖)
+# v2.6 (2026-10-19 SIGSEGV 根治轮): 单实例锁判据收紧(绝对路径+非僵尸) — 旧判据
+#   只 grep "led_mgr", 锁 pid 被复用时新实例永久误判 duplicate 退出(现场 18:44
+#   真实例死后 watchdog 每轮拉起又每轮自杀, 5G/WAN 灯守护长期缺席)。
 # v2.4 (2026-10-17 日志加密轮): 每次外部写导致的电平漂移都记 DRIFT(旧值->应为值),
 #   状态变化时附 ccmni 清单/载波/wan_alive 原文与年龄; 本文件日志轮转(400 行)。
 #   灯是"显示反映实际"的仪器 — 漂移频率直接反映外部写方(内核 trigger/watchdog)活跃度。
@@ -173,9 +176,15 @@ case "$1" in
 esac
 
 # v2.3: 单实例守 — PID 锁 + cmdline 复核(无模式匹配; 供 watchdog 精确取实例 PID)
+# v2.6: 锁判据收紧 — 必须是本脚本的绝对路径且非僵尸。旧判据只 grep "led_mgr"
+#   任意命中: 锁 pid 被复用给一条含 led_mgr 字样的 grep/命令时, 新实例会误判
+#   "duplicate" 永久退出(现场: 真实例 18:44 死后 watchdog 每轮拉起又每轮自杀,
+#   LED 守护长时间缺席)。僵尸 kill -0 也返回真, 一并排除。
 LOCK=/tmp/led_mgr.lock
 _lp=$(cat $LOCK 2>/dev/null)
-if [ -n "$_lp" ] && kill -0 "$_lp" 2>/dev/null    && grep -qa led_mgr /proc/$_lp/cmdline 2>/dev/null; then
+if [ -n "$_lp" ] && kill -0 "$_lp" 2>/dev/null \
+   && ! grep -q '^State:.*Z' /proc/$_lp/status 2>/dev/null \
+   && grep -qa '/data/gw/led_mgr.sh' /proc/$_lp/cmdline 2>/dev/null; then
     llog "duplicate instance pid=$_lp alive — exit (single-instance lock)"
     exit 0
 fi

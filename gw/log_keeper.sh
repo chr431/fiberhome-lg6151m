@@ -1,5 +1,11 @@
 #!/bin/sh
-# log_keeper.sh v1.6 -- 日志持久化守护（日志改善专项轮）
+# log_keeper.sh v1.7 -- 日志持久化守护（日志改善专项轮）
+#   v1.7 (2026-10-19 logread 崩溃轮): 开机后一次性清 syslog 环。厂商 logread 在
+#   含开机期记录的 10MB 环上约 1%/次运行 SIGSEGV(libc ctime→asctime_r→snprintf→
+#   vfprintf 路径, 三份未加密 core 同签名)。实测: 旧环 2500 次读取崩溃约 29 次量级,
+#   重启 logd 清环后 2500 次 0 崩; 触发记录随开机日志进入环并长期驻留(10MB 环
+#   数周才回卷)。uptime>=300s(boot 日志已落盘)时重启一次 logd 清环, 以
+#   /proc/stat btime 标记本 boot 已执行; logd 由 procd respawn(5 1 -1) 兜底。
 #   v1.6 (2026-10-18 日志降噪轮): 镜像层降噪 — 24h 实测 syslog 78% 音量来自
 #   thermal_core 5s 温度行 + mipc_cli 每调用 2 行 + mtk_monitor_hang; dmesg 字节
 #   大头是 cci 计数器 dump(rxq/isr 全列表)、SPM MCUSYSOFF 寄存器 dump(~900B/行)、
@@ -112,6 +118,21 @@ while :; do
         rm -f $DIR/.syslog.last $DIR/.dmesg.last
     fi
     PREV_UP=$U
+
+    # -- v1.7: 开机后一次性清 syslog 环(logread 崩溃规避) --
+    # 触发记录随开机日志进入 logd 环并长期驻留(10MB 环数周才回卷), 期间每次
+    # logread 都有 ~1% 概率在 ctime 格式化路径 SIGSEGV。uptime>=300s 时 boot
+    # 日志已由本守护落盘, 重启 logd 清环即可; btime 标记保证每 boot 只做一次。
+    _bt=$(awk '/^btime/{print $2; exit}' /proc/stat 2>/dev/null)
+    if [ "${U:-0}" -ge 300 ] && [ -n "$_bt" ] && [ "$(cat $DIR/.logd_reset_bt 2>/dev/null)" != "$_bt" ]; then
+        _lp=$(pidof logd 2>/dev/null)
+        if [ -n "$_lp" ]; then
+            kill $_lp 2>/dev/null
+            echo "$_bt" > $DIR/.logd_reset_bt
+            lk "logd restart to clear boot-era ring (pid=$_lp btime=$_bt up=$U)"
+            sleep 3
+        fi
+    fi
 
     # -- syslog 镜像(v1.6: 降噪 — 高频低值行不落盘, 丢弃量计数入汇总) --
     logread 2>/dev/null > /tmp/lk_ring

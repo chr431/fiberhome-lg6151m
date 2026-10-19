@@ -62,7 +62,7 @@ gw/bin/shmsnap	1.0	manifest	/data/gw/shmsnap	cfgmgr树共享内存快照工具(s
 gw/webs_revive.sh	1.3	manifest	/data/gw/webs_revive.sh	原厂GUI复活器(自足nginx conf; 手动拉起)
 gw/ntp_keeper.sh	1.2	manifest	/data/gw/ntp_keeper.sh	每小时NTP守时(多源; 设备无RTC; v1.2: +时区自愈(/etc/TZ→tmpfs重启即失, 每轮重应用); v1.1: 首选 NTP_SERVER 自管配置)
 gw/reboot_sched.sh	1.2	manifest	/data/gw/reboot_sched.sh	定时重启守护; v1.2(04:00 事件复盘): 触发行先落 /data/gw/logs/reboots.log+sync 再 reboot — 原只写 /tmp, 30s 持久化周期赶不上, 每日定时重启在持久日志零指纹
-gw/log_keeper.sh	1.6	manifest	/data/gw/log_keeper.sh	日志持久化守护; v1.6: 镜像降噪(thermal/mipc_cli/cci dump/SPM dump/eth debug/WiFi DPD/mipc 端口回声不落盘, 丢弃量入汇总; RAM 环不受影响)+dmesg 镜像 4MB; v1.5: BOOT 附 boot.reason
+gw/log_keeper.sh	1.7	manifest	/data/gw/log_keeper.sh	日志持久化守护; v1.7: 开机后一次性重启 logd 清 syslog 环(规避厂商 logread 在含开机记录的环上 ~1%/次 SIGSEGV; 旧环清环后 2500 次 0 崩); v1.6: 镜像降噪(thermal/mipc_cli/cci dump/SPM dump/eth debug/WiFi DPD/mipc 端口回声不落盘, 丢弃量入汇总; RAM 环不受影响)+dmesg 镜像 4MB; v1.5: BOOT 附 boot.reason
 gw/diag_dump.sh	1.1	manifest	/data/gw/diag_dump.sh	一键诊断包(脱敏: 配置/无线MLO掩码/网络/全量日志现场; v1.1: 结束行带生成时刻)
 tools/lk_flash_v4_eth1.py	1.1	tool	-	v1.1路径随项目根迁移; eth1刷入实证器(全链条: 陷阱→raw shell→eth1起链[历史疑点:PHY仅ifup后attach]→curl传输→deploy2自驱→重启回v4.1)
 tools/lk_flash_v4.py	1.1	tool	-	v1.1路径随项目根迁移; 终版刷入器(LK陷阱→raw shell→/dev/null修复→curl送deploy2.sh→后台自驱+轮询deploy.log→重启监测; 修三雷: uclient罢工/&需/dev/null/串口前台等待吃首字符)

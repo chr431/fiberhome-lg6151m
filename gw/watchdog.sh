@@ -1,5 +1,10 @@
 #!/bin/sh
-# watchdog.sh v1.19 -- on-device continuous invariant monitor.
+# watchdog.sh v1.20 -- on-device continuous invariant monitor.
+# v1.20 (2026-10-19 单实例/风扇轮): ① 自愈拉起统一走 alive() 双判据(pgrep 失败时
+#   回退锁文件 pid + /proc cmdline 复核) — SIGSEGV 家族会打死 pgrep 自身, 仅凭
+#   pgrep 会重复拉起(现场 3×wan_eth / 2×log_keeper / 2×watchdog); ② 看门狗自身
+#   单实例锁; ③ fan_mgr 只检不拉补齐(现场停 PWM 60, 高温不升挡); ④ 内核用户态
+#   fault 计数增量进 WARN(SIGSEGV 家族可见化)。
 # v1.19 (2026-10-19 wan_agg 静默死亡实弹): wan_agg 只检不拉 — 16:26 其子命令连续
 #   SIGSEGV 后脚本退出, /tmp/wan_alive 停更; led_mgr 按 30s 新鲜度灭 WAN 灯、
 #   GUI 判有线离线, 而 eth0 carrier=1/有 IP/默认路由/实际有流量。现补自愈拉起。
@@ -60,6 +65,22 @@ MAX_LOG=500
 CYC_TICK=0; QNODISC=""; LAST_EPOCH=""; LAST_UP=""
 
 log() { echo "$(date '+%m-%d %H:%M:%S') $*" >> $LOG; }
+
+# v1.20: 单实例判活 — SIGSEGV 家族里 pgrep/grep 自身也会被打死(实测), 仅凭 pgrep
+#   会重复拉起(现场: 3×wan_eth / 2×log_keeper / 2×watchdog)。锁文件记的 pid 活着
+#   且 /proc cmdline 复核匹配 → 视为在跑, 不再起第二个。
+alive() { # $1=pgrep pattern  $2=lock name  $3=cmdline token
+    pgrep -f "$1" >/dev/null 2>&1 && return 0
+    _ap=$(cat /tmp/$2.lock 2>/dev/null)
+    [ -n "$_ap" ] && kill -0 "$_ap" 2>/dev/null && \
+        grep -qa "$3" /proc/$_ap/cmdline 2>/dev/null && return 0
+    return 1
+}
+spawn() { # $1=lock name  $2=log file  $3...=command
+    _sl=$1; _so=$2; shift 2
+    nohup "$@" >"$_so" 2>&1 &
+    echo $! > /tmp/$_sl.lock
+}
 
 # v1.9: 告警灯自举 — gpio473 由 led_mgr 管(已 export+out); 若 watchdog 先跑
 #   (开机竞态), 这里补 export。写成 brightness 优先(class 节点不存在时回落 sysfs)。
@@ -138,9 +159,8 @@ run_cycle() {
     check v3httpd   "netstat -tln 2>/dev/null | grep -q ':80.*LISTEN'"  "GUI httpd"
     check dnsmasq   "pidof dnsmasq"                  "DHCP/DNS"
     check dropbear  "netstat -tln 2>/dev/null | grep -q ':22.*LISTEN'"  "SSH"
-    # wan_agg 不走 check(): v1.19 起由下方自愈块负责(死则按启动配方拉起)
+    # wan_agg / fan_mgr 不走 check(): v1.19/v1.20 起由下方自愈块负责
     check wan_eth   "pgrep -f wan_eth.sh"            "wired-WAN iface keeper"
-    check fan_mgr   "pgrep -f fan_mgr.sh"            "fan manager"
     # v1.15: 自研工具在位性 — 缺失时相关功能会静默降级(ccmni 落地/蜂窝直连)
     check mipc_tool "[ -x /data/gw/mipc_cellular ]"  "cellular direct tool"
     check ccmni_up  "[ -x /data/gw/ccmni_up.sh ]"    "ccmni landing tool"
@@ -199,24 +219,35 @@ run_cycle() {
         nohup sh /data/gw/dial_keeper.sh >/dev/null 2>&1 &
     fi
     # log_keeper: 日志持久化(专项轮); 死则拉起 — 日志连续性=诊断生命线
-    if pgrep -f log_keeper.sh >/dev/null 2>&1; then
+    if alive 'log_keeper[.]sh' log_keeper log_keeper.sh; then
         set_state logk 0 "log keeper"
     else
         set_state logk 1 "log keeper"
         FAILS=$((FAILS+1))
-        log "EVT restart log_keeper (no live instance)"
-        nohup sh /data/gw/log_keeper.sh >/dev/null 2>&1 &
+        log "EVT restart log_keeper (no live instance; lock=$(cat /tmp/log_keeper.lock 2>/dev/null || echo none))"
+        spawn log_keeper /dev/null sh /data/gw/log_keeper.sh
     fi
     # led_mgr: 显示器守护(v1.7 自愈拉) — 静默死亡=指示灯无声谎报(10-14 事故
     # 里用户对"灯还亮着"的判读是第一手症状, 灯不能哑)
-    if pgrep -f led_mgr.sh >/dev/null 2>&1; then
+    if alive 'led_mgr[.]sh' led_mgr led_mgr.sh; then
         set_state led_mgr 0 "LED manager"
     else
         set_state led_mgr 1 "LED manager"
         FAILS=$((FAILS+1))
         log "EVT restart led_mgr (no live instance; lock=$(cat /tmp/led_mgr.lock 2>/dev/null || echo none))"
-        nohup sh /data/gw/led_mgr.sh >/dev/null 2>&1 &
+        spawn led_mgr /dev/null sh /data/gw/led_mgr.sh
         logger -t watchdog "restarted led_mgr"
+    fi
+    # fan_mgr: 4 线风扇梯度温控(v1.20 自愈) — 死则 PWM 停在最后挡位, 高温不再
+    #   升挡(实测现场停在 60=1663rpm), 属散热静默劣化; 原实现只 check 不拉。
+    if alive 'fan_mgr[.]sh' fan_mgr fan_mgr.sh; then
+        set_state fan_mgr 0 "fan manager"
+    else
+        set_state fan_mgr 1 "fan manager"
+        FAILS=$((FAILS+1))
+        log "EVT restart fan_mgr (no live instance; pwm=$(cat /sys/devices/platform/pwm-fan@1/hwmon/hwmon1/pwm1 2>/dev/null))"
+        spawn fan_mgr /dev/null sh /data/gw/fan_mgr.sh
+        logger -t watchdog "restarted fan_mgr"
     fi
     # hostapd: WPA 安全面(v1.18 崩溃自愈) — 实弹 2026-10-19 12:41 SIGSEGV 后无人
     #   拉起: ra0/rai0 仍按驱动 apcfg 发信标, 手机看得见且 assoc 成功, 但 4-way
@@ -271,24 +302,24 @@ run_cycle() {
     #   连续 SIGSEGV 后脚本静默退出, /tmp/wan_alive 过期 → led_mgr(30s 新鲜度)
     #   灭 WAN 灯、GUI 线路状态判"离线", 而 eth0 carrier=1/有 IP/默认路由/实际有流量。
     #   原实现只 check 不拉(与 hostapd v1.18 前的缺口同型)。死则按启动配方拉起。
-    if pgrep -f wan_agg.sh >/dev/null 2>&1; then
+    if alive 'wan_agg[.]sh' wan_agg wan_agg.sh; then
         set_state wan_agg 0 "aggregation supervisor"
     else
         set_state wan_agg 1 "aggregation supervisor"
         FAILS=$((FAILS+1))
         log "EVT restart wan_agg (no live instance; wan_alive=$(cat /tmp/wan_alive 2>/dev/null))"
-        nohup sh /data/gw/wan_agg.sh >/tmp/wagg.out 2>&1 &
+        spawn wan_agg /tmp/wagg.out sh /data/gw/wan_agg.sh
         logger -t watchdog "restarted wan_agg"
     fi
     # wan_eth: 有线 WAN 接口管理守护(v1.12, 架构轮拆分自 wan_agg ensure_lease);
     #   死则拉起 — eth0 租约续订/NAT/FORWARD 看门狗停摆 = 家宽侧静默劣化
-    if pgrep -f wan_eth.sh >/dev/null 2>&1; then
+    if alive 'wan_eth[.]sh' wan_eth wan_eth.sh; then
         set_state wan_eth 0 "wired-WAN iface keeper"
     else
         set_state wan_eth 1 "wired-WAN iface keeper"
         FAILS=$((FAILS+1))
         log "EVT restart wan_eth (no live instance)"
-        nohup sh /data/gw/wan_eth.sh >/dev/null 2>&1 &
+        spawn wan_eth /dev/null sh /data/gw/wan_eth.sh
         logger -t watchdog "restarted wan_eth"
     fi
     # ql_wifi_sample 卡死清除(L28): stdin EOF 后死循环刷 syslog(实测 3700 行/s,
@@ -347,6 +378,18 @@ run_cycle() {
     fi
     grep -v '^beacon=' $STATE 2>/dev/null > $STATE.tmp
     echo "beacon=$BCN" >> $STATE.tmp
+    mv $STATE.tmp $STATE
+
+    # ---- v1.20: SIGSEGV 家族可见化 ----
+    # 未根除(厂商 syslog 管线/短命工具随机 SIGSEGV), 至少让"又崩了"进日志:
+    # 内核 fault 行计数增量; dmesg 环回卷导致计数回退时只重置不告警。
+    FLT=$(dmesg | grep -c 'unhandled exception')
+    FLT_PREV=$(grep '^faults=' $STATE 2>/dev/null | tail -1 | cut -d= -f2)
+    if [ -n "$FLT_PREV" ] && [ "$FLT" -gt "$FLT_PREV" ] 2>/dev/null; then
+        log "WARN  user-fault +$((FLT-FLT_PREV)) (ring total $FLT) — SIGSEGV family"
+    fi
+    grep -v '^faults=' $STATE 2>/dev/null > $STATE.tmp
+    echo "faults=$FLT" >> $STATE.tmp
     mv $STATE.tmp $STATE
 
     # ---- wifi channel consistency (v1.5) ----
@@ -456,7 +499,15 @@ run_cycle() {
 
 # ---- main ----
 touch $LOG $STATE
-log "===== watchdog v1.19 start (alert LED 5G orange; WAN LED owned by led_mgr; +hostapd/wan_agg crash recovery +wan_eth keeper +cell stats divergence +cell query liveness; fine-log TICK/HEALTH) ====="
+# v1.20: 看门狗单实例 — 双实例会重复自愈/告警(现场曾出现 2 个)
+_wp=$(cat /tmp/watchdog.lock 2>/dev/null)
+if [ -n "$_wp" ] && [ "$_wp" != "$$" ] && kill -0 "$_wp" 2>/dev/null && \
+   grep -qa watchdog.sh /proc/$_wp/cmdline 2>/dev/null; then
+    echo "watchdog: already running pid=$_wp" >&2
+    exit 0
+fi
+echo $$ > /tmp/watchdog.lock
+log "===== watchdog v1.20 start (alert LED 5G orange; WAN LED owned by led_mgr; +hostapd/wan_agg/fan_mgr recovery +single-instance locks +user-fault counter; fine-log TICK/HEALTH) ====="
 logger -t watchdog "watchdog v1.16 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine

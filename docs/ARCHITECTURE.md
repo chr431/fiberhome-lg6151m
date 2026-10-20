@@ -71,7 +71,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/fan_mode.conf` | **v1.0** | manifest | `/data/gw/fan_mode.conf` | 风扇模式:performance|silent(静音+6°C偏移) |
 | `gw/fw_apply.sh` | **v1.5** | manifest | `/data/gw/fw_apply.sh` | 端口映射/DMZ/禁网安装器(rc_netfh开机+api共用); v1.5(P1): v4 WAN面default-deny(icmp/DHCP客户端/established放行其余DROP, 含旧7端口黑名单语义)+V4WANGUARDF挡WAN->LAN新建转发(-A挂载保DNAT优先); v1.4: v6同构; 历史见git |
 | `gw/guest_fw.sh` | **v1.6** | manifest | `/data/gw/guest_fw.sh` | 访客隔离防火墙v1.6(审计P0: GUEST_ISOLATE开关删除=强制隔离; 兼容需求改由主WiFi终端频段锁定承接; 历史版本见git) |
-| `gw/healthdog.sh` | **v1.3** | manifest | `/data/gw/healthdog.sh` | 看门狗用户态心跳 + 二级监督; v1.3: lo 强制 up(实测 lo DOWN 使 loopback 判据永假); v1.2(P0-1): boot.healthy stable=1+boot_id 匹配且稳定 10min 才 arm; 主看门狗 beat 陈旧 → 重启→仍陈旧则 arm 内核; 重启环保护栏; pstore 开机回收 |
+| `gw/healthdog.sh` | **v1.4** | manifest | `/data/gw/healthdog.sh` | 看门狗用户态心跳 + 二级监督; v1.4: 跨重启恢复已 arm 内核的心跳(否则 90s 复位); v1.3: lo 强制 up; v1.2(P0-1): 稳定窗后主动 arm + 重启环保护栏 + pstore 回收; 历史见git |
 | `gw/led_mgr.sh` | **v2.8** | manifest | `/data/gw/led_mgr.sh` | 原厂风格LED守护(绝对电平+自愈); v2.8(batch1): 每 2s 心跳; v2.7: 单实例锁排除自身; 历史见git |
 | `gw/log_keeper.sh` | **v2.0** | manifest | `/data/gw/log_keeper.sh` | 日志持久化守护; v2.0(stability P1-5): 单实例锁 + ne_census.tsv(aee NE 进程名台账) + logc 崩溃面包屑归档; v1.9(batch1): logc rc 记录修复/BOOT btime 门禁/FORENSIC 降噪/心跳; 历史见git |
 | `gw/mipc_dial_trace.sh` | **v1.0** | manifest | `/data/gw/mipc_dial_trace.sh` | 5G 拨号取证(xtrace 抓真参) |

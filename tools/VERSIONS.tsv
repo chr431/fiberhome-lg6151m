@@ -11,7 +11,7 @@ gw/wan_eth.sh	1.4	manifest	/data/gw/wan_eth.sh	有线 WAN(eth0) 接口管理守�
 gw/wan_agg.sh	3.3	manifest	/data/gw/wan_agg.sh	双上行聚合主管; v3.2(日志加密轮): TICK(30s)汇总+探活逐目标+硬截止/authd/W2_READY 边沿+主路写失败留痕; v3.1: 探活实证选承载口(僵尸口); 历史见git; v3.3(日志加密轮补): 日志行补 epoch 时间基准(跨日志关联)
 gw/traffic_logger.sh	1.3	manifest	/data/gw/traffic_logger.sh	流量采样器; v1.3(P1-1): 单实例锁+心跳; v1.2b: 基线带源标记; 历史见git
 gw/udhcpc_wan.script	1.0	manifest	/data/gw/udhcpc_wan.script	WAN口 udhcpc 事件钩子(接口无关化)
-gw/healthdog.sh	1.3	manifest	/data/gw/healthdog.sh	看门狗用户态心跳 + 二级监督; v1.3: lo 强制 up(实测 lo DOWN 使 loopback 判据永假); v1.2(P0-1): boot.healthy stable=1+boot_id 匹配且稳定 10min 才 arm; 主看门狗 beat 陈旧 → 重启→仍陈旧则 arm 内核; 重启环保护栏; pstore 开机回收
+gw/healthdog.sh	1.4	manifest	/data/gw/healthdog.sh	看门狗用户态心跳 + 二级监督; v1.4: 跨重启恢复已 arm 内核的心跳(否则 90s 复位); v1.3: lo 强制 up; v1.2(P0-1): 稳定窗后主动 arm + 重启环保护栏 + pstore 回收; 历史见git
 gw/v3_babysit_v2.sh	3.0	manifest	/data/rescue/babysit.sh	启动保姆; v3.0(P0-2): 进展式 T1=240s(无进展 120s 才杀 rcS/mipc_wan_cli) + T2=600s(仍无进展才翻 B) + 900s 硬帽 + 决策落 /data; 目标路径改为 preinit 实跑的 /data/rescue/babysit.sh; 历史见git
 gw/night_report.sh	1.0	manifest	/data/gw/night_report.sh	夜间体检报告
 gw/wifi_guard.sh	1.2	manifest	/data/gw/wifi_guard.sh	BA/TX 停滞自动恢复守卫; v1.2(P1-4): 连续 4 次采样(60s)确认才动射频; 客户端/backlog/并行射频作业前置; 小时级 2 次+每 boot 10 次限频; 心跳+单实例

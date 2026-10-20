@@ -2028,7 +2028,7 @@ def t_p1_forensics():
 def t_p1_healthdog():
     hd = dev("cat /proc/healthdog 2>/dev/null").strip()
     st = dev("grep -c 'ARM REFUSED' /tmp/healthdog.log 2>/dev/null").strip()
-    start = dev("grep -c 'start v1.3' /tmp/healthdog.log 2>/dev/null").strip()
+    start = dev("grep -c 'start v1.4' /tmp/healthdog.log 2>/dev/null").strip()
     hb = dev("cat /tmp/healthdog.hb 2>/dev/null").strip()
     up = dev("cut -d. -f1 /proc/uptime").strip()
     fresh = hb.isdigit() and up.isdigit() and (int(up) - int(hb)) < 90

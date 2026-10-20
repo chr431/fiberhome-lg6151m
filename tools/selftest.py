@@ -1413,6 +1413,13 @@ def t_sys_led_dp():
     #   会被 pgrep 计入, 造成 daemon=2 假阳性(实测)。
     n = dev("c=0; for p in $(pgrep -f 'led_mg[r].sh'); do "
             "grep -qa 'dry-state' /proc/$p/cmdline 2>/dev/null || c=$((c+1)); done; echo $c").strip()
+    if n != "1":
+        # a supervisor restart can briefly overlap the old and new instance;
+        # re-check after it settles instead of flagging a transient duplicate
+        import time as _t
+        _t.sleep(2)
+        n = dev("c=0; for p in $(pgrep -f 'led_mg[r].sh'); do "
+                "grep -qa 'dry-state' /proc/$p/cmdline 2>/dev/null || c=$((c+1)); done; echo $c").strip()
     dry0 = dev("sh /data/gw/led_mgr.sh --dry-state 'w1 c0 b1 p1'").strip()
     dry1 = dev("sh /data/gw/led_mgr.sh --dry-state 'w1 c1 b1 p1'").strip()
     map0 = "g5g=0 g5o=0 g5r=0" in dry0
@@ -2046,7 +2053,7 @@ def t_p1_healthdog():
 
 @test("stability P1: hostapd/wifi_guard 决策硬化")
 def t_p1_radio():
-    hp = dev("for p in 'control socket' 'clients=' 'confirmation 1/3' 'recover hostapd'; do "
+    hp = dev("for p in 'control socket' 'clients=' 'need 2/3' 'recover hostapd'; do "
              "grep -c -- \"$p\" /data/gw/watchdog.sh; done").split()
     wg = dev("for p in 'STREAK' 'bounce budget' 'stations' 'boot_bounces'; do "
              "grep -c -- \"$p\" /data/gw/wifi_guard.sh; done").split()

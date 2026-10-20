@@ -1386,6 +1386,10 @@ def t_sys_logk():
     # v2.18: log_keeper(专项轮)单实例(防自匹配) + syslog 镜像存在/新鲜(<120s)
     # + boot 分隔行在位(重启后取证的分界依据)
     alive = dev("pgrep -f 'log_keepe[r].sh' | wc -l").strip()
+    if alive != "1":
+        import time as _t
+        _t.sleep(2)   # tolerate a brief supervisor-restart overlap
+        alive = dev("pgrep -f 'log_keepe[r].sh' | wc -l").strip()
     fresh = dev("test -f /data/gw/logs/syslog.log && "
                 "[ $(( $(date +%s) - $(date -r /data/gw/logs/syslog.log +%s) )) -lt 120 ] && echo y").strip()
     sep = dev("grep -c '^===== BOOT' /data/gw/logs/syslog.log 2>/dev/null").strip()

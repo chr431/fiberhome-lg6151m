@@ -1,5 +1,6 @@
 #!/bin/sh
-# log_keeper.sh v2.2 -- 日志持久化守护（日志改善专项轮）
+# log_keeper.sh v2.3 -- 日志持久化守护（日志改善专项轮）
+#   v2.3: 写锁后回读校验(与看门狗重启的 check-then-write 竞态不再产生双实例).
 #   v2.2: 手动/监督重启也带镜像时区(TZ 兜底), 日志时间戳不再 UTC.
 #   v2.1 (2026-10-20 audit): BOOT 门禁从 btime 等值比较改为 boot_id
 #   (btime 被 NTP 校时后漂移, 守护重启会写假 BOOT — 本轮实测复现).
@@ -123,6 +124,11 @@ if [ -n "$_lp" ] && [ "$_lp" != "$$" ] && kill -0 "$_lp" 2>/dev/null && \
     exit 0
 fi
 echo $$ > /tmp/log_keeper.lock
+# v2.3: close the check-then-write race with the supervisor: after writing the
+# lock, re-read it. If another instance won, leave immediately (a duplicate
+# would double-append the mirrors).
+sleep 1
+[ "$(cat /tmp/log_keeper.lock 2>/dev/null)" = "$$" ] || { echo "log_keeper: lost lock race" >&2; exit 0; }
 # v2.0: aee NE census — db_history has no process name; the vendor syslog line
 # does.  Called with the newly mirrored syslog text on stdin.
 census() {

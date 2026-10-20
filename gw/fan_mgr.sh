@@ -39,6 +39,7 @@ if [ -n "$_lp" ] && [ "$_lp" != "$$" ] && kill -0 "$_lp" 2>/dev/null && \
 fi
 echo $$ > /tmp/fan_mgr.lock
 CUR=0
+PWMBAD=0
 while :; do
     cut -d. -f1 /proc/uptime > /tmp/fan_mgr.hb 2>/dev/null
     # v1.3: 配置统一 + 修复v1.2双/data/gw路径bug(GUI静音切换从未生效的根因)
@@ -74,6 +75,20 @@ while :; do
             flog "temp=${T}C level $NL pwm=$(lvl_pwm $NL) rpm=$(cat $RPM 2>/dev/null) mode=$MODE"
         fi
         CUR=$NL
+    fi
+    # v1.5 (P1-1): PWM 回读交叉校验 — 驱动忽略写入/被外力改写时，散热会静默
+    # 停在低挡而日志仍显示"已设挡"。连续 3 轮不符才告警（避免换挡瞬间误报）。
+    _want=0; [ "$NL" -gt 0 ] && _want=$(lvl_pwm $NL)
+    _rb=$(cat $FAN 2>/dev/null)
+    case "$_rb" in ''|*[!0-9]*) _rb="?" ;; esac
+    if [ "$_rb" != "$_want" ]; then
+        PWMBAD=$((PWMBAD + 1))
+        if [ "$PWMBAD" -ge 3 ] && [ "${PWMWARNED:-0}" = 0 ]; then
+            PWMWARNED=1
+            flog "WARN pwm readback mismatch: want=$_want read=$_rb temp=${T}C level=$NL mode=$MODE rpm=$(cat $RPM 2>/dev/null)"
+        fi
+    else
+        PWMBAD=0; PWMWARNED=0
     fi
     sleep 10
 done

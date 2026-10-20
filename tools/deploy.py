@@ -131,7 +131,9 @@ EXTRA_KEEP = ["DEPLOY_MANIFEST", "ppe_reg",
               "dropbear_keys",   # rc.extend v1.8 唯一属主启动的宿主密钥目录(设备侧生成)
               "shadow.override", # rc.extend v1.9 bind 的 shadow 覆盖(rotate_toor 生成的运行态)
               "shadow.override.bak",  # rc.extend v2.1 回退存档(rotate_toor v1.4 维护)
-              "DO_UBUS_CAP", "MODE.fh"]  # rc.extend.sh 运行时模式标记(dispatcher引用, 非脚本)
+              "DO_UBUS_CAP", "MODE.fh",  # rc.extend.sh 运行时模式标记(dispatcher引用, 非脚本)
+              "boot_attempts.tsv",       # rc.extend v2.6 boot 尝试台账(运行时追加)
+              "healthdog.forensic"]      # v2.6 healthdog FORENSIC 打印 opt-in marker
 MD5_LINE = re.compile(r"^([0-9a-f]{32})  (.*)$", re.M)
 
 

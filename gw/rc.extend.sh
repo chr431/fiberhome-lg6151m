@@ -1,5 +1,5 @@
 #!/bin/sh
-# rc.extend.sh v2.5 -- slot-aware dispatcher (shared /data between v2/v3)
+# rc.extend.sh v2.6 -- slot-aware dispatcher (shared /data between v2/v3)
 # v2.5: TZ 取自自管配置(settings>defaults)而非早期 /etc/TZ(厂商 boot 会先写 UTC)。
 # v2.4: TZ 解析提前到 toolchain_init 之前(静态工具链自举日志也走镜像时区)。
 # v2.2 (SIGSEGV P2/P3): static userland bootstrap — toolchain_init.sh builds

@@ -176,10 +176,16 @@
   /tmp/rc19.done`。Uplink/WiFi/agg/authd 属服务级，由看门狗监督，**不进入 boot
   判据**——否则拔网线冷启动会被误判为坏启动并翻 B 槽（本分析 P0-2 方案里
   "eth0 IP+default"一项按此理由裁剪，见 6.6）。
-- **boot.healthy**：全通过（关键链 + 2 BSS + ubus + agg 规则 + authd 新鲜 +
-  至少一个上行口有地址且有默认路由 + wan_alive 新鲜）后原子写
-  `/data/gw/boot.healthy`（boot_id/btime/epoch/uptime/stable/degraded/reason/checks），
-  并 `sync`。10 分钟时复检通过才把 `stable=1` 改写；healthdog 只认 `stable=1`。
+- **boot.healthy**：判据分三层——`critical`（boot.done）、`healthy`（critical +
+  2 BSS + ubus + agg 规则）、`environmental`（authd 新鲜 + 上行口有地址且有默认
+  路由 + wan_alive 新鲜）。**只有 healthy 层决定 boot.healthy/TRY_A/stable**；
+  environmental 只记录为 `degraded=1`（拔网线/ISP 故障不得被当成坏启动）。
+  通过后原子写 `/data/gw/boot.healthy`（boot_id/btime/epoch/uptime/stable/
+  degraded/reason/checks）并 `sync`。10 分钟时复检通过才把 `stable=1` 改写；
+  healthdog 只认 `stable=1`。
+- **内核 arm 与连通性解耦**：armed 心跳只看 `loopback UP + 看门狗 beat <180s`，
+  外部 ping 仅记录不参与判据——否则一次断网就会让 armed 内核 90s 复位一次
+  （这是旧 healthdog 设计里未被触发的隐藏环）。
 - **TRY_A**：`rc.extend v2.6` 不再无条件清零；早期清零只允许"上次 attempt=healthy
   且非快速重启"，**终判清零在 boot_gate 全通过后**，写后 `dd` 读回
   `misc[2061]==0x00` 并记录 pre/post 字节。坏启动不再被掩盖，LK 计数可累积到回 B。

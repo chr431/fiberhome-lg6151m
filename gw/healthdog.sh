@@ -18,8 +18,10 @@
 #       happened <10 min ago (reboot-loop guard);
 #     * copies /sys/fs/pstore/console-ramoops-0 to /data/gw/logs/pstore/ once
 #       per boot (P1-5: the only crash record that survives a hard reset).
-# HEARTBEAT = loopback answers AND an uplink target answers.  If the loop
-# itself stalls (D-storm), heartbeats stop naturally -> kernel resets.
+# HEARTBEAT = loopback answers AND the watchdog beacon is fresh.  External
+# reachability is logged but deliberately NOT part of the predicate: an ISP
+# outage must never trigger a kernel reset.  If the loop itself stalls
+# (D-storm), heartbeats stop naturally -> kernel resets.
 # Manual override: /data/gw/healthdog.disarmed disables arming entirely.
 LOG=/tmp/healthdog.log
 HB=/tmp/healthdog.hb
@@ -92,9 +94,11 @@ while :; do
         continue
     fi
 
-    # kernel-armed path: heartbeat only while the box AND the primary
-    # supervisor answer.  A dead/stalled watchdog is the exact wedge class we
-    # cannot otherwise detect: withhold the heartbeat and let the kernel reset.
+    # kernel-armed path: heartbeat while the loop itself and the primary
+    # supervisor answer.  Deliberately NOT gated on internet/WAN reachability:
+    # an armed watchdog that withholds heartbeats when the ISP is down would
+    # reboot a perfectly healthy box every 90s.  External reachability is
+    # logged, never used to withhold.
     if [ "$ARMED" = 1 ]; then
         lo=0; ext=0
         ping -c1 -W2 127.0.0.1 >/dev/null 2>&1 && lo=1
@@ -102,14 +106,14 @@ while :; do
         ping -c1 -W2 192.168.9.101 >/dev/null 2>&1 && ext=1
         _ba=$(cat "$BEAT" 2>/dev/null)
         case "$_ba" in ''|*[!0-9]*) _wage=999999 ;; *) _wage=$((u - _ba)) ;; esac
-        if [ "$lo" = 1 ] && [ "$ext" = 1 ] && [ "$_wage" -le 180 ]; then
+        if [ "$lo" = 1 ] && [ "$_wage" -le 180 ]; then
             echo hb > /proc/healthdog 2>/dev/null
-            [ $(( $(now) % 300 )) -lt 10 ] && hd "armed heartbeat ok up=${u}s wd_age=${_wage}s"
+            [ $(( $(now) % 300 )) -lt 10 ] && hd "armed heartbeat ok up=${u}s wd_age=${_wage}s ext=$ext"
             WBAD=0
         else
             if [ "${WBAD:-0}" = 0 ]; then
                 WBAD=1
-                hd "ARMED HEALTH FAIL up=${u}s lo=$lo ext=$ext wd_age=${_wage}s — heartbeat withheld (reset in 90s)"
+                hd "ARMED HEALTH FAIL up=${u}s lo=$lo wd_age=${_wage}s ext=$ext — heartbeat withheld (reset in 90s)"
                 echo t > /proc/sysrq-trigger 2>/dev/null
             fi
         fi

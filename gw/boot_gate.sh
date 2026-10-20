@@ -87,12 +87,20 @@ c_wanalive() { # wan_agg's own timestamp, when the daemon is up
     [ $(( $(date +%s) - _ts )) -lt 120 ]
 }
 
-# critical = boot chain itself; full = critical + firmware capabilities
+# critical = boot chain itself (boot.done).  healthy = critical + firmware
+# capabilities that do not depend on the outside world (boot.healthy, TRY_A,
+# stable, healthdog arming).  full = healthy + environmental items (uplink /
+# authd / wan_alive), recorded as degraded= but never required: an unplugged
+# cable must not look like a broken boot.
 CRIT="lan_ip lo ssh dns gui rc19"
-FULL="lan_ip lo ssh dns gui rc19 wifi ubus agg authd uplink wan_alive"
-run_checks() { # $1 = "crit"|"full" -> prints key=ok/fail; returns 0 if that set passed
-    _set=$1
-    if [ "$_set" = crit ]; then _list=$CRIT; else _list=$FULL; fi
+REQ="lan_ip lo ssh dns gui rc19 wifi ubus agg"
+ENV="authd uplink wan_alive"
+run_checks() { # $1 = "crit"|"healthy"|"full" -> prints key=ok/fail; rc = failures
+    case "$1" in
+    crit)    _list=$CRIT ;;
+    healthy) _list=$REQ ;;
+    *)       _list="$REQ $ENV" ;;
+    esac
     _bad=0
     for _k in $_list; do
         if [ "$_k" = wan_alive ] && ! pgrep -f 'wan_agg[.]sh' >/dev/null 2>&1; then
@@ -107,8 +115,8 @@ run_checks() { # $1 = "crit"|"full" -> prints key=ok/fail; returns 0 if that set
     return "$_bad"
 }
 
-CHECK_ONCE() { # --check: full verdict, no side effects
-    _out=$(run_checks full); _rc=$?
+CHECK_ONCE() { # --check: healthy verdict, no side effects
+    _out=$(run_checks healthy); _rc=$?
     echo "$_out" | tr '\n' ' '; echo
     return "$_rc"
 }
@@ -191,15 +199,16 @@ while :; do
     fi
 
     # full verdict -> boot.healthy + TRY_A clear
-    _full=$(run_checks full); _frc=$?
+    _full=$(run_checks healthy); _frc=$?
     if [ "$HEALTHY_WRITTEN" = 0 ] && [ "$_frc" -eq 0 ]; then
         _deg=0
-        write_healthy 0 "$_deg" "full pass at ${_up}s"
+        run_checks full >/dev/null 2>&1 || _deg=1
+        write_healthy 0 "$_deg" "healthy pass at ${_up}s (degraded=$_deg)"
         HEALTHY_WRITTEN=1
-        prog "FULL PASS -> boot.healthy (up=${_up}s) checks=[$(echo "$_full" | tr '\n' ' ')]"
+        prog "HEALTHY PASS -> boot.healthy (up=${_up}s degraded=$_deg) checks=[$(echo "$_full" | tr '\n' ' ')]"
         clear_try_a
         mark_attempt healthy "gate ${_up}s"
-        logger -t boot_gate "healthy at ${_up}s; TRY_A cleared"
+        logger -t boot_gate "healthy at ${_up}s (degraded=$_deg); TRY_A cleared"
         # observation window: 10 minutes from health before stable=1
     elif [ "$HEALTHY_WRITTEN" = 1 ] && [ "$STABLE" = 0 ] && [ "$_up" -ge 600 ]; then
         if [ "$_frc" -eq 0 ]; then
@@ -207,7 +216,7 @@ while :; do
             STABLE=1
             prog "STABLE -> boot.healthy stable=1 at ${_up}s"
             logger -t boot_gate "stable at ${_up}s"
-            for _i in 1 2 3; do echo hb > /proc/healthdog 2>/dev/null; sleep 0.2; done
+            for _i in 1 2 3; do echo hb > /proc/healthdog 2>/dev/null; sleep 1; done
         else
             _deg=1
             write_healthy 0 "$_deg" "degraded at ${_up}s: $(echo "$_full" | grep -v '=ok' | tr '\n' ' ')"

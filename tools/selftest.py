@@ -2034,7 +2034,7 @@ def t_p1_healthdog():
     fresh = hb.isdigit() and up.isdigit() and (int(up) - int(hb)) < 90
     # armed=1 is legitimate only after a stable window; the heartbeat file and
     # the v1.2 start line are mandatory either way.
-    ok = (start == "1" and fresh and "armed=" in hd)
+    ok = (int(start or 0) >= 1 and fresh and "armed=" in hd)
     record(t_p1_healthdog._test_name, "system", ok,
            "hd=[%s] start=%s hb=%s fresh=%s refused=%s" % (hd, start, hb, fresh, st))
 

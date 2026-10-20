@@ -238,6 +238,11 @@
   BOOT 行以 btime 门禁；`core_trap v1.1` 全局配额 60 个/200MB + `quota.tsv`。
 - **pstore**：`healthdog` 每 boot 把 `/sys/fs/pstore/console-ramoops-0` 复制到
   `/data/gw/logs/pstore/console-ramoops.<btime>.txt`（硬复位后唯一现场）。
+- **fuzz 实弹**：`tools/fuzz_logc.py` 在设备侧对真实二进制跑 13 轮
+  （每轮 1.5–2.1MB：合法帧+截断+伪长度+属性类型污染+超大/NUL 消息+纯噪声，
+  另加一份 563KB 真实环 dump 作种子），全部 `rc=0`、零信号死亡。这说明
+  logc 的帧解析对上述输入类是健壮的；两次真实崩溃更像"特定帧+特定时机"，
+  需要面包屑/原始流才能收敛（语料与工具已就位）。
 - **已知未闭环**：logc 两次 SIGSEGV 的根因仍未定位（aee dump 加密）。本轮把
   "下一次崩溃"变成可归因：帧偏移/长度 + 进程元数据 + 原始流回放。若面包屑出现，
   用 `logc --stdin --dump-raw` 语料离线复现即可把范围收敛到单帧。
@@ -295,7 +300,8 @@
 
 ### 6.8 明确未做（诚实清单）
 
-- logc 崩溃根因（见 6.4；本轮交付的是归因能力，不是结论）。
+- logc 崩溃根因（见 6.4；本轮交付的是归因能力 + 13 轮设备侧 fuzz 无复现，
+  不是结论）。
 - P2/P3 项（蜂窝 zombie-IP、NTP 小时级策略、写放大、多写方 flock、静态 CGI 等）
   不在本轮 P0+P1 范围。
 - `v3_steth` 内核侧未新增 tx backlog 字段（需重建内核模块，风险高于收益）：改用

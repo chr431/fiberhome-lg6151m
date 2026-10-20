@@ -20,6 +20,12 @@ if [ "${1:-}" = "--asan" ]; then
     mkdir -p "$OUT_DIR"
     OUT="$OUT_DIR/logc-asan"
     CC=${CC:-}
+    case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*)
+        # The MSYS gcc has no Linux libc headers (endian.h etc.); ASAN must be
+        # built on a Linux host or with an explicit cross compiler.
+        [ -n "$CC" ] || { echo "build_logc: --asan on Windows needs CC=<linux cc>; run on Linux for the normal path" >&2; exit 1; } ;;
+    esac
     if [ -z "$CC" ]; then
         for c in cc gcc clang aarch64-linux-musl-gcc; do
             command -v "$c" >/dev/null 2>&1 && { CC=$c; break; }

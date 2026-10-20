@@ -396,6 +396,20 @@
 
 ### 7.5 验证（设备侧）
 
-- `vercheck.py check`：118 登记文件 / MANIFEST 69 项全覆盖。
-- 待补：冷启动、selftest 全量、netlock 竞争实测（见下轮记录）。
+- `vercheck.py check`：118 登记文件 / MANIFEST 69 项全覆盖；`deploy.py doctor`
+  冷启动后 **CLEAN**（118 个登记文件 md5 双向一致）。
+- **冷启动 1 次（2026-10-20 10:28，boot_id 2f27680a…）**：boot_gate v1.3
+  106s 写 `boot.healthy`（boot_id 匹配、degraded=0、checks 全 ok），
+  `boot.done` 同步；609s 写 `stable=1`，healthdog 615s arm（armed=1）；
+  rc_netfh v3.12 57s 完成（route/NAT 相位 + fw_apply ok）；
+  13 个受监督守护全部恰 1 实例且锁 pid 与 cmdline 一致；`netcfg_lock_timeouts`
+  为空（无写方争用）；netcfg 台账记录 5 条启动期 REPAIR（rc=0）。
+- **selftest（冷启动后）**：95 pass / 0 fail（system 31/31）；`logc --fuzz 100` PASS；
+  `logc --selftest` PASS。
+- **netlock 竞争实测**（/tmp 库）：同进程可重入（lock1=0/lock2=0）；另一进程
+  持锁时 `netcfg_lock 1` 返回 1 且 `/tmp/netcfg_lock_timeouts` 递增；持锁进程
+  释放后立即可取。
+- **wan_agg 双实例实弹**：v3.4 前手动重启曾出现 2 个主管（rc19 不经 spawn
+  预写锁）；v3.5 启动即 `svc_lock`，第二次启动输出 `wan_agg: already running`
+  并退出，进程数保持 1。
 

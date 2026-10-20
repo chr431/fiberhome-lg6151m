@@ -34,6 +34,8 @@ python tools/deploy.py attic      # 设备侧流浪脚本归档
 ```
 
 - 改动流程：改 → tools/VERSIONS.tsv 登记版本 → `vercheck render`（同步 ARCHITECTURE.md）→ commit → push
+- batch3 起 `gw/svc_lib.sh` / `gw/netlock.sh` 是守护与写方的公共库，MANIFEST 顺序
+  保证它们先于消费者落地；运行中的守护仍持旧函数，升级后需重启才生效。
 - 运行中的 ash 脚本内容相同不重推（busybox 惰性读取）
 - agg_pins.conf（MAC 钉死表）**设备侧自管**（`deploy.py` 的 `EXTRA_KEEP`：不进部署清单、
   不参与体检比对 —— 含个人 MAC，避免"仓库空版本覆盖设备真钉死"）。
@@ -103,3 +105,9 @@ python tools/deploy.py attic      # 设备侧流浪脚本归档
 - `/tmp/wifi_guard.log`（BA stall 计数）、`/tmp/wagg.out`（聚合状态）
 - `/tmp/wan_eth.log`（eth0 租约/看门狗动作）、`/tmp/wan_agg.log`（FSM/主路/模式热载）
 - `iotagtd` 云连接：`netstat -tnp | grep iotagtd`（应见 :9991 ESTABLISHED）
+- batch3 观测：`/data/gw/logs/stability_metrics.tsv`（5min 长期指标：logc 帧/异常/
+  崩溃、repairs_1h、load/MemAvailable）；`/data/gw/logs/netcfg_repairs.tsv`
+  （每次路由/防火墙补装 epoch/what/rc/verified）；`/tmp/netcfg_lock_timeouts`
+  （写方争用超时计数，健康时应为 0 或空）。
+- logc 自检：`/data/gw/bin/logc --selftest`、`/data/gw/bin/logc --fuzz 200`；
+  ASAN 版在 PC/Linux 侧 `sh tools/build_logc.sh --asan`（不入设备）。

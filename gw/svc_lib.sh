@@ -44,6 +44,7 @@ port_listen() { # $1=port
 # Lock-first liveness: the pid lock is authoritative (exact pid + cmdline
 # verification); pgrep -f is only the legacy fallback.
 alive() { # $1=pgrep pattern  $2=lock name  $3=cmdline token
+    [ -n "$3" ] || return 1
     _ap=$(cat /tmp/$2.lock 2>/dev/null)
     [ -n "$_ap" ] && kill -0 "$_ap" 2>/dev/null && \
         ! grep -q '^State:.*Z' /proc/$_ap/status 2>/dev/null && \

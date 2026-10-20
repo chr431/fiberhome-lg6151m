@@ -1998,10 +1998,15 @@ def t_p1_singletons():
     out = dev("for p in %s; do echo -n \"$p=\"; pgrep -f \"/data/gw/${p}[.]sh\" 2>/dev/null | wc -l; done"
               % " ".join(pats)).strip()
     bad = []
+    # boot_gate exits by design after the 10-minute observation window; when it
+    # is gone, stable=1 in boot.healthy is the proof that it finished its job.
+    _stable = dev("sed -n 's/^stable=//p' /data/gw/boot.healthy 2>/dev/null | tail -1").strip()
     for ln in out.splitlines():
         if "=" in ln:
             k, v = ln.split("=", 1)
             if v.strip() != "1":
+                if k == "boot_gate" and v.strip() == "0" and _stable == "1":
+                    continue
                 bad.append("%s:%s" % (k, v.strip()))
     record(t_p1_singletons._test_name, "system", not bad,
            "bad=%s all=%s" % (bad or "none", " ".join(out.split())))

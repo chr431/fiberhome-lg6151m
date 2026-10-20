@@ -55,7 +55,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/bin/v3_steth.ko` | **v1.0** | manifest | `/data/gw/v3_steth.ko` | hook槽位听诊器(bias/interval) |
 | `gw/bin/v3httpd` | **v2.6** | manifest | `/data/gw/v3httpd` | 网关GUI HTTP服务; v2.6(P2): 静态面拒*.sh(免认证源码泄露)+Host头校验(根治DNS rebinding) |
 | `gw/bin/wpapmk` | **v1.0** | manifest | `/data/gw/wpapmk` | WPA口令转PMK(纯C PBKDF2-SHA1; fh魔改hostapd只吃wpa_psk) |
-| `gw/boot_gate.sh` | **v1.0** | manifest | `/data/gw/boot_gate.sh` | 启动健康门禁(P0-2): 关键链(LAN IP/SSH/DHCP-DNS/GUI 监听/rc19 完成)实测通过才写 /tmp/boot.done; 全通过写 /data/gw/boot.healthy 并清 LK TRY_A(读回校验); 10min 稳定观察后 stable=1; --check 供 watchdog 复检 |
+| `gw/boot_gate.sh` | **v1.1** | manifest | `/data/gw/boot_gate.sh` | 启动健康门禁(P0-2); v1.1: GUI 判据加 HTTP 200; v1.0: 关键链实测通过才写 boot.done, 全通过写 boot.healthy 并清 TRY_A(读回校验), 10min 稳定窗, --check |
 | `gw/capture_ubus.sh` | **v1.1** | manifest | `/data/gw/capture_ubus.sh` | stock拨号一次性捕获(ubus monitor+ccmni采样) |
 | `gw/ccmni_up.sh` | **v1.1** | manifest | `/data/gw/ccmni_up.sh` | netagent-lite: MIPC 拨号+ccmni 落地(deact+act→解析→flush+add+mtu); v1.1(日志加密轮): 入口旧地址/deact/act rc+耗时/响应/flush/add rc/总耗时全程留痕; 不写路由/NAT |
 | `gw/cellular_replay.sh` | **v2.1** | manifest | `/data/gw/cellular_replay.sh` | 蜂窝锁定开机重放(频段/小区锁到cfgmgr树, 树每次开机由出厂档案重建) |
@@ -91,7 +91,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/wan_agg.sh` | **v3.3** | manifest | `/data/gw/wan_agg.sh` | 双上行聚合主管; v3.2(日志加密轮): TICK(30s)汇总+探活逐目标+硬截止/authd/W2_READY 边沿+主路写失败留痕; v3.1: 探活实证选承载口(僵尸口); 历史见git; v3.3(日志加密轮补): 日志行补 epoch 时间基准(跨日志关联) |
 | `gw/wan_agg_lib.sh` | **v1.2** | manifest | `/data/gw/wan_agg_lib.sh` | 聚合引擎落地层+conf 管理库; v1.2(日志加密轮): ensure_rules 每次补装记 REPAIR+rc(规则被外力蒸发不再静默); v1.1: +cell_iface_pick(探活实证选承载口) |
 | `gw/wan_eth.sh` | **v1.4** | manifest | `/data/gw/wan_eth.sh` | 有线 WAN(eth0) 接口管理守护; v1.4(P1-1): 单实例锁; v1.3(batch1): 心跳供 watchdog 判卡死; 历史见git |
-| `gw/watchdog.sh` | **v1.27** | manifest | `/data/gw/watchdog.sh` | 持续不变量看门狗; v1.27(stability P0/P1): 检查全程静态 timeout 限时+工具故障重试/toolfaults 台账; 3 次连续确认才做破坏性自愈; 统一服务监督表(dnsmasq/dropbear/v3httpd/authd + 10 个脚本守护, 含配方/心跳/限频); 端口判据改 /proc/net/tcp 最小读取; mto 有界 reap; /tmp/watchdog.beat 供二级监督; 10min boot.healthy 复检; 历史见git |
+| `gw/watchdog.sh` | **v1.28** | manifest | `/data/gw/watchdog.sh` | 持续不变量看门狗; v1.28: 2-of-3 采样确认 + 全部内联探针限时 + v3httpd HTTP 200/dnsmasq DNS 功能探针(仅告警); v1.27(P0/P1): 限时/统一监督表/工具故障台账/心跳/门禁复检; 历史见git |
 | `gw/webs_revive.sh` | **v1.3** | manifest | `/data/gw/webs_revive.sh` | 原厂GUI复活器(自足nginx conf; 手动拉起) |
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_autoch.sh` | **v1.1** | manifest | `/data/gw/wifi_autoch.sh` | WiFi 自动选道器; v1.1(日志加密轮): 输出 # 注释行记录扫描规模/候选/评分(源码时无害) — 选道依据可复盘; IDC 安全掩码+候选{1,6} |

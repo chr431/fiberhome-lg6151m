@@ -1,9 +1,12 @@
 #!/bin/sh
-# watchdog.sh v1.27 -- on-device continuous invariant monitor.
+# watchdog.sh v1.28 -- on-device continuous invariant monitor.
+# v1.28 (2026-10-20): 2-of-3 采样确认(P0-3/P1-3 原文语义) + 剩余内联探针
+#   (dmesg/iw/ip/tc/df/ps/station dump)全部过静态 timeout + v3httpd HTTP 200
+#   与 dnsmasq DNS 功能性探针(每 10 轮, 仅告警不重启).
 # v1.27 (2026-10-20 stability P0/P1 batch2):
 #   ① 每个外部检查/探针经静态 busybox timeout 限时(默认 8s; 超时/137/139 视为
 #      "工具故障" — 重试 3 次, 仍失败只告警并记 toolfaults, 不再等价于服务死);
-#   ② 破坏性自愈改为 3 次连续确认(3×30s=90s)才动作, 单次抖动不动射频/不杀进程;
+#   ② 破坏性自愈改为 2-of-3 采样确认(≥60s)才动作, 单次抖动不动射频/不杀进程;
 #   ③ 统一服务监督表(存活+cmdline配方+心跳新鲜度+限频 3 次/小时), 覆盖
 #      dnsmasq/dropbear/v3httpd/authd/ntp_keeper/traffic_logger/wifi_guard/
 #      reboot_sched/led_mgr/fan_mgr/wan_eth/log_keeper/core_trap/healthdog;
@@ -92,15 +95,25 @@ port_listen() { # $1=port
     done
     return 1
 }
-# v1.27: 3-consecutive-failure gate; destructive actions only when this returns 0.
-strike() { # $1=key -> 0 when 3 consecutive failures reached
-    _f=/tmp/watchdog_strike_$1; _n=$(cat "$_f" 2>/dev/null)
-    case "$_n" in ''|*[!0-9]*) _n=0 ;; esac
-    _n=$((_n + 1)); echo "$_n" > "$_f"
-    [ "$_n" -ge 3 ] && { rm -f "$_f"; return 0; }
+# v1.27: 2-of-3 sample confirmation (analysis P0-3/P1-3). Each service keeps a
+# 3-character history of the last samples ("1" = failure, "0" = pass); the
+# destructive action fires when at least 2 of the last 3 failed (>=60s at the
+# 30s cycle), so one probe glitch never bounces a radio or kills a daemon.
+strike() { # $1=key, records a FAILURE sample -> 0 when 2-of-3 reached
+    _f=/tmp/watchdog_strike_$1
+    _h=$(cat "$_f" 2>/dev/null | tr -d ' \n')
+    case "$_h" in ???*) _h="${_h#?}" ;; esac   # keep only the last 3 samples
+    _h="${_h}1"; echo "$_h" > "$_f"
+    _n=$(echo "$_h" | awk '{n=gsub(/1/,"1"); print n+0}')
+    [ "$_n" -ge 2 ] && { rm -f "$_f"; return 0; }
     return 1
 }
-strike_clear() { rm -f /tmp/watchdog_strike_$1; }
+strike_clear() { # $1=key, records a PASS sample (keeps the last-3 window)
+    _f=/tmp/watchdog_strike_$1
+    _h=$(cat "$_f" 2>/dev/null | tr -d ' \n')
+    case "$_h" in ???*) _h="${_h#?}" ;; esac
+    echo "${_h}0" > "$_f"
+}
 # per-service restart rate limit: max 3 per hour (tmpfs; reboot resets)
 rl_ok() { # $1=name
     _f=/tmp/watchdog_svc_$1.rec; _n=0; _t=0
@@ -270,7 +283,7 @@ svc_supervise() { # $1=name $2=pattern $3=lock $4=recipe $5=hb $6=maxage
     else
         log "WARN  $_sn not running (hb=${_hb}s)"
     fi
-    strike "$_sn" || { log "SKIP  $_sn recovery (confirmation 1/3)"; return 0; }
+    strike "$_sn" || { log "SKIP  $_sn recovery (failure sample recorded; need 2 of last 3)"; return 0; }
     if rl_ok "$_sn"; then
         _oldpid=$(cat /tmp/$_sn.lock 2>/dev/null)
         if [ -n "$_oldpid" ] && kill -0 "$_oldpid" 2>/dev/null && \
@@ -370,7 +383,7 @@ run_cycle() {
             export PATH=/data/gw/sbin:/data/gw/bin:/usr/sbin:/usr/bin:/sbin:/bin:/fhrom/bin:/fhrom/fhshell
             nohup sh /data/gw/dial_keeper.sh >/dev/null 2>&1 &
         else
-            log "SKIP  dial_keeper recovery (confirmation 1/3)"
+            log "SKIP  dial_keeper recovery (sample 1/3, need 2/3)"
         fi
     fi
 
@@ -380,6 +393,15 @@ run_cycle() {
         set_state dnsmasq 0 "DHCP/DNS"
         strike_clear dnsmasq
         save_cmdline "${_dp%% *}" /tmp/watchdog_dnsmasq.cmd 2>/dev/null
+        # v1.27 (P0-3): functional DNS probe every 10 cycles, only when an
+        # uplink exists (otherwise the failure is environmental, not dnsmasq).
+        if [ $((CYC_TICK % 10)) -eq 0 ] && [ -n "$BB" ]; then
+            if ! tmo 8 "$BB nslookup www.qq.com 192.168.9.1" >/dev/null 2>&1; then
+                if tmo 5 "ip route show default" | grep -q default; then
+                    log "WARN  dnsmasq functional probe failed (:53 up, uplink present)"
+                fi
+            fi
+        fi
     else
         set_state dnsmasq 1 "DHCP/DNS"
         FAILS=$((FAILS+1))
@@ -399,7 +421,7 @@ run_cycle() {
                 log "WARN  dnsmasq restart budget exhausted (3/h) — alert only"
             fi
         else
-            log "SKIP  dnsmasq recovery (confirmation 1/3)"
+            log "SKIP  dnsmasq recovery (sample 1/3, need 2/3)"
         fi
     fi
 
@@ -430,14 +452,22 @@ run_cycle() {
                 log "WARN  dropbear restart budget exhausted (3/h) — alert only"
             fi
         else
-            log "SKIP  dropbear recovery (confirmation 1/3)"
+            log "SKIP  dropbear recovery (sample 1/3, need 2/3)"
         fi
     fi
 
-    # ---- v3httpd: process + :80 listener ----
+    # ---- v3httpd: process + :80 listener + periodic HTTP 200 probe ----
     if pidof v3httpd >/dev/null 2>&1 && port_listen 80; then
         set_state v3httpd 0 "GUI httpd"
         strike_clear v3httpd
+        # v1.27 (P0-3): functional probe, warn-only — v3httpd is single-threaded
+        # and a GUI SSE stream can legitimately delay a request; it must never
+        # trigger a restart. Probe every 10 cycles (~5 min).
+        if [ $((CYC_TICK % 10)) -eq 0 ] && [ -n "$BB" ]; then
+            if ! tmo 8 "$BB wget -q -T 4 -O /dev/null http://192.168.9.1/"; then
+                log "WARN  v3httpd functional probe failed (pid/:80 up; possible busy SSE stream)"
+            fi
+        fi
     else
         set_state v3httpd 1 "GUI httpd"
         FAILS=$((FAILS+1))
@@ -452,7 +482,7 @@ run_cycle() {
                 log "WARN  v3httpd restart budget exhausted (3/h) — alert only"
             fi
         else
-            log "SKIP  v3httpd recovery (confirmation 1/3)"
+            log "SKIP  v3httpd recovery (sample 1/3, need 2/3)"
         fi
     fi
 
@@ -481,7 +511,7 @@ run_cycle() {
                     log "WARN  authd restart budget exhausted (3/h) — alert only"
                 fi
             else
-                log "SKIP  authd recovery (confirmation 1/3)"
+                log "SKIP  authd recovery (sample 1/3, need 2/3)"
             fi
         fi
     fi
@@ -536,7 +566,7 @@ EOF
             for _s in /var/run/hostapd/ra0 /var/run/hostapd/rai0 /var/run/wpa_supplicant/ra0; do
                 [ -S "$_s" ] && _sock=1
             done
-            _clients=$(iw dev ra0 station dump 2>/dev/null | grep -c '^Station')
+            _clients=$(tmo 5 "iw dev ra0 station dump" | grep -c '^Station')
             if [ "$_hn" -lt 3 ] && [ "$_sock" = 1 ]; then
                 _hn=$((_hn + 1)); echo "$_hn $_ht" > /tmp/watchdog_hostapd.rec
                 log "EVT recover hostapd (attempt $_hn/3 this hour; clients=$_clients ctrl_sock=$_sock live=$(pgrep -f 'hostapd -B' | tr '\n' ' '))"
@@ -565,7 +595,7 @@ EOF
                 log "WARN  hostapd down; recovery budget exhausted (3/h) — alert only"
             fi
         else
-            log "SKIP  hostapd recovery (confirmation 1/3)"
+            log "SKIP  hostapd recovery (sample 1/3, need 2/3)"
         fi
     fi
 
@@ -599,7 +629,7 @@ EOF
                 log "WARN  wan_agg restart budget exhausted (3/h) — alert only"
             fi
         else
-            log "SKIP  wan_agg recovery (confirmation 1/3)"
+            log "SKIP  wan_agg recovery (sample 1/3, need 2/3)"
         fi
     fi
 
@@ -621,7 +651,7 @@ EOF
                 log "EVT restart boot_gate (no live instance before healthy)"
                 spawn bootgate /tmp/boot_gate.out sh /data/gw/boot_gate.sh
             else
-                log "SKIP  boot_gate recovery (confirmation 1/3)"
+                log "SKIP  boot_gate recovery (sample 1/3, need 2/3)"
             fi
         fi
     fi
@@ -689,7 +719,7 @@ EOF
     fi
 
     # ---- incremental events ----
-    BCN=$(dmesg | grep -cE 'AP: Beacon OFF|Beacon lost - Error|Beacon interval is illegal')
+    BCN=$(tmo 8 "dmesg | grep -cE 'AP: Beacon OFF|Beacon lost - Error|Beacon interval is illegal'")
     BCN_PREV=$(grep '^beacon=' $STATE 2>/dev/null | tail -1 | cut -d= -f2)
     if [ -n "$BCN_PREV" ] && [ "$BCN" -gt "$BCN_PREV" ] 2>/dev/null; then
         log "WARN  beacon events +$((BCN-BCN_PREV))"
@@ -699,7 +729,7 @@ EOF
     mv $STATE.tmp $STATE
 
     # ---- v1.20: SIGSEGV 家族可见化 ----
-    FLT=$(dmesg | grep -c 'unhandled exception')
+    FLT=$(tmo 8 "dmesg | grep -c 'unhandled exception'")
     FLT_PREV=$(cat /tmp/watchdog_faultcount 2>/dev/null)
     if [ -n "$FLT_PREV" ] && [ "$FLT" -gt "$FLT_PREV" ] 2>/dev/null; then
         log "WARN  user-fault +$((FLT-FLT_PREV)) (ring total $FLT) — SIGSEGV family"
@@ -725,7 +755,7 @@ EOF
         [ "$_b" = 2g ] && _vif=ra0 || _vif=rai0
         _cfc=/var/wlan/hap_$_b.conf
         [ -r "$_cfc" ] || continue
-        _lc=$(iw dev $_vif info 2>/dev/null | awk '/channel/{print $2}')
+        _lc=$(tmo 5 "iw dev $_vif info" | awk '/channel/{print $2}')
         _cc=$(grep -m1 '^channel=' $_cfc 2>/dev/null | cut -d= -f2)
         if [ -n "$_lc" ] && [ -n "$_cc" ] && [ "$_lc" != "$_cc" ]; then
             sed -i "s/^channel=.*/channel=$_lc/" $_cfc 2>/dev/null
@@ -734,10 +764,10 @@ EOF
     done
 
     # ---- cellular stats divergence guard (v1.10) ----
-    CIF=$(ip -o -4 addr show 2>/dev/null | grep -m1 'ccmni.*inet' | awk '{print $2}')
+    CIF=$(tmo 5 "ip -o -4 addr show" | grep -m1 'ccmni.*inet' | awk '{print $2}')
     if [ -n "$CIF" ]; then
         CN=$(cat /sys/class/net/$CIF/statistics/tx_bytes 2>/dev/null || echo 0)
-        CQ=$(tc -s qdisc show dev $CIF 2>/dev/null | awk '/Sent/{print $2; exit}')
+        CQ=$(tmo 5 "tc -s qdisc show dev $CIF" | awk '/Sent/{print $2; exit}')
         if [ -z "$CQ" ]; then
             CQ=$CN
             [ "$QNODISC" = 1 ] || { log "WARN qdisc Sent missing on $CIF (cold boot/no qdisc) -> netdev fallback"; QNODISC=1; }
@@ -772,10 +802,10 @@ EOF
         _load=$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null)
         _mf=$(awk '/^MemFree:/{print $2}' /proc/meminfo 2>/dev/null)
         _ma=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo 2>/dev/null)
-        _df=$(df -k /data 2>/dev/null | tail -1 | awk '{print $4}')
-        _tf=$(df -k /tmp 2>/dev/null | tail -1 | awk '{print $4}')
+        _df=$(tmo 8 "df -k /data" | tail -1 | awk '{print $4}')
+        _tf=$(tmo 8 "df -k /tmp" | tail -1 | awk '{print $4}')
         _np=$(ls /proc 2>/dev/null | grep -c '^[0-9]')
-        _nz=$(ps 2>/dev/null | awk '$4 ~ /^Z/{n++} END{print n+0}')
+        _nz=$(tmo 8 "ps" | awk '$4 ~ /^Z/{n++} END{print n+0}')
         _ct=$(cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null)
         log "HEALTH epoch=$(date +%s) up=${UP}s load=$_load memfree=${_mf:-?}KB memavail=${_ma:-?}KB data_free=${_df:-?}KB tmp_free=${_tf:-?}KB procs=$_np zombies=$_nz conntrack=${_ct:-n/a} cell_if=${CIF:-none} netdev=${CN:-0} qdisc=${CQ:-0}"
         [ "${_df:-0}" -lt 102400 ] 2>/dev/null && log "WARN /data free low: ${_df}KB (<100MB)"
@@ -811,8 +841,8 @@ if [ -n "$_wp" ] && [ "$_wp" != "$$" ] && kill -0 "$_wp" 2>/dev/null && \
     exit 0
 fi
 echo $$ > /tmp/watchdog.lock
-log "===== watchdog v1.27 start (bounded checks + 3-strike recovery + unified service table + /proc port probes + boot.healthy recheck; alert LED 5G orange) ====="
-logger -t watchdog "watchdog v1.27 start"
+log "===== watchdog v1.28 start (bounded checks + 3-strike recovery + unified service table + /proc port probes + boot.healthy recheck; alert LED 5G orange) ====="
+logger -t watchdog "watchdog v1.28 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

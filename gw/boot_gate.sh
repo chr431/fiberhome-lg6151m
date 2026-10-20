@@ -1,5 +1,6 @@
 #!/bin/sh
-# boot_gate.sh v1.0 -- real boot health gate (replaces the rc19 120s timer).
+# boot_gate.sh v1.1 -- real boot health gate (replaces the rc19 120s timer).
+# v1.1: c_gui 加 HTTP 200 功能判据(lo 已修, 本机 HTTP 探活可用).
 #
 # Problem (2026-10-19 stability analysis P0-2): rc19 used
 #     ( sleep 120; touch /tmp/boot.done ) &
@@ -69,7 +70,8 @@ c_lan()    { TMO 4 "ip -4 addr show br-lan | grep -q 'inet 192.168.9.1'"; }
 c_lo()     { TMO 4 "ip link show lo" | grep -q 'LOOPBACK,UP'; }
 c_ssh()    { pidof dropbear >/dev/null 2>&1 && PORT 22; }
 c_dns()    { pidof dnsmasq >/dev/null 2>&1 && PORT 53; }
-c_gui()    { pidof v3httpd >/dev/null 2>&1 && PORT 80; }
+c_gui()    { pidof v3httpd >/dev/null 2>&1 && PORT 80 && \
+                TMO 8 "$BB wget -q -T 4 -O /dev/null http://192.168.9.1/"; }
 c_ubus()   { [ -S /var/run/ubus/ubus.sock ] || [ -S /var/run/ubus.sock ]; }
 c_wifi()   { [ "$(TMO 6 "iw dev" | grep -c 'type AP')" -ge 2 ]; }
 c_agg()    { TMO 5 "iptables -t mangle -S WANAGG 2>/dev/null | grep -q MARK"; }
@@ -140,7 +142,7 @@ clear_try_a() {
 write_healthy() { # $1=stable(0|1) $2=degraded(0|1) $3=reason
     _tmp=$HEALTHY.tmp
     {
-        echo "# boot health verdict (boot_gate v1.0)"
+        echo "# boot health verdict (boot_gate v1.1)"
         echo "boot_id=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)"
         echo "btime=$(awk '/^btime/{print $2; exit}' /proc/stat 2>/dev/null)"
         echo "epoch=$(date +%s)"

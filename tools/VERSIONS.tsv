@@ -63,7 +63,7 @@ gw/webs_revive.sh	1.3	manifest	/data/gw/webs_revive.sh	原厂GUI复活器(自足
 gw/ntp_keeper.sh	1.4	manifest	/data/gw/ntp_keeper.sh	每小时NTP守时(多源; 设备无RTC); v1.4(P1-1): 单实例锁; v1.3: 首同步失败 60s 重试+心跳; v1.2: 时区自愈; 历史见git
 gw/reboot_sched.sh	1.3	manifest	/data/gw/reboot_sched.sh	定时重启守护; v1.3(P1-1): 单实例锁+心跳; v1.2: 触发行先落 /data+sync; 历史见git
 gw/core_meta.sh	1.0	manifest	/data/gw/core_meta.sh	core_pattern 元数据 wrapper(P1-2/P1-5): 记录 exe/cmdline/status/maps/父进程/PATH/dmesg 尾后 exec aee forwarder(行为不变, stdin 不碰)
-gw/boot_gate.sh	1.0	manifest	/data/gw/boot_gate.sh	启动健康门禁(P0-2): 关键链(LAN IP/SSH/DHCP-DNS/GUI 监听/rc19 完成)实测通过才写 /tmp/boot.done; 全通过写 /data/gw/boot.healthy 并清 LK TRY_A(读回校验); 10min 稳定观察后 stable=1; --check 供 watchdog 复检
+gw/boot_gate.sh	1.1	manifest	/data/gw/boot_gate.sh	启动健康门禁(P0-2); v1.1: GUI 判据加 HTTP 200; v1.0: 关键链实测通过才写 boot.done, 全通过写 boot.healthy 并清 TRY_A(读回校验), 10min 稳定窗, --check
 gw/log_keeper.sh	2.0	manifest	/data/gw/log_keeper.sh	日志持久化守护; v2.0(stability P1-5): 单实例锁 + ne_census.tsv(aee NE 进程名台账) + logc 崩溃面包屑归档; v1.9(batch1): logc rc 记录修复/BOOT btime 门禁/FORENSIC 降噪/心跳; 历史见git
 gw/diag_dump.sh	1.2	manifest	/data/gw/diag_dump.sh	一键诊断包(脱敏); v1.2(SIGSEGV P1/P2): 环读取改静态 logc + 静态工具链自述; v1.1: 结束行带生成时刻
 tools/lk_flash_v4_eth1.py	1.1	tool	-	v1.1路径随项目根迁移; eth1刷入实证器(全链条: 陷阱→raw shell→eth1起链[历史疑点:PHY仅ifup后attach]→curl传输→deploy2自驱→重启回v4.1)
@@ -94,7 +94,7 @@ gw/defaults.conf	1.8	manifest	/data/gw/defaults.conf	统一配置只读出厂基
 tools/leak_check.py	2.2	tool	-	敏感词零命中门禁; v2.2: --history 全量扫提交正文(%B, 原仅扫标题%s可漏检消息体); v2.1: 修复 PAT_PARTS NameError; 历史见git
 docs/ARCHITECTURE.md	1.1	doc	-	架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针)
 docs/GUI_TERMINOLOGY.md	1.2	doc	-	GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git
-gw/watchdog.sh	1.27	manifest	/data/gw/watchdog.sh	持续不变量看门狗; v1.27(stability P0/P1): 检查全程静态 timeout 限时+工具故障重试/toolfaults 台账; 3 次连续确认才做破坏性自愈; 统一服务监督表(dnsmasq/dropbear/v3httpd/authd + 10 个脚本守护, 含配方/心跳/限频); 端口判据改 /proc/net/tcp 最小读取; mto 有界 reap; /tmp/watchdog.beat 供二级监督; 10min boot.healthy 复检; 历史见git
+gw/watchdog.sh	1.28	manifest	/data/gw/watchdog.sh	持续不变量看门狗; v1.28: 2-of-3 采样确认 + 全部内联探针限时 + v3httpd HTTP 200/dnsmasq DNS 功能探针(仅告警); v1.27(P0/P1): 限时/统一监督表/工具故障台账/心跳/门禁复检; 历史见git
 tools/selftest.py	2.51	tool	-	设备自检; v2.51: 控制台 UTF-8 重配置(GBK 终端不再中断 post-deploy 门禁); v2.50(P0/P1): +7 条 stability 判据; 历史见git
 tools/doc_audit.py	1.2	tool	-	台账↔文档内联标记双向审计; v1.2: 子进程显式 UTF-8(gbk 环境不再中断 deploy 文档门禁); 历史见git
 gw/src/mipc_cellular.c	0.17	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源码; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘

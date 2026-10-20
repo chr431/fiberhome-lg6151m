@@ -161,7 +161,7 @@
 
 | 项 | 落地 |
 |---|---|
-| 所有外部检查限时 | `watchdog v1.27` 的 `check()` 经 `/data/gw/bin/busybox timeout -s KILL 8`；124/137/139 视为工具故障，重试 3 次仍失败只记 `toolfaults` + `/data/gw/logs/toolfaults.log`（含 what/rc/pid/uptime/cmd），不触发任何破坏性动作 |
+| 所有外部检查限时 | `watchdog v1.28` 的 `check()` 经 `/data/gw/bin/busybox timeout -s KILL 8`；124/137/139 视为工具故障，重试 3 次仍失败只记 `toolfaults` + `/data/gw/logs/toolfaults.log`（含 what/rc/pid/uptime/cmd），不触发任何破坏性动作 |
 | `mto` 不再无限 wait | 优先静态 `timeout`；回退路径 0.1s 轮询 → `kill -9` → 最多再 reap 10s，D 态子进程不再阻塞看门狗 |
 | 端口判据去 netstat | `port_listen()` 直接解析 `/proc/net/tcp{,6}` 的 `:0016/:0035/:0050` + state 0A；守护树不再 spawn netstat |
 | 二级监督 | `watchdog` 每轮写 `/tmp/watchdog.beat`；`healthdog v1.3` 在校验 `boot.healthy(stable=1)` 后**主动 arm** 内核模块（wedge 时用户态无法自救，必须提前武装）；armed 期间以 `loopback UP + beat 新鲜` 为心跳判据（beat 在周期起点写，慢探针不误判；看门狗 pid 消失 120s、存活但慢 300s 才停心跳），主看门狗陈旧时先保留心跳做一次 45s 宽限重启，仍陈旧才停发心跳（90s 后内核复位） |
@@ -209,7 +209,7 @@
   reboot_sched/led_mgr/fan_mgr/wan_eth/log_keeper/core_trap/healthdog`，
   每项 = 存活 + 重启配方 + 心跳新鲜度 + 3 次/小时限频；`dnsmasq/dropbear/
   v3httpd/authd/wan_agg/dial_keeper/hostapd` 走专用块。
-- 破坏性动作统一 **3 次连续确认**（90s）；单次失败只降级为告警。
+- 破坏性动作统一 **2-of-3 采样确认**（30s 间隔，≥60s；P0-3/P1-3 原文语义）：每个服务保留最近 3 次采样，≥2 次失败才动作；单次失败只降级为告警。
 - 心跳：`led_mgr 2s / fan_mgr 10s / wifi_guard 15s / wan_eth ~5s / log_keeper 30s /
   ntp_keeper 60s / traffic_logger 300s / reboot_sched 30s / core_trap 30s /
   healthdog 10s`；`wan_agg` 继续用 `/tmp/wan_alive` 的 `ts=`（已在看门狗消费）。
@@ -249,7 +249,7 @@
 
 ### 6.5 P1-3 hostapd / P1-4 wifi_guard
 
-- hostapd：3 次连续确认（90s）后才动射频；`hostapd_cli` 超时/139 只记工具故障并
+- hostapd：2-of-3 采样确认（≥60s）后才动射频；`hostapd_cli` 超时/139 只记工具故障并
   重试，进程仍在时**拒绝**把"工具崩了"当成"hostapd 死了"；恢复前独立确认控制
   socket（`/var/run/hostapd/ra0|rai0`）存在、记录在线客户端数；成功判据同样经
   限时 wrapper；限频 3 次/小时。
@@ -286,9 +286,9 @@
 
 过程中做过、可复现的破坏性验证：
 
-- **监督表实弹**：把 7 个守护的心跳换成旧格式（999999s）后，看门狗按 3 次确认
+- **监督表实弹**：把 7 个守护的心跳换成旧格式（999999s）后，看门狗按 2-of-3 确认
   逐个重启，日志 `EVT restart …` → 30s 后全部 `OK … (recovered)`，`fails=0`。
-- **门禁自愈**：kill `boot_gate` 后，看门狗在 3 次确认（约 90s）后重新拉起，门禁
+- **门禁自愈**：kill `boot_gate` 后，看门狗在 2-of-3 确认（约 60s）后重新拉起，门禁
   重新写 healthy / 清 TRY_A。
 - **core 取证链**：`ulimit -c unlimited; busybox sh -c 'kill -SEGV $$'` →
   `cores/meta/…txt`（9.7KB，含 exe/cmdline/status/maps/父进程/PATH）、

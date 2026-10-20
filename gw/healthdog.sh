@@ -55,9 +55,11 @@ hd "start v1.4 pid=$$ boot_id=$(bid) up=$(up)s lo=$(ip link show lo 2>/dev/null 
 collect_pstore() {
     P=/sys/fs/pstore/console-ramoops-0
     [ -s "$P" ] || return 0
-    _bt=$(awk '/^btime/{print $2; exit}' /proc/stat 2>/dev/null)
+    # v1.4: name by boot_id — btime shifts when NTP corrects the clock, which
+    # produced duplicate saves of the same pstore (…495/…496).
+    _id=$(bid)
     mkdir -p "$PSDIR" 2>/dev/null
-    O=$PSDIR/console-ramoops.$_bt.txt
+    O=$PSDIR/console-ramoops.${_id:-$(awk '/^btime/{print $2; exit}' /proc/stat 2>/dev/null)}.txt
     [ -s "$O" ] && return 0
     cp "$P" "$O" 2>/dev/null && hd "pstore saved: $O ($(wc -c < "$O" 2>/dev/null) bytes)"
 }

@@ -2126,7 +2126,7 @@ def t_p2_batch3():
     dlock = [int(x) for x in dlock if x.strip().isdigit()]
     writers = ["wan_agg.sh", "wan_agg_lib.sh", "wan_eth.sh", "rc_netfh.sh",
                "fw_apply.sh", "ccmni_up.sh", "guest_fw.sh"]
-    wl = dev("for f in %s; do grep -c 'netcfg_lock' /data/gw/$f.sh; done"
+    wl = dev("for f in %s; do grep -c 'netcfg_lock' /data/gw/$f; done"
              % " ".join(writers)).split()
     wl = [int(x) for x in wl if x.strip().isdigit()]
     flock = dev("/data/gw/bin/busybox --list 2>/dev/null | grep -cx flock").strip()

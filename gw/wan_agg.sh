@@ -1,5 +1,5 @@
 #!/bin/sh
-# wan_agg.sh v3.4 — 双上行聚合主管: 探活 + 故障转移 FSM + 未打标主路策略 + CLI
+# wan_agg.sh v3.5 — 双上行聚合主管: 探活 + 故障转移 FSM + 未打标主路策略 + CLI
 # v3.2 (2026-10-17 日志加密轮): 每 ~30s TICK 汇总(存活/计数/authd/承载口/候选),
 #   探活逐目标结果、硬截止触发、ccmni 清单变化、authd/W2_READY 边沿、主路写失败
 #   全部留痕; 本文件日志自轮转(400 行) — 24h 分析不再依赖偶然的状态迁移行。
@@ -48,6 +48,11 @@
 # 引擎/规则/ioccc 历史与 RE 证据见 wan_agg_lib.sh 头注。
 # 实测基线 2026-10-04: 5G 258Mbps / 家宽 375Mbps (8并发 TUNA) -> 40/60
 . /data/gw/wan_agg_lib.sh
+# v3.5 (batch3): wan_agg had no self-lock (rc19 starts it with nohup and the
+# watchdog only pre-writes the lock when IT spawns).  A manual restart could
+# therefore run two supervisors writing the same rules.  The shared lock is
+# taken after the CLI dispatch below.
+if [ -r /data/gw/svc_lib.sh ]; then . /data/gw/svc_lib.sh; fi
 W1_IF=ccmni2; W2_IF=eth0
 GW_FILE=/tmp/wan.gw
 MODE_FILE=/tmp/wan_mode
@@ -194,7 +199,16 @@ case "$1" in
     exit 0 ;;
 esac
 
-log "===== wan_agg v3.4 start (lib 拆分; eth0 归 wan_eth; 判活多样+wan_alive; fine-log) ====="
+# v3.5: one supervisor only (cmdline + zombie verification, shared primitive).
+if command -v svc_lock >/dev/null 2>&1; then
+    _rc=0; svc_lock wan_agg /data/gw/wan_agg.sh || _rc=$?
+    if [ "$_rc" != 0 ]; then
+        [ "$_rc" = 1 ] && echo "wan_agg: already running" >&2 || echo "wan_agg: lost lock race" >&2
+        exit 0
+    fi
+fi
+
+log "===== wan_agg v3.5 start (lib 拆分; eth0 归 wan_eth; 判活多样+wan_alive; fine-log) ====="
 log "EVT env: w1=$W1_IF w2=$W2_IF probe=[$PROBE_V4] t1=$T1 t2=$T2 metric_prb=$W1_PRB_METRIC up=$(cut -d. -f1 /proc/uptime)s"
 agg_conf_seed
 pin_replay

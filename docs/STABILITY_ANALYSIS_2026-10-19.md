@@ -346,6 +346,8 @@
 - 新增 `gw/svc_lib.sh`（v1.0）：`svc_lock`（cmdline+僵尸复核、写后回读）、
   `svc_hb`、2-of-3 `strike`、限频 `rl_ok`、锁优先 `alive`、
   `port_listen`，以及 `SVC_TABLE`（11 个脚本守护，含 dial_keeper 的 env 列）。
+- `wan_agg v3.5` 补自持单实例锁：rc19 用 nohup 拉起时不经过 watchdog
+  的 spawn 预写锁，手动重启曾出现两个主管同时写规则；现启动即 `svc_lock`。
 - watchdog v1.29 删除本地重复实现，改为 source 该库；被监督守护
   （ntp/traffic/reboot/fan/wan_eth/wifi_guard/log_keeper/core_trap/healthdog/
   boot_gate/led_mgr/dial_keeper）的锁与心跳全部改调 `svc_lock`/`svc_hb`，

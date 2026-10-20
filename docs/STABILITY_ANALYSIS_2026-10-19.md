@@ -183,6 +183,11 @@
   通过后原子写 `/data/gw/boot.healthy`（boot_id/btime/epoch/uptime/stable/
   degraded/reason/checks）并 `sync`。10 分钟时复检通过才把 `stable=1` 改写；
   healthdog 只认 `stable=1`。
+- **arm 跨守护重启**（现场实测）：内核 `armed` 标志不随 healthdog 进程消失而清零。
+  重启后的新实例若从 `ARMED=0` 起步，会因"10 分钟内刚 arm 过"的保护栏拒绝 arm
+  且**停发心跳** → 90s 后内核复位。`healthdog v1.4` 启动时读 `/proc/healthdog`，
+  发现 `armed=1` 立即恢复心跳，再做其余判定。应急手法：
+  `(while :; do echo hb > /proc/healthdog; sleep 10; done) &`。
 - **内核 arm 与连通性解耦**：armed 心跳只看 `loopback UP + 看门狗 beat <180s`，
   外部 ping 仅记录不参与判据——否则一次断网就会让 armed 内核 90s 复位一次
   （这是旧 healthdog 设计里未被触发的隐藏环）。

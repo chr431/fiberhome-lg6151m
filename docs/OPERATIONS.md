@@ -18,6 +18,9 @@ LK(lk_a) → boot_a(RP0103 内核) → rootfs_a(v4: RP0103+定制) → preinit[b
 - 看门 babysitter v3.0：T1=240s 且**无进展 120s** 才杀挂起子进程（rcS/mipc_wan_cli）；
   T2=600s 且仍无进展才翻 B（有进展则延到 900s 硬帽）；dropbear :22 仍在监听时
   **抑制翻槽**并留痕。决策落 `/data/gw/logs/boot_babysit.log`。
+- 内核 wedge 复位（healthdog.ko）在 `boot.healthy stable=1` 后自动 arm；armed 期间
+  **重启/停掉 healthdog 必须先恢复心跳**（v1.4 已自动处理）。应急：
+  `(while :; do echo hb > /proc/healthdog; sleep 10; done) &`
 - `/tmp/rc19.done` `/tmp/boot.done` `/data/gw/boot.healthy` `/tmp/boot.progress` = 启动观测点
   （`boot_gate.sh --status` 可一键查看）
 

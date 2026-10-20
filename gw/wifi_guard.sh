@@ -1,5 +1,6 @@
 #!/bin/sh
-# wifi_guard.sh v1.2 — BA-stall auto-recovery + telemetry for the wifi TX quirk.
+# wifi_guard.sh v1.3 — BA-stall auto-recovery + telemetry for the wifi TX quirk.
+# v1.3: stations/txbacklog 探针经静态 timeout(卡死不再拖住守卫循环).
 #
 # v1.2 (2026-10-20 stability P1-4): the old trigger counted *episode
 #   increments*: one continuous stall (episodes fixed at 1) could never reach
@@ -42,9 +43,20 @@ BOUNCE_TIMES=""
 STALL_RUN=0
 glog "wifi_guard v1.2 start (pid $$)"
 
-stations() { iw dev rai0 station dump 2>/dev/null | grep -c '^Station'; }
-txbacklog() { # bytes queued on rai0 (qdisc or netdev tx_queue_len evidence)
-    tc -s qdisc show dev rai0 2>/dev/null | sed -n 's/.*backlog \([0-9]*\).*/\1/p' | head -1
+# v1.3: probes bounded — a wedged vendor iw/tc must not stall the guard loop
+stations() {
+    if [ -n "$BB" ]; then
+        "$BB" timeout -s KILL 5 iw dev rai0 station dump 2>/dev/null | grep -c '^Station'
+    else
+        iw dev rai0 station dump 2>/dev/null | grep -c '^Station'
+    fi
+}
+txbacklog() { # bytes queued on rai0 (qdisc backlog, evidence only)
+    if [ -n "$BB" ]; then
+        "$BB" timeout -s KILL 5 tc -s qdisc show dev rai0 2>/dev/null
+    else
+        tc -s qdisc show dev rai0 2>/dev/null
+    fi | sed -n 's/.*backlog \([0-9]*\).*/\1/p' | head -1
 }
 
 while true; do

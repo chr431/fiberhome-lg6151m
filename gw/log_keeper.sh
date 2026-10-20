@@ -1,5 +1,6 @@
 #!/bin/sh
-# log_keeper.sh v2.1 -- 日志持久化守护（日志改善专项轮）
+# log_keeper.sh v2.2 -- 日志持久化守护（日志改善专项轮）
+#   v2.2: 手动/监督重启也带镜像时区(TZ 兜底), 日志时间戳不再 UTC.
 #   v2.1 (2026-10-20 audit): BOOT 门禁从 btime 等值比较改为 boot_id
 #   (btime 被 NTP 校时后漂移, 守护重启会写假 BOOT — 本轮实测复现).
 #   v2.0 (2026-10-20 stability P1-5): ① 单实例锁(cmdline 复核) — 看门狗监督表
@@ -58,6 +59,7 @@
 #   6) 每次开机 +180s 生成一份诊断包（diag_dump.sh → diag_boot.txt）
 PATH=/data/gw/sbin:/data/gw/bin:$PATH
 export PATH
+[ -z "${TZ:-}" ] && [ -r /etc/TZ ] && TZ=$(cat /etc/TZ 2>/dev/null) && export TZ
 LOG=/tmp/log_keeper.log
 DIR=/data/gw/logs
 LOGC=/data/gw/bin/logc

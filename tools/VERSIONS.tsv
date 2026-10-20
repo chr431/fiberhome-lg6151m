@@ -64,7 +64,7 @@ gw/ntp_keeper.sh	1.4	manifest	/data/gw/ntp_keeper.sh	每小时NTP守时(多源; 
 gw/reboot_sched.sh	1.3	manifest	/data/gw/reboot_sched.sh	定时重启守护; v1.3(P1-1): 单实例锁+心跳; v1.2: 触发行先落 /data+sync; 历史见git
 gw/core_meta.sh	1.0	manifest	/data/gw/core_meta.sh	core_pattern 元数据 wrapper(P1-2/P1-5): 记录 exe/cmdline/status/maps/父进程/PATH/dmesg 尾后 exec aee forwarder(行为不变, stdin 不碰)
 gw/boot_gate.sh	1.1	manifest	/data/gw/boot_gate.sh	启动健康门禁(P0-2); v1.1: GUI 判据加 HTTP 200; v1.0: 关键链实测通过才写 boot.done, 全通过写 boot.healthy 并清 TRY_A(读回校验), 10min 稳定窗, --check
-gw/log_keeper.sh	2.1	manifest	/data/gw/log_keeper.sh	日志持久化守护; v2.1: BOOT 门禁改 boot_id(btime 受 NTP 校时漂移会写假 BOOT); v2.0(P1-5): 单实例锁 + ne_census.tsv + logc 崩溃面包屑; v1.9(batch1): logc rc 修复/降噪/心跳; 历史见git
+gw/log_keeper.sh	2.2	manifest	/data/gw/log_keeper.sh	日志持久化守护; v2.2: 重启路径补 TZ; v2.1: BOOT 门禁改 boot_id; v2.0(P1-5): 单实例锁 + ne_census + 崩溃面包屑; v1.9(batch1): rc 修复/降噪/心跳; 历史见git
 gw/diag_dump.sh	1.2	manifest	/data/gw/diag_dump.sh	一键诊断包(脱敏); v1.2(SIGSEGV P1/P2): 环读取改静态 logc + 静态工具链自述; v1.1: 结束行带生成时刻
 tools/lk_flash_v4_eth1.py	1.1	tool	-	v1.1路径随项目根迁移; eth1刷入实证器(全链条: 陷阱→raw shell→eth1起链[历史疑点:PHY仅ifup后attach]→curl传输→deploy2自驱→重启回v4.1)
 tools/lk_flash_v4.py	1.1	tool	-	v1.1路径随项目根迁移; 终版刷入器(LK陷阱→raw shell→/dev/null修复→curl送deploy2.sh→后台自驱+轮询deploy.log→重启监测; 修三雷: uclient罢工/&需/dev/null/串口前台等待吃首字符)

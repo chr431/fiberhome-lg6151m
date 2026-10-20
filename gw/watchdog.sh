@@ -118,11 +118,15 @@ rl_ok() { # $1=name
 #   会重复拉起(现场: 3×wan_eth / 2×log_keeper / 2×watchdog)。锁文件记的 pid 活着
 #   且 /proc cmdline 复核匹配 → 视为在跑, 不再起第二个。
 alive() { # $1=pgrep pattern  $2=lock name  $3=cmdline token
-    pgrep -f "$1" >/dev/null 2>&1 && return 0
+    # v1.27: the single-instance lock is authoritative (exact pid + cmdline
+    # verification). pgrep -f is only the legacy fallback: any process whose
+    # argv merely CONTAINS the pattern (a grep/editor/the admin's own shell)
+    # used to make a dead daemon look alive.
     _ap=$(cat /tmp/$2.lock 2>/dev/null)
     [ -n "$_ap" ] && kill -0 "$_ap" 2>/dev/null && \
         ! grep -q '^State:.*Z' /proc/$_ap/status 2>/dev/null && \
         grep -qa "/data/gw/$3" /proc/$_ap/cmdline 2>/dev/null && return 0
+    pgrep -f "/data/gw/$3" >/dev/null 2>&1 && return 0
     return 1
 }
 spawn() { # $1=lock name  $2=log file  $3...=command
@@ -608,7 +612,7 @@ EOF
     # 10-minute observation would otherwise never arm healthdog.
     _gstable=$(sed -n 's/^stable=//p' "$HEALTHY" 2>/dev/null | tail -1)
     if [ "$_gstable" != 1 ] && [ "$UP" -lt 900 ]; then
-        if alive 'boot_gate[.]sh' bootgate boot_gate.sh; then
+        if alive 'boot_gate[.]sh' boot_gate boot_gate.sh; then
             set_state bootgate 0 "boot health gate"
         else
             set_state bootgate 1 "boot health gate"

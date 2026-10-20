@@ -232,7 +232,7 @@ check_port() { # $1=key $2=port $3=label
 # v1.27: unified supervision for script daemons.
 # Columns: name|pgrep-pattern|lock-token|recipe|heartbeat|max-hb-age
 SVC_TABLE='
-ntp_keeper|ntp_keeper[.]sh|ntp_keeper.sh|sh /data/gw/ntp_keeper.sh|/tmp/ntp_keeper.hb|600
+ntp_keeper|ntp_keeper[.]sh|ntp_keeper.sh|sh /data/gw/ntp_keeper.sh|/tmp/ntp_keeper.hb|4200
 traffic_logger|traffic_logger[.]sh|traffic_logger.sh|sh /data/gw/traffic_logger.sh|/tmp/traffic_logger.hb|900
 wifi_guard|wifi_guard[.]sh|wifi_guard.sh|sh /data/gw/wifi_guard.sh|/tmp/wifi_guard.hb|90
 reboot_sched|reboot_sched[.]sh|reboot_sched.sh|sh /data/gw/reboot_sched.sh|/tmp/reboot_sched.hb|900

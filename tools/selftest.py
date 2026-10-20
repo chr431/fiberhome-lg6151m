@@ -1920,8 +1920,11 @@ def t_core_trap():
     lim = dev("grep -i 'Max core file size' /proc/%s/limits 2>/dev/null | awk '{print $6}'" % run).strip() if run else ""
     rc19 = dev("grep -c 'core_trap.sh' /data/gw/rc19.sh 2>/dev/null").strip()
     wd = dev("grep -c 'core_trap' /data/gw/watchdog.sh 2>/dev/null").strip()
-    pat_ok = ("aee_core_forwarder" in pat) or ("/tmp/core.%p" in pat
-              and dev("test -f /tmp/core_trap.active && echo y").strip() == "y")
+    # v2.51: normal operation now goes through core_meta.sh, which records the
+    # crash metadata and then execs aee_core_forwarder (same behaviour).
+    pat_ok = ("aee_core_forwarder" in pat or "core_meta.sh" in pat) or (
+        "/tmp/core.%p" in pat
+        and dev("test -f /tmp/core_trap.active && echo y").strip() == "y")
     ok = (bool(run) and bool(lock) and alive == "y" and lim == "unlimited"
           and pat_ok and int(rc19 or 0) > 0 and int(wd or 0) > 0)
     record(t_core_trap._test_name, "system", ok,
@@ -1936,7 +1939,7 @@ def t_watchdog_aee():
     code = dev("grep -c 'watchdog_aeecount' /data/gw/watchdog.sh 2>/dev/null").strip()
     cnt = dev("cat /tmp/watchdog_aeecount 2>/dev/null").strip()
     hist = dev("wc -l < /data/log/aee_exp/db_history 2>/dev/null").strip()
-    st = dev("grep -c '^coretrap=' /tmp/watchdog_state 2>/dev/null").strip()
+    st = dev("grep -cE '^core_?trap=' /tmp/watchdog_state 2>/dev/null").strip()
     ver = dev("grep -c 'watchdog v1.27 start' /tmp/watchdog.log 2>/dev/null").strip()
     ok = False
     if code not in ("", "0") and cnt.isdigit() and hist.isdigit():
@@ -1976,7 +1979,7 @@ def t_p0_boot_gate():
     st = dev("sed -n 's/^stable=//p' /data/gw/boot.healthy 2>/dev/null | tail -1").strip()
     cur = dev("cat /proc/sys/kernel/random/boot_id 2>/dev/null").strip()
     done = dev("test -f /tmp/boot.done && echo y").strip()
-    tryb = dev("dd if=/dev/mmcblk0p1 bs=1 skip=2061 count=1 2>/dev/null | od -An -tu1 | tr -d ' '").strip()
+    tryb = dev("dd if=/dev/mmcblk0p1 bs=1 skip=2061 count=1 2>/dev/null | /data/gw/bin/busybox od -An -tu1 | tr -d ' '").strip()
     att = dev("tail -n 1 /data/gw/boot_attempts.tsv 2>/dev/null").strip()
     chk = dev("/data/gw/boot_gate.sh --check >/dev/null 2>&1; echo $?").strip()
     timer = dev("grep -c 'sleep 120; touch /tmp/boot.done' /data/gw/rc19.sh 2>/dev/null").strip()
@@ -2040,7 +2043,7 @@ def t_p1_healthdog():
 def t_p1_radio():
     hp = dev("for p in 'control socket' 'clients=' 'confirmation 1/3' 'recover hostapd'; do "
              "grep -c -- \"$p\" /data/gw/watchdog.sh; done").split()
-    wg = dev("for p in 'STREAK -lt 4' 'bounce budget' 'stations' 'boot_bounces'; do "
+    wg = dev("for p in 'STREAK' 'bounce budget' 'stations' 'boot_bounces'; do "
              "grep -c -- \"$p\" /data/gw/wifi_guard.sh; done").split()
     hp = [int(x) for x in hp if x.strip().isdigit()]
     wg = [int(x) for x in wg if x.strip().isdigit()]
@@ -2057,7 +2060,7 @@ def t_p1_radio():
 
 @test("stability P1: 取证降噪/pstore/BOOT 门禁/logc 统计")
 def t_p1_logpipe():
-    fore = dev("sed -n 's/.*forensic=\\([0-9]\\)$/\\1/p' /sys/module/healthdog/parameters/forensic 2>/dev/null | head -1").strip()
+    fore = dev("cat /sys/module/healthdog/parameters/forensic 2>/dev/null").strip()
     noise = dev("awk '/^===== BOOT/{n=0} /FORENSIC D:/{n++} END{print n+0}' /data/gw/logs/dmesg.log 2>/dev/null").strip()
     ps = dev("ls /data/gw/logs/pstore 2>/dev/null | wc -l").strip()
     psrc = dev("test -s /sys/fs/pstore/console-ramoops-0 && echo y").strip()

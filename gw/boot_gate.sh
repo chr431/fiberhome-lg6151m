@@ -1,6 +1,6 @@
 #!/bin/sh
-# boot_gate.sh v1.2 --
-# v1.2: 不再写 /tmp/watchdog.beat(那是看门狗的数字心跳, 被 "107 boot.done" 污染). real boot health gate (replaces the rc19 120s timer).
+# boot_gate.sh v1.2 -- real boot health gate (replaces the rc19 120s timer).
+# v1.2: 不再写 /tmp/watchdog.beat(那是看门狗的数字心跳, 曾被 "107 boot.done" 污染).
 # v1.1: c_gui 加 HTTP 200 功能判据(lo 已修, 本机 HTTP 探活可用).
 #
 # Problem (2026-10-19 stability analysis P0-2): rc19 used

@@ -1,5 +1,8 @@
 #!/bin/sh
-# wan_eth.sh v1.2 — 有线 WAN(eth0) 接口管理守护 (自 wan_agg v2.34 ensure_lease 拆出, 架构轮)
+# wan_eth.sh v1.4 — 有线 WAN(eth0) 接口管理守护 (自 wan_agg v2.34 ensure_lease 拆出, 架构轮)
+# v1.4 (P1-1): 单实例锁 — 看门狗监督表重启不会拉出双写方.
+# v1.3 (2026-10-20 stability batch1): 每轮写 /tmp/wan_eth.hb — watchdog 用
+#   心跳年龄识别“进程活但循环卡死”(原仅 alive() 进程判据)。
 # v1.1 (2026-10-17 日志加密轮): 租约尝试/结果与耗时、载波/IP/网关/RA 网关边沿、
 #   每条规则的真实补装(REPAIR, 含 rc)、每 60s TICK 汇总 — 家宽侧静默劣化可追溯。
 # 职责(与聚合决策正交; 聚合旁路/仅蜂窝模式下照样要跑):
@@ -25,9 +28,18 @@ MAXL=600
 log() { echo "$(date '+%m-%d %H:%M:%S') $*" >> $LOG; }
 log_rot() { [ -s $LOG ] && [ "$(wc -l < $LOG 2>/dev/null || echo 0)" -gt $MAXL ] && \
     { tail -n $((MAXL/2)) $LOG > $LOG.tmp && mv $LOG.tmp $LOG; }; }
-log "===== wan_eth v1.2 start (fine-log: lease/carrier/repair/tick) ====="
+log "===== wan_eth v1.4 start (fine-log: lease/carrier/repair/tick; +heartbeat) ====="
+# v1.4 (P1-1): single instance (watchdog supervision may restart a stalled loop)
+_lp=$(cat /tmp/wan_eth.lock 2>/dev/null)
+if [ -n "$_lp" ] && [ "$_lp" != "$$" ] && kill -0 "$_lp" 2>/dev/null && \
+   grep -qa '/data/gw/wan_eth.sh' /proc/$_lp/cmdline 2>/dev/null; then
+    echo "wan_eth: already running pid=$_lp" >&2
+    exit 0
+fi
+echo $$ > /tmp/wan_eth.lock
 CYC=0; LAST_CAR=""; LAST_IP=""; LAST_GW=""; LAST_V6GW=""; STATIC_LOGGED=""; NOCAR_LOGGED=""
 while :; do
+    cut -d. -f1 /proc/uptime > /tmp/wan_eth.hb 2>/dev/null
     CYC=$((CYC+1)); [ $((CYC % 12)) -eq 0 ] && log_rot
     # v1.4(原 wan_agg): PHY 只在 ifup 后 attach, 别裸 DOWN
     ip link set $W2_IF up 2>/dev/null

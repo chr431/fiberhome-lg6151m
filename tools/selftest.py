@@ -11,7 +11,12 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
-v2.47: t_watchdog_aee 版本锚点随 watchdog v1.25; v2.46: v2.45: v2.44 (SIGSEGV 根治轮): +t_static_toolchain / t_logc /
+v2.50 (2026-10-20 stability P0/P1 batch2): +t_p0_watchdog / t_p0_boot_gate /
+  t_p1_singletons / t_p1_forensics / t_p1_healthdog / t_p1_radio / t_p1_logpipe —
+  限时检查、boot.healthy 门禁与 TRY_A 读回、统一监督表单实例、core_meta 取证链、
+  二级监督、hostapd/wifi_guard 决策硬化、降噪/pstore/BOOT 门禁的回归护栏。
+v2.48 (2026-10-20 stability batch1): +t_batch1_watchdog / t_batch1_logc_ntp;
+v2.47: t_watchdog_aee 版本锚点随 watchdog v1.27; v2.46: v2.45: v2.44 (SIGSEGV 根治轮): +t_static_toolchain / t_logc /
   t_core_trap / t_watchdog_aee — P1 静态采集器、P2 静态工具链与 PATH 接管、
   P3 core 窗口守护、P4 aee 台账增量判据的回归护栏。
 v2.41 (24h 日志轮): +t_v3fix_loaded — v3_fix.ko 必须恰 1 实例在 /proc/modules
@@ -1931,12 +1936,147 @@ def t_watchdog_aee():
     cnt = dev("cat /tmp/watchdog_aeecount 2>/dev/null").strip()
     hist = dev("wc -l < /data/log/aee_exp/db_history 2>/dev/null").strip()
     st = dev("grep -c '^coretrap=' /tmp/watchdog_state 2>/dev/null").strip()
-    ver = dev("grep -c 'watchdog v1.25 start' /tmp/watchdog.log 2>/dev/null").strip()
+    ver = dev("grep -c 'watchdog v1.27 start' /tmp/watchdog.log 2>/dev/null").strip()
     ok = False
     if code not in ("", "0") and cnt.isdigit() and hist.isdigit():
         ok = abs(int(cnt) - int(hist)) <= 2 and int(st or 0) > 0 and int(ver or 0) > 0
     record(t_watchdog_aee._test_name, "system", ok,
            "code=%s base=%s hist=%s state=%s ver=%s" % (code, cnt, hist, st, ver))
+
+
+@test("stability P0: 看门狗限时/3 次确认/统一监督表/心跳 (v1.27)")
+def t_p0_watchdog():
+    code = dev("for p in 'tmo()' 'is_toolfault' 'toolfault()' 'strike()' 'rl_ok' "
+               "'port_listen()' 'SVC_TABLE' 'svc_supervise' 'watchdog.beat' "
+               "'boot_gate.sh --check'; do "
+               "grep -c -- \"$p\" /data/gw/watchdog.sh; done").split()
+    code = [int(x) for x in code if x.strip().isdigit()]
+    hbs = dev("for f in /tmp/led_mgr.hb /tmp/fan_mgr.hb /tmp/wan_eth.hb "
+              "/tmp/log_keeper.hb /tmp/ntp_keeper.hb /tmp/wifi_guard.hb "
+              "/tmp/traffic_logger.hb /tmp/reboot_sched.hb /tmp/core_trap.hb "
+              "/tmp/healthdog.hb; do [ -s \"$f\" ] && echo y; done | wc -l").strip()
+    st = dev("grep -cE '^(dnsmasq|dropbear|v3httpd|authd|ntp_keeper|traffic_logger|"
+             "wifi_guard|reboot_sched|led_mgr|fan_mgr|wan_eth|log_keeper|core_trap|"
+             "healthdog)=' /tmp/watchdog_state 2>/dev/null").strip()
+    beat = dev("cat /tmp/watchdog.beat 2>/dev/null").strip()
+    up = dev("cut -d. -f1 /proc/uptime").strip()
+    fresh = beat.isdigit() and up.isdigit() and (int(up) - int(beat)) < 180
+    ok = (len(code) == 10 and all(c > 0 for c in code)
+          and int(hbs or 0) >= 10 and int(st or 0) >= 14 and fresh)
+    record(t_p0_watchdog._test_name, "system", ok,
+           "code=%s hb=%s states=%s beat=%s fresh=%s" % (code, hbs, st, beat, fresh))
+
+
+@test("stability P0: boot_gate 真门禁 + TRY_A 读回 + 尝试台账")
+def t_p0_boot_gate():
+    ex = dev("for f in /data/gw/boot_gate.sh /data/rescue/babysit.sh; do "
+             "[ -x \"$f\" ] && echo y; done | wc -l").strip()
+    hv = dev("sed -n 's/^boot_id=//p' /data/gw/boot.healthy 2>/dev/null | tail -1").strip()
+    st = dev("sed -n 's/^stable=//p' /data/gw/boot.healthy 2>/dev/null | tail -1").strip()
+    cur = dev("cat /proc/sys/kernel/random/boot_id 2>/dev/null").strip()
+    done = dev("test -f /tmp/boot.done && echo y").strip()
+    tryb = dev("dd if=/dev/mmcblk0p1 bs=1 skip=2061 count=1 2>/dev/null | od -An -tu1 | tr -d ' '").strip()
+    att = dev("tail -n 1 /data/gw/boot_attempts.tsv 2>/dev/null").strip()
+    chk = dev("/data/gw/boot_gate.sh --check >/dev/null 2>&1; echo $?").strip()
+    timer = dev("grep -c 'sleep 120; touch /tmp/boot.done' /data/gw/rc19.sh 2>/dev/null").strip()
+    ok = (ex == "2" and hv == cur and st == "1" and done == "y" and tryb == "0"
+          and "result=healthy" in att and chk == "0" and timer == "0")
+    record(t_p0_boot_gate._test_name, "system", ok,
+           "exec=%s healthy_id=%s..%s stable=%s done=%s try_a=%s att=[%s] check_rc=%s timer=%s"
+           % (ex, hv[:8], cur[:8], st, done, tryb, att[:60], chk, timer))
+
+
+@test("stability P1: 服务监督表单实例 (每守护恰 1 个)")
+def t_p1_singletons():
+    pats = ["watchdog", "led_mgr", "fan_mgr", "dial_keeper", "log_keeper",
+            "wan_agg", "wan_eth", "wifi_guard", "ntp_keeper", "traffic_logger",
+            "reboot_sched", "core_trap", "healthdog", "boot_gate"]
+    out = dev("for p in %s; do echo -n \"$p=\"; pgrep -f \"/data/gw/${p}[.]sh\" 2>/dev/null | wc -l; done"
+              % " ".join(pats)).strip()
+    bad = []
+    for ln in out.splitlines():
+        if "=" in ln:
+            k, v = ln.split("=", 1)
+            if v.strip() != "1":
+                bad.append("%s:%s" % (k, v.strip()))
+    record(t_p1_singletons._test_name, "system", not bad,
+           "bad=%s all=%s" % (bad or "none", " ".join(out.split())))
+
+
+@test("stability P1: 残余崩溃取证链 (core wrapper/logc/selftest/census)")
+def t_p1_forensics():
+    pat = dev("cat /proc/sys/kernel/core_pattern 2>/dev/null").strip()
+    ex = dev("[ -x /data/gw/core_meta.sh ] && echo y").strip()
+    fwd = dev("[ -x /sbin/aee_core_forwarder ] && echo y").strip()
+    lv = dev("/data/gw/bin/logc -V 2>/dev/null").strip()
+    st = dev("/data/gw/bin/logc --selftest 2>&1; echo rc=$?").strip()
+    cen = dev("grep -c 'ne_census' /data/gw/log_keeper.sh /data/gw/watchdog.sh 2>/dev/null").split()
+    met = dev("ls /data/gw/logs/cores/meta 2>/dev/null | wc -l").strip()
+    ok = (pat.startswith("|/data/gw/core_meta.sh") and ex == "y" and fwd == "y"
+          and lv == "logc 1.2" and "rc=0" in st and len(cen) == 2
+          and all(int(x) > 0 for x in cen if x.isdigit()))
+    record(t_p1_forensics._test_name, "system", ok,
+           "pattern=[%s] wrapper=%s fwd=%s logc=%s selftest=[%s] census=%s meta_files=%s"
+           % (pat, ex, fwd, lv, st[-120:], cen, met))
+
+
+@test("stability P1: healthdog 综合判据 (稳定窗后 arm / 防环)")
+def t_p1_healthdog():
+    hd = dev("cat /proc/healthdog 2>/dev/null").strip()
+    st = dev("grep -c 'ARM REFUSED' /tmp/healthdog.log 2>/dev/null").strip()
+    start = dev("grep -c 'start v1.3' /tmp/healthdog.log 2>/dev/null").strip()
+    hb = dev("cat /tmp/healthdog.hb 2>/dev/null").strip()
+    up = dev("cut -d. -f1 /proc/uptime").strip()
+    fresh = hb.isdigit() and up.isdigit() and (int(up) - int(hb)) < 90
+    # armed=1 is legitimate only after a stable window; the heartbeat file and
+    # the v1.2 start line are mandatory either way.
+    ok = (start == "1" and fresh and "armed=" in hd)
+    record(t_p1_healthdog._test_name, "system", ok,
+           "hd=[%s] start=%s hb=%s fresh=%s refused=%s" % (hd, start, hb, fresh, st))
+
+
+@test("stability P1: hostapd/wifi_guard 决策硬化")
+def t_p1_radio():
+    hp = dev("for p in 'control socket' 'clients=' 'confirmation 1/3' 'recover hostapd'; do "
+             "grep -c -- \"$p\" /data/gw/watchdog.sh; done").split()
+    wg = dev("for p in 'STREAK -lt 4' 'bounce budget' 'stations' 'boot_bounces'; do "
+             "grep -c -- \"$p\" /data/gw/wifi_guard.sh; done").split()
+    hp = [int(x) for x in hp if x.strip().isdigit()]
+    wg = [int(x) for x in wg if x.strip().isdigit()]
+    en = dev("hostapd_cli -i ra0 status 2>/dev/null | grep -c '^state=ENABLED'").strip()
+    hb = dev("cat /tmp/wifi_guard.hb 2>/dev/null").strip()
+    up = dev("cut -d. -f1 /proc/uptime").strip()
+    fresh = hb.isdigit() and up.isdigit() and (int(up) - int(hb)) < 90
+    ok = (len(hp) == 4 and all(x > 0 for x in hp) and len(wg) == 4
+          and all(x > 0 for x in wg) and en == "1" and fresh)
+    record(t_p1_radio._test_name, "system", ok,
+           "hostapd_checks=%s wifi_guard_checks=%s enabled=%s hb_fresh=%s"
+           % (hp, wg, en, fresh))
+
+
+@test("stability P1: 取证降噪/pstore/BOOT 门禁/logc 统计")
+def t_p1_logpipe():
+    fore = dev("sed -n 's/.*forensic=\\([0-9]\\)$/\\1/p' /sys/module/healthdog/parameters/forensic 2>/dev/null | head -1").strip()
+    noise = dev("awk '/^===== BOOT/{n=0} /FORENSIC D:/{n++} END{print n+0}' /data/gw/logs/dmesg.log 2>/dev/null").strip()
+    ps = dev("ls /data/gw/logs/pstore 2>/dev/null | wc -l").strip()
+    psrc = dev("test -s /sys/fs/pstore/console-ramoops-0 && echo y").strip()
+    bootga = dev("grep -c 'boot_btime' /data/gw/log_keeper.sh 2>/dev/null").strip()
+    stats = dev("cat /tmp/logc.stats 2>/dev/null").strip()
+
+    def kv(k):
+        for part in stats.replace("\n", " ").split():
+            if part.startswith(k + "="):
+                return part.split("=", 1)[1]
+        return ""
+
+    bad = kv("bad_frames"); rs = kv("resyncs"); io = kv("io_errors")
+    pstore_ok = int(ps or 0) >= 1 or psrc != "y"
+    ok = (fore == "0" and noise == "0" and pstore_ok
+          and int(bootga or 0) > 0 and io == "0"
+          and bad.isdigit() and rs.isdigit() and int(bad) <= 2 and int(rs) <= 2)
+    record(t_p1_logpipe._test_name, "system", ok,
+           "forensic=%s forensic_lines=%s pstore=%s src=%s boot_btime=%s stats=[%s]"
+           % (fore, noise, ps, psrc, bootga, stats))
 
 
 def main():

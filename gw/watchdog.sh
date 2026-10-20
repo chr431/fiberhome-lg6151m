@@ -1,5 +1,18 @@
 #!/bin/sh
-# watchdog.sh v1.25 -- on-device continuous invariant monitor.
+# watchdog.sh v1.27 -- on-device continuous invariant monitor.
+# v1.27 (2026-10-20 stability P0/P1 batch2):
+#   ① 每个外部检查/探针经静态 busybox timeout 限时(默认 8s; 超时/137/139 视为
+#      "工具故障" — 重试 3 次, 仍失败只告警并记 toolfaults, 不再等价于服务死);
+#   ② 破坏性自愈改为 3 次连续确认(3×30s=90s)才动作, 单次抖动不动射频/不杀进程;
+#   ③ 统一服务监督表(存活+cmdline配方+心跳新鲜度+限频 3 次/小时), 覆盖
+#      dnsmasq/dropbear/v3httpd/authd/ntp_keeper/traffic_logger/wifi_guard/
+#      reboot_sched/led_mgr/fan_mgr/wan_eth/log_keeper/core_trap/healthdog;
+#   ④ 端口判据改用 /proc/net/tcp{,6} 静态解析(最小读取, 不再 spawn netstat);
+#   ⑤ mto 改 0.1s 轮询 + 有界 reap(D 态子进程不再永久阻塞看门狗);
+#   ⑥ 心跳自证 /tmp/watchdog.beat 供 healthdog 二级监督; 启动 10 分钟做一次
+#      boot.healthy 复检(健康漂移进 WARN, 不重复清 TRY_A);
+#   ⑦ 工具故障明细落 /data/gw/logs/toolfaults.log(cmd/rc/pid/时间, 供归因).
+# v1.26 (2026-10-19 stability batch1): 限时/服务监督初版.
 # v1.25 (2026-10-19 SIGSEGV 根治轮): wan_agg 开机 180s 宽限期 — rc19 在启动
 #   配方 ~60s 后才拉起 wan_agg, 看门狗 90s 周期曾抢跑拉出第二个实例(冷启动
 #   实测两个 `sh wan_agg.sh` 并存, 双写路由)。宽限期内只记 SKIP 不算失败。
@@ -9,78 +22,94 @@
 # v1.23 (2026-10-19 SIGSEGV 根治轮): 单实例/自愈判据收紧 — 锁 pid 必须命中
 #   本守护的绝对路径且非僵尸(旧判据 grep 子串, 锁 pid 被复用给含同名子串的
 #   命令时会把死守护误判为活; led_mgr/dial_keeper/watchdog 三处同型修复)。
-# v1.22 (2026-10-19 SIGSEGV P3/P4): ① fault 判据加 aee db_history 行数增量
-#   (内核 DABT 行被 printk 限流后 dmesg 计数会低估, aee 是唯一仍在记录的
-#   NE 台账); ② core_trap 守护自愈(日窗口采集家族 core, 死则拉起);
-#   ③ dial_keeper 重启 PATH 前置静态工具链(原实现整段覆盖 PATH, 会把静态
-#   工具链从重启实例里抹掉)。
-# v1.21 (2026-10-19): 用户态 fault 计数移出 $STATE(独立 /tmp/watchdog_faultcount) —
-#   放进 state 会被 selftest 当 0/1 故障键误判(faults=1 报"未恢复故障")。
-# v1.20 (2026-10-19 单实例/风扇轮): ① 自愈拉起统一走 alive() 双判据(pgrep 失败时
-#   回退锁文件 pid + /proc cmdline 复核) — SIGSEGV 家族会打死 pgrep 自身, 仅凭
-#   pgrep 会重复拉起(现场 3×wan_eth / 2×log_keeper / 2×watchdog); ② 看门狗自身
-#   单实例锁; ③ fan_mgr 只检不拉补齐(现场停 PWM 60, 高温不升挡); ④ 内核用户态
-#   fault 计数增量进 WARN(SIGSEGV 家族可见化)。
-# v1.19 (2026-10-19 wan_agg 静默死亡实弹): wan_agg 只检不拉 — 16:26 其子命令连续
-#   SIGSEGV 后脚本退出, /tmp/wan_alive 停更; led_mgr 按 30s 新鲜度灭 WAN 灯、
-#   GUI 判有线离线, 而 eth0 carrier=1/有 IP/默认路由/实际有流量。现补自愈拉起。
-# v1.18 (2026-10-19 hostapd 崩溃实弹): hostapd 只检不拉 — 12:41 SIGSEGV 后无人
-#   重启, ra0/rai0 仍按驱动 apcfg 发信标, 手机 assoc 成功但 4-way 无 EAPOL
-#   (authorized:no) → 10s 后 reason=3 自断重试, 静默 3.5h。现补崩溃自愈:
-#   按 wifi_up.sh v1.23 的 MLO 在线重应用配方(两带接口下电→冷启动等价态→
-#   单进程 hostapd -B 双 conf→no_bcn 0 重装订信标), 限频 3 次/小时。
-# v1.17 (2026-10-17 日志加密轮补): modem_reg/at_chan 分支此前绕过 check() 直接
-#   set_state, 失败没有 rc/输出证据; 现补 FAIL detail(COPS/CFUN 原文)。
-# v1.15 (2026-10-17 日志加密轮): 失败检查附 rc/输出摘要; 每 2 环循(60s)一行
-#   TICK 全量状态; 每 10 环循(5min)一行 HEALTH(load/mem//data//tmp/进程/僵尸/
-#   conntrack/蜂窝统计双口径); 自愈重启记录原因与旧 PID; cells 查询失败附
-#   rc/输出长度; qdisc Sent 缺失(冷启动)显式留痕。
-# v1.14 (RIL 清零轮): cell 查询恢复提示改直连语义(ql_ril_service 已退役)。
-# v1.13 (RIL 收尾轮): cell 查询面恢复消息修正 — ql_netd 已退役, 恢复只需
-#   restart ql_ril_service。
+# v1.22: fault 判据加 aee db_history 行数增量 + core_trap 自愈 + dial_keeper
+#   重启保留静态 PATH。
+# v1.21: 用户态 fault 计数移出 $STATE(独立 /tmp/watchdog_faultcount)。
+# v1.20: 自愈拉起统一走 alive() 双判据; 看门狗自身单实例锁; fan_mgr 补齐。
+# v1.19: wan_agg 只检不拉补齐(静默死亡实弹).
+# v1.18: hostapd 崩溃自愈(MLO 在线重应用配方, 限频 3 次/小时).
+# v1.17: modem_reg/at_chan 失败附 COPS/CFUN 原文.
+# v1.15: 失败检查附 rc/输出摘要; TICK/HEALTH 周期汇总.
+# v1.12: +wan_eth 检查+自愈拉.
+# v1.9: 告警灯从 WAN 灯迁 5G 橙灯(gpio473); WAN 灯写权单一化归 led_mgr.
+# v1.7: mipc 探针硬超时; dial_keeper 心跳; led_mgr 自愈.
+# v1.6: +log_keeper 自愈 + ql_wifi_sample 卡死清除.
 # L13: "feature silently broken until manual inspection" countermeasure.
 # Runs every 30s; failures log + ALERT LED flash (5G orange); recovers silently.
-# Started by rc19.sh (pgrep guard); single instance.
-# v1.12 (2026-10-17 架构轮): +wan_eth 检查+自愈拉(有线 WAN 接口管理守护, 自 wan_agg
-#       ensure_lease 拆出 — 其为 eth0 租约续订/NAT 看门狗唯一写方, 静默死亡 = 家宽侧
-#       静默劣化: 租约到期/规则被冲刷后无人补)。
-# v1.11 (2026-10-15 蜂窝查询面失效实弹): +蜂窝查询路径活性告警 — 厂商 RIL 的
-#       ql_nw 子服务会静默失效(守护活着/数据面正常, 但 cells/endc 恒返
-#       -2147024889, GUI 小区与组网卡片静默报错)。告警不自动重启: 蜂窝为主力时
-#       重启 RIL 会打断数据面, 代价高于收益; 恢复路径已文档化。
-# v1.10 (2026-10-15 流量口径实弹): +蜂窝统计偏差护栏 — 每周期比对 ccmni 网卡
-#       tx_bytes 与 qdisc(真实发送路径)增量, 超阈值记 WARN。价值在"可见化":
-#       网卡计数会被厂商卸载记账灌入无佐证增量(1s +1.22MB 而 qdisc/抓包为 0),
-#       该信号此前只能靠事后翻采样日志才看得见。
-# v1.9 (2026-10-15 WAN 灯不亮实弹): 告警闪烁从 WAN 灯(gpio292/5g_evb_voice)
-#       迁到 5G 橙灯(gpio473)。原实现的病灶不是"闪"而是"闪完停在 0":
-#       led_mgr v1.x 边沿触发(只写状态变化), watchdog 抢写后状态串不变 →
-#       WAN 灯被闪灭后永不纠回。家宽数据面通而灯灭 = "eth0 有网 WAN 灯不亮"。
-#       写权单一化后此族 bug 结构性消除; led_mgr v2.0 改绝对电平驱动兜底。
-# v1.8 (2026-10-14 部署实测): dial_keeper 实例定位改 PID 锁(/tmp/dial_keeper.lock,
-#       cmdline 复核) — 旧 pgrep -f 判据与"杀所有匹配"在启动者 argv 含脚本路径时
-#       自匹配/误伤旁观 shell(实测两次)。
-# v1.7 (2026-10-14 模组 EE 事故): ① 所有 mipc 探针过 mto() 硬超时(无 timeout
-#       命令的纯 shell 封装) — 探针本身卡死会让整个看门狗停摆(事故窗口里
-#       任何守护重启都不会发生); ② dial_keeper 心跳陈旧(>90s)判死重启 —
-#       "进程在而守护死"(卡在 mipc 调用里)旧判据看不见; ③ led_mgr 自愈拉
-#       (原只检不拉, LED 是"显示反映实际"的仪器, 静默死亡=无声谎报)。
-# v1.6: +log_keeper 自愈 + ql_wifi_sample 卡死清除(L28 死循环刷 syslog 冲垮日志环)。
-# v1.5: +wifi 信道一致性(驱动 IDC 可自行搬道 → 生成配置漂移时以实况回写+记警)。
-# v1.4: agg 规则检查模式无关(weight/优先/仅模式); v1.3: +dial_keeper 兜底自愈。
-# v1.2 (L14): +cellular control plane -- atcid 自愈, AT 通道(CFUN/CSQ),
-#       模组注册态。第一阶段裁剪曾杀 atcid 而 3 天无人知晓 (数据面测试全绿)。
 
 LOG=/tmp/watchdog.log
 STATE=/tmp/watchdog_state
-# v1.9: 告警灯 = 5G 橙灯(gpio473)。语义上恒灭(5G 无数据=全灭), 借它闪烁不
-#   误导数据面; WAN 灯(292/5g_evb_voice)写权归 led_mgr 独占, 本脚本不再碰。
 ALED=/sys/class/gpio/gpio473/value
 CYCLE=30
-MAX_LOG=500
+MAX_LOG=800
 CYC_TICK=0; QNODISC=""; LAST_EPOCH=""; LAST_UP=""
+HEALTHY=/data/gw/boot.healthy
+TOOL_LOG=/data/gw/logs/toolfaults.log
 
 log() { echo "$(date '+%m-%d %H:%M:%S') $*" >> $LOG; }
+
+# ---- v1.27: bounded execution helpers ------------------------------------
+BB=/data/gw/bin/busybox
+[ -x "$BB" ] || BB=
+tmo() { # $1=seconds, $2...=command string; static busybox timeout when available
+    _secs=$1; shift
+    if [ -n "$BB" ]; then
+        "$BB" timeout -s KILL "$_secs" sh -c "$*" 2>/dev/null
+    else
+        sh -c "$*" 2>/dev/null
+    fi
+}
+# v1.27: tool fault = timeout/SIGKILL/SIGSEGV of the probing tool itself.
+is_toolfault() { case "$1" in 124|137|139) return 0 ;; esac; return 1; }
+toolfault() { # $1=what $2=rc $3=cmd $4=extra
+    _l="$TOOL_LOG"
+    [ -d /data/gw/logs ] || _l=/tmp/toolfaults.log
+    echo "$(date '+%Y-%m-%d %H:%M:%S') epoch=$(date +%s) what=$1 rc=$2 pid=$$ up=$(cut -d. -f1 /proc/uptime) cmd=[$3] $4" >> "$_l"
+    _sz=$(wc -c < "$_l" 2>/dev/null || echo 0)
+    if [ "${_sz:-0}" -gt 262144 ]; then
+        tail -n 400 "$_l" > "$_l.tmp" 2>/dev/null && mv "$_l.tmp" "$_l"
+    fi
+}
+hb_age() { # $1=heartbeat file (uptime seconds); 999999 if missing/non-numeric
+    _v=$(cat "$1" 2>/dev/null)
+    _u=$(cut -d. -f1 /proc/uptime)
+    case "$_v" in ''|*[!0-9]*) echo 999999 ;; *) echo $((_u - _v)) ;; esac
+}
+save_cmdline() { # $1=pid $2=file — cache a service restart recipe
+    [ -r "/proc/$1/cmdline" ] || return 1
+    tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null | sed 's/ $//' > "$2"
+}
+# v1.27: port liveness from /proc/net/tcp{,6} (hex local_address), no netstat.
+port_listen() { # $1=port
+    _hx=$(printf '%04X' "$1" 2>/dev/null)
+    [ -n "$_hx" ] || return 1
+    for _f in /proc/net/tcp /proc/net/tcp6; do
+        [ -r "$_f" ] || continue
+        awk -v p=":$_hx" '$4=="0A" && substr($2,length($2)-4)==p{f=1} END{exit(f?0:1)}' "$_f" 2>/dev/null && return 0
+    done
+    return 1
+}
+# v1.27: 3-consecutive-failure gate; destructive actions only when this returns 0.
+strike() { # $1=key -> 0 when 3 consecutive failures reached
+    _f=/tmp/watchdog_strike_$1; _n=$(cat "$_f" 2>/dev/null)
+    case "$_n" in ''|*[!0-9]*) _n=0 ;; esac
+    _n=$((_n + 1)); echo "$_n" > "$_f"
+    [ "$_n" -ge 3 ] && { rm -f "$_f"; return 0; }
+    return 1
+}
+strike_clear() { rm -f /tmp/watchdog_strike_$1; }
+# per-service restart rate limit: max 3 per hour (tmpfs; reboot resets)
+rl_ok() { # $1=name
+    _f=/tmp/watchdog_svc_$1.rec; _n=0; _t=0
+    [ -r "$_f" ] && read _n _t < "$_f"
+    _now=$(date +%s)
+    case "$_n" in ''|*[!0-9]*) _n=0 ;; esac
+    case "$_t" in ''|*[!0-9]*) _t=$_now ;; esac
+    [ $((_now - _t)) -gt 3600 ] && { _n=0; _t=$_now; }
+    [ "$_n" -ge 3 ] && return 1
+    echo "$((_n + 1)) $_t" > "$_f"
+    return 0
+}
 
 # v1.20: 单实例判活 — SIGSEGV 家族里 pgrep/grep 自身也会被打死(实测), 仅凭 pgrep
 #   会重复拉起(现场: 3×wan_eth / 2×log_keeper / 2×watchdog)。锁文件记的 pid 活着
@@ -110,24 +139,37 @@ alert_led_set() {
     echo "$1" > $ALED 2>/dev/null
 }
 
-# v1.7: timeout 语义的 mipc 探针封装(设备无 timeout/coreutils; 输出经临时文件
-#   回显保 stdout 语义; 超时 SIGKILL 并记警, 返回 124)
+# v1.7/v1.27: timeout 语义的 mipc 探针封装. 优先静态 busybox timeout;
+#   回退路径 0.1s 轮询 + 有界 reap — D 态子进程 kill -9 无效时绝不无限 wait.
 MTO=10
 mto() {
-    mipc_wan_cli "$@" >/tmp/mto.$$ 2>&1 & _mp=$!
-    _i=0
-    while [ "$_i" -lt "$MTO" ] && kill -0 $_mp 2>/dev/null; do
-        sleep 1; _i=$((_i + 1))
-    done
-    if kill -0 $_mp 2>/dev/null; then
-        kill -9 $_mp 2>/dev/null
-        rm -f /tmp/mto.$$
-        log "WARN  mipc probe timeout(${MTO}s): $1"
-        return 124
+    _tmp=/tmp/mto.$$
+    if [ -n "$BB" ]; then
+        "$BB" timeout -s KILL "$MTO" mipc_wan_cli "$@" >"$_tmp" 2>&1
+        _rc=$?
+        if [ "$_rc" = 124 ] || [ "$_rc" = 137 ]; then
+            rm -f "$_tmp"
+            log "WARN  mipc probe timeout(${MTO}s): $1"
+            return 124
+        fi
+    else
+        mipc_wan_cli "$@" >"$_tmp" 2>&1 & _mp=$!
+        _i=0
+        while [ "$_i" -lt $((MTO * 10)) ] && kill -0 $_mp 2>/dev/null; do
+            sleep 1; _i=$((_i + 1))
+        done
+        if kill -0 $_mp 2>/dev/null; then
+            kill -9 $_mp 2>/dev/null
+            _j=0
+            while [ "$_j" -lt 10 ] && kill -0 $_mp 2>/dev/null; do sleep 1; _j=$((_j + 1)); done
+            rm -f "$_tmp"
+            log "WARN  mipc probe timeout(${MTO}s): $1"
+            return 124
+        fi
+        wait $_mp 2>/dev/null; _rc=$?
     fi
-    wait $_mp; _rc=$?
-    cat /tmp/mto.$$ 2>/dev/null
-    rm -f /tmp/mto.$$
+    cat "$_tmp" 2>/dev/null
+    rm -f "$_tmp"
     return $_rc
 }
 
@@ -147,67 +189,146 @@ set_state() {  # $1=key $2=0(ok)|1(fail) $3=label
     fi
 }
 
-check() {  # $1=key $3=label, $2=check command
+# v1.27: bounded invariant check. Tool failures are retried and never counted
+# as service failures on their own (they only feed the toolfault ledger).
+check() {  # $1=key $2=check command  $3=label
     KEY=$1; CMD=$2; LABEL=$3
-    _out=$(eval "$CMD" 2>&1); _rc=$?
-    if [ $_rc -eq 0 ]; then
+    _rc=1; _out=""; _try=1
+    while [ "$_try" -le 3 ]; do
+        _out=$(tmo 8 "$CMD"); _rc=$?
+        [ "$_rc" -eq 0 ] && break
+        is_toolfault "$_rc" || break
+        sleep 1
+        _try=$((_try + 1))
+    done
+    if [ "$_rc" -eq 0 ]; then
         set_state "$KEY" 0 "$LABEL"
     else
         set_state "$KEY" 1 "$LABEL"
         FAILS=$((FAILS+1))
-        # v1.15: 失败证据 — 命令输出/rc 一并留痕(此前只有 label, 排障需重跑)
-        log "FAIL detail $KEY rc=$_rc out=$(printf '%s' "$_out" | tr '\n' ' ' | head -c 160)"
+        if is_toolfault "$_rc"; then
+            TOOLFAILS=$((TOOLFAILS + 1))
+            toolfault "$KEY" "$_rc" "$CMD" "retries=$_try"
+            log "FAIL detail $KEY rc=$_rc toolfail=1 out=$(printf '%s' "$_out" | tr '\n' ' ' | head -c 160)"
+        else
+            log "FAIL detail $KEY rc=$_rc out=$(printf '%s' "$_out" | tr '\n' ' ' | head -c 160)"
+        fi
+    fi
+}
+# v1.27: in-shell port check (port_listen is a function, cannot run via tmo).
+check_port() { # $1=key $2=port $3=label
+    if port_listen "$2"; then
+        set_state "$1" 0 "$3"
+    else
+        set_state "$1" 1 "$3"
+        FAILS=$((FAILS+1))
+        log "FAIL detail $1 out=no listener on :$2 (/proc/net/tcp)"
+    fi
+}
+
+# v1.27: unified supervision for script daemons.
+# Columns: name|pgrep-pattern|lock-token|recipe|heartbeat|max-hb-age
+SVC_TABLE='
+ntp_keeper|ntp_keeper[.]sh|ntp_keeper.sh|sh /data/gw/ntp_keeper.sh|/tmp/ntp_keeper.hb|600
+traffic_logger|traffic_logger[.]sh|traffic_logger.sh|sh /data/gw/traffic_logger.sh|/tmp/traffic_logger.hb|900
+wifi_guard|wifi_guard[.]sh|wifi_guard.sh|sh /data/gw/wifi_guard.sh|/tmp/wifi_guard.hb|90
+reboot_sched|reboot_sched[.]sh|reboot_sched.sh|sh /data/gw/reboot_sched.sh|/tmp/reboot_sched.hb|900
+led_mgr|led_mgr[.]sh|led_mgr.sh|sh /data/gw/led_mgr.sh|/tmp/led_mgr.hb|60
+fan_mgr|fan_mgr[.]sh|fan_mgr.sh|sh /data/gw/fan_mgr.sh|/tmp/fan_mgr.hb|60
+wan_eth|wan_eth[.]sh|wan_eth.sh|sh /data/gw/wan_eth.sh|/tmp/wan_eth.hb|150
+log_keeper|log_keeper[.]sh|log_keeper.sh|sh /data/gw/log_keeper.sh|/tmp/log_keeper.hb|180
+core_trap|core_trap[.]sh|core_trap.sh|sh /data/gw/core_trap.sh|/tmp/core_trap.hb|600
+healthdog|healthdog[.]sh|healthdog.sh|sh /data/gw/healthdog.sh|/tmp/healthdog.hb|60
+'
+svc_supervise() { # $1=name $2=pattern $3=lock $4=recipe $5=hb $6=maxage
+    _sn=$1; _sp=$2; _st=$3; _sc=$4; _shb=$5; _smax=$6
+    _hb=999999
+    [ -n "$_shb" ] && _hb=$(hb_age "$_shb")
+    _live=0
+    alive "$_sp" "$_sn" "$_st" && _live=1
+    # boot grace: rc19 owns first-boot startup; do not race or cry wolf
+    if [ "$UP" -lt 240 ]; then
+        [ "$_live" = 1 ] && set_state "$_sn" 0 "$_sn (boot)"
+        return 0
+    fi
+    if [ "$_live" = 1 ] && [ "$_hb" -le "$_smax" ]; then
+        set_state "$_sn" 0 "$_sn"
+        strike_clear "$_sn"
+        return 0
+    fi
+    set_state "$_sn" 1 "$_sn"
+    FAILS=$((FAILS + 1))
+    if [ "$_live" = 1 ]; then
+        log "WARN  $_sn heartbeat stale (${_hb}s > ${_smax}s) — process alive, counting"
+    else
+        log "WARN  $_sn not running (hb=${_hb}s)"
+    fi
+    strike "$_sn" || { log "SKIP  $_sn recovery (confirmation 1/3)"; return 0; }
+    if rl_ok "$_sn"; then
+        _oldpid=$(cat /tmp/$_sn.lock 2>/dev/null)
+        if [ -n "$_oldpid" ] && kill -0 "$_oldpid" 2>/dev/null && \
+           grep -qa "/data/gw/$_st" /proc/$_oldpid/cmdline 2>/dev/null; then
+            kill -9 "$_oldpid" 2>/dev/null
+            log "EVT $_sn stale instance pid=$_oldpid killed before restart"
+        fi
+        log "EVT restart $_sn (live=$_live hb=${_hb}s recipe=[$_sc])"
+        # v1.27: run a plain "sh /data/gw/<script>" recipe directly (no sh -c
+        # wrapper) so $! is the script's own pid and its single-instance lock
+        # matches the pid the watchdog remembers.
+        case "$_sc" in
+        "sh /data/gw/"*) spawn "$_sn" /tmp/$_sn.out sh "/data/gw/$_st" ;;
+        *)               spawn "$_sn" /tmp/$_sn.out sh -c "$_sc" ;;
+        esac
+        logger -t watchdog "restarted $_sn"
+    else
+        log "WARN  $_sn restart budget exhausted (3/h) — alert only"
     fi
 }
 
 run_cycle() {
     FAILS=0
+    TOOLFAILS=0
+    UP=$(cut -d. -f1 /proc/uptime)
     # v1.15: 时钟跳变检测 — NTP 校时/回拨会让本地时间戳不可跨段比较; epoch 与
     #   uptime 增量不一致即留痕(设备无 RTC, 开机曾出现 8h 跳变)。
-    _NOW=$(date +%s); _UP=$(cut -d. -f1 /proc/uptime)
+    _NOW=$(date +%s)
     if [ -n "$LAST_EPOCH" ] && [ -n "$LAST_UP" ]; then
-        _de=$(( _NOW - LAST_EPOCH )); _du=$(( _UP - LAST_UP ))
+        _de=$(( _NOW - LAST_EPOCH )); _du=$(( UP - LAST_UP ))
         _dd=$(( _de - _du )); [ $_dd -lt 0 ] && _dd=$(( -_dd ))
         [ "$_dd" -gt 5 ] && log "EVT clock jump: epoch +${_de}s vs uptime +${_du}s (skew ${_dd}s)"
     fi
-    LAST_EPOCH=$_NOW; LAST_UP=$_UP
+    LAST_EPOCH=$_NOW; LAST_UP=$UP
 
     # ---- process invariants (pidof 比 pgrep -x 更可靠, busybox -x 有怪癖) ----
-    # hostapd 不走 check(): v1.18 起由下方自愈块负责(存活+控制面 ENABLED 双判据)
-    check v3httpd   "netstat -tln 2>/dev/null | grep -q ':80.*LISTEN'"  "GUI httpd"
-    check dnsmasq   "pidof dnsmasq"                  "DHCP/DNS"
-    check dropbear  "netstat -tln 2>/dev/null | grep -q ':22.*LISTEN'"  "SSH"
-    # wan_agg / fan_mgr 不走 check(): v1.19/v1.20 起由下方自愈块负责
-    check wan_eth   "pgrep -f wan_eth.sh"            "wired-WAN iface keeper"
-    # v1.15: 自研工具在位性 — 缺失时相关功能会静默降级(ccmni 落地/蜂窝直连)
+    # v1.27: 服务本体统一走下方监督表/专用块; 这里只做静态不变量.
     check mipc_tool "[ -x /data/gw/mipc_cellular ]"  "cellular direct tool"
     check ccmni_up  "[ -x /data/gw/ccmni_up.sh ]"    "ccmni landing tool"
+    check bootgate  "[ -x /data/gw/boot_gate.sh ]"   "boot health gate tool"
+    check coremeta  "[ -x /data/gw/core_meta.sh ]"   "core metadata wrapper"
 
     # ---- data plane invariants ----
-    # v1.4: 模式无关 — weight 模式有 sport 分界, 优先/仅模式为单路 MARK 规则
     check agg_rules "iptables -t mangle -S WANAGG 2>/dev/null | grep -q MARK" "split rules installed"
     check fwmark    "ip rule | grep -q fwmark"       "fwmark policy routing"
     check nat       "iptables -t nat -S POSTROUTING | grep -q MASQ"  "NAT masquerade"
     check bss       "[ \$(iw dev 2>/dev/null | grep -c 'type AP') -ge 2 ]"  "2+ BSS active"
-    check port80    "netstat -tln 2>/dev/null | grep -q ':80.*LISTEN'"  "GUI :80 reachable"
-    check port22    "netstat -tln 2>/dev/null | grep -q ':22.*LISTEN'"  "SSH :22 reachable"
-    check boot      "[ -f /tmp/boot.done ]"          "boot chain complete"
+    check_port port80 80 "GUI :80 reachable"
+    check_port port22 22 "SSH :22 reachable"
+    if [ -f /tmp/boot.done ]; then
+        set_state boot 0 "boot chain complete"
+    elif [ "$UP" -lt 600 ]; then
+        set_state boot 0 "boot chain in progress"
+    else
+        check boot "[ -f /tmp/boot.done ]" "boot chain complete"
+    fi
     check lan_ip    "ip -4 addr show br-lan | grep -q inet"  "LAN IP present"
+    check lo_up     "ip link show lo | grep -q 'LOOPBACK,UP'" "loopback up"
 
-    # ---- cellular control plane (L14) ----
-    # dial_keeper: 拨号兜底守护 (P2); 死则带环境拉起
-    # v1.7: 进程在 ≠ 守护活 — 卡死在一次 mipc 调用里时进程仍存活(10-14 模组 EE
-    #   事故疑似形态)。心跳 /tmp/dial_keeper.hb(uptime 秒, 守护每 ≤5s 刷)陈旧
-    #   >90s 即杀+拉起; 无心跳文件且已过开机宽限(300s)同样判异常。
-    # v1.8: 实例定位改 PID 锁(/tmp/dial_keeper.lock; cmdline 复核防 PID 复用) —
-    #   旧 pgrep -f 判据在"启动者 argv 含脚本路径"时自匹配, 且"杀所有匹配"会
-    #   误伤旁观 shell(08:00 部署实测两次); 无锁文件时回退括号法 pgrep(旧版过渡)。
+    # ---- dial_keeper: hb + lock (v1.7/v1.8 semantics preserved) ----
     _dhb=$(cat /tmp/dial_keeper.hb 2>/dev/null)
-    _dup=$(cut -d. -f1 /proc/uptime)
     _dstale=0
     case "$_dhb" in
-    ''|*[!0-9]*) [ "${_dup:-0}" -gt 300 ] && _dstale=1 ;;
-    *) [ $((_dup - _dhb)) -gt 90 ] && _dstale=1 ;;
+    ''|*[!0-9]*) [ "${UP:-0}" -gt 300 ] && _dstale=1 ;;
+    *) [ $((UP - _dhb)) -gt 90 ] && _dstale=1 ;;
     esac
     _kp=$(cat /tmp/dial_keeper.lock 2>/dev/null)
     _kalive=0
@@ -216,153 +337,291 @@ run_cycle() {
        && grep -qa '/data/gw/dial_keeper.sh' /proc/$_kp/cmdline 2>/dev/null; then
         _kalive=1
     elif pgrep -f 'dial_keepe[r].sh' >/dev/null 2>&1; then
-        _kalive=1   # 回退判据(旧版实例无锁文件)
+        _kalive=1
     fi
     if [ "$_kalive" = 1 ] && [ "$_dstale" = 0 ]; then
         set_state keeper 0 "dial keeper"
+        strike_clear dial_keeper
     else
         if [ "$_dstale" = 1 ]; then
-            log "WARN  stale dial_keeper heartbeat (hb=${_dhb:-none} up=${_dup}) — restart"
-            logger -t watchdog "stale dial_keeper heartbeat (hb=${_dhb:-none}) — restart"
+            log "WARN  stale dial_keeper heartbeat (hb=${_dhb:-none} up=${UP}) — counting"
         fi
         set_state keeper 1 "dial keeper"
         FAILS=$((FAILS+1))
-        log "EVT restart dial_keeper (alive=$_kalive stale=$_dstale old_pid=${_kp:-none} hb=${_dhb:-none} up=${_dup})"
-        # 只杀锁指向的实例(cmdline 复核) — 不打模式匹配, 防误伤旁观进程
-        if [ -n "$_kp" ] && kill -0 "$_kp" 2>/dev/null \
-           && ! grep -q '^State:.*Z' /proc/$_kp/status 2>/dev/null \
-           && grep -qa '/data/gw/dial_keeper.sh' /proc/$_kp/cmdline 2>/dev/null; then
-            kill -9 "$_kp" 2>/dev/null
+        if strike dial_keeper; then
+            log "EVT restart dial_keeper (alive=$_kalive stale=$_dstale old_pid=${_kp:-none} hb=${_dhb:-none} up=${UP})"
+            if [ -n "$_kp" ] && kill -0 "$_kp" 2>/dev/null \
+               && ! grep -q '^State:.*Z' /proc/$_kp/status 2>/dev/null \
+               && grep -qa '/data/gw/dial_keeper.sh' /proc/$_kp/cmdline 2>/dev/null; then
+                kill -9 "$_kp" 2>/dev/null
+            fi
+            export LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib
+            export PATH=/data/gw/sbin:/data/gw/bin:/usr/sbin:/usr/bin:/sbin:/bin:/fhrom/bin:/fhrom/fhshell
+            nohup sh /data/gw/dial_keeper.sh >/dev/null 2>&1 &
+        else
+            log "SKIP  dial_keeper recovery (confirmation 1/3)"
         fi
-        export LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib
-        export PATH=/data/gw/sbin:/data/gw/bin:/usr/sbin:/usr/bin:/sbin:/bin:/fhrom/bin:/fhrom/fhshell
-        nohup sh /data/gw/dial_keeper.sh >/dev/null 2>&1 &
     fi
-    # log_keeper: 日志持久化(专项轮); 死则拉起 — 日志连续性=诊断生命线
-    if alive 'log_keeper[.]sh' log_keeper log_keeper.sh; then
-        set_state logk 0 "log keeper"
+
+    # ---- dnsmasq: process + :53 listener, restart from cached cmdline ----
+    _dp=$(pidof dnsmasq 2>/dev/null)
+    if [ -n "$_dp" ] && port_listen 53; then
+        set_state dnsmasq 0 "DHCP/DNS"
+        strike_clear dnsmasq
+        save_cmdline "${_dp%% *}" /tmp/watchdog_dnsmasq.cmd 2>/dev/null
     else
-        set_state logk 1 "log keeper"
+        set_state dnsmasq 1 "DHCP/DNS"
         FAILS=$((FAILS+1))
-        log "EVT restart log_keeper (no live instance; lock=$(cat /tmp/log_keeper.lock 2>/dev/null || echo none))"
-        spawn log_keeper /dev/null sh /data/gw/log_keeper.sh
+        log "WARN  dnsmasq unhealthy (pid=${_dp:-none} :53=$(port_listen 53 && echo y || echo n))"
+        if strike dnsmasq; then
+            if rl_ok dnsmasq; then
+                [ -n "$_dp" ] && kill -9 $_dp 2>/dev/null
+                if [ -s /tmp/watchdog_dnsmasq.cmd ]; then
+                    log "EVT restart dnsmasq (cached cmdline)"
+                    spawn dnsmasq /tmp/dnsmasq.out sh -c "$(cat /tmp/watchdog_dnsmasq.cmd)"
+                else
+                    log "EVT restart dnsmasq (rc19 recipe)"
+                    . /data/gw/defaults.conf 2>/dev/null; . /data/gw/settings.conf 2>/dev/null
+                    spawn dnsmasq /tmp/dnsmasq.out sh -c "dnsmasq -p 53 --no-resolv --server=223.5.5.5 --server=119.29.29.29 --stop-dns-rebind --bogus-priv -i br-lan -I lo -F ${DHCP_R1:-192.168.9.100},${DHCP_R2:-192.168.9.200},255.255.255.0,${DHCP_LEASE:-12h} --dhcp-option=3,192.168.9.1 --dhcp-option=6,192.168.9.1 --dhcp-leasefile=/tmp/dnsmasq_br.leases -x /var/run/dnsmasd_br.pid"
+                fi
+            else
+                log "WARN  dnsmasq restart budget exhausted (3/h) — alert only"
+            fi
+        else
+            log "SKIP  dnsmasq recovery (confirmation 1/3)"
+        fi
     fi
-    # core_trap: daily user-space core window (SIGSEGV P3) — dead means the
-    # family core gap can never close; restart it.  On start it also repairs a
-    # stale /tmp/core_trap.active left by a kill -9 mid-window.
-    if alive 'core_trap[.]sh' core_trap core_trap.sh; then
-        set_state coretrap 0 "core capture window"
+
+    # ---- dropbear: process + :22 listener ----
+    if pidof dropbear >/dev/null 2>&1 && port_listen 22; then
+        set_state dropbear 0 "SSH"
+        strike_clear dropbear
+        _dbp=$(pidof dropbear 2>/dev/null)
+        [ -n "$_dbp" ] && save_cmdline "${_dbp%% *}" /tmp/watchdog_dropbear.cmd 2>/dev/null
     else
-        set_state coretrap 1 "core capture window"
+        set_state dropbear 1 "SSH"
         FAILS=$((FAILS+1))
-        log "EVT restart core_trap (no live instance; pattern=$(cat /proc/sys/kernel/core_pattern 2>/dev/null))"
-        spawn core_trap /dev/null sh /data/gw/core_trap.sh
+        log "WARN  dropbear unhealthy (pid=$(pidof dropbear 2>/dev/null || echo none) :22=$(port_listen 22 && echo y || echo n))"
+        if strike dropbear; then
+            if rl_ok dropbear; then
+                _old=$(pidof dropbear 2>/dev/null)
+                [ -n "$_old" ] && kill -9 $_old 2>/dev/null
+                if [ -s /tmp/watchdog_dropbear.cmd ]; then
+                    log "EVT restart dropbear (cached cmdline)"
+                    spawn dropbear /dev/null sh -c "$(cat /tmp/watchdog_dropbear.cmd)"
+                else
+                    log "EVT restart dropbear (rc.extend recipe)"
+                    [ -s /data/gw/dropbear_keys/rsa ] || \
+                        /usr/bin/dropbearkey -t rsa -f /data/gw/dropbear_keys/rsa -s 2048 2>/dev/null
+                    spawn dropbear /dev/null /usr/sbin/dropbear -r /data/gw/dropbear_keys/rsa -p 22
+                fi
+            else
+                log "WARN  dropbear restart budget exhausted (3/h) — alert only"
+            fi
+        else
+            log "SKIP  dropbear recovery (confirmation 1/3)"
+        fi
     fi
-    # led_mgr: 显示器守护(v1.7 自愈拉) — 静默死亡=指示灯无声谎报(10-14 事故
-    # 里用户对"灯还亮着"的判读是第一手症状, 灯不能哑)
-    if alive 'led_mgr[.]sh' led_mgr led_mgr.sh; then
-        set_state led_mgr 0 "LED manager"
+
+    # ---- v3httpd: process + :80 listener ----
+    if pidof v3httpd >/dev/null 2>&1 && port_listen 80; then
+        set_state v3httpd 0 "GUI httpd"
+        strike_clear v3httpd
     else
-        set_state led_mgr 1 "LED manager"
+        set_state v3httpd 1 "GUI httpd"
         FAILS=$((FAILS+1))
-        log "EVT restart led_mgr (no live instance; lock=$(cat /tmp/led_mgr.lock 2>/dev/null || echo none))"
-        spawn led_mgr /dev/null sh /data/gw/led_mgr.sh
-        logger -t watchdog "restarted led_mgr"
+        log "WARN  v3httpd unhealthy (pid=$(pidof v3httpd 2>/dev/null || echo none) :80=$(port_listen 80 && echo y || echo n))"
+        if strike v3httpd; then
+            if rl_ok v3httpd; then
+                _old=$(pidof v3httpd 2>/dev/null)
+                [ -n "$_old" ] && kill -9 $_old 2>/dev/null
+                log "EVT restart v3httpd"
+                spawn v3httpd /dev/null /data/gw/v3httpd
+            else
+                log "WARN  v3httpd restart budget exhausted (3/h) — alert only"
+            fi
+        else
+            log "SKIP  v3httpd recovery (confirmation 1/3)"
+        fi
     fi
-    # fan_mgr: 4 线风扇梯度温控(v1.20 自愈) — 死则 PWM 停在最后挡位, 高温不再
-    #   升挡(实测现场停在 60=1663rpm), 属散热静默劣化; 原实现只 check 不拉。
-    if alive 'fan_mgr[.]sh' fan_mgr fan_mgr.sh; then
-        set_state fan_mgr 0 "fan manager"
-    else
-        set_state fan_mgr 1 "fan manager"
-        FAILS=$((FAILS+1))
-        log "EVT restart fan_mgr (no live instance; pwm=$(cat /sys/devices/platform/pwm-fan@1/hwmon/hwmon1/pwm1 2>/dev/null))"
-        spawn fan_mgr /dev/null sh /data/gw/fan_mgr.sh
-        logger -t watchdog "restarted fan_mgr"
+
+    # ---- uplink auth (generic AUTHD_CMD; no private syntax here) ----
+    _aen=$(sed -n 's/^ENABLE=//p' /data/gw/uplink.conf 2>/dev/null | tail -1)
+    _acmd=$(sed -n 's/^AUTHD_CMD=//p' /data/gw/uplink.conf 2>/dev/null | tail -1)
+    if [ "$_aen" = "1" ] && [ -n "$_acmd" ]; then
+        _apid=$(pidof authd 2>/dev/null | awk '{print $1}')
+        _ast=$(awk '{print $2}' /tmp/authd_state 2>/dev/null)
+        case "$_ast" in ''|*[!0-9]*) _ast="" ;; esac
+        if [ -n "$_apid" ] && [ -n "$_ast" ] && [ $((_NOW - _ast)) -lt 300 ]; then
+            set_state authd 0 "uplink auth"
+            strike_clear authd
+        elif [ "$UP" -lt 240 ]; then
+            set_state authd 0 "uplink auth (boot pending)"
+        else
+            set_state authd 1 "uplink auth"
+            FAILS=$((FAILS+1))
+            log "WARN  authd unhealthy (pid=${_apid:-none} state_age=$((_NOW - ${_ast:-_NOW}))s)"
+            if strike authd; then
+                if rl_ok authd; then
+                    [ -n "$_apid" ] && kill -9 "$_apid" 2>/dev/null
+                    log "EVT restart authd"
+                    spawn authd /dev/null sh -c "$_acmd"
+                else
+                    log "WARN  authd restart budget exhausted (3/h) — alert only"
+                fi
+            else
+                log "SKIP  authd recovery (confirmation 1/3)"
+            fi
+        fi
     fi
-    # hostapd: WPA 安全面(v1.18 崩溃自愈) — 实弹 2026-10-19 12:41 SIGSEGV 后无人
-    #   拉起: ra0/rai0 仍按驱动 apcfg 发信标, 手机看得见且 assoc 成功, 但 4-way
-    #   无 EAPOL(authorized:no) → 10s 后 reason=3 自断重试, 直到人工发现(3.5h)。
-    #   配方 = wifi_up.sh v1.23 的 MLO 在线重应用等价态(接口已 UP 时直接 -B 必死):
-    #   两带接口下电 3s → 单进程 hostapd -B 双 conf → no_bcn 0 重装订信标。
-    #   限频 3 次/小时(tmpfs 窗口文件, 重启清零), 超限只告警不动射频。
-    _ha=0
+
+    # ---- unified script-daemon table (v1.27) ----
+    while IFS='|' read -r _n _p _t _r _hb _mx; do
+        [ -z "$_n" ] && continue
+        svc_supervise "$_n" "$_p" "$_t" "$_r" "$_hb" "$_mx"
+    done <<EOF
+$(printf '%s\n' "$SVC_TABLE" | sed '/^[[:space:]]*$/d')
+EOF
+
+    # ---- hostapd: WPA layer; 3-strike + tool-fault separation ----
+    _ha=0; _htool=0; _hrc=0
     if pgrep -f 'hostapd -B' >/dev/null 2>&1; then
-        hostapd_cli -i ra0 status 2>/dev/null | grep -q '^state=ENABLED' && _ha=1
+        _try=1
+        while [ "$_try" -le 3 ]; do
+            _hs=$(tmo 5 "hostapd_cli -i ra0 status"); _hrc=$?
+            printf '%s' "$_hs" | grep -q '^state=ENABLED' && { _ha=1; break; }
+            is_toolfault "$_hrc" || break
+            _htool=1
+            toolfault hostapd_cli "$_hrc" "hostapd_cli -i ra0 status" "retry=$_try"
+            sleep 2
+            _try=$((_try + 1))
+        done
     fi
     if [ "$_ha" = 1 ]; then
         set_state hostapd 0 "hostapd WPA layer"
-    elif pgrep -f 'wifi_up[.]sh' >/dev/null 2>&1 || [ "$(cut -d. -f1 /proc/uptime)" -lt 180 ]; then
-        # 开机/在线重应用进行中: 不与之抢射频, 只记录
+        strike_clear hostapd
+    elif [ "$_htool" = 1 ] && pgrep -f 'hostapd -B' >/dev/null 2>&1; then
+        # control path unusable but daemon alive: retry-safe, alert-only
+        set_state hostapd 1 "hostapd WPA layer (control tool failed)"
+        FAILS=$((FAILS + 1)); TOOLFAILS=$((TOOLFAILS + 1))
+        log "SKIP  hostapd recovery (control tool timeout/segv rc=$_hrc; alert only)"
+    elif pgrep -f 'wifi_up[.]sh' >/dev/null 2>&1 || [ "$UP" -lt 240 ]; then
         set_state hostapd 1 "hostapd WPA layer"
         FAILS=$((FAILS+1))
         log "SKIP  hostapd recovery (boot or wifi_up in progress)"
     else
         set_state hostapd 1 "hostapd WPA layer"
         FAILS=$((FAILS+1))
-        _hn=0; _ht=0
-        [ -r /tmp/watchdog_hostapd.rec ] && read _hn _ht < /tmp/watchdog_hostapd.rec
-        _now2=$(date +%s)
-        case "$_hn" in ''|*[!0-9]*) _hn=0 ;; esac
-        case "$_ht" in ''|*[!0-9]*) _ht=$_now2 ;; esac
-        [ $((_now2 - _ht)) -gt 3600 ] && { _hn=0; _ht=$_now2; }
-        if [ "$_hn" -lt 3 ]; then
-            _hn=$((_hn + 1))
-            echo "$_hn $_ht" > /tmp/watchdog_hostapd.rec
-            log "EVT recover hostapd (attempt $_hn/3 this hour; live=$(pgrep -f 'hostapd -B' | tr '\n' ' '))"
-            for _p in $(pgrep -f 'hostapd -B' 2>/dev/null); do kill $_p 2>/dev/null; done
-            for _v in ra0 rai0 ra1 rai1; do ifconfig $_v down 2>/dev/null; done
-            sleep 3
-            brctl addif br-lan ra0 2>/dev/null
-            brctl addif br-lan rai0 2>/dev/null
-            LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib \
-                hostapd -B /var/wlan/hap_2g.conf /var/wlan/hap_5g.conf >>/tmp/watchdog.log 2>&1
-            sleep 5
-            for _v in ra0 rai0; do mwctl dev $_v set no_bcn 0 >/dev/null 2>&1; done
-            if hostapd_cli -i ra0 status 2>/dev/null | grep -q '^state=ENABLED'; then
-                log "OK    hostapd recovered (ra0 ENABLED; clients must re-associate)"
-                set_state hostapd 0 "hostapd WPA layer"
+        log "WARN  hostapd not ENABLED (pid=$(pgrep -f 'hostapd -B' | tr '\n' ' '))"
+        if strike hostapd; then
+            _hn=0; _ht=0
+            [ -r /tmp/watchdog_hostapd.rec ] && read _hn _ht < /tmp/watchdog_hostapd.rec
+            _now2=$(date +%s)
+            case "$_hn" in ''|*[!0-9]*) _hn=0 ;; esac
+            case "$_ht" in ''|*[!0-9]*) _ht=$_now2 ;; esac
+            [ $((_now2 - _ht)) -gt 3600 ] && { _hn=0; _ht=$_now2; }
+            # independent confirmation before touching the radios
+            _sock=0
+            for _s in /var/run/hostapd/ra0 /var/run/hostapd/rai0 /var/run/wpa_supplicant/ra0; do
+                [ -S "$_s" ] && _sock=1
+            done
+            _clients=$(iw dev ra0 station dump 2>/dev/null | grep -c '^Station')
+            if [ "$_hn" -lt 3 ] && [ "$_sock" = 1 ]; then
+                _hn=$((_hn + 1)); echo "$_hn $_ht" > /tmp/watchdog_hostapd.rec
+                log "EVT recover hostapd (attempt $_hn/3 this hour; clients=$_clients ctrl_sock=$_sock live=$(pgrep -f 'hostapd -B' | tr '\n' ' '))"
+                for _p in $(pgrep -f 'hostapd -B' 2>/dev/null); do kill $_p 2>/dev/null; done
+                for _v in ra0 rai0 ra1 rai1; do ifconfig $_v down 2>/dev/null; done
+                sleep 3
+                brctl addif br-lan ra0 2>/dev/null
+                brctl addif br-lan rai0 2>/dev/null
+                LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib \
+                    hostapd -B /var/wlan/hap_2g.conf /var/wlan/hap_5g.conf >>/tmp/watchdog.log 2>&1
+                sleep 5
+                for _v in ra0 rai0; do mwctl dev $_v set no_bcn 0 >/dev/null 2>&1; done
+                _hs=$(tmo 5 "hostapd_cli -i ra0 status"); _hrc=$?
+                if printf '%s' "$_hs" | grep -q '^state=ENABLED'; then
+                    log "OK    hostapd recovered (ra0 ENABLED; clients=$_clients must re-associate)"
+                    set_state hostapd 0 "hostapd WPA layer"
+                elif is_toolfault "$_hrc"; then
+                    log "WARN  hostapd recovery verification tool failed rc=$_hrc — alert only"
+                    TOOLFAILS=$((TOOLFAILS + 1))
+                else
+                    log "FAIL  hostapd recovery did not reach ENABLED"
+                fi
+            elif [ "$_sock" = 0 ]; then
+                log "WARN  hostapd down but no control socket — refusing RF bounce (alert only)"
             else
-                log "FAIL  hostapd recovery did not reach ENABLED"
+                log "WARN  hostapd down; recovery budget exhausted (3/h) — alert only"
             fi
         else
-            log "WARN  hostapd down; recovery budget exhausted (3/h) — alert only"
+            log "SKIP  hostapd recovery (confirmation 1/3)"
         fi
     fi
-    # wan_agg: 双上行聚合主管(v1.19 崩溃自愈) — 实弹 2026-10-19 16:26: 子命令
-    #   连续 SIGSEGV 后脚本静默退出, /tmp/wan_alive 过期 → led_mgr(30s 新鲜度)
-    #   灭 WAN 灯、GUI 线路状态判"离线", 而 eth0 carrier=1/有 IP/默认路由/实际有流量。
-    #   原实现只 check 不拉(与 hostapd v1.18 前的缺口同型)。死则按启动配方拉起。
-    if alive 'wan_agg[.]sh' wan_agg wan_agg.sh; then
+
+    # ---- wan_agg: wan_alive freshness + boot grace (v1.25 semantics) ----
+    _wa_ts=$(sed -n 's/.* ts=\([0-9][0-9]*\).*/\1/p' /tmp/wan_alive 2>/dev/null)
+    _wa_age=999999
+    [ -n "$_wa_ts" ] && _wa_age=$(( _NOW - _wa_ts ))
+    _wastale=0
+    [ "$UP" -gt 240 ] && [ "$_wa_age" -gt 120 ] && _wastale=1
+    if [ "$_wastale" = 0 ] && alive 'wan_agg[.]sh' wan_agg wan_agg.sh; then
         set_state wan_agg 0 "aggregation supervisor"
-    elif [ "$(cut -d. -f1 /proc/uptime)" -lt 180 ]; then
-        # v1.25 (boot duplicate real hit): rc19 starts wan_agg only after its
-        # ~60s recipe; a 90s uptime watchdog cycle would spawn a second
-        # instance before rc19's own startup (observed two `sh wan_agg.sh`).
-        # Boot grace: don't race rc19, and don't raise a false failure.
+        strike_clear wan_agg
+    elif [ "$UP" -lt 240 ]; then
         set_state wan_agg 0 "aggregation supervisor (boot pending)"
         log "SKIP  wan_agg recovery (boot in progress; rc19 owns startup)"
     else
         set_state wan_agg 1 "aggregation supervisor"
         FAILS=$((FAILS+1))
-        log "EVT restart wan_agg (no live instance; wan_alive=$(cat /tmp/wan_alive 2>/dev/null))"
-        spawn wan_agg /tmp/wagg.out sh /data/gw/wan_agg.sh
-        logger -t watchdog "restarted wan_agg"
+        log "WARN  wan_agg unhealthy (stale=$_wastale age=${_wa_age}s wan_alive=$(cat /tmp/wan_alive 2>/dev/null))"
+        if strike wan_agg; then
+            if rl_ok wan_agg; then
+                _wap=$(cat /tmp/wan_agg.lock 2>/dev/null)
+                if [ -n "$_wap" ] && kill -0 "$_wap" 2>/dev/null \
+                   && grep -qa '/data/gw/wan_agg.sh' /proc/$_wap/cmdline 2>/dev/null; then
+                    kill -9 "$_wap" 2>/dev/null
+                fi
+                log "EVT restart wan_agg (stale=$_wastale age=${_wa_age}s)"
+                spawn wan_agg /tmp/wagg.out sh /data/gw/wan_agg.sh
+                logger -t watchdog "restarted wan_agg"
+            else
+                log "WARN  wan_agg restart budget exhausted (3/h) — alert only"
+            fi
+        else
+            log "SKIP  wan_agg recovery (confirmation 1/3)"
+        fi
     fi
-    # wan_eth: 有线 WAN 接口管理守护(v1.12, 架构轮拆分自 wan_agg ensure_lease);
-    #   死则拉起 — eth0 租约续订/NAT/FORWARD 看门狗停摆 = 家宽侧静默劣化
-    if alive 'wan_eth[.]sh' wan_eth wan_eth.sh; then
-        set_state wan_eth 0 "wired-WAN iface keeper"
-    else
-        set_state wan_eth 1 "wired-WAN iface keeper"
-        FAILS=$((FAILS+1))
-        log "EVT restart wan_eth (no live instance)"
-        spawn wan_eth /dev/null sh /data/gw/wan_eth.sh
-        logger -t watchdog "restarted wan_eth"
+
+    # ---- boot health gate supervision (v1.27) ----
+    # Before boot.healthy exists the gate is boot-critical: restart it if dead.
+    # Once healthy, re-verify at the 10-minute mark; drift is reported only
+    # (services are repaired by their own supervision; TRY_A is not re-cleared).
+    if [ ! -f "$HEALTHY" ] && [ "$UP" -lt 900 ]; then
+        if alive 'boot_gate[.]sh' bootgate boot_gate.sh; then
+            set_state bootgate 0 "boot health gate"
+        else
+            set_state bootgate 1 "boot health gate"
+            FAILS=$((FAILS+1))
+            if strike bootgate; then
+                log "EVT restart boot_gate (no live instance before healthy)"
+                spawn bootgate /tmp/boot_gate.out sh /data/gw/boot_gate.sh
+            else
+                log "SKIP  boot_gate recovery (confirmation 1/3)"
+            fi
+        fi
     fi
+    if [ -f "$HEALTHY" ] && [ "$UP" -ge 600 ] && [ "$UP" -lt 690 ] && [ ! -f /tmp/watchdog_bootrecheck ]; then
+        : > /tmp/watchdog_bootrecheck
+        _gate=$(tmo 60 "/data/gw/boot_gate.sh --check"); _grc=$?
+        if [ "$_grc" -eq 0 ]; then
+            log "OK    boot.healthy re-check at ${UP}s: all gate checks still pass"
+        else
+            log "WARN  boot.healthy drift at ${UP}s rc=$_grc: $(printf '%s' "$_gate" | tr '\n' ' ' | head -c 200)"
+        fi
+    fi
+
     # ql_wifi_sample 卡死清除(L28): stdin EOF 后死循环刷 syslog(实测 3700 行/s,
-    #   日志环被冲至 18s 深)。CPU 累计 >=120s 即杀(交互等待不耗 CPU, 不误伤;
-    #   stat 14+15=utime+stime tick, busybox HZ 按 100 计, 阈值语义随 HZ 平移无害)
+    #   日志环被冲至 18s 深)。CPU 累计 >=120s 即杀(交互等待不耗 CPU, 不误伤)
     for _p in $(pgrep -f ql_wifi_sampl[e] 2>/dev/null); do
         _cpu=$(awk '{print int(($14 + $15) / 100)}' /proc/$_p/stat 2>/dev/null)
         if [ -n "$_cpu" ] && [ "$_cpu" -ge 120 ]; then
@@ -380,7 +639,6 @@ run_cycle() {
         /usr/bin/atcid >/var/atcid.log 2>&1 &
     fi
     # CFUN 探测同时充当通道活性探针; airplane(CFUN:4)时跳过注册态断言
-    # v1.7: 探针过 mto() 硬超时 — 探针卡死不再让整轮看门狗停摆
     CFUNR=$(mto --at_cmd 'AT+CFUN?' 2>/dev/null)
     case "$CFUNR" in
     *"CFUN: 4"*)
@@ -419,20 +677,14 @@ run_cycle() {
     mv $STATE.tmp $STATE
 
     # ---- v1.20: SIGSEGV 家族可见化 ----
-    # 未根除(厂商 syslog 管线/短命工具随机 SIGSEGV), 至少让"又崩了"进日志:
-    # 内核 fault 行计数增量; dmesg 环回卷导致计数回退时只重置不告警。
     FLT=$(dmesg | grep -c 'unhandled exception')
     FLT_PREV=$(cat /tmp/watchdog_faultcount 2>/dev/null)
     if [ -n "$FLT_PREV" ] && [ "$FLT" -gt "$FLT_PREV" ] 2>/dev/null; then
         log "WARN  user-fault +$((FLT-FLT_PREV)) (ring total $FLT) — SIGSEGV family"
     fi
-    # v1.21: 计数走独立文件 — 放 state 会被 selftest 当 0/1 故障键误判(faults=1)
     echo "$FLT" > /tmp/watchdog_faultcount
 
-    # ---- v1.22: aee NE 台账增量 (P4) ----
-    # 内核 DABT 行会被 printk 限流(dmesg 镜像 18:14 后无新增行), 但 aee 仍在
-    # 追加 db_history —— dmesg 计数会低估。以行数为增量判据, 回退(轮转/重置)
-    # 时只重置基线不告警。末行含进程名/信号/时间, 直接进 WARN 供复盘。
+    # ---- v1.22: aee NE 台账增量 (P4) + v1.27 census 进程名 ----
     AEEH=/data/log/aee_exp/db_history
     if [ -r "$AEEH" ]; then
         AEE_N=$(wc -l < "$AEEH" 2>/dev/null)
@@ -440,15 +692,13 @@ run_cycle() {
         case "$AEE_N" in ''|*[!0-9]*) AEE_N=0 ;; esac
         case "$AEE_PREV" in ''|*[!0-9]*) AEE_PREV=$AEE_N ;; esac
         if [ "$AEE_N" -gt "$AEE_PREV" ]; then
-            log "WARN  aee NE +$((AEE_N-AEE_PREV)) (total $AEE_N): $(tail -n 1 "$AEEH" 2>/dev/null)"
+            _cen=$(tail -n 1 /data/gw/logs/ne_census.tsv 2>/dev/null | tr '\t' ' ')
+            log "WARN  aee NE +$((AEE_N-AEE_PREV)) (total $AEE_N): $(tail -n 1 "$AEEH" 2>/dev/null) census=[${_cen:-pending}]"
         fi
         echo "$AEE_N" > /tmp/watchdog_aeecount
     fi
 
     # ---- wifi channel consistency (v1.5) ----
-    # 驱动 IDC(LTE 共存避让)可在运行期自行搬道(实测), hostapd 生成配置的 channel=
-    # 会与实况脱节("配置写 ch1 而实况 ch11")。实况为权威: 漂移时回写生成配置
-    # (hostapd 下次重启读到的即真相)并记警; 不闪 LED(非服务性故障)。
     for _b in 2g 5g; do
         [ "$_b" = 2g ] && _vif=ra0 || _vif=rai0
         _cfc=/var/wlan/hap_$_b.conf
@@ -462,12 +712,6 @@ run_cycle() {
     done
 
     # ---- cellular stats divergence guard (v1.10) ----
-    # ccmni 网卡 tx_bytes 会被厂商卸载路径的记账灌入无佐证的批量增量(实测:
-    #   1 秒 +1,221,373B/813 包, 而同期 qdisc 仅 +29B/1 包、ccmni2 抓包只有 6 个
-    #   探针包; 无 IP/无路由且 DOWN 的 ccmni1 也记了 47MB)。流量统计已改用 qdisc
-    #   口径(traffic_logger v1.2/api v2.72), 这里只做**可见化**: 每周期比对两者
-    #   增量, 超阈值记警。原则是不猜修、只取证 —— 信号出现即说明"统计与实际不符"
-    #   在持续发生, 而不是静默污染流量账。
     CIF=$(ip -o -4 addr show 2>/dev/null | grep -m1 'ccmni.*inet' | awk '{print $2}')
     if [ -n "$CIF" ]; then
         CN=$(cat /sys/class/net/$CIF/statistics/tx_bytes 2>/dev/null || echo 0)
@@ -483,9 +727,6 @@ run_cycle() {
             DN=$((CN - PN)); [ $DN -lt 0 ] && DN=$CN
             DQ=$((CQ - PQ)); [ $DQ -lt 0 ] && DQ=$CQ
             GAP=$((DN - DQ))
-            # 阈值 256KB/30s: 真实流量下网卡与 Linux 路径增量**逐字节相等**(实测
-            #   已知量注入 gap=0), 故任何正差都属厂商侧记账异常; 取 256KB 既远高于
-            #   两次读取间的毫秒级错位, 也能抓住单次 1.22MB 的跳变(2MiB 阈值曾漏)。
             [ "$GAP" -gt 262144 ] && \
                 log "WARN  cell stats divergence on $CIF: netdev +${DN}B vs linux-path +${DQ}B (gap ${GAP}B)"
         fi
@@ -493,23 +734,17 @@ run_cycle() {
     fi
 
     # ---- cellular query path liveness (v1.11) ----
-    # 实弹(2026-10-15): ql_ril_service 活着、蜂窝数据面完全正常(有 IP/可 ping),
-    #   但 cells/endc 查询恒返 -2147024889 —— 厂商 RIL 的 ql_nw 子服务静默失效,
-    #   无任何守护察觉, GUI 的小区/邻区/组网模式卡片会静默报错(状态与实际不符)。
-    #   恢复 = 项目自身路径清栈重启 RIL(dial_5g/rc_netfh 同法)。
-    #   只**告警不自动重启**: 蜂窝是主力时重启 RIL 会打断数据面(需重拨 ~40s),
-    #   代价高于收益; 可见化 + 文档化手工恢复是当前最稳做法。每 10 环循(~5min)探一次。
     CQ_TICK=$(( ${CQ_TICK:-0} + 1 ))
     if [ $((CQ_TICK % 10)) -eq 1 ]; then
-        _co=$(/data/gw/mipc_cellular cells 2>&1); _crc=$?
+        _co=$(tmo 10 "/data/gw/mipc_cellular cells"); _crc=$?
         printf '%s' "$_co" | grep -q '"serving"' || \
-            log "WARN  cell query path dead (rc=$_crc len=${#_co} out=$(printf '%s' "$_co" | tr '\n' ' ' | head -c 100)) — 直连 MIPC 查询失败(数据面可能正常); 恢复: 检查 /dev/ttyCMIPC 端口占用与 modem 状态, 见 docs/FINDINGS §27/§29"
+            log "WARN  cell query path dead (rc=$_crc len=${#_co} out=$(printf '%s' "$_co" | tr '\n' ' ' | head -c 100)) — 直连 MIPC 查询失败(数据面可能正常); 恢复见 docs/FINDINGS §27/§29"
     fi
 
     # ---- v1.15: periodic summaries (24h 分析主干) ----
     CYC_TICK=$((CYC_TICK + 1))
     if [ $((CYC_TICK % 2)) -eq 0 ] || [ "$FAILS" -gt 0 ]; then
-        log "TICK epoch=$(date +%s) fails=$FAILS up=$(cut -d. -f1 /proc/uptime)s state=[$(tr '\n' ' ' < $STATE 2>/dev/null)]"
+        log "TICK epoch=$(date +%s) fails=$FAILS toolfails=${TOOLFAILS:-0} up=${UP}s healthy=$([ -f "$HEALTHY" ] && echo y || echo n) state=[$(tr '\n' ' ' < $STATE 2>/dev/null)]"
     fi
     if [ $((CYC_TICK % 10)) -eq 0 ]; then
         _load=$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null)
@@ -520,21 +755,11 @@ run_cycle() {
         _np=$(ls /proc 2>/dev/null | grep -c '^[0-9]')
         _nz=$(ps 2>/dev/null | awk '$4 ~ /^Z/{n++} END{print n+0}')
         _ct=$(cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null)
-        log "HEALTH epoch=$(date +%s) up=$(cut -d. -f1 /proc/uptime)s load=$_load memfree=${_mf:-?}KB memavail=${_ma:-?}KB data_free=${_df:-?}KB tmp_free=${_tf:-?}KB procs=$_np zombies=$_nz conntrack=${_ct:-n/a} cell_if=${CIF:-none} netdev=${CN:-0} qdisc=${CQ:-0}"
+        log "HEALTH epoch=$(date +%s) up=${UP}s load=$_load memfree=${_mf:-?}KB memavail=${_ma:-?}KB data_free=${_df:-?}KB tmp_free=${_tf:-?}KB procs=$_np zombies=$_nz conntrack=${_ct:-n/a} cell_if=${CIF:-none} netdev=${CN:-0} qdisc=${CQ:-0}"
         [ "${_df:-0}" -lt 102400 ] 2>/dev/null && log "WARN /data free low: ${_df}KB (<100MB)"
     fi
 
     # ---- visual alert ----
-    # v1.9 (2026-10-15 实弹): 告警闪烁不再用 WAN 灯。两个写方抢同一物理灯是
-    #   "灯不符实际"的直接成因: watchdog 闪 3 次后停在 0, 而 led_mgr v1.x 只在
-    #   状态串变化时写灯 → 家宽数据面明明通着, WAN 灯被闪灭后永久停在误值
-    #   (实弹: 06:05 状态 b1 起 5 小时内 led_mgr 一次都没再写)。
-    #   改闪 5G 橙灯(gpio473): 该灯在 v1.9 语义下"无数据一律全灭", 恒为 0,
-    #   借它闪烁不误导任何数据面语义(led_mgr v2.0 绝对电平驱动每 2s 纠回, 闪
-    #   完即复原)。WAN 灯写权自此单一化 = led_mgr 独占。
-    # v1.9b: 原 sleep 0.1 是死代码 —— busybox sleep 只吃整数秒(实测
-    #   "invalid number '0.1'"), 告警闪烁自 v1.x 起从未真的执行过。改用
-    #   1s 亮/1s 灭(肉眼可辨, 且不拖长 30s 周期)。
     if [ "$FAILS" -gt 0 ]; then
         for i in 1 2 3; do
             alert_led_set 1; sleep 1
@@ -542,6 +767,9 @@ run_cycle() {
         done
         log "WARN  visual alert: $FAILS check(s) failing"
     fi
+
+    # v1.27: independent liveness beacon (healthdog.sh second-level supervisor)
+    echo "$UP" > /tmp/watchdog.beat 2>/dev/null
 
     # ---- log truncation ----
     LINES=$(wc -l < $LOG 2>/dev/null || echo 0)
@@ -561,8 +789,8 @@ if [ -n "$_wp" ] && [ "$_wp" != "$$" ] && kill -0 "$_wp" 2>/dev/null && \
     exit 0
 fi
 echo $$ > /tmp/watchdog.lock
-log "===== watchdog v1.25 start (alert LED 5G orange; WAN LED owned by led_mgr; +hostapd/wan_agg/fan_mgr/core_trap recovery +single-instance locks +user-fault/aee counters; fine-log TICK/HEALTH) ====="
-logger -t watchdog "watchdog v1.25 start"
+log "===== watchdog v1.27 start (bounded checks + 3-strike recovery + unified service table + /proc port probes + boot.healthy recheck; alert LED 5G orange) ====="
+logger -t watchdog "watchdog v1.27 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

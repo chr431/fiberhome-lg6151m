@@ -1,5 +1,7 @@
 #!/bin/sh
-# led_mgr.sh v2.7 — 原厂风格指示灯状态守护 (绝对电平驱动 + 自愈 + 全灯覆盖)
+# led_mgr.sh v2.8 — 原厂风格指示灯状态守护 (绝对电平驱动 + 自愈 + 全灯覆盖)
+# v2.8 (2026-10-20 stability batch1): 每 2s 轮写 /tmp/led_mgr.hb — watchdog
+#   用心跳识别“进程活但显示循环卡死”。
 # v2.7 (2026-10-19 SIGSEGV 根治轮): 单实例锁排除自身 pid — watchdog spawn 预写
 #   子进程 pid 进锁文件, 守护启动读到自己的 pid 会永久误判 duplicate 退出
 #   (5G/WAN 灯守护每轮被拉起又每轮自杀的根因)。
@@ -202,6 +204,7 @@ ST=""         # 仅用于日志: 状态串变化才写日志(灯写入已不依�
 POLL=${LED_POLL:-2}
 LCYC=0
 while :; do
+    cut -d. -f1 /proc/uptime > /tmp/led_mgr.hb 2>/dev/null
     LCYC=$((LCYC+1)); [ $((LCYC % 60)) -eq 0 ] && log_rot
     # v1.3: 夜间模式($B/led_mode.conf=1) — 全灭; 电源灯归bootloader不管
     # v1.6: 配置统一 — defaults+settings 叠加(回退旧led_mode.conf)

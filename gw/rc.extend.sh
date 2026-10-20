@@ -47,10 +47,32 @@ fi
 [ -x /data/gw/toolchain_init.sh ] && /data/gw/toolchain_init.sh
 PATH=/data/gw/sbin:/data/gw/bin:$PATH
 export PATH
+# --- v2.6: loopback was DOWN on this image ---------------------------------
+# Measured 2026-10-20: `ip link show lo` = state DOWN, ping 127.0.0.1 fails,
+# and every on-device connect to 192.168.9.1 (HTTP/SSH/DNS) times out because
+# the local route points at lo.  healthdog's loopback liveness check would
+# therefore never pass (a fatal interaction once it arms the kernel watchdog).
+# Bring lo up unconditionally; it is idempotent and costs nothing.
+ip link set lo up 2>/dev/null
+logger -t rc.extend "lo: $(ip link show lo 2>/dev/null | head -1)" 2>/dev/null
 # core_trap (P3) needs unlimited RLIMIT_CORE on the daemons it watches; hard
 # limit is unlimited on this image, soft limit is 0 by default.
 ulimit -c unlimited 2>/dev/null
 logger -t rc.extend "static toolchain: PATH=$PATH TZ=${TZ:-unset} core=$(ulimit -c 2>/dev/null)" 2>/dev/null
+
+# --- v2.6 (P1-2/P1-5): core_pattern metadata wrapper -----------------------
+# aee owns core_pattern and its dumps are encrypted (no process name, no
+# registers). core_meta.sh records /proc/<pid>/{exe,cmdline,status,maps} +
+# parent + PATH + dmesg tail, then execs aee's forwarder with the same argv so
+# aee behaviour is unchanged. The next SIGSEGV becomes attributable.
+if [ -x /data/gw/core_meta.sh ]; then
+    _cur=$(cat /proc/sys/kernel/core_pattern 2>/dev/null)
+    case "$_cur" in
+    *core_meta.sh*) ;;
+    *) echo "|/data/gw/core_meta.sh %p %s %u %g" > /proc/sys/kernel/core_pattern 2>/dev/null
+       logger -t rc.extend "core_pattern wrapped: [$_cur] -> [$(cat /proc/sys/kernel/core_pattern 2>/dev/null)]" ;;
+    esac
+fi
 
 # --- v2.0(P2/L-7): session tokens cleared at boot -- /tmp is not tmpfs, stale
 # tokens survive reboots (bad after password rotation); v3httpd/rc19 start
@@ -86,12 +108,34 @@ mkdir -p /data/gw/dropbear_keys
 [ -f /data/gw/dropbear_keys/rsa ] || /usr/bin/dropbearkey -t rsa -f /data/gw/dropbear_keys/rsa -s 2048 2>/dev/null
 pgrep -x dropbear >/dev/null || /usr/sbin/dropbear -r /data/gw/dropbear_keys/rsa -p 22 >/dev/null 2>&1  # v1.8: 无&, dropbear自daemonize, 同步返回即监听, 杜绝rc19守卫竞态
 
+# --- v2.6 (2026-10-20 P0-2): boot attempt ledger + conditional TRY_A --------
+# v1.7 cleared TRY_A seconds into every A-slot boot, so LK's fallback counter
+# never accumulated: a boot-breaking deploy could loop forever on slot A.
+# New rule (analysis P0-2): the *early* clear is allowed only when the previous
+# attempt is recorded healthy AND this boot is not a fast reboot; the definitive
+# clear happens in boot_gate.sh once the boot chain is proven healthy.
+BOOT_ATT=/data/gw/boot_attempts.tsv
+BT=$(awk '/^btime/{print $2; exit}' /proc/stat 2>/dev/null)
+BID=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
+PREV=$(grep -v "^btime=$BT " "$BOOT_ATT" 2>/dev/null | tail -1)
+PREV_BT=$(echo "$PREV" | sed -n 's/^btime=\([0-9]*\).*/\1/p')
+PREV_RES=$(echo "$PREV" | sed -n 's/.*result=\([a-z]*\).*/\1/p')
+FAST=0
+case "$PREV_BT" in ''|*[!0-9]*) ;; *) [ $((BT - PREV_BT)) -lt 180 ] && FAST=1 ;; esac
+echo "btime=$BT epoch=$(date +%s) result=pending fast=$FAST boot_id=$BID" >> "$BOOT_ATT" 2>/dev/null
+tail -n 30 "$BOOT_ATT" > "$BOOT_ATT.tmp" 2>/dev/null && mv "$BOOT_ATT.tmp" "$BOOT_ATT"
+logger -t rc.extend "boot attempt: btime=$BT prev=$PREV_RES fast=$FAST"
+
 # --- v1.7: A-slot keepalive (vendor S99 semantics, lost when S99 was removed)
 case "$(cat /proc/cmdline)" in *bootslot=a*)
-    [ -b /dev/mmcblk0p1 ] && dd if=/dev/zero of=/dev/mmcblk0p1 bs=1 seek=2061 count=1 conv=notrunc 2>/dev/null
+    _try=retain
+    if [ "$PREV_RES" = healthy ] && [ "$FAST" = 0 ]; then
+        [ -b /dev/mmcblk0p1 ] && dd if=/dev/zero of=/dev/mmcblk0p1 bs=1 seek=2061 count=1 conv=notrunc 2>/dev/null
+        _try=cleared
+    fi
     echo 0 1 > /proc/hnat/hnat_qos 2>/dev/null
     echo 2 1 > /proc/hnat/hnat_qos 2>/dev/null
-    logger -t rc.extend "slot=a: TRY_A cleared + hnat_qos"
+    logger -t rc.extend "slot=a: TRY_A=$_try (prev=$PREV_RES fast=$FAST) + hnat_qos"
     ;; esac
 [ -f /data/gw/DO_UBUS_CAP ] && nohup sh /data/gw/capture_ubus.sh >/dev/null 2>&1 &
 slot=$(cat /proc/cmdline | tr ' ' '\n' | sed -n 's/^bootslot=//p')
@@ -112,7 +156,9 @@ case "$slot" in
          echo "$(date -u +%FT%TZ) MODE.fh auto-provisioned (first boot)" >> /tmp/rc.extend.log
      fi
      [ -f /data/gw/MODE.fh ] && nohup sh /data/gw/rc_netfh.sh >/tmp/netfh.out 2>&1 &
-     insmod /data/gw/healthdog.ko forensic=1 armed=0 2>/dev/null
+     # v2.6 (P1-5): FORENSIC D 打印按 marker 开启(默认关, 降 dmesg 噪声)
+     _fore=0; [ -e /data/gw/healthdog.forensic ] && _fore=1
+     insmod /data/gw/healthdog.ko forensic=$_fore armed=0 2>/dev/null
      nohup sh /data/gw/rc19.sh >/tmp/rc19.log 2>&1 &
      # healthdog stack + RCU-stall panic
      echo 1 > /proc/sys/kernel/panic_on_rcu_stall 2>/dev/null

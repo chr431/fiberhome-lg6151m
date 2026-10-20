@@ -31,7 +31,19 @@
  *   -s PATH     ubus socket (default /var/run/ubus/ubus.sock)
  *   --stats-file FILE   write key=value counters at exit / every 4096 frames
  *   --stdin     parse a raw record stream from stdin (offline test mode)
+ *   --dump-raw FILE     keep the raw stream bytes (capped) for replay
+ *   --raw-max BYTES     cap for --dump-raw (default 8 MiB)
+ *   --selftest  run the frame parser against synthetic valid/malformed streams
  *   -V          version
+ *
+ * v1.2 -- stability P1-2 hardening:
+ *   - SIGSEGV/SIGBUS/SIGABRT/SIGILL handler on an alternate stack writes a
+ *     breadcrumb (/tmp/logc.crash): signal, frame offset, frame length, buffer
+ *     fill, emitted frame count, uptime.  The next unexplained crash becomes
+ *     an attributable frame instead of an opaque aee NE.
+ *   - --dump-raw keeps the exact stream for offline replay via --stdin.
+ *   - --selftest exercises the parser on-device (no ubus needed).
+ *   - ubus message buffers moved off per-call stack frames.
  *
  * v1.0 -- initial defensive collector.
  */
@@ -52,12 +64,13 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
 
-#define LOGC_VERSION "1.0"
+#define LOGC_VERSION "1.2"
 
 /* ---- ubus wire protocol (only what we need) ---------------------------- */
 
@@ -143,6 +156,105 @@ static int debug;
 static const char *stats_file;
 static volatile sig_atomic_t stop_flag;
 
+/* ---- v1.2: crash breadcrumb ------------------------------------------- */
+#ifndef SIGSTKSZ
+#define SIGSTKSZ 8192
+#endif
+static const char *crash_path = "/tmp/logc.crash";
+static volatile sig_atomic_t cr_off = -1;	/* frame offset in the buffer */
+static volatile sig_atomic_t cr_flen = -1;	/* claimed frame length */
+static volatile sig_atomic_t cr_len = -1;	/* bytes currently buffered */
+static volatile sig_atomic_t cr_frames = 0;	/* records emitted so far */
+
+static size_t put_str(char *b, size_t n, size_t cap, const char *s)
+{
+	while (*s && n < cap)
+		b[n++] = *s++;
+	return n;
+}
+
+static size_t put_num(char *b, size_t n, size_t cap, long v)
+{
+	char t[24];
+	size_t k = 0;
+	unsigned long u;
+
+	if (v < 0) {
+		if (n < cap)
+			b[n++] = '-';
+		u = (unsigned long)(-v);
+	} else {
+		u = (unsigned long)v;
+	}
+	do {
+		t[k++] = (char)('0' + (u % 10));
+		u /= 10;
+	} while (u && k < sizeof(t));
+	while (k && n < cap)
+		b[n++] = t[--k];
+	return n;
+}
+
+static void on_crash(int sig)
+{
+	char b[256];
+	size_t n = 0;
+	int fd;
+
+	n = put_str(b, n, sizeof(b), "logc crash: version=" LOGC_VERSION
+		    " sig=");
+	n = put_num(b, n, sizeof(b), sig);
+	n = put_str(b, n, sizeof(b), " pid=");
+	n = put_num(b, n, sizeof(b), (long)getpid());
+	n = put_str(b, n, sizeof(b), " frame_off=");
+	n = put_num(b, n, sizeof(b), (long)cr_off);
+	n = put_str(b, n, sizeof(b), " frame_len=");
+	n = put_num(b, n, sizeof(b), (long)cr_flen);
+	n = put_str(b, n, sizeof(b), " buf_len=");
+	n = put_num(b, n, sizeof(b), (long)cr_len);
+	n = put_str(b, n, sizeof(b), " frames_emitted=");
+	n = put_num(b, n, sizeof(b), (long)cr_frames);
+	n = put_str(b, n, sizeof(b), " uptime_s=");
+	{
+		struct timespec ts;
+		long up = -1;
+		if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0)
+			up = (long)ts.tv_sec;
+		n = put_num(b, n, sizeof(b), up);
+	}
+	n = put_str(b, n, sizeof(b), "\n");
+
+	fd = open(crash_path, O_CREAT | O_WRONLY | O_TRUNC, 0600);
+	if (fd >= 0) {
+		ssize_t r = write(fd, b, n);
+		(void)r;
+		close(fd);
+	}
+	_exit(128 + sig);
+}
+
+static void install_crash_handler(void)
+{
+	static char alt[SIGSTKSZ * 2];
+	struct sigaction sa;
+	stack_t ss;
+
+	memset(&ss, 0, sizeof(ss));
+	ss.ss_sp = alt;
+	ss.ss_size = sizeof(alt);
+	(void)sigaltstack(&ss, NULL);
+
+	memset(&sa, 0, sizeof(sa));
+	sa.sa_handler = on_crash;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = SA_ONSTACK | SA_RESETHAND;
+	sigaction(SIGSEGV, &sa, NULL);
+	sigaction(SIGBUS, &sa, NULL);
+	sigaction(SIGILL, &sa, NULL);
+	sigaction(SIGFPE, &sa, NULL);
+	sigaction(SIGABRT, &sa, NULL);
+}
+
 static void dbg(const char *fmt, ...)
 {
 	va_list ap;
@@ -208,6 +320,31 @@ static int write_all(int fd, const void *buf, size_t len)
 static int out_fd = STDOUT_FILENO;
 static const char *out_path;
 static long out_limit;		/* bytes, 0 = no rotation */
+
+/* v1.2: raw stream dump for offline replay (--dump-raw) */
+static const char *raw_path;
+static FILE *raw_fp;
+static unsigned long long raw_max = 8ULL << 20;
+static unsigned long long raw_bytes;
+
+static void raw_dump(const void *p, size_t n)
+{
+	if (!raw_path)
+		return;
+	if (!raw_fp) {
+		raw_fp = fopen(raw_path, "wb");
+		if (!raw_fp)
+			return;
+	}
+	if (raw_bytes >= raw_max)
+		return;
+	if (raw_bytes + n > raw_max)
+		n = (size_t)(raw_max - raw_bytes);
+	if (n && fwrite(p, 1, n, raw_fp) == n) {
+		raw_bytes += n;
+		fflush(raw_fp);
+	}
+}
 
 static int open_output(void)
 {
@@ -463,6 +600,7 @@ static int emit_record(const struct record *r, int with_ts, regex_t *re)
 	}
 	st.frames++;
 	st.bytes += n;
+	cr_frames = (sig_atomic_t)(st.frames & 0x7fffffff);
 	if ((st.frames & 0xfff) == 0)
 		write_stats();
 	return 0;
@@ -480,6 +618,9 @@ static size_t consume_records(const uint8_t *buf, size_t len, int with_ts,
 		uint32_t hdr = rd_be32(buf + off);
 		uint32_t flen = hdr & BLOB_LEN_MASK;
 		struct record r;
+
+		cr_off = (sig_atomic_t)off;
+		cr_flen = (sig_atomic_t)flen;
 
 		if ((hdr & BLOB_EXTENDED) || ((hdr & BLOB_ID_MASK) >> 24) != 0 ||
 		    flen < MIN_FRAME || flen > MAX_FRAME) {
@@ -718,11 +859,16 @@ static const uint8_t *find_attr(const uint8_t *p, size_t len, unsigned int id,
 static int connect_ubus(const char *path)
 {
 	struct sockaddr_un sa;
+	struct timeval tv = { 10, 0 };
 	int fd;
 
 	fd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (fd < 0)
 		return -1;
+	/* v1.1: bounded handshake — a wedged ubusd/logd must not hang the
+	 * caller (log_keeper runs this synchronously every 30s). */
+	setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+	setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 	memset(&sa, 0, sizeof(sa));
 	sa.sun_family = AF_UNIX;
 	if (strlen(path) >= sizeof(sa.sun_path)) {
@@ -737,14 +883,17 @@ static int connect_ubus(const char *path)
 	return fd;
 }
 
+/* v1.2: one static message buffer instead of a 64 KB array per call frame
+ * (three such frames previously coexisted on the stack of the ubus path). */
+static uint8_t ubus_payload[UBUS_MAX_MSG];
+
 static int ubus_hello(int fd)
 {
 	struct ubus_hdr h;
-	uint8_t payload[UBUS_MAX_MSG];
 	size_t plen;
 	int rfd;
 
-	if (recv_msg(fd, &h, payload, sizeof(payload), &plen, &rfd) != 0)
+	if (recv_msg(fd, &h, ubus_payload, sizeof(ubus_payload), &plen, &rfd) != 0)
 		return -1;
 	if (rfd >= 0)
 		close(rfd);
@@ -755,7 +904,7 @@ static int ubus_hello(int fd)
 
 static int ubus_lookup(int fd, const char *path, uint32_t *id)
 {
-	uint8_t attrs[256], payload[UBUS_MAX_MSG];
+	uint8_t attrs[256];
 	struct mbuf b = { attrs, 0, sizeof(attrs) };
 	struct ubus_hdr h;
 	size_t plen;
@@ -769,12 +918,12 @@ static int ubus_lookup(int fd, const char *path, uint32_t *id)
 	for (tries = 0; tries < 16; tries++) {
 		const uint8_t *a;
 		size_t alen;
-		if (recv_msg(fd, &h, payload, sizeof(payload), &plen, &rfd) != 0)
+		if (recv_msg(fd, &h, ubus_payload, sizeof(ubus_payload), &plen, &rfd) != 0)
 			return -1;
 		if (rfd >= 0)
 			close(rfd);
 		if (h.type == UBUS_MSG_DATA && h.seq == 1) {
-			a = find_attr(payload, plen, UBUS_ATTR_OBJID, &alen);
+			a = find_attr(ubus_payload, plen, UBUS_ATTR_OBJID, &alen);
 			if (!a || alen != 4)
 				return -1;
 			*id = rd_be32(a);
@@ -790,7 +939,7 @@ static int ubus_lookup(int fd, const char *path, uint32_t *id)
 static int ubus_open_log_stream(int fd, uint32_t objid, int follow,
 				unsigned int lines, int *out_fd)
 {
-	uint8_t inner[128], attrs[512], payload[UBUS_MAX_MSG];
+	uint8_t inner[128], attrs[512];
 	struct mbuf ib = { inner, 0, sizeof(inner) };
 	struct mbuf b = { attrs, 0, sizeof(attrs) };
 	struct ubus_hdr h;
@@ -812,7 +961,7 @@ static int ubus_open_log_stream(int fd, uint32_t objid, int follow,
 		return -1;
 
 	for (tries = 0; tries < 16; tries++) {
-		if (recv_msg(fd, &h, payload, sizeof(payload), &plen, &rfd) != 0) {
+		if (recv_msg(fd, &h, ubus_payload, sizeof(ubus_payload), &plen, &rfd) != 0) {
 			if (got >= 0)
 				close(got);
 			return -1;
@@ -825,7 +974,7 @@ static int ubus_open_log_stream(int fd, uint32_t objid, int follow,
 		if (h.type == UBUS_MSG_STATUS && h.seq == 2) {
 			const uint8_t *a;
 			size_t alen;
-			a = find_attr(payload, plen, UBUS_ATTR_STATUS, &alen);
+			a = find_attr(ubus_payload, plen, UBUS_ATTR_STATUS, &alen);
 			if (a && alen == 4 && rd_be32(a) == 0 && got >= 0) {
 				*out_fd = got;
 				return 0;
@@ -842,11 +991,12 @@ static int ubus_open_log_stream(int fd, uint32_t objid, int follow,
 
 /* ---- stream reader ----------------------------------------------------- */
 
-static int read_stream_fd(int fd, int with_ts, regex_t *re)
+static int read_stream_fd(int fd, int with_ts, regex_t *re, int follow)
 {
 	uint8_t *buf;
 	size_t cap = 1 << 20, len = 0;
 	int eof = 0;
+	time_t last_data = time(NULL);
 
 	buf = malloc(cap);
 	if (!buf)
@@ -890,8 +1040,14 @@ static int read_stream_fd(int fd, int with_ts, regex_t *re)
 					continue;
 				break;
 			}
-			if (pr == 0)
-				continue;	/* follow mode idle */
+			if (pr == 0) {
+				/* oneshot must not wait forever on a wedged logd */
+				if (!follow && time(NULL) - last_data > 60) {
+					dbg("oneshot idle timeout");
+					break;
+				}
+				continue;
+			}
 			if (stop_flag)
 				break;
 			n = read(fd, buf + len, cap - len);
@@ -905,7 +1061,10 @@ static int read_stream_fd(int fd, int with_ts, regex_t *re)
 				eof = 1;
 				continue;
 			}
+			last_data = time(NULL);
 			len += (size_t)n;
+			cr_len = (sig_atomic_t)len;
+			raw_dump(buf + len - (size_t)n, (size_t)n);
 		}
 	}
 
@@ -917,6 +1076,90 @@ static int read_stream_fd(int fd, int with_ts, regex_t *re)
 }
 
 /* ---- main -------------------------------------------------------------- */
+
+/* ---- v1.2: on-device parser selftest ----------------------------------- */
+
+static size_t mk_frame(uint8_t *b, size_t cap, uint64_t tms, uint32_t id,
+		       uint32_t prio, uint32_t src, const char *msg)
+{
+	struct mbuf mb;
+	uint64_t be64;
+	uint32_t be, hdr;
+
+	if (cap < 8)
+		return 0;
+	mb.p = b + 4;
+	mb.len = 0;
+	mb.cap = cap - 4;
+	be64 = htobe64(tms);
+	if (bm_attr(&mb, BLOBMSG_TYPE_INT64, "time", &be64, 8) != 0)
+		return 0;
+	if (bm_attr(&mb, BLOBMSG_TYPE_STRING, "msg", msg, strlen(msg) + 1) != 0)
+		return 0;
+	be = htobe32(id);
+	if (bm_attr(&mb, BLOBMSG_TYPE_INT32, "id", &be, 4) != 0)
+		return 0;
+	be = htobe32(prio);
+	if (bm_attr(&mb, BLOBMSG_TYPE_INT32, "priority", &be, 4) != 0)
+		return 0;
+	be = htobe32(src);
+	if (bm_attr(&mb, BLOBMSG_TYPE_INT32, "source", &be, 4) != 0)
+		return 0;
+	hdr = htobe32((uint32_t)mb.len + 4);
+	memcpy(b, &hdr, 4);
+	return mb.len + 4;
+}
+
+static int selftest(void)
+{
+	static uint8_t buf[16384];
+	uint8_t f[2048];
+	size_t len = 0, n;
+	int fails = 0, dn;
+
+	memset(&st, 0, sizeof(st));
+	n = mk_frame(f, sizeof(f), 1700000000123ULL, 7, 0x1e, 1, "selftest one");
+	if (!n)
+		return 3;
+	memcpy(buf + len, f, n);
+	len += n;
+	memset(buf + len, 0x5a, 9);	/* garbage between records */
+	len += 9;
+	n = mk_frame(f, sizeof(f), 1700000000456ULL, 8, 0x1e, 0, "selftest two");
+	memcpy(buf + len, f, n);
+	len += n;
+	n = mk_frame(f, sizeof(f), 1700000000789ULL, 9, 0x1e, 0, "truncated tail");
+	memcpy(buf + len, f, n - 3);	/* partial record at EOF */
+	len += n - 3;
+
+	dn = open("/dev/null", O_WRONLY);
+	if (dn >= 0)
+		out_fd = dn;
+	(void)consume_records(buf, len, 0, NULL, 1);
+	if (dn >= 0)
+		close(dn);
+
+	if (st.frames < 2) {
+		printf("selftest: frames=%llu (expected >=2)\n", st.frames);
+		fails++;
+	}
+	if (st.bad_frames == 0) {
+		printf("selftest: bad_frames=0 (expected >0)\n");
+		fails++;
+	}
+	if (st.resyncs == 0) {
+		printf("selftest: resyncs=0 (expected >0)\n");
+		fails++;
+	}
+	if (st.dropped_bytes == 0) {
+		printf("selftest: dropped_bytes=0 (expected >0)\n");
+		fails++;
+	}
+	printf("logc %s selftest: %s frames=%llu bad_frames=%llu resyncs=%llu dropped=%llu\n",
+	       LOGC_VERSION, fails ? "FAIL" : "PASS", st.frames, st.bad_frames,
+	       st.resyncs, st.dropped_bytes);
+	return fails ? 1 : 0;
+}
 
 static void usage(FILE *f)
 {
@@ -932,6 +1175,9 @@ static void usage(FILE *f)
 		"  -d          debug to stderr\n"
 		"  --stats-file FILE   write counters (key=value)\n"
 		"  --stdin     parse raw records from stdin (offline test)\n"
+		"  --dump-raw FILE     keep raw stream bytes (capped) for replay\n"
+		"  --raw-max BYTES     cap for --dump-raw (default 8388608)\n"
+		"  --selftest  parser selftest on synthetic streams\n"
 		"  -V          version\n");
 }
 
@@ -940,7 +1186,7 @@ int main(int argc, char **argv)
 	const char *sock_path = "/var/run/ubus/ubus.sock";
 	const char *regex_str = NULL;
 	unsigned int lines = 0;
-	int follow = 0, with_ts = 0, use_stdin = 0;
+	int follow = 0, with_ts = 0, use_stdin = 0, do_selftest = 0;
 	int ubus_fd = -1, stream_fd = -1;
 	uint32_t objid = 0;
 	regex_t re, *re_p = NULL;
@@ -949,12 +1195,16 @@ int main(int argc, char **argv)
 	signal(SIGPIPE, SIG_IGN);
 	signal(SIGTERM, on_signal);
 	signal(SIGINT, on_signal);
+	install_crash_handler();
 	init_timezone();
 
 	while (1) {
 		static const struct option long_opts[] = {
 			{ "stdin", no_argument, NULL, 1000 },
 			{ "stats-file", required_argument, NULL, 1001 },
+			{ "dump-raw", required_argument, NULL, 1002 },
+			{ "raw-max", required_argument, NULL, 1003 },
+			{ "selftest", no_argument, NULL, 1004 },
 			{ NULL, 0, NULL, 0 },
 		};
 		int lidx = 0;
@@ -999,6 +1249,15 @@ int main(int argc, char **argv)
 		case 1001:
 			stats_file = optarg;
 			break;
+		case 1002:
+			raw_path = optarg;
+			break;
+		case 1003:
+			raw_max = strtoull(optarg, NULL, 10);
+			break;
+		case 1004:
+			do_selftest = 1;
+			break;
 		default:
 			usage(stderr);
 			return 1;
@@ -1008,6 +1267,9 @@ int main(int argc, char **argv)
 		fprintf(stderr, "logc: unexpected argument %s\n", argv[optind]);
 		return 1;
 	}
+
+	if (do_selftest)
+		return selftest();
 
 	if (regex_str) {
 		if (regcomp(&re, regex_str, REG_EXTENDED | REG_NOSUB) != 0) {
@@ -1021,7 +1283,7 @@ int main(int argc, char **argv)
 		return 1;
 
 	if (use_stdin) {
-		rc = read_stream_fd(STDIN_FILENO, with_ts, re_p) == 0 ? 0 : 1;
+		rc = read_stream_fd(STDIN_FILENO, with_ts, re_p, 1) == 0 ? 0 : 1;
 		goto out;
 	}
 
@@ -1047,7 +1309,7 @@ int main(int argc, char **argv)
 		goto out;
 	}
 
-	rc = read_stream_fd(stream_fd, with_ts, re_p) == 0 ? 0 : 1;
+	rc = read_stream_fd(stream_fd, with_ts, re_p, follow) == 0 ? 0 : 1;
 
 out:
 	if (stream_fd >= 0)
@@ -1056,6 +1318,8 @@ out:
 		close(ubus_fd);
 	if (out_fd != STDOUT_FILENO)
 		close(out_fd);
+	if (raw_fp)
+		fclose(raw_fp);
 	if (re_p)
 		regfree(re_p);
 	write_stats();

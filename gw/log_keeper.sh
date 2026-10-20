@@ -1,5 +1,17 @@
 #!/bin/sh
-# log_keeper.sh v1.8 -- 日志持久化守护（日志改善专项轮）
+# log_keeper.sh v2.0 -- 日志持久化守护（日志改善专项轮）
+#   v2.0 (2026-10-20 stability P1-5): ① 单实例锁(cmdline 复核) — 看门狗监督表
+#   会重启本守护, 双实例会重复追加镜像; ② ne_census.tsv — 从 syslog 新增行抽取
+#   aee 的 "pid: N >>> comm <<<" 记录(时间/pid/comm/原文), 补上 db_history 无
+#   进程名的盲区, watchdog 的 NE WARN 直接引用末条; ③ logc 崩溃留痕 — 读
+#   /tmp/logc.crash(SIGSEGV 面包屑) 并复制到 logs/logc_crash/; ④ resync 文案
+#   改为 ring 语义(不再提厂商 logread); ⑤ 心跳/btime BOOT 门禁沿用 v1.9.
+#   v1.9 (2026-10-20 stability batch1): ① logc 退出码在 `if !` 前保存(原
+#   `$?` 在 then 分支恒为 0, 崩溃被记成 rc=0); ② BOOT 分隔行以 /proc/stat
+#   btime 为门禁 — 守护被 watchdog 重启时不再写假 BOOT(现场已有 up=59808s
+#   的假 BOOT 混在真重启里); ③ dmesg 镜像降噪新增 healthdog FORENSIC D/
+#   wdtk/hang_detect/SPM 噪声(占持久 dmesg 75%, 也是内核环只剩 ~22min 的
+#   主因); ④ 每轮写 /tmp/log_keeper.hb 供 watchdog 判“进程活但日志停摆”。
 #   v1.8 (2026-10-19 SIGSEGV P1): syslog 环读取改用自建静态采集器
 #   /data/gw/bin/logc（同 ubus fd 流, 帧校验+全量重同步+时间戳范围断言,
 #   静态链接=零厂商 musl 耦合）。logread 的帧同步缺陷/ctime 崩溃路径从
@@ -48,7 +60,7 @@ LOGC=/data/gw/bin/logc
 lk() { echo "$(date '+%m-%d %H:%M:%S') $*" >> $LOG; }
 # v1.6: 镜像降噪模式(仅作用于持久镜像; busybox grep -E 实测兼容)
 SYSLOG_DROP='thermal_core\[[0-9]+\]: interval=|mipc_cli\[[0-9]+\]: main:mipc operation (start|end)|mtk_monitor_hang\[[0-9]+\]:|\[ccci[0-9]+/(net|dpmaif|cif)\]|\[ccci[0-9]+/chr\]port ttyCMIPC[0-9]+ (open|close)'
-DMESG_DROP='\[ccci[0-9]+/(net|dpmaif|cif)\]|MCUSYSOFF wake up|mtk_eth_search_port_by_mac_table|mt7992_apply_dpd_flatness_data|\[ccci[0-9]+/chr\]port ttyCMIPC[0-9]+ (open|close)'
+DMESG_DROP='\[ccci[0-9]+/(net|dpmaif|cif)\]|MCUSYSOFF wake up|mtk_eth_search_port_by_mac_table|mt7992_apply_dpd_flatness_data|\[ccci[0-9]+/chr\]port ttyCMIPC[0-9]+ (open|close)|FORENSIC D:|wdtk-[0-9]+:|\[wdk-[a-z]+\]|hang_detect:|\[thread:[0-9]+\] [0-9-]+ [0-9:.]+ UTC|\[name:spm&\]'
 DROP_S=0; DROP_D=0; DROP_S0=0; DROP_D0=0
 # 增量抽取: 以 last 锚行在环内定位, 输出其后全部新增行(标准 busybox awk)
 delta() { # $1=ring file $2=last-anchor
@@ -96,6 +108,32 @@ bootmark() {
 }
 mkdir -p $DIR/tmp
 touch $DIR/syslog.log $DIR/dmesg.log $DIR/.prevup
+# v2.0: single instance — a supervised restart must never double-append
+_lp=$(cat /tmp/log_keeper.lock 2>/dev/null)
+if [ -n "$_lp" ] && [ "$_lp" != "$$" ] && kill -0 "$_lp" 2>/dev/null && \
+   ! grep -q '^State:.*Z' /proc/$_lp/status 2>/dev/null && \
+   grep -qa '/data/gw/log_keeper.sh' /proc/$_lp/cmdline 2>/dev/null; then
+    echo "log_keeper: already running pid=$_lp" >&2
+    exit 0
+fi
+echo $$ > /tmp/log_keeper.lock
+# v2.0: aee NE census — db_history has no process name; the vendor syslog line
+# does.  Called with the newly mirrored syslog text on stdin.
+census() {
+    awk -v out="$DIR/ne_census.tsv" -v ts="$(date +%s)" '
+        />>>/ {
+            pid = ""; comm = ""
+            if (match($0, /pid: [0-9]+/)) { pid = substr($0, RSTART + 5, RLENGTH - 5) }
+            if (match($0, />>>.*<<</)) {
+                comm = substr($0, RSTART + 4, RLENGTH - 7)
+                gsub(/^ +| +$/, "", comm)
+            }
+            if (comm != "") print ts "\t" pid "\t" comm "\t" $0 >> out
+        }'
+    # keep the census bounded (one line per crash; 2000 lines is plenty)
+    _n=$(wc -l < "$DIR/ne_census.tsv" 2>/dev/null || echo 0)
+    [ "${_n:-0}" -gt 2000 ] && { tail -n 1000 "$DIR/ne_census.tsv" > "$DIR/ne_census.tsv.tmp"; mv "$DIR/ne_census.tsv.tmp" "$DIR/ne_census.tsv"; }
+}
 # v1.2: 上一 boot 的 /tmp 快照转存 — 以 .snap_up(uptime 秒)记录快照归属的 boot;
 #   uptime 回退(或首跑无标记) = 新 boot → tmp → tmp.prev(单代, 覆盖旧代);
 #   同一 boot 内的 log_keeper 重启(看门狗自愈)不转存, 现场留在 tmp。
@@ -112,15 +150,27 @@ if [ "$_rot" = 1 ]; then
     lk "new boot: tmp -> tmp.prev, anchors reset"
 fi
 echo "${U0:-0}" > $DIR/.snap_up
-lk "start"
-bootmark
+# v1.9: BOOT 分隔行只在真 boot(btime 变化)时写; watchdog 重启守护不写假 BOOT.
+_bt=$(awk '/^btime/{print $2; exit}' /proc/stat 2>/dev/null)
+_pbt=$(cat $DIR/.boot_btime 2>/dev/null)
+if [ -n "$_bt" ] && [ "$_bt" != "$_pbt" ]; then
+    echo "$_bt" > $DIR/.boot_btime
+    lk "start (new boot btime=$_bt)"
+    bootmark
+else
+    lk "start (same boot btime=${_bt:-unknown}; daemon restart, no BOOT line)"
+fi
+cut -d. -f1 /proc/uptime > /tmp/log_keeper.hb 2>/dev/null
 PREV_UP=$(cut -d. -f1 /proc/uptime)
 DIAG_DONE=""
 while :; do
     sleep 30
+    cut -d. -f1 /proc/uptime > /tmp/log_keeper.hb 2>/dev/null
     # -- boot 检出: uptime 回退 → 分隔行 + 重置锚(环已全新) --
     U=$(cut -d. -f1 /proc/uptime)
     if [ "${PREV_UP:-0}" -gt "$U" ] 2>/dev/null; then
+        _bt=$(awk '/^btime/{print $2; exit}' /proc/stat 2>/dev/null)
+        [ -n "$_bt" ] && echo "$_bt" > $DIR/.boot_btime
         bootmark
         rm -f $DIR/.syslog.last $DIR/.dmesg.last
     fi
@@ -144,8 +194,17 @@ while :; do
 
     # -- syslog 镜像(v1.6: 降噪 — 高频低值行不落盘, 丢弃量计数入汇总) --
     # v1.8: logc 取代 logread: 静态链接 + 帧校验 + 重同步 + 时间戳范围断言。
-    if ! $LOGC --stats-file /tmp/logc.stats 2>/tmp/logc.err > /tmp/lk_ring; then
-        lk "WARN logc rc=$? err=$(tail -n 1 /tmp/logc.err 2>/dev/null)"
+    # v1.9: 先保存退出码 — `if ! cmd; then $?` 在 then 分支恒为 0(原 bug).
+    $LOGC --stats-file /tmp/logc.stats 2>/tmp/logc.err > /tmp/lk_ring
+    _lc=$?
+    if [ "$_lc" -ne 0 ]; then
+        lk "WARN logc rc=$_lc err=$(tail -n 1 /tmp/logc.err 2>/dev/null)"
+        # v2.0: SIGSEGV breadcrumb written by logc's signal handler
+        if [ -s /tmp/logc.crash ]; then
+            mkdir -p $DIR/logc_crash 2>/dev/null
+            cp /tmp/logc.crash "$DIR/logc_crash/crash.$(date +%Y%m%d-%H%M%S).txt" 2>/dev/null
+            lk "WARN logc crash breadcrumb: $(tr '\n' ' ' < /tmp/logc.crash | head -c 300)"
+        fi
     fi
     _bad=$(grep -o 'bad_frames=[0-9]*' /tmp/logc.stats 2>/dev/null | cut -d= -f2)
     _rs=$(grep -o 'resyncs=[0-9]*' /tmp/logc.stats 2>/dev/null | cut -d= -f2)
@@ -160,9 +219,10 @@ while :; do
                     _d=$(printf '%s\n' "$NEW" | grep -cE "$SYSLOG_DROP")
                     [ "${_d:-0}" -gt 0 ] && { NEW=$(printf '%s\n' "$NEW" | grep -vE "$SYSLOG_DROP"); DROP_S=$((DROP_S + _d)); }
                     [ -n "$NEW" ] && printf '%s\n' "$NEW" | append_cap $DIR/syslog.log 4194304
+                    printf '%s\n' "$NEW" | census
                 fi
             else
-                { echo "-- logread 环溢出/轮转, resync --"; tail -n 400 /tmp/lk_ring | grep -vE "$SYSLOG_DROP"; } | append_cap $DIR/syslog.log 4194304
+                { echo "-- syslog ring overflow/rotate, resync --"; tail -n 400 /tmp/lk_ring | grep -vE "$SYSLOG_DROP"; } | append_cap $DIR/syslog.log 4194304
                 lk "syslog ring resync"
             fi
         else

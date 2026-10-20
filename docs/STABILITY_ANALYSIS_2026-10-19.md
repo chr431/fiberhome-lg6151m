@@ -150,3 +150,121 @@
 - 00:32 按用户要求回滚：公开仓回到 `42aa736`（batch1 提交未推送），设备推送回 batch1 前版本并重启；batch1 补丁与本文分别归档在
   `_local/archive/stability_2026-10-20/batch1.patch` 与同目录的
   `STABILITY_ANALYSIS_2026-10-19.md`。
+
+## 6. 2026-10-20 执行记录（batch2：P0 全部 + P1 全部）
+
+> 实现原则：batch1 的方案保留为骨架，但把"单次失败就动射频/杀进程"全部改为
+> **先取证、再确认、后动作**；所有超时/信号异常只进工具故障台账，不再等价于
+> 服务死亡。版本登记见 `tools/VERSIONS.tsv`（本次 115 个登记文件 / MANIFEST 67 项）。
+
+### 6.1 P0-1 自愈链：限时、有界、二级监督
+
+| 项 | 落地 |
+|---|---|
+| 所有外部检查限时 | `watchdog v1.27` 的 `check()` 经 `/data/gw/bin/busybox timeout -s KILL 8`；124/137/139 视为工具故障，重试 3 次仍失败只记 `toolfaults` + `/data/gw/logs/toolfaults.log`（含 what/rc/pid/uptime/cmd），不触发任何破坏性动作 |
+| `mto` 不再无限 wait | 优先静态 `timeout`；回退路径 0.1s 轮询 → `kill -9` → 最多再 reap 10s，D 态子进程不再阻塞看门狗 |
+| 端口判据去 netstat | `port_listen()` 直接解析 `/proc/net/tcp{,6}` 的 `:0016/:0035/:0050` + state 0A；守护树不再 spawn netstat |
+| 二级监督 | `watchdog` 每轮写 `/tmp/watchdog.beat`；`healthdog v1.3` 校验该心跳，陈旧 >120s 先重启看门狗，仍陈旧则 `echo arm > /proc/healthdog`（90s 无心跳内核复位） |
+| 受控 arm | 仅在 `boot.healthy` 的 `boot_id` 与本 boot 相同且 `stable=1`（10 分钟观察窗）后 arm；最近 3 次启动无 healthy 或 10 分钟内刚 arm 过 → 拒绝 arm（防 reboot 环） |
+| 快速重启台账 | `rc.extend` 每次启动追加 `/data/gw/boot_attempts.tsv`（btime/epoch/result/fast/boot_id，保留 30 行）；<180s 的快速重启标记 `fast=1` |
+
+### 6.2 P0-2 boot.done 真门禁 + TRY_A 回滚
+
+- **timer 退役**：`rc19 v2.34` 删除 `( sleep 120; touch /tmp/boot.done ) &`，改由
+  `boot_gate.sh` 在**关键链实测通过**后才写 marker：
+  `LAN IP(192.168.9.1) + lo UP + dropbear:22 + dnsmasq:53 + v3httpd:80 监听 +
+  /tmp/rc19.done`。Uplink/WiFi/agg/authd 属服务级，由看门狗监督，**不进入 boot
+  判据**——否则拔网线冷启动会被误判为坏启动并翻 B 槽（本分析 P0-2 方案里
+  "eth0 IP+default"一项按此理由裁剪，见 6.6）。
+- **boot.healthy**：全通过（关键链 + 2 BSS + ubus + agg 规则 + authd 新鲜 +
+  至少一个上行口有地址且有默认路由 + wan_alive 新鲜）后原子写
+  `/data/gw/boot.healthy`（boot_id/btime/epoch/uptime/stable/degraded/reason/checks），
+  并 `sync`。10 分钟时复检通过才把 `stable=1` 改写；healthdog 只认 `stable=1`。
+- **TRY_A**：`rc.extend v2.6` 不再无条件清零；早期清零只允许"上次 attempt=healthy
+  且非快速重启"，**终判清零在 boot_gate 全通过后**，写后 `dd` 读回
+  `misc[2061]==0x00` 并记录 pre/post 字节。坏启动不再被掩盖，LK 计数可累积到回 B。
+- **babysit v3.0**：`/tmp/boot.done` 在 preinit 无条件删除（旧标记必属上一 boot）；
+  T1=240s 且**无进展 120s** 才 dump + 只杀 `rcS/mipc_wan_cli/dial_5g/ccmni_up`；
+  T2=600s 且仍无进展才翻 B，进展持续则 60s 步进延到 900s 硬帽。
+  **额外安全阀**：T2 若 dropbear :22 仍在监听则抑制翻槽并留痕（可手工修复的
+  盒子不应被自动降级）。所有决策写 `/data/gw/logs/boot_babysit.log`。
+- manifest 修正：babysit 的部署目标从 `/data/gw/babysit_v2.sh` 改为 preinit 实际
+  执行的 `/data/rescue/babysit.sh` —— 旧目标从未被执行，历史上对 babysit 的修改
+  根本无法经 deploy.py 生效。
+
+### 6.3 P0-3 关键服务自愈 + P1-1 心跳
+
+- 统一监督表（`SVC_TABLE`）覆盖 `ntp_keeper/traffic_logger/wifi_guard/
+  reboot_sched/led_mgr/fan_mgr/wan_eth/log_keeper/core_trap/healthdog`，
+  每项 = 存活 + 重启配方 + 心跳新鲜度 + 3 次/小时限频；`dnsmasq/dropbear/
+  v3httpd/authd/wan_agg/dial_keeper/hostapd` 走专用块。
+- 破坏性动作统一 **3 次连续确认**（90s）；单次失败只降级为告警。
+- 心跳：`led_mgr 2s / fan_mgr 10s / wifi_guard 15s / wan_eth ~5s / log_keeper 30s /
+  ntp_keeper 60s / traffic_logger 300s / reboot_sched 30s / core_trap 30s /
+  healthdog 10s`；`wan_agg` 继续用 `/tmp/wan_alive` 的 `ts=`（已在看门狗消费）。
+- 被监督脚本全部补**单实例锁**（cmdline 复核 + 非僵尸），避免"重启=双写方"：
+  log_keeper/wan_eth/fan_mgr/ntp_keeper/traffic_logger/reboot_sched/wifi_guard。
+
+### 6.4 P1-2/P1-5 残余崩溃取证链
+
+- **core_pattern 元数据 wrapper**（`core_meta.sh v1.0`）：`rc.extend` 把
+  `core_pattern` 从 aee 直连改为 `|/data/gw/core_meta.sh %p %s %u %g`；wrapper
+  先落 `/proc/<pid>/{exe,cmdline,status,maps,environ-PATH,cwd,fd 数}`、父进程、
+  持久 dmesg 尾与 aee 台账尾到 `/data/gw/logs/cores/meta/`，再 **exec 原
+  `/sbin/aee_core_forwarder`（同 argv、stdin 不碰）**，aee 行为不变。
+  另写 `/data/gw/logs/ne_events.tsv` 一行一条（watchdog 的 NE WARN 引用）。
+- **logc v1.2**：SIGSEGV/SIGBUS/SIGILL/SIGFPE/SIGABRT 走独立栈 handler，写
+  `/tmp/logc.crash`（sig/pid/frame_off/frame_len/buf_len/frames_emitted/uptime）后
+  `_exit`；`log_keeper` 检测 rc≠0 时归档到 `logs/logc_crash/`；新增 `--dump-raw`
+  （原始流，默认 8MiB 上限）与 `--selftest`（合法帧+垃圾段+截断尾，期望
+  frames≥2/bad_frames>0/resyncs>0/dropped>0）；ubus 三个 64KB 栈缓冲合并为静态
+  缓冲，构建加 `-fstack-protector-all`。
+- **进程名台账**：`log_keeper v2.0` 从 syslog 新增行抽取 aee 的
+  `pid: N, tid: N, >>> comm <<<` 写 `logs/ne_census.tsv`（epoch/pid/comm/原文），
+  补上 `db_history` 无进程名的盲区；watchdog 的 `WARN aee NE +N` 直接附 census 末条。
+- **降噪**：healthdog `forensic` 默认 0（`/data/gw/healthdog.forensic` marker 才
+  开 FORENSIC D）；`log_keeper` 的 dmesg 镜像过滤 FORENSIC/wdtk/hang_detect/SPM；
+  BOOT 行以 btime 门禁；`core_trap v1.1` 全局配额 60 个/200MB + `quota.tsv`。
+- **pstore**：`healthdog` 每 boot 把 `/sys/fs/pstore/console-ramoops-0` 复制到
+  `/data/gw/logs/pstore/console-ramoops.<btime>.txt`（硬复位后唯一现场）。
+- **已知未闭环**：logc 两次 SIGSEGV 的根因仍未定位（aee dump 加密）。本轮把
+  "下一次崩溃"变成可归因：帧偏移/长度 + 进程元数据 + 原始流回放。若面包屑出现，
+  用 `logc --stdin --dump-raw` 语料离线复现即可把范围收敛到单帧。
+
+### 6.5 P1-3 hostapd / P1-4 wifi_guard
+
+- hostapd：3 次连续确认（90s）后才动射频；`hostapd_cli` 超时/139 只记工具故障并
+  重试，进程仍在时**拒绝**把"工具崩了"当成"hostapd 死了"；恢复前独立确认控制
+  socket（`/var/run/hostapd/ra0|rai0`）存在、记录在线客户端数；成功判据同样经
+  限时 wrapper；限频 3 次/小时。
+- wifi_guard v1.2：恢复判据从"episode 增量"改为**连续 4 次采样 stall=1（60s）**；
+  前置 ≥1 个关联客户端、无 wifi_up/hostapd 恢复在进行；小时 2 次、每 boot 10 次
+  限频；每次记录客户端数/qdisc backlog/`wed_task1` 计数；心跳 + 单实例锁。
+
+### 6.6 实测发现：loopback 一直是 DOWN（本轮的额外硬证据）
+
+`ip link show lo` = `state DOWN`，`ping 127.0.0.1` 失败；设备本机连接
+`192.168.9.1:80/22/53` 全部超时（本地路由指向 lo），而 PC 侧正常。这解释了两件事：
+
+1. 任何"设备本机 HTTP 探活"在旧固件上都不可能成功；boot_gate 因此改用
+   `/proc/net/tcp` 监听判据（不依赖 lo）。
+2. 旧 `healthdog.sh` 的 `ping 127.0.0.1` 健康判据**永远为假**；一旦按 P0-1 的
+   方案 arm 内核模块，它会在 90s 后必然硬复位（90s 复位环）。故 `rc.extend v2.6`
+   与 `healthdog v1.3` 都显式 `ip link set lo up`，并把 `lo UP` 纳入 boot 关键链。
+
+### 6.7 验证方式（部署后执行）
+
+- `logc --selftest`、`boot_gate.sh --check` 先做非破坏性判定；
+- 冷启动后断言：`boot.healthy.boot_id == 当前 boot_id`、`stable=1`、
+  `/tmp/boot.done` 在位、`misc[2061]==0x00`、`boot_attempts` 末行 `result=healthy`；
+- `selftest.py` 全量（新增 7 条 stability P0/P1 断言：监督表单实例、心跳新鲜度、
+  core wrapper/selftest/census、healthdog 判据、hostapd/wifi_guard 静态判据、
+  降噪/pstore/BOOT 门禁）。
+
+### 6.8 明确未做（诚实清单）
+
+- logc 崩溃根因（见 6.4；本轮交付的是归因能力，不是结论）。
+- P2/P3 项（蜂窝 zombie-IP、NTP 小时级策略、写放大、多写方 flock、静态 CGI 等）
+  不在本轮 P0+P1 范围。
+- hostapd/wifi_guard 的阈值（90s 确认、60s 连续 stall、2 次/小时）是**保守初值**，
+  需用下一次真实 stall 的日志校准；本轮只保证"不再误伤"。

@@ -105,8 +105,13 @@ def selftest_tests():
 def git_ver_at(commit, name):
     """注册表中某文件在指定 commit 时的版本; 查不到 -> None."""
     try:
-        t = subprocess.run(["git", "show", "%s:tools/VERSIONS.tsv" % commit],
-                           capture_output=True, text=True, cwd=REPO, timeout=15).stdout
+        # v1.2: explicit UTF-8 — the registry is UTF-8, but Windows defaults to
+        # the GBK locale and subprocess text=True raised UnicodeDecodeError
+        # (which aborted deploy.py's doc gate on every run).
+        r = subprocess.run(["git", "show", "%s:tools/VERSIONS.tsv" % commit],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", cwd=REPO, timeout=15)
+        t = r.stdout or ""
     except Exception:
         return None
     for line in t.splitlines():
@@ -118,7 +123,8 @@ def git_ver_at(commit, name):
 
 def head_short():
     return subprocess.run(["git", "rev-parse", "--short", "HEAD"],
-                          capture_output=True, text=True, cwd=REPO).stdout.strip()
+                          capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", cwd=REPO).stdout.strip()
 
 
 def audit(verbose=True):

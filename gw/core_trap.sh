@@ -1,5 +1,9 @@
 #!/bin/sh
-# core_trap.sh v1.0 -- daily user-space core capture window (SIGSEGV P3).
+# core_trap.sh v1.1 -- daily user-space core capture window (SIGSEGV P3).
+# v1.1 (2026-10-20 stability P1-5): restore target is now the core_meta.sh
+#   wrapper (which execs aee, so behaviour is unchanged); a start-up check
+#   warns when core_pattern was not wrapped by rc.extend.  Heartbeat for the
+#   watchdog supervision table + quota index (files/bytes) for the kept cores.
 #
 # aee owns /proc/sys/kernel/core_pattern in normal operation.  This daemon
 # opens a short daily window (default 03:20 local, 600 s) during which
@@ -20,7 +24,9 @@ set -u
 
 START=${CORETRAP_START:-03:20}
 SECS=${CORETRAP_SECS:-600}
-AEE_PATTERN='|/sbin/aee_core_forwarder /tmp %p %s %u %g'
+AEE_PATTERN='|/data/gw/core_meta.sh %p %s %u %g'
+CORE_QUOTA_FILES=${CORE_QUOTA_FILES:-60}
+CORE_QUOTA_MB=${CORE_QUOTA_MB:-200}
 SAVED=/tmp/core_trap.saved
 ACTIVE=/tmp/core_trap.active
 AEE0=/tmp/core_trap.aee0
@@ -76,6 +82,28 @@ restore_pattern() {
 	rm -f "$SAVED"
 }
 
+# v1.1: global core quota across day dirs (flash is finite)
+quota() {
+	_n=$(ls $COREDIR/*/core.* 2>/dev/null | wc -l)
+	case "$_n" in ''|*[!0-9]*) _n=0 ;; esac
+	if [ "$_n" -gt "$CORE_QUOTA_FILES" ]; then
+		ls -t $COREDIR/*/core.* 2>/dev/null | tail -n +$((CORE_QUOTA_FILES + 1)) | \
+			while read -r _old; do rm -f "$_old"; done
+		say "quota: files ${_n} > ${CORE_QUOTA_FILES}, oldest removed"
+	fi
+	_kb=$(du -sk "$COREDIR" 2>/dev/null | awk '{print $1}')
+	case "$_kb" in ''|*[!0-9]*) _kb=0 ;; esac
+	if [ "$_kb" -gt $((CORE_QUOTA_MB * 1024)) ]; then
+		ls -t $COREDIR/*/core.* 2>/dev/null | while read -r _old; do
+			rm -f "$_old"
+			_kb=$(du -sk "$COREDIR" 2>/dev/null | awk '{print $1}')
+			[ "${_kb:-0}" -le $((CORE_QUOTA_MB * 1024)) ] && break
+		done
+		say "quota: size exceeded ${CORE_QUOTA_MB}MB, oldest removed"
+	fi
+	echo "$(date +%s)	$(ls $COREDIR/*/core.* 2>/dev/null | wc -l) files	$(du -sk "$COREDIR" 2>/dev/null | awk '{print $1}') KB" >> "$COREDIR/quota.tsv" 2>/dev/null
+}
+
 end_window() {
 	[ -f "$ACTIVE" ] || return 0
 	restore_pattern
@@ -97,6 +125,7 @@ end_window() {
 	_a0=$(cat "$AEE0" 2>/dev/null)
 	_a1=$(wc -l < "$HIST" 2>/dev/null)
 	rm -f "$ACTIVE" "$AEE0"
+	quota
 	say "window closed: cores=$_n dir=$D aee_lines=${_a0:-?}->${_a1:-?}"
 }
 
@@ -124,9 +153,19 @@ if [ -f "$ACTIVE" ]; then
 	say "stale window recovered; core_pattern restored"
 fi
 
+# v1.1: core_pattern must be the core_meta wrapper (which execs aee); if some
+# vendor script rewrote it, say so loudly — attribution would be lost.
+_cur=$(cat "$PAT" 2>/dev/null)
+case "$_cur" in
+*core_meta.sh*) ;;
+*) say "WARN core_pattern not wrapped: [$_cur] (rc.extend v2.6 should own it)" ;;
+esac
+cut -d. -f1 /proc/uptime > /tmp/core_trap.hb 2>/dev/null
+
 trap 'end_window; exit 0' INT TERM HUP
 
 while :; do
+	cut -d. -f1 /proc/uptime > /tmp/core_trap.hb 2>/dev/null
 	if in_window; then
 		[ -f "$ACTIVE" ] || begin_window
 		_use=$(df /tmp 2>/dev/null | awk 'NR==2{gsub("%","",$5); print $5}')

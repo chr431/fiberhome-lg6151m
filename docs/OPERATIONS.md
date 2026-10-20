@@ -11,8 +11,15 @@ LK(lk_a) → boot_a(RP0103 内核) → rootfs_a(v4: RP0103+定制) → preinit[b
   → rc.local: dropbear(rc19 兜底自起) / S95done: touch markers
 ```
 
-- 看门 babysitter：T1=180s 杀挂起 rcS，T2=360s 自动翻 B 槽
-- `/tmp/rcS.done` `/tmp/boot.done` = 启动完成观测点
+- 启动判据（v2.34/batch2 起）：`boot_gate.sh` 实测关键链
+  （LAN IP + lo UP + dropbear:22 + dnsmasq:53 + v3httpd:80 + rc19 完成）通过才写
+  `/tmp/boot.done`；全通过写 `/data/gw/boot.healthy`（10 分钟后 `stable=1`）并在
+  读回校验下清 LK `TRY_A`。失败则 marker 缺席、TRY_A 保留，LK 计数累积到回 B。
+- 看门 babysitter v3.0：T1=240s 且**无进展 120s** 才杀挂起子进程（rcS/mipc_wan_cli）；
+  T2=600s 且仍无进展才翻 B（有进展则延到 900s 硬帽）；dropbear :22 仍在监听时
+  **抑制翻槽**并留痕。决策落 `/data/gw/logs/boot_babysit.log`。
+- `/tmp/rc19.done` `/tmp/boot.done` `/data/gw/boot.healthy` `/tmp/boot.progress` = 启动观测点
+  （`boot_gate.sh --status` 可一键查看）
 
 ## 部署纪律（deploy.py）
 

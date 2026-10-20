@@ -1,5 +1,11 @@
 #!/bin/sh
-# rc19.sh v2 (=local v3_rc10.extend.sh) v2.32 -- Frankenstein v3.1: br-lan world + WiFi.
+# rc19.sh v2 (=local v3_rc10.extend.sh) v2.34 -- Frankenstein v3.1: br-lan world + WiFi.
+# v2.34 (2026-10-20 stability P0-2): 120s 定时器标记退役 — /tmp/boot.done 改由
+#        boot_gate.sh 在"关键启动链实测通过"后写入(LAN IP+SSH+DHCP/DNS+GUI 监听
+#        + rc19 完成); 本脚本在关键相位写 /tmp/boot.progress 供 babysit 判进展,
+#        结束时 touch /tmp/rc19.done。healthdog forensic 改为按 marker 开启。
+# v2.33 (2026-10-20 stability batch1): authd/static eth0 档案先于 wan_agg 起
+#        (消除启动期 w2 ready/authd signal 翻转导致的假 failover)。
 # v2.32 (SIGSEGV 根治轮): PATH 幂等(rc.extend 已前置时不重复拼接)。
 # v2.31 (SIGSEGV P2/P3): static userland PATH/TZ fallback (manual runs inherit
 #        the same tools as boot), +core_trap daily core-capture daemon,
@@ -39,9 +45,16 @@ esac
 export PATH
 [ -z "${TZ:-}" ] && [ -r /etc/TZ ] && TZ=$(cat /etc/TZ 2>/dev/null) && export TZ
 
-# --- babysitter boot.done race fix (marker must mean verified-healthy)
-rm -f /tmp/boot.done
-( sleep 120; touch /tmp/boot.done ) &
+# --- v2.34 (P0-2): boot.done is a *health verdict*, not a timer -----------
+# boot_gate.sh probes the real boot chain and only then writes /tmp/boot.done;
+# it also writes /data/gw/boot.healthy and clears LK TRY_A after a full pass
+# (see gw/boot_gate.sh).  babysit v3 exits on the marker, so its T1/T2 only
+# fire on a boot that never proved itself.
+rm -f /tmp/boot.done /tmp/rc19.done
+[ -f /tmp/boot.progress ] && rm -f /tmp/boot.progress
+progress() { echo "$(date +%s) $(cut -d. -f1 /proc/uptime) $*" >> /tmp/boot.progress; }
+progress "rc19 start v2.34"
+pgrep -f boot_gate[.]sh >/dev/null || nohup sh /data/gw/boot_gate.sh >/tmp/boot_gate.out 2>&1 &
 
 # --- auto_adapt: embedded DHCP client -> bridge ops -> FH br deadlock
 printf '#!/bin/sh\nexit 0\n' > /tmp/stub.sh
@@ -62,6 +75,7 @@ sleep 45
 #     dialing and modules -- keep FH net modules loaded, skip our dialer.
 FHMODE=0; [ -f /data/gw/MODE.fh ] && FHMODE=1
 KLOG "FHMODE=$FHMODE"
+progress "fh-mode=$FHMODE rmmod phase"
 
 # --- remove FH net modules (flow first; fdb->forward dep order matters --
 #     v1's order left fdb/forward loaded silently for 9h)
@@ -75,7 +89,10 @@ if [ $FHMODE -eq 0 ]; then
 fi
 
 # --- our modules
-insmod /data/gw/healthdog.ko forensic=1 armed=0 2>/dev/null
+# v2.34 (P1-5): healthdog FORENSIC D 打印(每 20s 遍历全部任务, 占持久 dmesg
+#   75%)改为按 marker 开启 — 取证用 /data/gw/healthdog.forensic, 平时零噪声。
+_fore=0; [ -e /data/gw/healthdog.forensic ] && _fore=1
+insmod /data/gw/healthdog.ko forensic=$_fore armed=0 2>/dev/null
 # v2.30: wan_if 从钉死 ccmni2 改为空(全接口) — 承载口在 ccmni2/3 间漂移
 #   (2026-10-18 24h 日志实证), 钉死单口=漂移后 TTL 伪装静默失效; TTL++ 对
 #   eth0 出向同样无害(同样是"撤销本机路由减一"语义)。insmod 失败不再静默:
@@ -127,12 +144,14 @@ dnsmasq -p 53 --no-resolv --server=223.5.5.5 --server=119.29.29.29 \
 echo "dnsmasq: pid=$(pidof dnsmasq)" > /tmp/rc19_dnsmasq.state
 pidof dropbear >/dev/null || /usr/sbin/dropbear -p 22 2>/dev/null
 KLOG "LAN br-lan ok addr=$(ip -o addr show br-lan | grep -c 192.168.9.1)"
+progress "lan+dnsmasq+dropbear up"
 
 # --- WiFi: wait for FH init to finish loading the mt7992 chain, then APs up
 i=0
 while [ $i -lt 30 ] && [ ! -d /sys/class/net/rai0 ]; do sleep 5; i=$((i+1)); done
 sh /data/gw/wifi_up.sh >/tmp/wifi_up.log 2>&1
 KLOG "wifi: aps=$(iw dev 2>/dev/null | grep -c 'type AP') log=/tmp/wifi_up.log"
+progress "wifi_up done aps=$(iw dev 2>/dev/null | grep -c 'type AP')"
 
 # --- wifi TX-stall auto-recovery guard (consumes /proc/v3_steth)
 pgrep -f wifi_guard.sh >/dev/null || nohup sh /data/gw/wifi_guard.sh >/dev/null 2>&1 &
@@ -166,20 +185,14 @@ pgrep -f log_keeper.sh >/dev/null || nohup sh /data/gw/log_keeper.sh >/dev/null 
 #   watchdog restarts it if killed; it self-heals a stale window at start.
 pgrep -f core_trap.sh >/dev/null || nohup sh /data/gw/core_trap.sh >/dev/null 2>&1 &
 
-# --- dual-uplink aggregation last (v2.8: wan_agg supersedes wan_policy2;
-#     vendor quecadp kernel split via /proc/multi_wan + fwmark policy routing;
-#     5G+家宽 both active, per-flow 40/60, ~15s failover)
-# v2.29: 有线 WAN 接口管理守护先于聚合主管拉起(租约/NAT 看门狗独立成活;
-#     watchdog v1.12+ 自愈)。启动顺序在此无硬依赖(wan_agg 只读 sysfs/文件),
-#     纯粹是让 eth0 档案尽早就绪。
-pgrep -f wan_eth.sh >/dev/null || nohup sh /data/gw/wan_eth.sh >/tmp/wan_eth.out 2>&1 &
-sleep 15
-nohup sh /data/gw/wan_agg.sh >/tmp/wagg.out 2>&1 &
-
 # --- v2.16: 可插拔上行认证守护 — conf 里 AUTHD_CMD 为任意认证程序
 # v2.21: static 档案开机重应用 — MAC 伪装与静态 IP 是运行态, 断电/重启即丢
 #   (2026-10-07 实弹: 断电重启后 eth0 回原生 MAC+无 IP, authd 带错 MAC 反复重试
 #    且无人察觉; 现开机先恢复伪装与 IP 再拉认证, 与 apply_uplink_form 同配方)
+# v2.33 (2026-10-20 stability batch1): authd/static eth0 移到 wan_agg 之前 —
+#   原先 wan_agg 先起、authd 后起, 启动期 w2 ready/authd signal 多次翻转
+#   (21:19/21:29 实测), 触发不必要的 w2 dead→keepalive; 顺序调整后
+#   wan_agg 看到的是已启动的 authd/eth0 档案。
 if [ -r /data/gw/uplink.conf ] && grep -q '^ENABLE=1' /data/gw/uplink.conf; then
     . /data/gw/uplink.conf 2>/dev/null
     if [ "${FORM:-home}" = "static" ] && [ -n "${AUTH_IP:-}" ]; then
@@ -198,6 +211,17 @@ if [ -r /data/gw/uplink.conf ] && grep -q '^ENABLE=1' /data/gw/uplink.conf; then
     [ -n "${AUTHD_CMD:-}" ] && nohup $AUTHD_CMD >/dev/null 2>&1 &
 fi
 
+# --- dual-uplink aggregation last (v2.8: wan_agg supersedes wan_policy2;
+#     vendor quecadp kernel split via /proc/multi_wan + fwmark policy routing;
+#     5G+家宽 both active, per-flow 40/60, ~15s failover)
+# v2.29: 有线 WAN 接口管理守护先于聚合主管拉起(租约/NAT 看门狗独立成活;
+#     watchdog v1.12+ 自愈)。启动顺序在此无硬依赖(wan_agg 只读 sysfs/文件),
+#     纯粹是让 eth0 档案尽早就绪。
+pgrep -f wan_eth.sh >/dev/null || nohup sh /data/gw/wan_eth.sh >/tmp/wan_eth.out 2>&1 &
+sleep 15
+nohup sh /data/gw/wan_agg.sh >/tmp/wagg.out 2>&1 &
+progress "wan_eth+wan_agg started"
+
 # --- production 5G dialer (ubus bootstrap + proven mipc recipe; runs late
 #     so the modem is settled; wan_policy2 still prefers eth1 when present)
 #     SKIPPED in FH mode: mobilenetwork (rc_netfh) owns the stock dial.
@@ -205,4 +229,6 @@ if [ $FHMODE -eq 0 ]; then
   (sleep 90; sh /data/gw/dial_5g.sh >>/tmp/dial_5g.out 2>&1) &
 fi
 KLOG "rc19v2 complete"
+progress "rc19 complete"
+: > /tmp/rc19.done
 exit 0

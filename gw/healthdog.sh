@@ -1,29 +1,172 @@
 #!/bin/sh
-# healthdog.sh — userspace half of healthdog (kernel: healthdog.c)
-# HEALTHY = loopback answers AND (LAN PC OR uplink answers). If the loop
+# healthdog.sh v1.3 -- userspace half of healthdog + second-level supervisor.
+#
+# v1.3 (2026-10-20): loopback was measured DOWN on this image (state DOWN,
+#   ping 127.0.0.1 fails, on-device connects to 192.168.9.1 time out).  Bring
+#   lo up here as well: the heartbeat predicate below requires loopback, and an
+#   armed kernel watchdog with a dead lo would reset the box every 90s.
+# v1.2 (2026-10-20 stability P0-1): the kernel module used to be armed only by
+#   a manual marker, so in practice `armed=0 / heartbeats=0` (no kernel-level
+#   wedge reset at all).  This version is a supervisor:
+#     * waits for boot_gate to stamp boot.healthy with stable=1 (a 10-minute
+#       observation window) — the same boot_id, not a stale file;
+#     * watches watchdog's own beacon (/tmp/watchdog.beat).  Stale >120s:
+#       restart watchdog once, dump tasks (sysrq-t) for forensics, and if it
+#       is still stale after another 60s, ARM the kernel module so a D-state
+#       wedge that kills every userspace loop still forces a reset;
+#     * refuses to arm when the last boots were unhealthy or the previous arm
+#       happened <10 min ago (reboot-loop guard);
+#     * copies /sys/fs/pstore/console-ramoops-0 to /data/gw/logs/pstore/ once
+#       per boot (P1-5: the only crash record that survives a hard reset).
+# HEARTBEAT = loopback answers AND an uplink target answers.  If the loop
 # itself stalls (D-storm), heartbeats stop naturally -> kernel resets.
-# Opt-in per session: touch /data/gw/healthdog.armed
+# Manual override: /data/gw/healthdog.disarmed disables arming entirely.
 LOG=/tmp/healthdog.log
-# slot-aware: v2 (bootslot=b) always armed — it is the safety slot; v3 only
-# with explicit marker (5G may be absent there during bring-up)
-if ! grep -q "bootslot=b" /proc/cmdline 2>/dev/null; then
-    [ -e /data/gw/healthdog.armed ] || { echo "$(date) v3 + marker absent, disarmed" >> $LOG 2>/dev/null; exit 0; }
+HB=/tmp/healthdog.hb
+HEALTHY=/data/gw/boot.healthy
+BEAT=/tmp/watchdog.beat
+ATTEMPTS=/data/gw/boot_attempts.tsv
+ARM_LOG=/data/gw/healthdog.armlog
+DISARM=/data/gw/healthdog.disarmed
+PSDIR=/data/gw/logs/pstore
+hd() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> $LOG; }
+up() { cut -d. -f1 /proc/uptime; }
+now() { date +%s; }
+bid() { cat /proc/sys/kernel/random/boot_id 2>/dev/null; }
+
+if [ ! -e /proc/healthdog ]; then
+    MOD=/data/gw/healthdog.ko
+    [ -f "$MOD" ] && insmod "$MOD" forensic=0 armed=0 2>/dev/null
+    [ -e /proc/healthdog ] || { hd "module not loaded"; exit 1; }
 fi
-[ -e /proc/healthdog ] || { echo "$(date) module not loaded" >> $LOG; exit 1; }
-echo arm > /proc/healthdog
-echo "$(date) armed pid=$$" >> $LOG
-hbs=0
+echo $$ > /tmp/healthdog.lock 2>/dev/null
+# v1.3: loopback is required by the heartbeat predicate (and was DOWN)
+ip link set lo up 2>/dev/null
+hd "start v1.3 pid=$$ boot_id=$(bid) up=$(up)s lo=$(ip link show lo 2>/dev/null | head -1)"
+
+# ---- pstore: rescue the previous boot's console log (P1-5) ---------------
+collect_pstore() {
+    P=/sys/fs/pstore/console-ramoops-0
+    [ -s "$P" ] || return 0
+    _bt=$(awk '/^btime/{print $2; exit}' /proc/stat 2>/dev/null)
+    mkdir -p "$PSDIR" 2>/dev/null
+    O=$PSDIR/console-ramoops.$_bt.txt
+    [ -s "$O" ] && return 0
+    cp "$P" "$O" 2>/dev/null && hd "pstore saved: $O ($(wc -c < "$O" 2>/dev/null) bytes)"
+}
+
+# ---- boot-loop guard ----------------------------------------------------
+recent_unhealthy() { # 0 when the last 3 attempts contain no healthy
+    [ -r "$ATTEMPTS" ] || return 1
+    _tail=$(tail -n 3 "$ATTEMPTS" 2>/dev/null)
+    case "$_tail" in *result=healthy*) return 1 ;; esac
+    [ -n "$_tail" ] && return 0
+    return 1
+}
+arm_recent() { # 0 when an arm happened <600s ago
+    [ -r "$ARM_LOG" ] || return 1
+    _t=$(tail -n 1 "$ARM_LOG" 2>/dev/null | awk '{print $1}')
+    case "$_t" in ''|*[!0-9]*) return 1 ;; esac
+    [ $(( $(now) - _t )) -lt 600 ]
+}
+healthy_ok() { # 0 when boot.healthy is for THIS boot and stable=1
+    [ -r "$HEALTHY" ] || return 1
+    _id=$(sed -n 's/^boot_id=//p' "$HEALTHY" 2>/dev/null | tail -1)
+    _st=$(sed -n 's/^stable=//p' "$HEALTHY" 2>/dev/null | tail -1)
+    [ -n "$_id" ] && [ "$_id" = "$(bid)" ] && [ "$_st" = 1 ]
+}
+
+collect_pstore
+
+ARMED=0
+WATCHDOG_TRIES=0
+LAST_RESTART=0
 while :; do
-    lo=0; ext=0
-    ping -c1 -W2 127.0.0.1 >/dev/null 2>&1 && lo=1
-    ping -c1 -W2 192.168.9.101 >/dev/null 2>&1 && ext=1
-    ping -c1 -W3 223.5.5.5 >/dev/null 2>&1 && ext=1
-    if [ $lo -eq 1 ] && [ $ext -eq 1 ]; then
-        echo hb > /proc/healthdog 2>/dev/null || exit 0
-        hbs=$((hbs+1))
-        [ $((hbs % 60)) -eq 0 ] && echo "$(date) $hbs heartbeats ok" >> $LOG
-    else
-        echo "$(date) HEALTH FAIL hb=$hbs lo=$lo ext=$ext" >> $LOG
+    echo "$(up)" > "$HB" 2>/dev/null
+    u=$(up)
+
+    if [ -f "$DISARM" ]; then
+        [ "$ARMED" = 1 ] && { echo disarm > /proc/healthdog 2>/dev/null; ARMED=0; }
+        hd "disarmed by marker ($(cat "$DISARM" 2>/dev/null | head -c 80))"
+        sleep 30
+        continue
     fi
+
+    # kernel-armed path: heartbeat only while the box AND the primary
+    # supervisor answer.  A dead/stalled watchdog is the exact wedge class we
+    # cannot otherwise detect: withhold the heartbeat and let the kernel reset.
+    if [ "$ARMED" = 1 ]; then
+        lo=0; ext=0
+        ping -c1 -W2 127.0.0.1 >/dev/null 2>&1 && lo=1
+        ping -c1 -W3 223.5.5.5 >/dev/null 2>&1 && ext=1
+        ping -c1 -W2 192.168.9.101 >/dev/null 2>&1 && ext=1
+        _ba=$(cat "$BEAT" 2>/dev/null)
+        case "$_ba" in ''|*[!0-9]*) _wage=999999 ;; *) _wage=$((u - _ba)) ;; esac
+        if [ "$lo" = 1 ] && [ "$ext" = 1 ] && [ "$_wage" -le 180 ]; then
+            echo hb > /proc/healthdog 2>/dev/null
+            [ $(( $(now) % 300 )) -lt 10 ] && hd "armed heartbeat ok up=${u}s wd_age=${_wage}s"
+            WBAD=0
+        else
+            if [ "${WBAD:-0}" = 0 ]; then
+                WBAD=1
+                hd "ARMED HEALTH FAIL up=${u}s lo=$lo ext=$ext wd_age=${_wage}s — heartbeat withheld (reset in 90s)"
+                echo t > /proc/sysrq-trigger 2>/dev/null
+            fi
+        fi
+        sleep 10
+        continue
+    fi
+
+    # not armed: supervision of the primary watchdog
+    if [ "$u" -lt 600 ]; then
+        sleep 10
+        continue
+    fi
+    if ! healthy_ok; then
+        [ $((u % 300)) -lt 10 ] && hd "not arming: no stable boot.healthy for this boot (up=${u}s)"
+        sleep 10
+        continue
+    fi
+    _ba=$(cat "$BEAT" 2>/dev/null)
+    case "$_ba" in ''|*[!0-9]*) _age=999999 ;; *) _age=$((u - _ba)) ;; esac
+    if [ "$_age" -le 120 ]; then
+        WATCHDOG_TRIES=0
+        sleep 10
+        continue
+    fi
+
+    # watchdog beacon stale -> escalate
+    hd "watchdog beacon stale (age=${_age}s up=${u}s) — escalation"
+    echo t > /proc/sysrq-trigger 2>/dev/null
+    if [ "$WATCHDOG_TRIES" -lt 1 ]; then
+        WATCHDOG_TRIES=$((WATCHDOG_TRIES + 1))
+        _wp=$(cat /tmp/watchdog.lock 2>/dev/null)
+        if [ -n "$_wp" ] && kill -0 "$_wp" 2>/dev/null && \
+           grep -qa '/data/gw/watchdog.sh' /proc/$_wp/cmdline 2>/dev/null; then
+            hd "restarting unresponsive watchdog pid=$_wp"
+            kill -9 "$_wp" 2>/dev/null
+        fi
+        PATH=/data/gw/sbin:/data/gw/bin:$PATH
+        nohup sh /data/gw/watchdog.sh >/dev/null 2>&1 </dev/null &
+        sleep 60
+        continue
+    fi
+
+    # still stale after a restart -> arm the kernel wedge reset
+    if recent_unhealthy; then
+        hd "ARM REFUSED: recent boot attempts are not healthy (reboot-loop guard)"
+        sleep 60
+        continue
+    fi
+    if arm_recent; then
+        hd "ARM REFUSED: an arm happened <600s ago (reboot-loop guard)"
+        sleep 60
+        continue
+    fi
+    echo arm > /proc/healthdog 2>/dev/null && {
+        ARMED=1
+        echo "$(now) arm up=${u}s watchdog_age=${_age}s" >> "$ARM_LOG" 2>/dev/null
+        hd "KERNEL ARMED (watchdog stale ${_age}s; timeout=$(sed -n 's/.*timeout_s=\([0-9]*\).*/\1/p' /proc/healthdog 2>/dev/null)s)"
+    }
     sleep 10
 done

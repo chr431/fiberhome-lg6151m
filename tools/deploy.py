@@ -67,7 +67,12 @@ MANIFEST = [
     ("gw/bin/fhstub.so", "/data/gw/fhstub.so"),        # FH symbol stubs: load libfhdrv_net_api standalone
     ("gw/udhcpc_wan.script", "/data/gw/udhcpc_wan.script"), # WAN udhcpc event hook (iface-agnostic)
     ("gw/healthdog.sh", "/data/gw/healthdog.sh"),    # userspace heartbeat
-    ("gw/v3_babysit_v2.sh", "/data/gw/babysit_v2.sh"),   # boot babysitter
+    # v2.23 (P0-2): preinit runs /data/rescue/babysit.sh — the old target
+    # /data/gw/babysit_v2.sh was never executed, so babysitter fixes could not
+    # reach the device through deploy.py at all.
+    ("gw/v3_babysit_v2.sh", "/data/rescue/babysit.sh"),   # boot babysitter (preinit)
+    ("gw/boot_gate.sh", "/data/gw/boot_gate.sh"),      # boot health gate (P0-2; boot.done/healthy/TRY_A)
+    ("gw/core_meta.sh", "/data/gw/core_meta.sh"),      # core_pattern metadata wrapper (P1-2/P1-5)
     ("gw/night_report.sh", "/data/gw/night_report.sh"),
     ("gw/wifi_guard.sh", "/data/gw/wifi_guard.sh"),   # BA-stall auto-recovery
     ("gw/bin/wpapmk", "/data/gw/wpapmk"),          # WPA passphrase->PMK (fh hostapd only eats wpa_psk)

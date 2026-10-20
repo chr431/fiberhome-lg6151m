@@ -301,6 +301,10 @@ run_cycle() {
         [ "$_dd" -gt 5 ] && log "EVT clock jump: epoch +${_de}s vs uptime +${_du}s (skew ${_dd}s)"
     fi
     LAST_EPOCH=$_NOW; LAST_UP=$UP
+    # v1.27: liveness beacon at CYCLE START — proves the loop is running even
+    # when an individual probe is slow (the end-of-cycle completion stamp goes
+    # to /tmp/watchdog.done and is used for reporting only).
+    echo "$UP" > /tmp/watchdog.beat 2>/dev/null
 
     # ---- process invariants (pidof 比 pgrep -x 更可靠, busybox -x 有怪癖) ----
     # v1.27: 服务本体统一走下方监督表/专用块; 这里只做静态不变量.
@@ -771,8 +775,8 @@ EOF
         log "WARN  visual alert: $FAILS check(s) failing"
     fi
 
-    # v1.27: independent liveness beacon (healthdog.sh second-level supervisor)
-    echo "$UP" > /tmp/watchdog.beat 2>/dev/null
+    # v1.27: completion stamp (healthdog uses the start beacon above)
+    echo "$UP $(date +%s)" > /tmp/watchdog.done 2>/dev/null
 
     # ---- log truncation ----
     LINES=$(wc -l < $LOG 2>/dev/null || echo 0)

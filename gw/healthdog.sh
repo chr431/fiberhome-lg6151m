@@ -109,11 +109,19 @@ while :; do
         ping -c1 -W2 192.168.9.101 >/dev/null 2>&1 && ext=1
         _ba=$(cat "$BEAT" 2>/dev/null)
         case "$_ba" in ''|*[!0-9]*) _wage=999999 ;; *) _wage=$((u - _ba)) ;; esac
-        if [ "$lo" = 1 ] && [ "$_wage" -le 180 ]; then
+        # a live-but-slow watchdog gets 300s (probes can time out); a watchdog
+        # whose pid is gone gets 120s.
+        _wpid=$(cat /tmp/watchdog.lock 2>/dev/null)
+        _limit=120
+        if [ -n "$_wpid" ] && kill -0 "$_wpid" 2>/dev/null && \
+           grep -qa '/data/gw/watchdog.sh' /proc/$_wpid/cmdline 2>/dev/null; then
+            _limit=300
+        fi
+        if [ "$lo" = 1 ] && [ "$_wage" -le "$_limit" ]; then
             echo hb > /proc/healthdog 2>/dev/null
             [ $(( $(now) % 300 )) -lt 10 ] && hd "armed heartbeat ok up=${u}s wd_age=${_wage}s ext=$ext"
             WBAD=0; WATCHDOG_TRIES=0
-        elif [ "$lo" = 1 ] && [ "$_wage" -gt 180 ] && [ "$WATCHDOG_TRIES" -lt 1 ]; then
+        elif [ "$lo" = 1 ] && [ "$_wage" -gt "$_limit" ] && [ "$WATCHDOG_TRIES" -lt 1 ]; then
             # one grace restart: keep heartbeating while the primary recovers
             WATCHDOG_TRIES=1
             hd "armed: watchdog stale ${_wage}s — restarting once (heartbeat kept)"

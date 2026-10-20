@@ -841,7 +841,7 @@ if [ -n "$_wp" ] && [ "$_wp" != "$$" ] && kill -0 "$_wp" 2>/dev/null && \
     exit 0
 fi
 echo $$ > /tmp/watchdog.lock
-log "===== watchdog v1.28 start (bounded checks + 3-strike recovery + unified service table + /proc port probes + boot.healthy recheck; alert LED 5G orange) ====="
+log "===== watchdog v1.28 start (bounded checks + 2-of-3 recovery + unified service table + /proc port probes + boot.healthy recheck; alert LED 5G orange) ====="
 logger -t watchdog "watchdog v1.28 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine

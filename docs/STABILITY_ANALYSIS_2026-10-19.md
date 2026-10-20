@@ -286,8 +286,10 @@
 
 过程中做过、可复现的破坏性验证：
 
-- **监督表实弹**：把 7 个守护的心跳换成旧格式（999999s）后，看门狗按 2-of-3 确认
-  逐个重启，日志 `EVT restart …` → 30s 后全部 `OK … (recovered)`，`fails=0`。
+- **监督表实弹（2-of-3 语义）**：把 `traffic_logger` 心跳写成旧值后，第 1 次采样
+  只记 `FAIL + SKIP`（history=`01`，不动作）；第 2 次采样（30s 后）达到 2-of-3，
+  日志 `EVT … stale instance killed` + `EVT restart`，新实例立即刷新心跳且恢复
+  单实例。升级过渡期另有 7 个旧实例（无心跳文件）被监督表逐个重启并全部 `OK`。
 - **门禁自愈**：kill `boot_gate` 后，看门狗在 2-of-3 确认（约 60s）后重新拉起，门禁
   重新写 healthy / 清 TRY_A。
 - **core 取证链**：`ulimit -c unlimited; busybox sh -c 'kill -SEGV $$'` →

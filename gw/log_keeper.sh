@@ -1,5 +1,6 @@
 #!/bin/sh
-# log_keeper.sh v2.3 -- 日志持久化守护（日志改善专项轮）
+# log_keeper.sh v2.4 -- 日志持久化守护（日志改善专项轮）
+#   v2.4: 每轮重写自己的锁 — 启动竞态残留的旧 pid 会在一个周期内自愈.
 #   v2.3: 写锁后回读校验(与看门狗重启的 check-then-write 竞态不再产生双实例).
 #   v2.2: 手动/监督重启也带镜像时区(TZ 兜底), 日志时间戳不再 UTC.
 #   v2.1 (2026-10-20 audit): BOOT 门禁从 btime 等值比较改为 boot_id
@@ -189,6 +190,7 @@ DIAG_DONE=""
 while :; do
     sleep 30
     cut -d. -f1 /proc/uptime > /tmp/log_keeper.hb 2>/dev/null
+    echo $$ > /tmp/log_keeper.lock 2>/dev/null   # v2.4: owner re-asserts the lock
     # -- boot 检出: uptime 回退 → 分隔行 + 重置锚(环已全新) --
     U=$(cut -d. -f1 /proc/uptime)
     if [ "${PREV_UP:-0}" -gt "$U" ] 2>/dev/null; then

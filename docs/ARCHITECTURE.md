@@ -73,7 +73,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/guest_fw.sh` | **v1.6** | manifest | `/data/gw/guest_fw.sh` | 访客隔离防火墙v1.6(审计P0: GUEST_ISOLATE开关删除=强制隔离; 兼容需求改由主WiFi终端频段锁定承接; 历史版本见git) |
 | `gw/healthdog.sh` | **v1.4** | manifest | `/data/gw/healthdog.sh` | 看门狗用户态心跳 + 二级监督; v1.4: 跨重启恢复已 arm 内核的心跳(否则 90s 复位); v1.3: lo 强制 up; v1.2(P0-1): 稳定窗后主动 arm + 重启环保护栏 + pstore 回收; 历史见git |
 | `gw/led_mgr.sh` | **v2.8** | manifest | `/data/gw/led_mgr.sh` | 原厂风格LED守护(绝对电平+自愈); v2.8(batch1): 每 2s 心跳; v2.7: 单实例锁排除自身; 历史见git |
-| `gw/log_keeper.sh` | **v2.3** | manifest | `/data/gw/log_keeper.sh` | 日志持久化守护; v2.3: 写锁回读校验(防监督重启竞态双实例); v2.2: TZ; v2.1: BOOT 门禁 boot_id; v2.0(P1-5): 单实例锁+ne_census+崩溃面包屑; 历史见git |
+| `gw/log_keeper.sh` | **v2.4** | manifest | `/data/gw/log_keeper.sh` | 日志持久化守护; v2.4: 每轮重写锁(竞态残留自愈); v2.3: 写锁回读; v2.2: TZ; v2.1: BOOT 门禁 boot_id; v2.0(P1-5): 单实例锁+ne_census+面包屑; 历史见git |
 | `gw/mipc_dial_trace.sh` | **v1.0** | manifest | `/data/gw/mipc_dial_trace.sh` | 5G 拨号取证(xtrace 抓真参) |
 | `gw/night_report.sh` | **v1.0** | manifest | `/data/gw/night_report.sh` | 夜间体检报告 |
 | `gw/ntp_keeper.sh` | **v1.4** | manifest | `/data/gw/ntp_keeper.sh` | 每小时NTP守时(多源; 设备无RTC); v1.4(P1-1): 单实例锁; v1.3: 首同步失败 60s 重试+心跳; v1.2: 时区自愈; 历史见git |
@@ -95,7 +95,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/webs_revive.sh` | **v1.3** | manifest | `/data/gw/webs_revive.sh` | 原厂GUI复活器(自足nginx conf; 手动拉起) |
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_autoch.sh` | **v1.1** | manifest | `/data/gw/wifi_autoch.sh` | WiFi 自动选道器; v1.1(日志加密轮): 输出 # 注释行记录扫描规模/候选/评分(源码时无害) — 选道依据可复盘; IDC 安全掩码+候选{1,6} |
-| `gw/wifi_guard.sh` | **v1.3** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫; v1.3: iw/tc 探针限时; v1.2(P1-4): 连续 4 样本(60s)确认+站点/backlog 前置+2 次/小时限频+心跳+单实例; 历史见git |
+| `gw/wifi_guard.sh` | **v1.4** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫; v1.4: 每轮重写锁; v1.3: iw/tc 限时; v1.2(P1-4): 连续 4 样本确认+前置+限频+心跳; 历史见git |
 | `gw/wifi_macplan.sh` | **v1.0** | manifest | `/data/gw/wifi_macplan.sh` | 出厂 MAC 派生计划(自 wifi_up v1.29 拆出; api uplink 的 eth0 原生 MAC 还原同步收敛到此唯一实现 — 原内联副本缺两级兜底属算法漂移实例) |
 | `gw/wifi_up.sh` | **v1.29** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.29 架构轮: MAC 派生拆出 wifi_macplan.sh + 自动选道拆出 wifi_autoch.sh, 主文件收敛为拉起配方本体, 变量/契约零变化; v1.28: 候选收敛安全集深部{1,6}; 历史见git) |
 | `gw/www/api.sh` | **v2.77** | manifest | `/data/gw/www/api.sh` | API 核心路由器+helpers; v2.76(日志加密轮): +/tmp/api.log 请求级日志(写端点全记/读端点仅慢或错误, 只含端点/方法/耗时/错误码, 不记 body/token/口令); v2.75: 六域模块懒加载拆分; v2.77(日志加密轮补): 日志行补 epoch 时间基准(跨日志关联) |

@@ -1,5 +1,6 @@
 #!/bin/sh
-# wifi_guard.sh v1.3 — BA-stall auto-recovery + telemetry for the wifi TX quirk.
+# wifi_guard.sh v1.4 — BA-stall auto-recovery + telemetry for the wifi TX quirk.
+# v1.4: 每轮重写自己的锁(启动竞态残留自愈).
 # v1.3: stations/txbacklog 探针经静态 timeout(卡死不再拖住守卫循环).
 #
 # v1.2 (2026-10-20 stability P1-4): the old trigger counted *episode
@@ -62,6 +63,7 @@ txbacklog() { # bytes queued on rai0 (qdisc backlog, evidence only)
 while true; do
     sleep 15
     cut -d. -f1 /proc/uptime > /tmp/wifi_guard.hb 2>/dev/null
+    echo $$ > /tmp/wifi_guard.lock 2>/dev/null   # v1.4: owner re-asserts the lock
 
     # ---- primary signal: kernel stethoscope ----
     STALL=0; EP=0

@@ -14,7 +14,7 @@ gw/udhcpc_wan.script	1.0	manifest	/data/gw/udhcpc_wan.script	WAN口 udhcpc 事�
 gw/healthdog.sh	1.4	manifest	/data/gw/healthdog.sh	看门狗用户态心跳 + 二级监督; v1.4: 跨重启恢复已 arm 内核的心跳(否则 90s 复位); v1.3: lo 强制 up; v1.2(P0-1): 稳定窗后主动 arm + 重启环保护栏 + pstore 回收; 历史见git
 gw/v3_babysit_v2.sh	3.0	manifest	/data/rescue/babysit.sh	启动保姆; v3.0(P0-2): 进展式 T1=240s(无进展 120s 才杀 rcS/mipc_wan_cli) + T2=600s(仍无进展才翻 B) + 900s 硬帽 + 决策落 /data; 目标路径改为 preinit 实跑的 /data/rescue/babysit.sh; 历史见git
 gw/night_report.sh	1.0	manifest	/data/gw/night_report.sh	夜间体检报告
-gw/wifi_guard.sh	1.3	manifest	/data/gw/wifi_guard.sh	BA/TX 停滞自动恢复守卫; v1.3: iw/tc 探针限时; v1.2(P1-4): 连续 4 样本(60s)确认+站点/backlog 前置+2 次/小时限频+心跳+单实例; 历史见git
+gw/wifi_guard.sh	1.4	manifest	/data/gw/wifi_guard.sh	BA/TX 停滞自动恢复守卫; v1.4: 每轮重写锁; v1.3: iw/tc 限时; v1.2(P1-4): 连续 4 样本确认+前置+限频+心跳; 历史见git
 gw/mipc_dial_trace.sh	1.0	manifest	/data/gw/mipc_dial_trace.sh	5G 拨号取证(xtrace 抓真参)
 gw/dial_5g.sh	1.6	manifest	/data/gw/dial_5g.sh	生产 5G 拨号器; v1.6: ubus 冷启动引导不再拉起 ql_ril_service(已退役); 历史见git
 gw/ccmni_up.sh	1.1	manifest	/data/gw/ccmni_up.sh	netagent-lite: MIPC 拨号+ccmni 落地(deact+act→解析→flush+add+mtu); v1.1(日志加密轮): 入口旧地址/deact/act rc+耗时/响应/flush/add rc/总耗时全程留痕; 不写路由/NAT
@@ -64,7 +64,7 @@ gw/ntp_keeper.sh	1.4	manifest	/data/gw/ntp_keeper.sh	每小时NTP守时(多源; 
 gw/reboot_sched.sh	1.3	manifest	/data/gw/reboot_sched.sh	定时重启守护; v1.3(P1-1): 单实例锁+心跳; v1.2: 触发行先落 /data+sync; 历史见git
 gw/core_meta.sh	1.0	manifest	/data/gw/core_meta.sh	core_pattern 元数据 wrapper(P1-2/P1-5): 记录 exe/cmdline/status/maps/父进程/PATH/dmesg 尾后 exec aee forwarder(行为不变, stdin 不碰)
 gw/boot_gate.sh	1.1	manifest	/data/gw/boot_gate.sh	启动健康门禁(P0-2); v1.1: GUI 判据加 HTTP 200; v1.0: 关键链实测通过才写 boot.done, 全通过写 boot.healthy 并清 TRY_A(读回校验), 10min 稳定窗, --check
-gw/log_keeper.sh	2.3	manifest	/data/gw/log_keeper.sh	日志持久化守护; v2.3: 写锁回读校验(防监督重启竞态双实例); v2.2: TZ; v2.1: BOOT 门禁 boot_id; v2.0(P1-5): 单实例锁+ne_census+崩溃面包屑; 历史见git
+gw/log_keeper.sh	2.4	manifest	/data/gw/log_keeper.sh	日志持久化守护; v2.4: 每轮重写锁(竞态残留自愈); v2.3: 写锁回读; v2.2: TZ; v2.1: BOOT 门禁 boot_id; v2.0(P1-5): 单实例锁+ne_census+面包屑; 历史见git
 gw/diag_dump.sh	1.2	manifest	/data/gw/diag_dump.sh	一键诊断包(脱敏); v1.2(SIGSEGV P1/P2): 环读取改静态 logc + 静态工具链自述; v1.1: 结束行带生成时刻
 tools/lk_flash_v4_eth1.py	1.1	tool	-	v1.1路径随项目根迁移; eth1刷入实证器(全链条: 陷阱→raw shell→eth1起链[历史疑点:PHY仅ifup后attach]→curl传输→deploy2自驱→重启回v4.1)
 tools/lk_flash_v4.py	1.1	tool	-	v1.1路径随项目根迁移; 终版刷入器(LK陷阱→raw shell→/dev/null修复→curl送deploy2.sh→后台自驱+轮询deploy.log→重启监测; 修三雷: uclient罢工/&需/dev/null/串口前台等待吃首字符)

@@ -31,6 +31,10 @@
 #        boot_gate.sh --check  one-shot verdict for watchdog (no side effects)
 #        boot_gate.sh --status last decision + current check table
 set -u
+# v1.0: the gate can be run by hand (no static PATH inherited); every probe
+# below resolves to the static toolchain first.
+PATH=/data/gw/sbin:/data/gw/bin:$PATH
+export PATH
 
 HERE=/data/gw
 BB=$HERE/bin/busybox

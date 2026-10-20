@@ -20,6 +20,9 @@
 # Safety: <=120 files kept; every command is absolute; failure to record must
 # never prevent aee from getting the core (so no `set -e`, all errors ignored).
 
+# core_pattern helpers run with a minimal kernel-provided environment: set PATH.
+PATH=/data/gw/sbin:/data/gw/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
 BB=/data/gw/bin/busybox
 [ -x "$BB" ] || BB=
 DIR=/data/gw/logs/cores/meta

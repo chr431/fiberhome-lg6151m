@@ -37,6 +37,8 @@
 # L13: "feature silently broken until manual inspection" countermeasure.
 # Runs every 30s; failures log + ALERT LED flash (5G orange); recovers silently.
 
+PATH=/data/gw/sbin:/data/gw/bin:$PATH
+export PATH
 LOG=/tmp/watchdog.log
 STATE=/tmp/watchdog_state
 ALED=/sys/class/gpio/gpio473/value

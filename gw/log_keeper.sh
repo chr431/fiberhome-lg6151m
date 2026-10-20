@@ -54,6 +54,8 @@
 #   5) 容量护栏     → syslog 4MB / dmesg 2MB 触发轮转(.1，仅留一代)；单轮追加
 #      上限 512K（洪泛时限流，保 flash）
 #   6) 每次开机 +180s 生成一份诊断包（diag_dump.sh → diag_boot.txt）
+PATH=/data/gw/sbin:/data/gw/bin:$PATH
+export PATH
 LOG=/tmp/log_keeper.log
 DIR=/data/gw/logs
 LOGC=/data/gw/bin/logc

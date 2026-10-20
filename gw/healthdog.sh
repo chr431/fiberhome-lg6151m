@@ -23,6 +23,8 @@
 # outage must never trigger a kernel reset.  If the loop itself stalls
 # (D-storm), heartbeats stop naturally -> kernel resets.
 # Manual override: /data/gw/healthdog.disarmed disables arming entirely.
+PATH=/data/gw/sbin:/data/gw/bin:$PATH
+export PATH
 LOG=/tmp/healthdog.log
 HB=/tmp/healthdog.hb
 HEALTHY=/data/gw/boot.healthy

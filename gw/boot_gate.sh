@@ -35,6 +35,7 @@ set -u
 # below resolves to the static toolchain first.
 PATH=/data/gw/sbin:/data/gw/bin:$PATH
 export PATH
+[ -z "${TZ:-}" ] && [ -r /etc/TZ ] && TZ=$(cat /etc/TZ 2>/dev/null) && export TZ
 
 HERE=/data/gw
 BB=$HERE/bin/busybox

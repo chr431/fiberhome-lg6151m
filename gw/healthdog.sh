@@ -25,6 +25,7 @@
 # Manual override: /data/gw/healthdog.disarmed disables arming entirely.
 PATH=/data/gw/sbin:/data/gw/bin:$PATH
 export PATH
+[ -z "${TZ:-}" ] && [ -r /etc/TZ ] && TZ=$(cat /etc/TZ 2>/dev/null) && export TZ
 LOG=/tmp/healthdog.log
 HB=/tmp/healthdog.hb
 HEALTHY=/data/gw/boot.healthy

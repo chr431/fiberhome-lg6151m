@@ -23,6 +23,7 @@
 # core_pattern helpers run with a minimal kernel-provided environment: set PATH.
 PATH=/data/gw/sbin:/data/gw/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
+[ -z "${TZ:-}" ] && [ -r /etc/TZ ] && TZ=$(cat /etc/TZ 2>/dev/null) && export TZ
 BB=/data/gw/bin/busybox
 [ -x "$BB" ] || BB=
 DIR=/data/gw/logs/cores/meta

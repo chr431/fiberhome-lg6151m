@@ -39,6 +39,7 @@
 
 PATH=/data/gw/sbin:/data/gw/bin:$PATH
 export PATH
+[ -z "${TZ:-}" ] && [ -r /etc/TZ ] && TZ=$(cat /etc/TZ 2>/dev/null) && export TZ
 LOG=/tmp/watchdog.log
 STATE=/tmp/watchdog_state
 ALED=/sys/class/gpio/gpio473/value

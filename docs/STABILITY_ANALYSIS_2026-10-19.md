@@ -235,7 +235,7 @@
   补上 `db_history` 无进程名的盲区；watchdog 的 `WARN aee NE +N` 直接附 census 末条。
 - **降噪**：healthdog `forensic` 默认 0（`/data/gw/healthdog.forensic` marker 才
   开 FORENSIC D）；`log_keeper` 的 dmesg 镜像过滤 FORENSIC/wdtk/hang_detect/SPM；
-  BOOT 行以 btime 门禁；`core_trap v1.1` 全局配额 60 个/200MB + `quota.tsv`。
+  BOOT 行以 **boot_id** 门禁（btime 受 NTP 校时漂移，实测曾在守护重启时写假 BOOT，log_keeper v2.1 修正）；`core_trap v1.1` 全局配额 60 个/200MB + `quota.tsv`。
 - **pstore**：`healthdog` 每 boot 把 `/sys/fs/pstore/console-ramoops-0` 复制到
   `/data/gw/logs/pstore/console-ramoops.<btime>.txt`（硬复位后唯一现场）。
 - **fuzz 实弹**：`tools/fuzz_logc.py` 在设备侧对真实二进制跑 13 轮
@@ -292,6 +292,11 @@
   单实例。升级过渡期另有 7 个旧实例（无心跳文件）被监督表逐个重启并全部 `OK`。
 - **门禁自愈**：kill `boot_gate` 后，看门狗在 2-of-3 确认（约 60s）后重新拉起，门禁
   重新写 healthy / 清 TRY_A。
+- **关键服务重启**：kill `dnsmasq` / `v3httpd` 后，第 1 次采样只记 SKIP，第 2 次
+  （30s 后）按缓存 cmdline/静态配方重启；随后 `pidof`+端口+功能探针（DNS 解析 /
+  HTTP 200）全部恢复。dropbear/authd 走同一代码路径，未主动杀（会自断 SSH/认证）。
+- **BOOT 门禁**：重启 `log_keeper` 前后 `BOOT epoch` 计数不变（6→6），日志记
+  `same boot boot_id=…; daemon restart, no BOOT line`（v2.1 起以 boot_id 为键）。
 - **core 取证链**：`ulimit -c unlimited; busybox sh -c 'kill -SEGV $$'` →
   `cores/meta/…txt`（9.7KB，含 exe/cmdline/status/maps/父进程/PATH）、
   `ne_events.tsv` 一行 census、aee `db_history` 185→186 且 `db.04.NE` 时间戳更新
@@ -299,6 +304,25 @@
 - **armed 跨重启**：healthdog 重启后记录
   `resuming supervision of an already-armed kernel watchdog`，心跳继续
   （旧版本会在 90s 后被内核复位；已修）。
+
+### 6.9 第一批 / 第二批逐项对照（2026-10-20 审计）
+
+| 批次项 | 状态 | 证据 |
+|---|---|---|
+| 第一批：check 加 timeout | ✅ | watchdog v1.28：`check()`/`mto`/`tmo` 全覆盖；剩余内联探针（dmesg×2、iw×2、ip、tc、df×2、ps、station dump）本轮补齐限时 |
+| 第一批：rc=139/超时重试 | ✅ | `is_toolfault`+重试 3 次+`toolfaults.log`（what/rc/pid/uptime/cmd）；hostapd_cli 同规则 |
+| 第一批：dnsmasq/dropbear/v3httpd/authd 重启 | ✅ | 监督块 + 缓存 cmdline/配方；**dnsmasq、v3httpd 实弹 kill→2-of-3→重启→功能恢复**；dropbear/authd 同代码路径（主动杀会自断 SSH/认证，未做） |
+| 第一批：wan_agg/log_keeper 等进度判据 | ✅ | `wan_alive ts` + 10 个 `/tmp/*.hb`（stale 重启用 2-of-3） |
+| 第一批：FORENSIC/wdtk 降噪 | ✅ | healthdog `forensic=0`（marker 才开）+ log_keeper drop 表；本 boot 以来 `FORENSIC D/wdtk/hang_detect` 0 行 |
+| 第一批：BOOT btime 门禁 | ✅ | log_keeper v2.1 改 **boot_id**（btime 受 NTP 校正漂移）；重启实测 6→6 无假 BOOT |
+| 第一批：log_keeper rc 修复 | ✅ | `_lc=$?` 先保存（v1.9 起）；rc≠0 归档 logc 面包屑 |
+| 第一批：NTP 首同步重试 | ✅ | ntp_keeper v1.4：未同步时 60s 重试、成功后才 3600s；本轮开机首同步成功 |
+| 第一批：authd 启动顺序 | ✅ | rc19 v2.34：AUTHD_CMD 在 wan_agg 之前（rc19.sh L212 < L223） |
+| 第二批：boot.healthy 门禁 + babysit 进展式 | ✅ | 冷启动 105s 门禁、601s stable；babysit v3.0 未误触（进展式 T1/T2） |
+| 第二批：TRY_A 延迟清零/回滚 | ✅ | 早期条件清 + gate 全通过后清并读回；台账 3 行 healthy；坏启动保留 LK 计数 |
+| 第二批：healthdog 受控 arm + watchdog 心跳 | ✅ | 609s arm（stable 后）、60s 复检、重启恢复心跳（v1.4）、防 reboot 环 |
+| 第二批：core_pattern 元数据 wrapper | ✅ | 实弹 SIGSEGV：meta 文件 + ne_events + aee NE 185→186（aee 行为不变） |
+| 第二批：hostapd/wifi_guard 决策硬化 | ✅ | 2-of-3（与 traffic_logger/dnsmasq 实测同一实现）+ 控制 socket/客户端数/限频；wifi_guard 连续 4 样本 + 站点/backlog 前置 |
 
 ### 6.8 明确未做（诚实清单）
 

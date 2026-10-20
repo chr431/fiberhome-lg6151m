@@ -164,7 +164,7 @@
 | 所有外部检查限时 | `watchdog v1.27` 的 `check()` 经 `/data/gw/bin/busybox timeout -s KILL 8`；124/137/139 视为工具故障，重试 3 次仍失败只记 `toolfaults` + `/data/gw/logs/toolfaults.log`（含 what/rc/pid/uptime/cmd），不触发任何破坏性动作 |
 | `mto` 不再无限 wait | 优先静态 `timeout`；回退路径 0.1s 轮询 → `kill -9` → 最多再 reap 10s，D 态子进程不再阻塞看门狗 |
 | 端口判据去 netstat | `port_listen()` 直接解析 `/proc/net/tcp{,6}` 的 `:0016/:0035/:0050` + state 0A；守护树不再 spawn netstat |
-| 二级监督 | `watchdog` 每轮写 `/tmp/watchdog.beat`；`healthdog v1.3` 校验该心跳，陈旧 >120s 先重启看门狗，仍陈旧则 `echo arm > /proc/healthdog`（90s 无心跳内核复位） |
+| 二级监督 | `watchdog` 每轮写 `/tmp/watchdog.beat`；`healthdog v1.3` 在校验 `boot.healthy(stable=1)` 后**主动 arm** 内核模块（wedge 时用户态无法自救，必须提前武装）；armed 期间以 `loopback UP + beat <180s` 为心跳判据，主看门狗陈旧时先保留心跳做一次 45s 宽限重启，仍陈旧才停发心跳（90s 后内核复位） |
 | 受控 arm | 仅在 `boot.healthy` 的 `boot_id` 与本 boot 相同且 `stable=1`（10 分钟观察窗）后 arm；最近 3 次启动无 healthy 或 10 分钟内刚 arm 过 → 拒绝 arm（防 reboot 环） |
 | 快速重启台账 | `rc.extend` 每次启动追加 `/data/gw/boot_attempts.tsv`（btime/epoch/result/fast/boot_id，保留 30 行）；<180s 的快速重启标记 `fast=1` |
 

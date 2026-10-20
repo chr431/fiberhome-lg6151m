@@ -112,7 +112,20 @@ while :; do
         if [ "$lo" = 1 ] && [ "$_wage" -le 180 ]; then
             echo hb > /proc/healthdog 2>/dev/null
             [ $(( $(now) % 300 )) -lt 10 ] && hd "armed heartbeat ok up=${u}s wd_age=${_wage}s ext=$ext"
-            WBAD=0
+            WBAD=0; WATCHDOG_TRIES=0
+        elif [ "$lo" = 1 ] && [ "$_wage" -gt 180 ] && [ "$WATCHDOG_TRIES" -lt 1 ]; then
+            # one grace restart: keep heartbeating while the primary recovers
+            WATCHDOG_TRIES=1
+            hd "armed: watchdog stale ${_wage}s — restarting once (heartbeat kept)"
+            _wp=$(cat /tmp/watchdog.lock 2>/dev/null)
+            if [ -n "$_wp" ] && kill -0 "$_wp" 2>/dev/null && \
+               grep -qa '/data/gw/watchdog.sh' /proc/$_wp/cmdline 2>/dev/null; then
+                kill -9 "$_wp" 2>/dev/null
+            fi
+            nohup sh /data/gw/watchdog.sh >/dev/null 2>&1 </dev/null &
+            echo hb > /proc/healthdog 2>/dev/null
+            sleep 45
+            echo hb > /proc/healthdog 2>/dev/null
         else
             if [ "${WBAD:-0}" = 0 ]; then
                 WBAD=1
@@ -124,7 +137,9 @@ while :; do
         continue
     fi
 
-    # not armed: supervision of the primary watchdog
+    # not armed: arm once the boot has been healthy and stable for the window,
+    # then keep supervising from the armed branch above.  Arming proactively is
+    # the point: a wedged userspace cannot arm itself later.
     if [ "$u" -lt 600 ]; then
         sleep 10
         continue
@@ -134,32 +149,6 @@ while :; do
         sleep 10
         continue
     fi
-    _ba=$(cat "$BEAT" 2>/dev/null)
-    case "$_ba" in ''|*[!0-9]*) _age=999999 ;; *) _age=$((u - _ba)) ;; esac
-    if [ "$_age" -le 120 ]; then
-        WATCHDOG_TRIES=0
-        sleep 10
-        continue
-    fi
-
-    # watchdog beacon stale -> escalate
-    hd "watchdog beacon stale (age=${_age}s up=${u}s) — escalation"
-    echo t > /proc/sysrq-trigger 2>/dev/null
-    if [ "$WATCHDOG_TRIES" -lt 1 ]; then
-        WATCHDOG_TRIES=$((WATCHDOG_TRIES + 1))
-        _wp=$(cat /tmp/watchdog.lock 2>/dev/null)
-        if [ -n "$_wp" ] && kill -0 "$_wp" 2>/dev/null && \
-           grep -qa '/data/gw/watchdog.sh' /proc/$_wp/cmdline 2>/dev/null; then
-            hd "restarting unresponsive watchdog pid=$_wp"
-            kill -9 "$_wp" 2>/dev/null
-        fi
-        PATH=/data/gw/sbin:/data/gw/bin:$PATH
-        nohup sh /data/gw/watchdog.sh >/dev/null 2>&1 </dev/null &
-        sleep 60
-        continue
-    fi
-
-    # still stale after a restart -> arm the kernel wedge reset
     if recent_unhealthy; then
         hd "ARM REFUSED: recent boot attempts are not healthy (reboot-loop guard)"
         sleep 60
@@ -170,10 +159,14 @@ while :; do
         sleep 60
         continue
     fi
-    echo arm > /proc/healthdog 2>/dev/null && {
+    if echo arm > /proc/healthdog 2>/dev/null; then
         ARMED=1
-        echo "$(now) arm up=${u}s watchdog_age=${_age}s" >> "$ARM_LOG" 2>/dev/null
-        hd "KERNEL ARMED (watchdog stale ${_age}s; timeout=$(sed -n 's/.*timeout_s=\([0-9]*\).*/\1/p' /proc/healthdog 2>/dev/null)s)"
-    }
+        echo "$(now) arm up=${u}s stable-healthy" >> "$ARM_LOG" 2>/dev/null
+        hd "KERNEL ARMED after stable window (up=${u}s; timeout=$(sed -n 's/.*timeout_s=\([0-9]*\).*/\1/p' /proc/healthdog 2>/dev/null)s)"
+        echo hb > /proc/healthdog 2>/dev/null
+    else
+        hd "ARM FAILED: /proc/healthdog not writable"
+        sleep 30
+    fi
     sleep 10
 done

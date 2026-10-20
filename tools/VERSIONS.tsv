@@ -95,7 +95,7 @@ tools/leak_check.py	2.2	tool	-	敏感词零命中门禁; v2.2: --history 全量�
 docs/ARCHITECTURE.md	1.1	doc	-	架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针)
 docs/GUI_TERMINOLOGY.md	1.2	doc	-	GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git
 gw/watchdog.sh	1.27	manifest	/data/gw/watchdog.sh	持续不变量看门狗; v1.27(stability P0/P1): 检查全程静态 timeout 限时+工具故障重试/toolfaults 台账; 3 次连续确认才做破坏性自愈; 统一服务监督表(dnsmasq/dropbear/v3httpd/authd + 10 个脚本守护, 含配方/心跳/限频); 端口判据改 /proc/net/tcp 最小读取; mto 有界 reap; /tmp/watchdog.beat 供二级监督; 10min boot.healthy 复检; 历史见git
-tools/selftest.py	2.50	tool	-	设备自检; v2.50(stability P0/P1): +boot_gate/healthdog/core_meta/supervision/wifi_guard 判据; 历史见git
+tools/selftest.py	2.51	tool	-	设备自检; v2.51: 控制台 UTF-8 重配置(GBK 终端不再中断 post-deploy 门禁); v2.50(P0/P1): +7 条 stability 判据; 历史见git
 tools/doc_audit.py	1.2	tool	-	台账↔文档内联标记双向审计; v1.2: 子进程显式 UTF-8(gbk 环境不再中断 deploy 文档门禁); 历史见git
 gw/src/mipc_cellular.c	0.17	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源码; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘
 gw/bin/mipc_cellular	0.17	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘

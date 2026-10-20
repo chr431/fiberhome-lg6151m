@@ -11,6 +11,7 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
+v2.51 (2026-10-20): 控制台 stdout/stderr 显式 UTF-8(GBK 终端下 ✓/✗ 打印不再中断套件). 
 v2.50 (2026-10-20 stability P0/P1 batch2): +t_p0_watchdog / t_p0_boot_gate /
   t_p1_singletons / t_p1_forensics / t_p1_healthdog / t_p1_radio / t_p1_logpipe —
   限时检查、boot.healthy 门禁与 TRY_A 读回、统一监督表单实例、core_meta 取证链、
@@ -2080,6 +2081,13 @@ def t_p1_logpipe():
 
 
 def main():
+    # v2.51: the suite prints ✓/✗; a Windows GBK console raised
+    # UnicodeEncodeError mid-run (aborting deploy.py's post-deploy gate).
+    for _s in (sys.stdout, sys.stderr):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     args = sys.argv[1:]
     cats = [a for a in args if not a.startswith("-")]
     json_out = "--json" in args

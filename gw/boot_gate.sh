@@ -1,5 +1,6 @@
 #!/bin/sh
-# boot_gate.sh v1.1 -- real boot health gate (replaces the rc19 120s timer).
+# boot_gate.sh v1.2 --
+# v1.2: 不再写 /tmp/watchdog.beat(那是看门狗的数字心跳, 被 "107 boot.done" 污染). real boot health gate (replaces the rc19 120s timer).
 # v1.1: c_gui 加 HTTP 200 功能判据(lo 已修, 本机 HTTP 探活可用).
 #
 # Problem (2026-10-19 stability analysis P0-2): rc19 used
@@ -142,7 +143,7 @@ clear_try_a() {
 write_healthy() { # $1=stable(0|1) $2=degraded(0|1) $3=reason
     _tmp=$HEALTHY.tmp
     {
-        echo "# boot health verdict (boot_gate v1.1)"
+        echo "# boot health verdict (boot_gate v1.2)"
         echo "boot_id=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)"
         echo "btime=$(awk '/^btime/{print $2; exit}' /proc/stat 2>/dev/null)"
         echo "epoch=$(date +%s)"
@@ -207,7 +208,6 @@ while :; do
             mv "$DONE.tmp" "$DONE"
             DONE_WRITTEN=1
             prog "CRITICAL PASS -> /tmp/boot.done up=${_up}s [$(echo "$_crit" | tr '\n' ' ')]"
-            echo "$_up boot.done" > /tmp/watchdog.beat 2>/dev/null
         else
             prog "critical pending [$(echo "$_crit" | tr '\n' ' ')]"
         fi

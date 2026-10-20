@@ -55,7 +55,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/bin/v3_steth.ko` | **v1.0** | manifest | `/data/gw/v3_steth.ko` | hook槽位听诊器(bias/interval) |
 | `gw/bin/v3httpd` | **v2.6** | manifest | `/data/gw/v3httpd` | 网关GUI HTTP服务; v2.6(P2): 静态面拒*.sh(免认证源码泄露)+Host头校验(根治DNS rebinding) |
 | `gw/bin/wpapmk` | **v1.0** | manifest | `/data/gw/wpapmk` | WPA口令转PMK(纯C PBKDF2-SHA1; fh魔改hostapd只吃wpa_psk) |
-| `gw/boot_gate.sh` | **v1.1** | manifest | `/data/gw/boot_gate.sh` | 启动健康门禁(P0-2); v1.1: GUI 判据加 HTTP 200; v1.0: 关键链实测通过才写 boot.done, 全通过写 boot.healthy 并清 TRY_A(读回校验), 10min 稳定窗, --check |
+| `gw/boot_gate.sh` | **v1.2** | manifest | `/data/gw/boot_gate.sh` | 启动健康门禁(P0-2); v1.2: 不写 watchdog.beat(避免污染数字心跳); v1.1: GUI 判据加 HTTP 200; v1.0: 关键链门禁+boot.healthy+TRY_A 读回+10min 稳定窗 |
 | `gw/capture_ubus.sh` | **v1.1** | manifest | `/data/gw/capture_ubus.sh` | stock拨号一次性捕获(ubus monitor+ccmni采样) |
 | `gw/ccmni_up.sh` | **v1.1** | manifest | `/data/gw/ccmni_up.sh` | netagent-lite: MIPC 拨号+ccmni 落地(deact+act→解析→flush+add+mtu); v1.1(日志加密轮): 入口旧地址/deact/act rc+耗时/响应/flush/add rc/总耗时全程留痕; 不写路由/NAT |
 | `gw/cellular_replay.sh` | **v2.1** | manifest | `/data/gw/cellular_replay.sh` | 蜂窝锁定开机重放(频段/小区锁到cfgmgr树, 树每次开机由出厂档案重建) |

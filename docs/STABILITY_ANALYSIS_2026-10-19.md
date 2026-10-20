@@ -268,18 +268,18 @@
    方案 arm 内核模块，它会在 90s 后必然硬复位（90s 复位环）。故 `rc.extend v2.6`
    与 `healthdog v1.4` 都显式 `ip link set lo up`，并把 `lo UP` 纳入 boot 关键链。
 
-### 6.7 冷启动实测（3 次，第 3 次为最终代码）
+### 6.7 冷启动实测（4 次，第 4 次为最终代码）
 
 | 观测点 | 实测 |
 |---|---|
-| rc19 完成 → `/tmp/rc19.done` | 104s（boot3；boot1/2 均为 104s） |
-| `/tmp/boot.done`（关键链） | 105s（旧实现是固定 120s 定时器） |
-| `/data/gw/boot.healthy` | 105s 写入（boot_id 与当前一致，degraded=0） |
-| LK `TRY_A` | 106s 清零并读回：`pre=0f01… post=0f00… byte1=0`；`misc[2060..] = 0f 00 00 00 00 0e 00 01 02 00` |
-| `stable=1`（10 分钟观察窗） | 601s（boot3；boot2 603s） |
-| healthdog 内核 arm | 609s（boot3；boot2 604s），`armed=1 timeout_s=90`，心跳持续 |
-| 看门狗 10 分钟复检 | `OK boot.healthy re-check at 620s: all gate checks still pass` |
-| 启动尝试台账 | 3 行全部 `result=healthy`（btime 漂移不再影响匹配） |
+| rc19 完成 → `/tmp/rc19.done` | 106s（boot4；boot1–3 为 104s） |
+| `/tmp/boot.done`（关键链，含 GUI HTTP 200） | 107s（旧实现是固定 120s 定时器） |
+| `/data/gw/boot.healthy` | 108s 写入（boot_id 与当前一致，degraded=0） |
+| LK `TRY_A` | 108s 清零并读回：`pre=0f01… post=0f00… byte1=0`；`misc[2060..] = 0f 00 00 00 00 0e 00 01 02 00` |
+| `stable=1`（10 分钟观察窗） | 601s（boot4；boot2/3 为 601–603s） |
+| healthdog 内核 arm | 606s（boot4；boot2/3 为 604–609s），`armed=1 timeout_s=90`，心跳持续 |
+| 看门狗 10 分钟复检 | `OK boot.healthy re-check at 622s: all gate checks still pass` |
+| 启动尝试台账 | 4 行全部 `result=healthy`（btime 漂移不再影响匹配） |
 | 服务树 | 14 个受监督守护**全部恰 1 实例**；10 个心跳文件新鲜 |
 | `selftest.py` 全量 | **94 pass / 0 fail**（wifi 8/8、gui 10/10、agg 11/11、net 5/5、cellular 22/22、security 8/8、system 30/30） |
 | `deploy.py doctor` | **CLEAN**（115 个登记文件 / MANIFEST 67 项，md5 双向一致，无流浪脚本） |
@@ -314,7 +314,7 @@
 | 第一批：dnsmasq/dropbear/v3httpd/authd 重启 | ✅ | 监督块 + 缓存 cmdline/配方；**dnsmasq、v3httpd 实弹 kill→2-of-3→重启→功能恢复**；dropbear/authd 同代码路径（主动杀会自断 SSH/认证，未做） |
 | 第一批：wan_agg/log_keeper 等进度判据 | ✅ | `wan_alive ts` + 10 个 `/tmp/*.hb`（stale 重启用 2-of-3） |
 | 第一批：FORENSIC/wdtk 降噪 | ✅ | healthdog `forensic=0`（marker 才开）+ log_keeper drop 表；本 boot 以来 `FORENSIC D/wdtk/hang_detect` 0 行 |
-| 第一批：BOOT btime 门禁 | ✅ | log_keeper v2.1 改 **boot_id**（btime 受 NTP 校正漂移）；重启实测 6→6 无假 BOOT |
+| 第一批：BOOT btime 门禁 | ✅ | log_keeper v2.1 改 **boot_id**（btime 受 NTP 校正漂移）；v2.3/v2.4 写锁回读+每轮重写（监督重启竞态自愈）；重启实测 6→6 无假 BOOT |
 | 第一批：log_keeper rc 修复 | ✅ | `_lc=$?` 先保存（v1.9 起）；rc≠0 归档 logc 面包屑 |
 | 第一批：NTP 首同步重试 | ✅ | ntp_keeper v1.4：未同步时 60s 重试、成功后才 3600s；本轮开机首同步成功 |
 | 第一批：authd 启动顺序 | ✅ | rc19 v2.34：AUTHD_CMD 在 wan_agg 之前（rc19.sh L212 < L223） |

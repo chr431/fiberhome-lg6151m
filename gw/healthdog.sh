@@ -70,10 +70,16 @@ recent_unhealthy() { # 0 when the last 3 attempts contain no healthy
     [ -n "$_tail" ] && return 0
     return 1
 }
-arm_recent() { # 0 when an arm happened <600s ago
+arm_recent() { # 0 when an arm happened <600s ago IN THIS BOOT
+    # v1.4: the guard exists to stop arm/disarm/arm loops inside one boot; a
+    # legitimate reboot must not delay arming by another 10 minutes.
     [ -r "$ARM_LOG" ] || return 1
-    _t=$(tail -n 1 "$ARM_LOG" 2>/dev/null | awk '{print $1}')
+    _l=$(tail -n 1 "$ARM_LOG" 2>/dev/null)
+    _t=$(echo "$_l" | awk '{print $1}')
+    _b=$(echo "$_l" | sed -n 's/.*btime=\([0-9]*\).*/\1/p')
     case "$_t" in ''|*[!0-9]*) return 1 ;; esac
+    _cur=$(awk '/^btime/{print $2; exit}' /proc/stat 2>/dev/null)
+    [ -n "$_b" ] && [ "$_b" != "$_cur" ] && return 1
     [ $(( $(now) - _t )) -lt 600 ]
 }
 healthy_ok() { # 0 when boot.healthy is for THIS boot and stable=1
@@ -177,7 +183,7 @@ while :; do
     fi
     if echo arm > /proc/healthdog 2>/dev/null; then
         ARMED=1
-        echo "$(now) arm up=${u}s stable-healthy" >> "$ARM_LOG" 2>/dev/null
+        echo "$(now) btime=$(awk '/^btime/{print $2; exit}' /proc/stat 2>/dev/null) up=${u}s stable-healthy" >> "$ARM_LOG" 2>/dev/null
         hd "KERNEL ARMED after stable window (up=${u}s; timeout=$(sed -n 's/.*timeout_s=\([0-9]*\).*/\1/p' /proc/healthdog 2>/dev/null)s)"
         echo hb > /proc/healthdog 2>/dev/null
     else

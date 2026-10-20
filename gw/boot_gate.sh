@@ -162,7 +162,7 @@ mark_attempt() { # $1=result $2=note
     [ -f "$ATTEMPTS" ] || return 0
     _last=$(tail -n 1 "$ATTEMPTS" 2>/dev/null)
     [ -n "$_last" ] || return 0
-    _new=$(printf '%s\n' "$_last" | sed "s/result=[a-z]*/result=$1/; s/note=[^ ]*/note=$2/")
+    _new=$(printf '%s\n' "$_last" | sed "s/result=[a-z]*/result=$1/; s/ note=.*/ note=$2/")
     case "$_new" in *note=*) ;; *) _new="$_new note=$2" ;; esac
     { sed '$d' "$ATTEMPTS"; printf '%s\n' "$_new"; } > "$ATTEMPTS.tmp" 2>/dev/null \
         && mv "$ATTEMPTS.tmp" "$ATTEMPTS"

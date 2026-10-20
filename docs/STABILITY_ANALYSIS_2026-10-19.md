@@ -277,5 +277,7 @@
 - logc 崩溃根因（见 6.4；本轮交付的是归因能力，不是结论）。
 - P2/P3 项（蜂窝 zombie-IP、NTP 小时级策略、写放大、多写方 flock、静态 CGI 等）
   不在本轮 P0+P1 范围。
+- `v3_steth` 内核侧未新增 tx backlog 字段（需重建内核模块，风险高于收益）：改用
+  `tc -s qdisc show dev rai0` 的 backlog 作为同义用户态信号，随每次恢复决策留痕。
 - hostapd/wifi_guard 的阈值（90s 确认、60s 连续 stall、2 次/小时）是**保守初值**，
   需用下一次真实 stall 的日志校准；本轮只保证"不再误伤"。

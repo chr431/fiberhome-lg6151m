@@ -1,5 +1,7 @@
 #!/bin/sh
-# log_keeper.sh v2.0 -- 日志持久化守护（日志改善专项轮）
+# log_keeper.sh v2.1 -- 日志持久化守护（日志改善专项轮）
+#   v2.1 (2026-10-20 audit): BOOT 门禁从 btime 等值比较改为 boot_id
+#   (btime 被 NTP 校时后漂移, 守护重启会写假 BOOT — 本轮实测复现).
 #   v2.0 (2026-10-20 stability P1-5): ① 单实例锁(cmdline 复核) — 看门狗监督表
 #   会重启本守护, 双实例会重复追加镜像; ② ne_census.tsv — 从 syslog 新增行抽取
 #   aee 的 "pid: N >>> comm <<<" 记录(时间/pid/comm/原文), 补上 db_history 无
@@ -152,15 +154,26 @@ if [ "$_rot" = 1 ]; then
     lk "new boot: tmp -> tmp.prev, anchors reset"
 fi
 echo "${U0:-0}" > $DIR/.snap_up
-# v1.9: BOOT 分隔行只在真 boot(btime 变化)时写; watchdog 重启守护不写假 BOOT.
+# v2.1: BOOT 分隔行以 boot_id 为门禁 —— btime 会被 NTP 校时改变(实测同一
+#   boot 内漂移 1-2s), 用等值比较会在守护重启时写假 BOOT(本轮实测复现)。
+#   boot_id 在 boot 内恒定; 缺失时回退 btime ±120s 容差.
+_bid=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
+_pbid=$(cat $DIR/.boot_id 2>/dev/null)
 _bt=$(awk '/^btime/{print $2; exit}' /proc/stat 2>/dev/null)
 _pbt=$(cat $DIR/.boot_btime 2>/dev/null)
-if [ -n "$_bt" ] && [ "$_bt" != "$_pbt" ]; then
-    echo "$_bt" > $DIR/.boot_btime
-    lk "start (new boot btime=$_bt)"
-    bootmark
+_same=0
+if [ -n "$_bid" ] && [ -n "$_pbid" ]; then
+    [ "$_bid" = "$_pbid" ] && _same=1
+elif [ -n "$_bt" ] && [ -n "$_pbt" ]; then
+    _d=$((_bt - _pbt)); [ "${_d#-}" -le 120 ] && _same=1
+fi
+if [ "$_same" = 1 ]; then
+    lk "start (same boot boot_id=${_bid:-?}; daemon restart, no BOOT line)"
 else
-    lk "start (same boot btime=${_bt:-unknown}; daemon restart, no BOOT line)"
+    [ -n "$_bid" ] && echo "$_bid" > $DIR/.boot_id
+    [ -n "$_bt" ] && echo "$_bt" > $DIR/.boot_btime
+    lk "start (new boot boot_id=${_bid:-?} btime=${_bt:-?})"
+    bootmark
 fi
 cut -d. -f1 /proc/uptime > /tmp/log_keeper.hb 2>/dev/null
 PREV_UP=$(cut -d. -f1 /proc/uptime)
@@ -171,6 +184,8 @@ while :; do
     # -- boot 检出: uptime 回退 → 分隔行 + 重置锚(环已全新) --
     U=$(cut -d. -f1 /proc/uptime)
     if [ "${PREV_UP:-0}" -gt "$U" ] 2>/dev/null; then
+        _bid=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
+        [ -n "$_bid" ] && echo "$_bid" > $DIR/.boot_id
         _bt=$(awk '/^btime/{print $2; exit}' /proc/stat 2>/dev/null)
         [ -n "$_bt" ] && echo "$_bt" > $DIR/.boot_btime
         bootmark

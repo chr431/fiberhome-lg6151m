@@ -603,7 +603,11 @@ EOF
     # Before boot.healthy exists the gate is boot-critical: restart it if dead.
     # Once healthy, re-verify at the 10-minute mark; drift is reported only
     # (services are repaired by their own supervision; TRY_A is not re-cleared).
-    if [ ! -f "$HEALTHY" ] && [ "$UP" -lt 900 ]; then
+    # v1.27: the gate is boot-critical until it stamps stable=1 (not merely
+    # until boot.healthy exists) — a gate that dies between healthy and the
+    # 10-minute observation would otherwise never arm healthdog.
+    _gstable=$(sed -n 's/^stable=//p' "$HEALTHY" 2>/dev/null | tail -1)
+    if [ "$_gstable" != 1 ] && [ "$UP" -lt 900 ]; then
         if alive 'boot_gate[.]sh' bootgate boot_gate.sh; then
             set_state bootgate 0 "boot health gate"
         else

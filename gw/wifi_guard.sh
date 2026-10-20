@@ -1,6 +1,6 @@
 #!/bin/sh
-# wifi_guard.sh v1.4 — BA-stall auto-recovery + telemetry for the wifi TX quirk.
-# v1.4: 每轮重写自己的锁(启动竞态残留自愈).
+# wifi_guard.sh v1.5 — BA-stall auto-recovery + telemetry for the wifi TX quirk.
+# v1.4: 每轮重写自己的锁(启动竞态残留自愈); v1.5: 启动日志版本对齐.
 # v1.3: stations/txbacklog 探针经静态 timeout(卡死不再拖住守卫循环).
 #
 # v1.2 (2026-10-20 stability P1-4): the old trigger counted *episode
@@ -42,7 +42,7 @@ LAST_EP=0
 BOUNCED=0
 BOUNCE_TIMES=""
 STALL_RUN=0
-glog "wifi_guard v1.2 start (pid $$)"
+glog "wifi_guard v1.5 start (pid $$)"
 
 # v1.3: probes bounded — a wedged vendor iw/tc must not stall the guard loop
 stations() {

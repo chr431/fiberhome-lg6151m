@@ -14,7 +14,7 @@ gw/udhcpc_wan.script	1.0	manifest	/data/gw/udhcpc_wan.script	WAN口 udhcpc 事�
 gw/healthdog.sh	1.4	manifest	/data/gw/healthdog.sh	看门狗用户态心跳 + 二级监督; v1.4: 跨重启恢复已 arm 内核的心跳(否则 90s 复位); v1.3: lo 强制 up; v1.2(P0-1): 稳定窗后主动 arm + 重启环保护栏 + pstore 回收; 历史见git
 gw/v3_babysit_v2.sh	3.0	manifest	/data/rescue/babysit.sh	启动保姆; v3.0(P0-2): 进展式 T1=240s(无进展 120s 才杀 rcS/mipc_wan_cli) + T2=600s(仍无进展才翻 B) + 900s 硬帽 + 决策落 /data; 目标路径改为 preinit 实跑的 /data/rescue/babysit.sh; 历史见git
 gw/night_report.sh	1.0	manifest	/data/gw/night_report.sh	夜间体检报告
-gw/wifi_guard.sh	1.4	manifest	/data/gw/wifi_guard.sh	BA/TX 停滞自动恢复守卫; v1.4: 每轮重写锁; v1.3: iw/tc 限时; v1.2(P1-4): 连续 4 样本确认+前置+限频+心跳; 历史见git
+gw/wifi_guard.sh	1.5	manifest	/data/gw/wifi_guard.sh	BA/TX 停滞自动恢复守卫; v1.5: 启动日志版本对齐; v1.4: 每轮重写锁; v1.3: iw/tc 限时; v1.2(P1-4): 连续 4 样本+前置+限频+心跳; 历史见git
 gw/mipc_dial_trace.sh	1.0	manifest	/data/gw/mipc_dial_trace.sh	5G 拨号取证(xtrace 抓真参)
 gw/dial_5g.sh	1.6	manifest	/data/gw/dial_5g.sh	生产 5G 拨号器; v1.6: ubus 冷启动引导不再拉起 ql_ril_service(已退役); 历史见git
 gw/ccmni_up.sh	1.1	manifest	/data/gw/ccmni_up.sh	netagent-lite: MIPC 拨号+ccmni 落地(deact+act→解析→flush+add+mtu); v1.1(日志加密轮): 入口旧地址/deact/act rc+耗时/响应/flush/add rc/总耗时全程留痕; 不写路由/NAT

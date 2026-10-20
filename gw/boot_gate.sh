@@ -92,9 +92,9 @@ c_wanalive() { # wan_agg's own timestamp, when the daemon is up
 # stable, healthdog arming).  full = healthy + environmental items (uplink /
 # authd / wan_alive), recorded as degraded= but never required: an unplugged
 # cable must not look like a broken boot.
-CRIT="lan_ip lo ssh dns gui rc19"
-REQ="lan_ip lo ssh dns gui rc19 wifi ubus agg"
-ENV="authd uplink wan_alive"
+CRIT="lan lo ssh dns gui rc19"
+REQ="lan lo ssh dns gui rc19 wifi ubus agg"
+ENV="authd uplink wanalive"
 run_checks() { # $1 = "crit"|"healthy"|"full" -> prints key=ok/fail; rc = failures
     case "$1" in
     crit)    _list=$CRIT ;;
@@ -103,7 +103,7 @@ run_checks() { # $1 = "crit"|"healthy"|"full" -> prints key=ok/fail; rc = failur
     esac
     _bad=0
     for _k in $_list; do
-        if [ "$_k" = wan_alive ] && ! pgrep -f 'wan_agg[.]sh' >/dev/null 2>&1; then
+        if [ "$_k" = wanalive ] && ! pgrep -f 'wan_agg[.]sh' >/dev/null 2>&1; then
             echo "$_k=skip"; continue
         fi
         if "c_$_k" >/dev/null 2>&1; then

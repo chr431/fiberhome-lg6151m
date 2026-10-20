@@ -1,5 +1,5 @@
 #!/bin/sh
-# fan_mgr.sh v1.5 -- 原厂梯度温控风扇守护 (2026-10-04 破案后固化)
+# fan_mgr.sh v1.6 -- 原厂梯度温控风扇守护 (2026-10-04 破案后固化)
 # v1.5 (P1-1): 单实例锁 + 心跳(v1.4) — 看门狗重启不会拉出双实例.
 # v1.4 (2026-10-20 stability batch1): 每轮写 /tmp/fan_mgr.hb — watchdog 用
 #   心跳识别“进程活但 PWM 卡死”; 散热件不允许静默停摆。
@@ -29,19 +29,18 @@ lvl_temp() { # 各挡进入阈值(°C), 降挡需低于阈值-3(滞回)
     esac
 }
 
-flog "===== fan_mgr v1.5 start (unified config; +heartbeat) ====="
-# v1.5 (P1-1): single instance (watchdog may restart a stalled fan manager)
-_lp=$(cat /tmp/fan_mgr.lock 2>/dev/null)
-if [ -n "$_lp" ] && [ "$_lp" != "$$" ] && kill -0 "$_lp" 2>/dev/null && \
-   grep -qa '/data/gw/fan_mgr.sh' /proc/$_lp/cmdline 2>/dev/null; then
-    echo "fan_mgr: already running pid=$_lp" >&2
+flog "===== fan_mgr v1.6 start (unified config; +heartbeat; svc_lib) ====="
+# v1.6 (batch3): shared single-instance lock + heartbeat primitives.
+if [ -r /data/gw/svc_lib.sh ]; then . /data/gw/svc_lib.sh; else echo "fan_mgr: svc_lib.sh missing" >&2; exit 1; fi
+_rc=0; svc_lock fan_mgr /data/gw/fan_mgr.sh || _rc=$?
+if [ "$_rc" != 0 ]; then
+    [ "$_rc" = 1 ] && echo "fan_mgr: already running" >&2 || echo "fan_mgr: lost lock race" >&2
     exit 0
 fi
-echo $$ > /tmp/fan_mgr.lock
 CUR=0
 PWMBAD=0
 while :; do
-    cut -d. -f1 /proc/uptime > /tmp/fan_mgr.hb 2>/dev/null
+    svc_hb fan_mgr
     # v1.3: 配置统一 + 修复v1.2双/data/gw路径bug(GUI静音切换从未生效的根因)
     [ -r /data/gw/defaults.conf ] && . /data/gw/defaults.conf
     [ -r /data/gw/settings.conf ] && . /data/gw/settings.conf

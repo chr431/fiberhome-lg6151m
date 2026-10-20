@@ -34,7 +34,13 @@
  *   --dump-raw FILE     keep the raw stream bytes (capped) for replay
  *   --raw-max BYTES     cap for --dump-raw (default 8 MiB)
  *   --selftest  run the frame parser against synthetic valid/malformed streams
+ *   --fuzz N    deterministic in-process mutation fuzz (N rounds); designed to
+ *               run under an ASAN build (tools/build_logc.sh --asan)
  *   -V          version
+ *
+ * v1.3 -- stability batch3: --fuzz in-process mutation harness (valid frames,
+ *   truncations, bogus lengths, type swaps, oversized/NUL messages, noise);
+ *   pairs with the ASAN build target so the next real crash can be replayed.
  *
  * v1.2 -- stability P1-2 hardening:
  *   - SIGSEGV/SIGBUS/SIGABRT/SIGILL handler on an alternate stack writes a
@@ -70,7 +76,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define LOGC_VERSION "1.2"
+#define LOGC_VERSION "1.3"
 
 /* ---- ubus wire protocol (only what we need) ---------------------------- */
 
@@ -1161,6 +1167,108 @@ static int selftest(void)
 	return fails ? 1 : 0;
 }
 
+/* ---- v1.3: deterministic in-process fuzz harness ----------------------- */
+static uint32_t fz_state = 0x9e3779b9u;
+static uint32_t fz_rand(void)
+{
+	fz_state = fz_state * 1664525u + 1013904223u;
+	return fz_state;
+}
+
+static size_t fz_append(uint8_t *buf, size_t len, size_t cap,
+			const uint8_t *p, size_t n)
+{
+	if (n > cap - len)
+		n = cap - len;
+	memcpy(buf + len, p, n);
+	return len + n;
+}
+
+static int fuzz_selftest(unsigned rounds)
+{
+	static uint8_t buf[65536];
+	static uint8_t f[16384];
+	unsigned long long tframes = 0, tbad = 0, tresync = 0, tdrop = 0;
+	unsigned r;
+	int dn, saved = out_fd;
+
+	dn = open("/dev/null", O_WRONLY);
+	if (dn >= 0)
+		out_fd = dn;
+	for (r = 0; r < rounds; r++) {
+		size_t len = 0;
+		int guard = 0;
+
+		while (len < sizeof(buf) - 2048 && guard++ < 400) {
+			unsigned k = fz_rand() % 10;
+			size_t n;
+
+			if (k < 4) {
+				char msg[256];
+				size_t ml = fz_rand() % 200;
+				memset(msg, (int)('a' + (fz_rand() % 26)), ml);
+				msg[ml] = 0;
+				n = mk_frame(f, sizeof(f), 1700000000000ULL + r * 1000 + k,
+					     r, 0x1e, 0, msg);
+				if (n)
+					len = fz_append(buf, len, sizeof(buf), f, n);
+			} else if (k == 4) {
+				n = mk_frame(f, sizeof(f), 1700000000000ULL + r, r,
+					     0x1e, 0, "trunc-abcdefghijklmnopqrstuvwxyz");
+				if (n > 1) {
+					size_t cut = 1 + fz_rand() % (n - 1);
+					len = fz_append(buf, len, sizeof(buf), f, cut);
+				}
+			} else if (k == 5) {
+				static const uint32_t bogus[] = { 0, 3, 4, 0x00ffffffu, 0x7fffffffu };
+				uint32_t be = htobe32(bogus[fz_rand() % 5]);
+				unsigned i, nn = fz_rand() % 80;
+				len = fz_append(buf, len, sizeof(buf), (uint8_t *)&be, 4);
+				for (i = 0; i < nn; i++) {
+					uint8_t c = (uint8_t)fz_rand();
+					len = fz_append(buf, len, sizeof(buf), &c, 1);
+				}
+			} else if (k == 6) {
+				n = mk_frame(f, sizeof(f), 1700000000000ULL + r, r,
+					     0x1e, 0, "typeswap-zzzzzzzzzzzzzzzzzzzz");
+				if (n > 8)
+					f[4 + fz_rand() % (n - 4)] = (uint8_t)fz_rand();
+				len = fz_append(buf, len, sizeof(buf), f, n);
+			} else if (k == 7) {
+				char big[9001];
+				memset(big, 'q', 9000);
+				big[9000] = 0;
+				n = mk_frame(f, sizeof(f), 1700000000000ULL + r, r,
+					     0x1e, 0, big);
+				len = fz_append(buf, len, sizeof(buf), f, n);
+			} else if (k == 8) {
+				uint64_t bad = (fz_rand() & 1) ? 0 : 0xffffffffffffffffULL;
+				n = mk_frame(f, sizeof(f), bad, r, 0xff, 0, "nul\0inside");
+				len = fz_append(buf, len, sizeof(buf), f, n);
+			} else {
+				unsigned i, nn = 4 + fz_rand() % 120;
+				for (i = 0; i < nn; i++) {
+					uint8_t c = (uint8_t)fz_rand();
+					len = fz_append(buf, len, sizeof(buf), &c, 1);
+				}
+			}
+		}
+		memset(&st, 0, sizeof(st));
+		(void)consume_records(buf, len, 0, NULL, 1);
+		tframes += st.frames;
+		tbad += st.bad_frames;
+		tresync += st.resyncs;
+		tdrop += st.dropped_bytes;
+	}
+	if (dn >= 0)
+		close(dn);
+	out_fd = saved;
+	printf("logc %s fuzz: PASS rounds=%u frames=%llu bad_frames=%llu "
+	       "resyncs=%llu dropped=%llu\n",
+	       LOGC_VERSION, rounds, tframes, tbad, tresync, tdrop);
+	return 0;
+}
+
 static void usage(FILE *f)
 {
 	fprintf(f,
@@ -1178,6 +1286,7 @@ static void usage(FILE *f)
 		"  --dump-raw FILE     keep raw stream bytes (capped) for replay\n"
 		"  --raw-max BYTES     cap for --dump-raw (default 8388608)\n"
 		"  --selftest  parser selftest on synthetic streams\n"
+		"  --fuzz N    deterministic mutation fuzz (N rounds)\n"
 		"  -V          version\n");
 }
 
@@ -1187,6 +1296,7 @@ int main(int argc, char **argv)
 	const char *regex_str = NULL;
 	unsigned int lines = 0;
 	int follow = 0, with_ts = 0, use_stdin = 0, do_selftest = 0;
+	unsigned fuzz_rounds = 0;
 	int ubus_fd = -1, stream_fd = -1;
 	uint32_t objid = 0;
 	regex_t re, *re_p = NULL;
@@ -1205,6 +1315,7 @@ int main(int argc, char **argv)
 			{ "dump-raw", required_argument, NULL, 1002 },
 			{ "raw-max", required_argument, NULL, 1003 },
 			{ "selftest", no_argument, NULL, 1004 },
+			{ "fuzz", required_argument, NULL, 1005 },
 			{ NULL, 0, NULL, 0 },
 		};
 		int lidx = 0;
@@ -1258,6 +1369,9 @@ int main(int argc, char **argv)
 		case 1004:
 			do_selftest = 1;
 			break;
+		case 1005:
+			fuzz_rounds = (unsigned)strtoul(optarg, NULL, 10);
+			break;
 		default:
 			usage(stderr);
 			return 1;
@@ -1270,6 +1384,8 @@ int main(int argc, char **argv)
 
 	if (do_selftest)
 		return selftest();
+	if (fuzz_rounds)
+		return fuzz_selftest(fuzz_rounds);
 
 	if (regex_str) {
 		if (regcomp(&re, regex_str, REG_EXTENDED | REG_NOSUB) != 0) {

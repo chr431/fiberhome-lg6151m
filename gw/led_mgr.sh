@@ -1,5 +1,5 @@
 #!/bin/sh
-# led_mgr.sh v2.8 — 原厂风格指示灯状态守护 (绝对电平驱动 + 自愈 + 全灯覆盖)
+# led_mgr.sh v2.9 — 原厂风格指示灯状态守护 (绝对电平驱动 + 自愈 + 全灯覆盖)
 # v2.8 (2026-10-20 stability batch1): 每 2s 轮写 /tmp/led_mgr.hb — watchdog
 #   用心跳识别“进程活但显示循环卡死”。
 # v2.7 (2026-10-19 SIGSEGV 根治轮): 单实例锁排除自身 pid — watchdog spawn 预写
@@ -188,23 +188,21 @@ esac
 #   任意命中: 锁 pid 被复用给一条含 led_mgr 字样的 grep/命令时, 新实例会误判
 #   "duplicate" 永久退出(现场: 真实例 18:44 死后 watchdog 每轮拉起又每轮自杀,
 #   LED 守护长时间缺席)。僵尸 kill -0 也返回真, 一并排除。
-LOCK=/tmp/led_mgr.lock
-_lp=$(cat $LOCK 2>/dev/null)
-if [ -n "$_lp" ] && [ "$_lp" != "$$" ] && kill -0 "$_lp" 2>/dev/null \
-   && ! grep -q '^State:.*Z' /proc/$_lp/status 2>/dev/null \
-   && grep -qa '/data/gw/led_mgr.sh' /proc/$_lp/cmdline 2>/dev/null; then
-    llog "duplicate instance pid=$_lp alive — exit (single-instance lock)"
+# v2.9 (batch3): shared lock/heartbeat/minimal-parser primitives.
+if [ -r /data/gw/svc_lib.sh ]; then . /data/gw/svc_lib.sh; else echo "led_mgr: svc_lib.sh missing" >&2; exit 1; fi
+_rc=0; svc_lock led_mgr /data/gw/led_mgr.sh || _rc=$?
+if [ "$_rc" != 0 ]; then
+    [ "$_rc" = 1 ] && llog "duplicate instance alive — exit (single-instance lock)" || llog "lost lock race — exit"
     exit 0
 fi
-echo $$ > $LOCK
 
-llog "===== led_mgr v2.7 start (absolute-level drive + self-heal + 2s poll; pid-lock; pid=$$) ====="
+llog "===== led_mgr v2.9 start (absolute-level drive + self-heal + 2s poll; svc_lib lock; pid=$$) ====="
 BCN_LAST=""   # v1.6: 固件信标事件计数(RE实证三条权威标志)
 ST=""         # 仅用于日志: 状态串变化才写日志(灯写入已不依赖它)
 POLL=${LED_POLL:-2}
 LCYC=0
 while :; do
-    cut -d. -f1 /proc/uptime > /tmp/led_mgr.hb 2>/dev/null
+    svc_hb led_mgr
     LCYC=$((LCYC+1)); [ $((LCYC % 60)) -eq 0 ] && log_rot
     # v1.3: 夜间模式($B/led_mode.conf=1) — 全灭; 电源灯归bootloader不管
     # v1.6: 配置统一 — defaults+settings 叠加(回退旧led_mode.conf)
@@ -237,10 +235,12 @@ while :; do
     # v1.6: 信标看门狗 — 驱动固件权威事件增量触发 no_bcn 重装(与wifi_up F2同原语)
     # v1.7: vif枚举动态化(访客可开在 ra1/rai1 任一/双频, 不再硬编码)
     # v2.0: dmesg 全量 grep 每轮跑(此前 10s/次已够, 2s/次仍廉价; 且只在增量时动作)
-    BCN_NOW=$(dmesg 2>/dev/null | grep -cE 'AP: Beacon OFF|Beacon lost - Error|Beacon interval is illegal')
+    BCN_NOW=$(svc_dmesg_count 'AP: Beacon OFF|Beacon lost - Error|Beacon interval is illegal')
     if [ -n "$BCN_LAST" ] && [ "$BCN_NOW" -gt "$BCN_LAST" ]; then
         llog "beacon-loss event ($BCN_LAST->$BCN_NOW) — re-arming beacons"
-        for vif in $(iw dev 2>/dev/null | awk '/Interface/{print $2}' | grep -E '^ra'); do
+        for _p in /sys/class/net/ra*; do
+            [ -e "$_p" ] || continue
+            vif=${_p##*/}
             mwctl dev $vif set no_bcn 0 >/dev/null 2>&1
         done
     fi

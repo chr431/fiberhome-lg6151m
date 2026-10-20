@@ -40,6 +40,17 @@
 # WAN2 = 有线宽带 eth0 DHCP (静态IP形态见 uplink.conf) mark 0x8000000
 case "$0" in *wan_agg_lib.sh) echo "wan_agg_lib: library, not executable" >&2; exit 2 ;; esac
 
+# v1.3 (batch3): serialize every kernel route/firewall write with the other
+# writers (wan_eth/rc_netfh/fw_apply/ccmni_up).  A missing netlock library is
+# tolerated during a staged upgrade (no-op = pre-batch3 behaviour).
+if [ -r /data/gw/netlock.sh ]; then
+    . /data/gw/netlock.sh
+else
+    netcfg_lock() { return 0; }
+    netcfg_unlock() { :; }
+    netcfg_repair() { :; }
+fi
+
 LAN_NET=192.168.9.0/24
 W1_MARK=0x4000000; W2_MARK=0x8000000; W_MASK=0xfc000000
 T1=100; T2=200
@@ -147,6 +158,7 @@ cell_iface_pick() {
 
 # ---------- data plane ----------
 dp_setup() {
+    netcfg_lock 3 || { log "WARN netcfg lock timeout: dp_setup"; return 1; }
     # 双表: T1 恒走 5G; T2 走家宽 gw (拿到租约后由 wan_eth 侧刷新)
     ip route replace default dev $W1_IF table $T1 2>/dev/null
     ip rule del fwmark $W1_MARK/$W_MASK table $T1 2>/dev/null
@@ -165,9 +177,11 @@ dp_setup() {
     ip -6 rule add to fd42:9ac1:7e50::/64 lookup main priority 50   # 入向LAN护盾(v6)
     ip -6 route replace default dev $W1_IF table $T1 2>/dev/null
     log "dp: v4+v6 rules+t1 ready"
+    netcfg_unlock
 }
 
 fw6_rules() {
+    netcfg_lock 3 || { log "WARN netcfg lock timeout: fw6_rules"; return 1; }
     ip -6 rule del fwmark $W1_MARK/$W_MASK table $T1 2>/dev/null
     ip -6 rule del fwmark $W2_MARK/$W_MASK table $T2 2>/dev/null
     # v2.6: 低8位规则优先级90/91 — 先于高位规则(101/102)匹配, 双活时自建
@@ -176,8 +190,10 @@ fw6_rules() {
     ip -6 rule add fwmark $M6_LOW1/0xff table $T1 priority 90
     ip -6 rule del fwmark $M6_LOW2/0xff table $T2 2>/dev/null
     ip -6 rule add fwmark $M6_LOW2/0xff table $T2 priority 91
+    netcfg_unlock
 }
 fw6_setup() {  # $1=w2_on(1=双路分流, 0=家宽死全走5G); 5G死时用 fw6_setup_alive2
+    netcfg_lock 5 || { log "WARN netcfg lock timeout: fw6_setup"; return 1; }
     ip6tables -t mangle -D PREROUTING -i br-lan -j WANAGG6 2>/dev/null
     ip6tables -t mangle -F WANAGG6 2>/dev/null
     ip6tables -t mangle -X WANAGG6 2>/dev/null
@@ -217,8 +233,10 @@ fw6_setup() {  # $1=w2_on(1=双路分流, 0=家宽死全走5G); 5G死时用 fw6_
     fi
     ip6tables -t mangle -A WANAGG6 -j CONNMARK --save-mark --mask 0xff
     ip6tables -t mangle -A PREROUTING -i br-lan -j WANAGG6
+    netcfg_unlock
 }
 fw6_setup_alive2() {  # 5G死: 全部新流 -> W2(家宽)
+    netcfg_lock 5 || { log "WARN netcfg lock timeout: fw6_setup_alive2"; return 1; }
     ip6tables -t mangle -D PREROUTING -i br-lan -j WANAGG6 2>/dev/null
     ip6tables -t mangle -F WANAGG6 2>/dev/null
     ip6tables -t mangle -X WANAGG6 2>/dev/null
@@ -229,6 +247,7 @@ fw6_setup_alive2() {  # 5G死: 全部新流 -> W2(家宽)
         -j MARK --set-mark $M6_LOW2/0xff
     ip6tables -t mangle -A WANAGG6 -j CONNMARK --save-mark --mask 0xff
     ip6tables -t mangle -A PREROUTING -i br-lan -j WANAGG6
+    netcfg_unlock
 }
 
 kernel_apply() {  # $1=s1(5G) $2=s2(家宽) — vendor ioctl via multiwan_ctl+fhstub
@@ -242,6 +261,7 @@ pin_ip() {  # $1=mac -> 当前IP(空=未解析)
     ip neigh | grep -i "$1" | awk '{print $1}' | grep -E '^[0-9.]+$' | head -1
 }
 fw_setup() {  # $1=w2_pct(家宽份额 0-100, 死侧归零后的有效值)
+    netcfg_lock 5 || { log "WARN netcfg lock timeout: fw_setup"; return 1; }
     iptables -t mangle -D PREROUTING -i br-lan -j WANAGG 2>/dev/null
     iptables -t mangle -F WANAGG 2>/dev/null
     iptables -t mangle -X WANAGG 2>/dev/null
@@ -285,11 +305,13 @@ fw_setup() {  # $1=w2_pct(家宽份额 0-100, 死侧归零后的有效值)
     # 保存 ct mark 供后续包恢复
     iptables -t mangle -A WANAGG -j CONNMARK --save-mark --mask $W_MASK
     iptables -t mangle -A PREROUTING -i br-lan -j WANAGG
+    netcfg_unlock
 }
 
 # v2.15: 旁路模式 — 拆全部分流装置(mangle 链 + fwmark 策略规则 v4/v6 高/低
 # 位), 流量回落 main 表 = 走状态机当前主路; NAT/租约/路由看门狗不受影响
 agg_bypass() {
+    netcfg_lock 5 || { log "WARN netcfg lock timeout: agg_bypass"; return 1; }
     iptables  -t mangle -D PREROUTING -i br-lan -j WANAGG 2>/dev/null
     iptables  -t mangle -F WANAGG 2>/dev/null;  iptables  -t mangle -X WANAGG 2>/dev/null
     ip6tables -t mangle -D PREROUTING -i br-lan -j WANAGG6 2>/dev/null
@@ -299,38 +321,50 @@ agg_bypass() {
         while ip rule del $R 2>/dev/null; do :; done
         while ip -6 rule del $R 2>/dev/null; do :; done
     done
+    netcfg_unlock
 }
 
 # v2.5: fwmark策略规则存在性看门狗 — 只补活侧缺失, 不动存量。
 #   病例(2026-10-05): 高位v6规则在运行中被外力蒸发(boot期home瞬断恢复后消失),
 #   无看门狗=静默丢一半路由规则。调用方须已设置 S1/S2(当前有效态)。
 ensure_rules() {
+    # v1.3: short lock; a busy writer just means this cycle skips the level
+    # repair (the next 3s cycle retries).  No WARN flood on contention.
+    netcfg_lock 1 || return 0
     # v1.2: 每次补装都记 REPAIR —— 规则被外力蒸发此前是静默事件, 只能靠
     #   "最终状态不对"倒推; 24h 日志里 REPAIR 频率是判断外部写方活跃度的关键。
     if [ $S1 -eq 1 ]; then
         ip rule show | grep -q "$W1_MARK/$W_MASK lookup $T1" || {
-            ip rule add fwmark $W1_MARK/$W_MASK table $T1 priority 101 2>/dev/null
-            log "REPAIR v4 rule w1 fwmark/$W1_MARK table $T1 (missing -> re-added rc=$?)"; }
+            ip rule add fwmark $W1_MARK/$W_MASK table $T1 priority 101 2>/dev/null; _r=$?
+            netcfg_repair "v4 rule w1" "$_r"
+            log "REPAIR v4 rule w1 fwmark/$W1_MARK table $T1 (missing -> re-added rc=$_r)"; }
         ip -6 rule show | grep -q "$W1_MARK/$W_MASK lookup $T1" || {
-            ip -6 rule add fwmark $W1_MARK/$W_MASK table $T1 priority 101 2>/dev/null
-            log "REPAIR v6 rule w1 fwmark/$W1_MARK table $T1 (missing -> re-added rc=$?)"; }
+            ip -6 rule add fwmark $W1_MARK/$W_MASK table $T1 priority 101 2>/dev/null; _r=$?
+            netcfg_repair "v6 rule w1" "$_r"
+            log "REPAIR v6 rule w1 fwmark/$W1_MARK table $T1 (missing -> re-added rc=$_r)"; }
         ip -6 rule show | grep -q "$M6_LOW1/0xff lookup $T1" || {
-            ip -6 rule add fwmark $M6_LOW1/0xff table $T1 priority 90 2>/dev/null
-            log "REPAIR v6 rule w1 low8/$M6_LOW1 table $T1 (missing -> re-added rc=$?)"; }
+            ip -6 rule add fwmark $M6_LOW1/0xff table $T1 priority 90 2>/dev/null; _r=$?
+            netcfg_repair "v6 rule w1 low8" "$_r"
+            log "REPAIR v6 rule w1 low8/$M6_LOW1 table $T1 (missing -> re-added rc=$_r)"; }
     fi
     if [ $S2 -eq 1 ]; then
         ip rule show | grep -q "$W2_MARK/$W_MASK lookup $T2" || {
-            ip rule add fwmark $W2_MARK/$W_MASK table $T2 priority 102 2>/dev/null
-            log "REPAIR v4 rule w2 fwmark/$W2_MARK table $T2 (missing -> re-added rc=$?)"; }
+            ip rule add fwmark $W2_MARK/$W_MASK table $T2 priority 102 2>/dev/null; _r=$?
+            netcfg_repair "v4 rule w2" "$_r"
+            log "REPAIR v4 rule w2 fwmark/$W2_MARK table $T2 (missing -> re-added rc=$_r)"; }
         ip -6 rule show | grep -q "$W2_MARK/$W_MASK lookup $T2" || {
-            ip -6 rule add fwmark $W2_MARK/$W_MASK table $T2 priority 102 2>/dev/null
-            log "REPAIR v6 rule w2 fwmark/$W2_MARK table $T2 (missing -> re-added rc=$?)"; }
+            ip -6 rule add fwmark $W2_MARK/$W_MASK table $T2 priority 102 2>/dev/null; _r=$?
+            netcfg_repair "v6 rule w2" "$_r"
+            log "REPAIR v6 rule w2 fwmark/$W2_MARK table $T2 (missing -> re-added rc=$_r)"; }
         ip -6 rule show | grep -q "$M6_LOW2/0xff lookup $T2" || {
-            ip -6 rule add fwmark $M6_LOW2/0xff table $T2 priority 91 2>/dev/null
-            log "REPAIR v6 rule w2 low8/$M6_LOW2 table $T2 (missing -> re-added rc=$?)"; }
+            ip -6 rule add fwmark $M6_LOW2/0xff table $T2 priority 91 2>/dev/null; _r=$?
+            netcfg_repair "v6 rule w2 low8" "$_r"
+            log "REPAIR v6 rule w2 low8/$M6_LOW2 table $T2 (missing -> re-added rc=$_r)"; }
     fi
     # 入向LAN护盾(v6 版也纳入看门狗; v4版在 wan_eth)
     ip -6 rule show | grep -q "to fd42:9ac1:7e50::/64 lookup main" || {
-        ip -6 rule add to fd42:9ac1:7e50::/64 lookup main priority 50
-        log "REPAIR v6 LAN shield rule (missing -> re-added rc=$?)"; }
+        ip -6 rule add to fd42:9ac1:7e50::/64 lookup main priority 50; _r=$?
+        netcfg_repair "v6 LAN shield" "$_r"
+        log "REPAIR v6 LAN shield rule (missing -> re-added rc=$_r)"; }
+    netcfg_unlock
 }

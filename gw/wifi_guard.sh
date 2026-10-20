@@ -1,5 +1,5 @@
 #!/bin/sh
-# wifi_guard.sh v1.5 — BA-stall auto-recovery + telemetry for the wifi TX quirk.
+# wifi_guard.sh v1.6 — BA-stall auto-recovery + telemetry for the wifi TX quirk.
 # v1.4: 每轮重写自己的锁(启动竞态残留自愈); v1.5: 启动日志版本对齐.
 # v1.3: stations/txbacklog 探针经静态 timeout(卡死不再拖住守卫循环).
 #
@@ -28,29 +28,25 @@ glog() { echo "$(date -u +%FT%TZ) $*" >> $LOG; }
 BB=/data/gw/bin/busybox
 [ -x "$BB" ] || BB=
 
-# single instance (watchdog may restart us)
-_lp=$(cat /tmp/wifi_guard.lock 2>/dev/null)
-if [ -n "$_lp" ] && [ "$_lp" != "$$" ] && kill -0 "$_lp" 2>/dev/null && \
-   grep -qa '/data/gw/wifi_guard.sh' /proc/$_lp/cmdline 2>/dev/null; then
-    echo "wifi_guard: already running pid=$_lp" >&2
+# v1.6 (batch3): shared single-instance lock + heartbeat + station parser.
+if [ -r /data/gw/svc_lib.sh ]; then . /data/gw/svc_lib.sh; else echo "wifi_guard: svc_lib.sh missing" >&2; exit 1; fi
+_rc=0; svc_lock wifi_guard /data/gw/wifi_guard.sh || _rc=$?
+if [ "$_rc" != 0 ]; then
+    [ "$_rc" = 1 ] && echo "wifi_guard: already running" >&2 || echo "wifi_guard: lost lock race" >&2
     exit 0
 fi
-echo $$ > /tmp/wifi_guard.lock
 
 STREAK=0
 LAST_EP=0
 BOUNCED=0
 BOUNCE_TIMES=""
 STALL_RUN=0
-glog "wifi_guard v1.5 start (pid $$)"
+glog "wifi_guard v1.6 start (pid $$)"
 
 # v1.3: probes bounded — a wedged vendor iw/tc must not stall the guard loop
 stations() {
-    if [ -n "$BB" ]; then
-        "$BB" timeout -s KILL 5 iw dev rai0 station dump 2>/dev/null | grep -c '^Station'
-    else
-        iw dev rai0 station dump 2>/dev/null | grep -c '^Station'
-    fi
+    # v1.6: shared bounded parser (vendor iw stays advisory only).
+    svc_station_count rai0
 }
 txbacklog() { # bytes queued on rai0 (qdisc backlog, evidence only)
     if [ -n "$BB" ]; then
@@ -62,8 +58,8 @@ txbacklog() { # bytes queued on rai0 (qdisc backlog, evidence only)
 
 while true; do
     sleep 15
-    cut -d. -f1 /proc/uptime > /tmp/wifi_guard.hb 2>/dev/null
-    echo $$ > /tmp/wifi_guard.lock 2>/dev/null   # v1.4: owner re-asserts the lock
+    svc_hb wifi_guard
+    svc_lock_assert wifi_guard   # v1.4: owner re-asserts the lock
 
     # ---- primary signal: kernel stethoscope ----
     STALL=0; EP=0

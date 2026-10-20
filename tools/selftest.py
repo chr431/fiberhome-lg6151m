@@ -1951,7 +1951,7 @@ def t_watchdog_aee():
     cnt = dev("cat /tmp/watchdog_aeecount 2>/dev/null").strip()
     hist = dev("wc -l < /data/log/aee_exp/db_history 2>/dev/null").strip()
     st = dev("grep -cE '^core_?trap=' /tmp/watchdog_state 2>/dev/null").strip()
-    ver = dev("grep -c 'watchdog v1.28 start' /tmp/watchdog.log 2>/dev/null").strip()
+    ver = dev("grep -c 'watchdog v1.29 start' /tmp/watchdog.log 2>/dev/null").strip()
     ok = False
     if code not in ("", "0") and cnt.isdigit() and hist.isdigit():
         ok = abs(int(cnt) - int(hist)) <= 2 and int(st or 0) > 0 and int(ver or 0) > 0
@@ -1959,25 +1959,27 @@ def t_watchdog_aee():
            "code=%s base=%s hist=%s state=%s ver=%s" % (code, cnt, hist, st, ver))
 
 
-@test("stability P0: 看门狗限时/3 次确认/统一监督表/心跳 (v1.27)")
+@test("stability P0/P3: 限时/3 次确认/统一监督表/心跳 (v1.29)")
 def t_p0_watchdog():
+    # v1.29: the primitives moved into svc_lib.sh; grep both files so the test
+    # asserts "the implementation exists somewhere in the shared framework".
     code = dev("for p in 'tmo()' 'is_toolfault' 'toolfault()' 'strike()' 'rl_ok' "
                "'port_listen()' 'SVC_TABLE' 'svc_supervise' 'watchdog.beat' "
                "'boot_gate.sh --check'; do "
-               "grep -c -- \"$p\" /data/gw/watchdog.sh; done").split()
+               "cat /data/gw/watchdog.sh /data/gw/svc_lib.sh 2>/dev/null | grep -c -- \"$p\"; done").split()
     code = [int(x) for x in code if x.strip().isdigit()]
     hbs = dev("for f in /tmp/led_mgr.hb /tmp/fan_mgr.hb /tmp/wan_eth.hb "
               "/tmp/log_keeper.hb /tmp/ntp_keeper.hb /tmp/wifi_guard.hb "
               "/tmp/traffic_logger.hb /tmp/reboot_sched.hb /tmp/core_trap.hb "
-              "/tmp/healthdog.hb; do [ -s \"$f\" ] && echo y; done | wc -l").strip()
+              "/tmp/healthdog.hb /tmp/dial_keeper.hb; do [ -s \"$f\" ] && echo y; done | wc -l").strip()
     st = dev("grep -cE '^(dnsmasq|dropbear|v3httpd|authd|ntp_keeper|traffic_logger|"
              "wifi_guard|reboot_sched|led_mgr|fan_mgr|wan_eth|log_keeper|core_trap|"
-             "healthdog)=' /tmp/watchdog_state 2>/dev/null").strip()
+             "healthdog|dial_keeper)=' /tmp/watchdog_state 2>/dev/null").strip()
     beat = dev("cat /tmp/watchdog.beat 2>/dev/null").strip()
     up = dev("cut -d. -f1 /proc/uptime").strip()
     fresh = beat.isdigit() and up.isdigit() and (int(up) - int(beat)) < 180
     ok = (len(code) == 10 and all(c > 0 for c in code)
-          and int(hbs or 0) >= 10 and int(st or 0) >= 14 and fresh)
+          and int(hbs or 0) >= 11 and int(st or 0) >= 15 and fresh)
     record(t_p0_watchdog._test_name, "system", ok,
            "code=%s hb=%s states=%s beat=%s fresh=%s" % (code, hbs, st, beat, fresh))
 
@@ -2030,21 +2032,22 @@ def t_p1_forensics():
     fwd = dev("[ -x /sbin/aee_core_forwarder ] && echo y").strip()
     lv = dev("/data/gw/bin/logc -V 2>/dev/null").strip()
     st = dev("/data/gw/bin/logc --selftest 2>&1; echo rc=$?").strip()
+    fz = dev("/data/gw/bin/logc --fuzz 40 2>&1; echo rc=$?").strip()
     cen = dev("grep -c 'ne_census' /data/gw/log_keeper.sh /data/gw/watchdog.sh 2>/dev/null").split()
     met = dev("ls /data/gw/logs/cores/meta 2>/dev/null | wc -l").strip()
     ok = (pat.startswith("|/data/gw/core_meta.sh") and ex == "y" and fwd == "y"
-          and lv == "logc 1.2" and "rc=0" in st and len(cen) == 2
-          and all(int(x) > 0 for x in cen if x.isdigit()))
+          and lv == "logc 1.3" and "rc=0" in st and "PASS" in fz and "rc=0" in fz
+          and len(cen) == 2 and all(int(x) > 0 for x in cen if x.isdigit()))
     record(t_p1_forensics._test_name, "system", ok,
-           "pattern=[%s] wrapper=%s fwd=%s logc=%s selftest=[%s] census=%s meta_files=%s"
-           % (pat, ex, fwd, lv, st[-120:], cen, met))
+           "pattern=[%s] wrapper=%s fwd=%s logc=%s selftest=[%s] fuzz=[%s] census=%s meta_files=%s"
+           % (pat, ex, fwd, lv, st[-100:], fz[-100:], cen, met))
 
 
 @test("stability P1: healthdog 综合判据 (稳定窗后 arm / 防环)")
 def t_p1_healthdog():
     hd = dev("cat /proc/healthdog 2>/dev/null").strip()
     st = dev("grep -c 'ARM REFUSED' /tmp/healthdog.log 2>/dev/null").strip()
-    start = dev("grep -c 'start v1.4' /tmp/healthdog.log 2>/dev/null").strip()
+    start = dev("grep -c 'start v1.5' /tmp/healthdog.log 2>/dev/null").strip()
     hb = dev("cat /tmp/healthdog.hb 2>/dev/null").strip()
     up = dev("cut -d. -f1 /proc/uptime").strip()
     fresh = hb.isdigit() and up.isdigit() and (int(up) - int(hb)) < 90
@@ -2057,7 +2060,7 @@ def t_p1_healthdog():
 
 @test("stability P1: hostapd/wifi_guard 决策硬化")
 def t_p1_radio():
-    hp = dev("for p in 'control socket' 'clients=' 'need 2/3' 'recover hostapd'; do "
+    hp = dev("for p in 'control socket' 'clients=' 'svc_hostapd_up' 'recover hostapd'; do "
              "grep -c -- \"$p\" /data/gw/watchdog.sh; done").split()
     wg = dev("for p in 'STREAK' 'bounce budget' 'stations' 'boot_bounces'; do "
              "grep -c -- \"$p\" /data/gw/wifi_guard.sh; done").split()
@@ -2093,12 +2096,52 @@ def t_p1_logpipe():
 
     bad = kv("bad_frames"); rs = kv("resyncs"); io = kv("io_errors")
     pstore_ok = int(ps or 0) >= 1 or psrc != "y"
+    met = dev("tail -n 1 /data/gw/logs/stability_metrics.tsv 2>/dev/null").strip()
+    metn = dev("wc -l < /data/gw/logs/stability_metrics.tsv 2>/dev/null || echo 0").strip()
     ok = (fore == "0" and noise == "0" and pstore_ok
           and int(bootga or 0) > 0 and bidw == bidc and io == "0"
-          and bad.isdigit() and rs.isdigit() and int(bad) <= 2 and int(rs) <= 2)
+          and bad.isdigit() and rs.isdigit() and int(bad) <= 2 and int(rs) <= 2
+          and int(metn or 0) > 0 and "logc_rc=" in met and "repairs_1h=" in met)
     record(t_p1_logpipe._test_name, "system", ok,
-           "forensic=%s forensic_lines=%s pstore=%s src=%s boot_btime=%s boot_id_match=%s stats=[%s]"
-           % (fore, noise, ps, psrc, bootga, bidw == bidc, stats))
+           "forensic=%s forensic_lines=%s pstore=%s src=%s boot_btime=%s boot_id_match=%s stats=[%s] metrics=%s/[%s]"
+           % (fore, noise, ps, psrc, bootga, bidw == bidc, stats, metn, met[:120]))
+
+
+@test("stability batch3: 统一监督/锁/心跳 + netcfg 串行化 + logc fuzz")
+def t_p2_batch3():
+    # Structural batch 3 (2026-10-20): one supervision/lock/heartbeat library,
+    # netcfg writer serialization, static parsers, and the logc fuzz harness.
+    sl = dev("for p in 'SVC_TABLE' 'svc_lock()' 'svc_hb()' 'svc_bss_count()' "
+             "'svc_zombies()' 'svc_dmesg_count()'; do "
+             "grep -c -- \"$p\" /data/gw/svc_lib.sh; done").split()
+    sl = [int(x) for x in sl if x.strip().isdigit()]
+    nl = dev("for p in 'netcfg_lock()' 'flock' 'netcfg_repair()'; do "
+             "grep -c -- \"$p\" /data/gw/netlock.sh; done").split()
+    nl = [int(x) for x in nl if x.strip().isdigit()]
+    daemons = ["ntp_keeper", "traffic_logger", "reboot_sched", "fan_mgr", "wan_eth",
+               "wifi_guard", "log_keeper", "core_trap", "healthdog", "boot_gate",
+               "led_mgr", "dial_keeper"]
+    dlock = dev("for f in %s; do grep -c 'svc_lock ' /data/gw/$f.sh; done"
+                % " ".join(daemons)).split()
+    dlock = [int(x) for x in dlock if x.strip().isdigit()]
+    writers = ["wan_agg.sh", "wan_agg_lib.sh", "wan_eth.sh", "rc_netfh.sh",
+               "fw_apply.sh", "ccmni_up.sh", "guest_fw.sh"]
+    wl = dev("for f in %s; do grep -c 'netcfg_lock' /data/gw/$f.sh; done"
+             % " ".join(writers)).split()
+    wl = [int(x) for x in wl if x.strip().isdigit()]
+    flock = dev("/data/gw/bin/busybox --list 2>/dev/null | grep -cx flock").strip()
+    fz = dev("/data/gw/bin/logc --fuzz 100 2>&1; echo rc=$?").strip()
+    rows = dev("grep -c '|sh /data/gw/' /data/gw/svc_lib.sh 2>/dev/null").strip()
+    led = dev("test -f /data/gw/logs/netcfg_repairs.tsv || test -f /tmp/netcfg_repairs.tsv; echo $?").strip()
+    ok = (len(sl) == 6 and all(x > 0 for x in sl)
+          and len(nl) == 3 and all(x > 0 for x in nl)
+          and len(dlock) == len(daemons) and all(x > 0 for x in dlock)
+          and len(wl) == len(writers) and all(x > 0 for x in wl)
+          and flock == "1" and "PASS" in fz and "rc=0" in fz
+          and int(rows or 0) >= 11 and led == "0")
+    record(t_p2_batch3._test_name, "system", ok,
+           "svc=%s netlock=%s daemons=%s writers=%s flock=%s rows=%s ledger=%s fuzz=[%s]"
+           % (sl, nl, dlock, wl, flock, rows, led, fz[-80:]))
 
 
 def main():

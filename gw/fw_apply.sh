@@ -1,5 +1,5 @@
 #!/bin/sh
-# fw_apply.sh v1.5 -- 端口映射/DMZ/禁网/厂商面纵深封禁 持久层安装器 (幂等)
+# fw_apply.sh v1.6 -- 端口映射/DMZ/禁网/厂商面纵深封禁 持久层安装器 (幂等)
 #   被 rc_netfh.sh 开机调用 + api.sh 在配置变更时 source 调用
 # v1.5 (P1): v4 WAN 面升级 default-deny(icmp/DHCP客户端/established 放行, 其余
 #   DROP; 原 v1.1-v1.3 的 7 端口黑名单语义被整体包含) + V4WANGUARDF 挡 WAN->LAN
@@ -10,8 +10,13 @@
 #   (30005)/filink CoAP(5683)/telnet(23) 即使对应守护被裁/未启, 规则也常备。
 #   不依赖"进程不在"这一假设; 若未来任一守护意外复活, WAN 侧仍不可达。
 GWDATA=/data/gw
+# v1.6 (batch3): the installer is one of several firewall writers; serialize it.
+if [ -r /data/gw/netlock.sh ]; then . /data/gw/netlock.sh; else
+    netcfg_lock() { return 0; }; netcfg_unlock() { :; }; netcfg_repair() { :; }
+fi
 
 fw_apply() {
+    netcfg_lock 5 || { echo "fw_apply: netcfg lock timeout" >&2; return 1; }
     iptables -t nat -F V3FWD 2>/dev/null
     iptables -t nat -X V3FWD 2>/dev/null
     iptables -t nat -N V3FWD
@@ -78,6 +83,8 @@ fw_apply() {
         ip6tables -C FORWARD -i $IF -j V6WANGUARDF 2>/dev/null || \
             ip6tables -I FORWARD -i $IF -j V6WANGUARDF
     done
+    netcfg_repair "fw_apply install" 0
+    netcfg_unlock
     return 0
 }
 

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""deploy.py -- single source of truth for PC<->CPE deployment + drift guard.
+"""deploy.py v2.24 -- single source of truth for PC<->CPE deployment + drift guard.
+
+v2.24 (batch3): MANIFEST +svc_lib.sh/netlock.sh (the shared supervision and
+netcfg libraries must land before the daemons that source them).
 
 Kills the version-drift failure class (2026-10-01 lesson: dispatcher script-name
 drift made three fix experiments silently never run; /data/gw accumulated
@@ -49,6 +52,8 @@ MGMT_CANDIDATES = ["192.168.9.1", "192.168.1.1", "192.168.8.1", "192.168.3.75"]
 MANIFEST = [
     ("gw/rc.extend.sh", "/data/rc.extend.sh"),         # slot dispatcher (boot entry)
     ("gw/toolchain_init.sh", "/data/gw/toolchain_init.sh"),  # static userland bootstrap (P2)
+    ("gw/svc_lib.sh", "/data/gw/svc_lib.sh"),           # batch3: shared supervision/lock/hb/parsers
+    ("gw/netlock.sh", "/data/gw/netlock.sh"),           # batch3: route/firewall writer serialization
     ("gw/bin/busybox", "/data/gw/bin/busybox"),         # static busybox 1.36.1 applets (P2)
     ("gw/bin/ip", "/data/gw/bin/ip"),                   # static iproute2 6.3.0 (P2)
     ("gw/bin/logc", "/data/gw/bin/logc"),               # static syslog collector (P1)

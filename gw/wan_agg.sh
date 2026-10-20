@@ -1,5 +1,5 @@
 #!/bin/sh
-# wan_agg.sh v3.3 — 双上行聚合主管: 探活 + 故障转移 FSM + 未打标主路策略 + CLI
+# wan_agg.sh v3.4 — 双上行聚合主管: 探活 + 故障转移 FSM + 未打标主路策略 + CLI
 # v3.2 (2026-10-17 日志加密轮): 每 ~30s TICK 汇总(存活/计数/authd/承载口/候选),
 #   探活逐目标结果、硬截止触发、ccmni 清单变化、authd/W2_READY 边沿、主路写失败
 #   全部留痕; 本文件日志自轮转(400 行) — 24h 分析不再依赖偶然的状态迁移行。
@@ -83,10 +83,12 @@ prim_want() {   # $1=ns1(蜂窝真实存活 0/1) $2=ns2(家宽真实存活 0/1)
 # v3.0: 头部先维持蜂窝探活可达(与主路无关也要保 —— 双死态探活是恢复的前提),
 #   BB_GW 自读(原由 ensure_lease 设置, wan_eth 拆出后本函数是唯一读者)。
 main_primary_apply() {   # $1=w1|w2 (空=状态未知, 仅维持探活路由)
+    # v3.4 (batch3): serialize main-table writes with wan_eth/rc_netfh.
+    netcfg_lock 3 || { log "WARN netcfg lock timeout: main_primary_apply"; return 0; }
     ip route show default | grep -q "dev $W1_IF metric $W1_PRB_METRIC" || \
         ip route add default dev $W1_IF metric $W1_PRB_METRIC 2>/dev/null
     ip route del default dev $W1_IF metric 50 2>/dev/null   # 清历史遗留(旧写方)
-    _p=$1; [ -n "$_p" ] || return 0
+    _p=$1; [ -n "$_p" ] || { netcfg_unlock; return 0; }
     BB_GW=$(head -1 $GW_FILE 2>/dev/null)
     # --- v4 ---
     if [ "$_p" = w2 ]; then
@@ -119,6 +121,7 @@ main_primary_apply() {   # $1=w1|w2 (空=状态未知, 仅维持探活路由)
             log "WARN main v6 w1 write failed (dev=$W1_IF)"
     fi
     [ "$_p" != "$P_LAST" ] && { log "main-primary: $_p (v4+v6 未打标主路; mode=$MODE w1=$W1_PCT% 存活=$NS1/$NS2)"; P_LAST=$_p; }
+    netcfg_unlock
 }
 P_LAST=""
 
@@ -191,7 +194,7 @@ case "$1" in
     exit 0 ;;
 esac
 
-log "===== wan_agg v3.3 start (lib 拆分; eth0 归 wan_eth; 判活多样+wan_alive; fine-log) ====="
+log "===== wan_agg v3.4 start (lib 拆分; eth0 归 wan_eth; 判活多样+wan_alive; fine-log) ====="
 log "EVT env: w1=$W1_IF w2=$W2_IF probe=[$PROBE_V4] t1=$T1 t2=$T2 metric_prb=$W1_PRB_METRIC up=$(cut -d. -f1 /proc/uptime)s"
 agg_conf_seed
 pin_replay
@@ -246,22 +249,29 @@ while :; do
         CW_LAST=none
     elif [ -n "$CW" ]; then CW_LAST=$CW; fi
     if [ -n "$CW" ] && [ "$CW" != "$W1_IF" ]; then
-        log "5g iface moved: $W1_IF -> $CW"
-        W1_IF=$CW
-        ip route replace default dev $W1_IF table $T1 2>/dev/null
-        # v1.4: 探活路由随活跃 ccmni 重指(netagent 漂移后可能指着死口);
-        #   main 主默认由 main_primary_apply() 每周期统一完成(它用更新后的
-        #   $W1_IF), 本处不写 main, 避免第二写方 —— 只保证探活路由指向新口。
-        ip route del default dev $W1_IF metric 50 2>/dev/null
-        ip route replace default dev $W1_IF metric $W1_PRB_METRIC 2>/dev/null
-        iptables -t nat -C POSTROUTING -s $LAN_NET -o $W1_IF -j MASQUERADE 2>/dev/null || \
-            iptables -t nat -A POSTROUTING -s $LAN_NET -o $W1_IF -j MASQUERADE
-        iptables -C FORWARD -i br-lan -o $W1_IF -j ACCEPT 2>/dev/null || \
-            iptables -I FORWARD -i br-lan -o $W1_IF -j ACCEPT
-        iptables -C FORWARD -i $W1_IF -o br-lan -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || \
-            iptables -I FORWARD -i $W1_IF -o br-lan -m state --state ESTABLISHED,RELATED -j ACCEPT
-        D1=99; U1=0   # 迫使下一轮重新评估 5G 探活
-        ip -6 route replace default dev $W1_IF table $T1 2>/dev/null
+        # v3.4: all writes under the netcfg lock; on timeout keep the old iface
+        # and retry next cycle (CW still differs from W1_IF).
+        if netcfg_lock 5; then
+            log "5g iface moved: $W1_IF -> $CW"
+            W1_IF=$CW
+            ip route replace default dev $W1_IF table $T1 2>/dev/null
+            # v1.4: 探活路由随活跃 ccmni 重指(netagent 漂移后可能指着死口);
+            #   main 主默认由 main_primary_apply() 每周期统一完成(它用更新后的
+            #   $W1_IF), 本处不写 main, 避免第二写方 —— 只保证探活路由指向新口。
+            ip route del default dev $W1_IF metric 50 2>/dev/null
+            ip route replace default dev $W1_IF metric $W1_PRB_METRIC 2>/dev/null
+            iptables -t nat -C POSTROUTING -s $LAN_NET -o $W1_IF -j MASQUERADE 2>/dev/null || \
+                iptables -t nat -A POSTROUTING -s $LAN_NET -o $W1_IF -j MASQUERADE
+            iptables -C FORWARD -i br-lan -o $W1_IF -j ACCEPT 2>/dev/null || \
+                iptables -I FORWARD -i br-lan -o $W1_IF -j ACCEPT
+            iptables -C FORWARD -i $W1_IF -o br-lan -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || \
+                iptables -I FORWARD -i $W1_IF -o br-lan -m state --state ESTABLISHED,RELATED -j ACCEPT
+            D1=99; U1=0   # 迫使下一轮重新评估 5G 探活
+            ip -6 route replace default dev $W1_IF table $T1 2>/dev/null
+            netcfg_unlock
+        else
+            log "WARN netcfg lock timeout: 5g iface move (retry next cycle)"
+        fi
     fi
     # v2.15: 总开关热切 (agg.conf ENABLE) — 0=旁路 1=参战
     NEW_EN=$(grep -m1 '^ENABLE=' /data/gw/agg.conf 2>/dev/null | cut -d= -f2)
@@ -404,6 +414,7 @@ while :; do
     fi
     if [ "$AGG_ON" = 1 ] && { [ "$E1$E2" != "$S1$S2" ] || [ "${FORCE:-0}" = 1 ]; }; then
         FORCE=0
+        if netcfg_lock 5; then
         log "state: 5g $S1->$E1 (d1=$D1) home $S2->$E2 (d2=$D2) pmode=$PMODE probe1=[$P1R] probe2=[$P2R] authd=${AS:-none}/${ASAGE}s w2rdy=$W2_READY"
         kernel_apply $E1 $E2 2>>$LOG   # vendor 引擎下即生效; iptables 引擎下无害空写
         if [ "$ENGINE" = iptables ]; then
@@ -444,6 +455,11 @@ while :; do
         fi
         S1=$E1; S2=$E2
         echo "agg:$S1:$S2" > $MODE_FILE
+        netcfg_unlock
+        else
+            log "WARN netcfg lock timeout: agg transition (retry next cycle)"
+            FORCE=1
+        fi
     fi
     # v2.22: 自适应节奏 — 任一侧有失败记录时加快环循(死亡确认提速)
     SLP=3   # v2.24: authd-up 免 ping 使健康环循变廉, 基础节奏 5s->3s

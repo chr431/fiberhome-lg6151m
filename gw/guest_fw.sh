@@ -1,5 +1,5 @@
 #!/bin/sh
-# guest_fw.sh v1.6 — 访客网络隔离 (强制开启, 无开关)
+# guest_fw.sh v1.7 — 访客网络隔离 (强制开启, 无开关)
 #
 # v1.6 (审计P0): 删除 GUEST_ISOLATE 开关 — 访客可达管理面/内网曾是开关关闭态,
 #   属实弹高危面(访客口令一旦泄露=内网全权)。兼容需求(不支持MLO的设备等)改由
@@ -16,6 +16,10 @@
 # 状态: /tmp/guest_fw.state 与内核规则同生命周期(重启均清零, 天然一致)
 
 PRE=WIFI_GUEST
+# v1.7 (batch3): guest isolation rules are firewall writes like any other.
+if [ -r /data/gw/netlock.sh ]; then . /data/gw/netlock.sh; else
+    netcfg_lock() { return 0; }; netcfg_unlock() { :; }; netcfg_repair() { :; }
+fi
 STATE=/tmp/guest_fw.state
 LAN_NET=$(ip route show dev br-lan 2>/dev/null | awk 'NR==1{print $1}')
 [ -z "$LAN_NET" ] && LAN_NET=192.168.9.0/24
@@ -104,6 +108,7 @@ apply_iface() {  # 为一个现存访客 iface 施加隔离 (v1.2 架构: 纯桥
 
 case "$1" in
 sync)
+    netcfg_lock 5 || { log "netcfg lock timeout — sync skipped"; exit 1; }
     # 清旧(状态文件记录的 + 残留链名扫描), 再按现存访客 iface 重建
     for _if in $(cat $STATE 2>/dev/null); do clean_iface $_if; done
     for _t in broute filter; do
@@ -121,6 +126,8 @@ sync)
     done
     mv $STATE.new $STATE
     [ -s $STATE ] || log "no guest iface — all clean"
+    netcfg_repair "guest_fw sync" 0
+    netcfg_unlock
     ;;
 *)
     echo "Usage: $0 sync"; exit 1

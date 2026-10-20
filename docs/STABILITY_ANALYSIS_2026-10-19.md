@@ -334,3 +334,66 @@
   `tc -s qdisc show dev rai0` 的 backlog 作为同义用户态信号，随每次恢复决策留痕。
 - hostapd/wifi_guard 的阈值（90s 确认、60s 连续 stall、2 次/小时）是**保守初值**，
   需用下一次真实 stall 的日志校准；本轮只保证"不再误伤"。
+
+## 7. 2026-10-20 第三批（结构性）实施记录
+
+> 目标（§3 第三批）：统一监督/心跳/锁框架；静态工具/最小解析器；多写方串行化；
+> logc ASAN/fuzz 与长期指标。原则不变：先取证、再确认、后动作；单次工具故障
+> 只进台账，不触发破坏性动作。
+
+### 7.1 统一监督/心跳/锁框架
+
+- 新增 `gw/svc_lib.sh`（v1.0）：`svc_lock`（cmdline+僵尸复核、写后回读）、
+  `svc_hb`、2-of-3 `strike`、限频 `rl_ok`、锁优先 `alive`、
+  `port_listen`，以及 `SVC_TABLE`（11 个脚本守护，含 dial_keeper 的 env 列）。
+- watchdog v1.29 删除本地重复实现，改为 source 该库；被监督守护
+  （ntp/traffic/reboot/fan/wan_eth/wifi_guard/log_keeper/core_trap/healthdog/
+  boot_gate/led_mgr/dial_keeper）的锁与心跳全部改调 `svc_lock`/`svc_hb`，
+  单实例语义（绝对路径+非僵尸+排除自身）保持不变。
+
+### 7.2 静态工具/最小解析器
+
+| 旧探针 | 新实现 | 性质 |
+|---|---|---|
+| `ps` 僵尸计数 | `/proc/*/stat` 状态字段（svc_zombies） | 纯 /proc |
+| `df -k` | 静态 busybox `df`（svc_df_free） | 静态工具 |
+| `dmesg` | 静态 busybox `dmesg`（svc_dmesg_count） | 静态工具 |
+| `iw dev` 数 AP BSS | hostapd 控制 socket + sysfs link flags（svc_bss_count） | 纯 sysfs/socket |
+| `hostapd_cli status` 判活 | 进程+双控制 socket+双链路 UP（svc_hostapd_up）；cli 仅诊断 | 决策去工具化 |
+| `ip link show lo` | `/sys/class/net/lo/flags`（svc_loopback_up） | 纯 sysfs |
+| `netstat` 端口 | `/proc/net/tcp{,6}`（沿用 v1.27） | 纯 /proc |
+
+`iw station dump`/`tc qdisc` 仍为厂商动态工具，但只作证据/告警（有界 timeout），
+不再参与任何破坏性决策。
+
+### 7.3 多写方串行化
+
+- 新增 `gw/netlock.sh`（v1.0）：静态 busybox `flock -n` + 有界重试（该 busybox
+  无 `-w`），进程内可重入；超时只记 `/tmp/netcfg_lock_timeouts` 并跳过本轮写，
+  不阻塞状态机。
+- 接入写方：wan_agg_lib（dp/fw/fw6/ensure_rules/agg_bypass）、wan_agg
+  （main_primary_apply/5G 漂移/状态迁移）、wan_eth（路由/NAT 修复）、
+  rc_netfh（开机 route/NAT/v6 相位）、fw_apply、ccmni_up（地址落地）、guest_fw。
+- `netcfg_repair` 把每次补装写入 `/data/gw/logs/netcfg_repairs.tsv`
+  （epoch/what/rc/verified），watchdog HEALTH 报 `repairs_1h=` 滚动小时速率。
+- 注意：radvd 启动前显式释放锁，避免长驻子进程继承 flock fd。
+
+### 7.4 logc ASAN/fuzz 与长期指标
+
+- `logc v1.3` 新增 `--fuzz N`：确定性 LCG 生成合法帧/截断/伪长度/类型污染/
+  超大与 NUL 消息/纯噪声，进程内跑真实解析器；`--selftest` 保持原语义。
+- `tools/build_logc.sh --asan`：主机 ASAN/UBSAN 构建（开发件，不入设备）；
+  设备侧仍为 zig 静态 aarch64 构建。`tools/fuzz_logc.py --inproc N` 可直接
+  在设备上跑该 harness。
+- `log_keeper v2.5` 每 5 分钟写 `/data/gw/logs/stability_metrics.tsv`
+  （logc rc/帧/异常/丢弃/io/崩溃数、repairs_1h、load、MemAvailable）；
+  watchdog HEALTH 增 `logc_bad/logc_resync/logc_io/logc_crash/repairs_1h/
+  netlock_to/bss`。
+- 设备侧实测：`logc --selftest` PASS；`logc --fuzz 200` PASS
+  （7296 帧 / 3258 bad_frames / 3071 resyncs，零信号死亡）。
+
+### 7.5 验证（设备侧）
+
+- `vercheck.py check`：118 登记文件 / MANIFEST 69 项全覆盖。
+- 待补：冷启动、selftest 全量、netlock 竞争实测（见下轮记录）。
+

@@ -14,6 +14,11 @@ Usage:
   python tools/fuzz_logc.py --rounds 20 --seed 100
   python tools/fuzz_logc.py --from-ring     # seed with a real ring dump first
   python tools/fuzz_logc.py --keep          # keep device temp files
+  python tools/fuzz_logc.py --inproc 2000   # logc v1.3 in-process mutation fuzz
+
+The in-process mode runs the deterministic harness built into logc
+(`logc --fuzz N`) on the device; combined with an ASAN build from
+`tools/build_logc.sh --asan` the same harness becomes a memory-safety test.
 """
 import os
 import random
@@ -104,6 +109,7 @@ def main():
     args = sys.argv[1:]
     rounds = 6
     seed0 = 1
+    inproc = 0
     from_ring = "--from-ring" in args
     keep = "--keep" in args
     for i, a in enumerate(args):
@@ -111,6 +117,8 @@ def main():
             rounds = int(args[i + 1])
         if a == "--seed":
             seed0 = int(args[i + 1])
+        if a == "--inproc":
+            inproc = int(args[i + 1])
 
     c = lgssh.connect()
     try:
@@ -122,6 +130,11 @@ def main():
             print("ring seed: %d bytes" % len(raw))
 
         bad = 0
+        if inproc:
+            txt = run_bytes(c, "%s --fuzz %d" % (DEV, inproc), timeout=300).decode("utf-8", "replace").strip()
+            print("in-process fuzz: %s" % txt)
+            if "PASS" not in txt:
+                bad += 1
         for r in range(rounds):
             data = corpus(seed0 + r, 1_500_000)
             if raw:

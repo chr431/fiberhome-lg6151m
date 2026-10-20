@@ -1,5 +1,5 @@
 #!/bin/sh
-# ntp_keeper.sh v1.4 -- 守时器 (每小时对时; 设备无RTC电池, 冷启动时间漂移大)
+# ntp_keeper.sh v1.5 -- 守时器 (每小时对时; 设备无RTC电池, 冷启动时间漂移大)
 # v1.4 (P1-1): 单实例锁(看门狗监督表会重启) + 心跳沿用 v1.3.
 # 首选源 = 自管配置 NTP_SERVER (defaults.conf 出厂默认叠 settings.conf 用户覆盖, 与 GUI
 # 时间同步卡片同源); 其后硬编码 IP 兜底; 223.5.5.5 兜底 resolv.conf 语义不变。
@@ -13,18 +13,17 @@
 LOG=/tmp/ntp_keeper.log
 ng() { echo "$(date '+%m-%d %H:%M:%S') $*" >> $LOG; }
 [ -s /etc/resolv.conf ] || echo "nameserver 223.5.5.5" > /etc/resolv.conf
-# v1.4 (P1-1): single instance + heartbeat (watchdog supervision table)
-_lp=$(cat /tmp/ntp_keeper.lock 2>/dev/null)
-if [ -n "$_lp" ] && [ "$_lp" != "$$" ] && kill -0 "$_lp" 2>/dev/null && \
-   grep -qa '/data/gw/ntp_keeper.sh' /proc/$_lp/cmdline 2>/dev/null; then
-    echo "ntp_keeper: already running pid=$_lp" >&2
+# v1.5 (batch3): shared single-instance lock + heartbeat primitives.
+if [ -r /data/gw/svc_lib.sh ]; then . /data/gw/svc_lib.sh; else echo "ntp_keeper: svc_lib.sh missing" >&2; exit 1; fi
+_rc=0; svc_lock ntp_keeper /data/gw/ntp_keeper.sh || _rc=$?
+if [ "$_rc" != 0 ]; then
+    [ "$_rc" = 1 ] && echo "ntp_keeper: already running" >&2 || echo "ntp_keeper: lost lock race" >&2
     exit 0
 fi
-echo $$ > /tmp/ntp_keeper.lock
 ng "start"
 SYNCED=0
 while :; do
-    cut -d. -f1 /proc/uptime > /tmp/ntp_keeper.hb 2>/dev/null
+    svc_hb ntp_keeper
     NTP_SERVER=""; TZ=""
     [ -r /data/gw/defaults.conf ] && . /data/gw/defaults.conf
     [ -r /data/gw/settings.conf ] && . /data/gw/settings.conf

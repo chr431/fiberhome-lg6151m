@@ -1,5 +1,5 @@
 #!/bin/sh
-# rc_netfh.sh v3.11 -- route A: FH modem-stack environment (minimal army).
+# rc_netfh.sh v3.12 -- route A: FH modem-stack environment (minimal army).
 # v3.10 (2026-10-17 日志加密轮): 全程相位计时(t+Ns)+每阶段 pid/rc 快照; settle
 #   watch 每轮记录 ccmni 清单(不再只记最终结果); fw_apply rc、route/NAT 真实补装
 #   均留痕。24h 分析可区分"开机没起来"与"起来后又被拆"。
@@ -40,8 +40,12 @@ ph() { glog "PHASE $* (t+$(( $(cut -d. -f1 /proc/uptime 2>/dev/null) - ${T_BOOT:
 # v1.1: FH binaries+libs live outside the default PATH/loader path
 export PATH=$PATH:/fhrom/bin:/fhrom/fhshell
 export LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib
+# v3.12 (batch3): serialize boot-time route/NAT writes with wan_agg/wan_eth.
+if [ -r /data/gw/netlock.sh ]; then . /data/gw/netlock.sh; else
+    netcfg_lock() { return 0; }; netcfg_unlock() { :; }; netcfg_repair() { :; }
+fi
 log_rot
-glog "===== rc_netfh v3.11 start (epoch=$(date +%s) boot=$(cut -d. -f1 /proc/uptime)s slot=$(tr ' ' '\n' < /proc/cmdline | sed -n 's/^bootslot=//p') cci=$(cat /sys/kernel/ccci/boot 2>/dev/null)) ====="
+glog "===== rc_netfh v3.12 start (epoch=$(date +%s) boot=$(cut -d. -f1 /proc/uptime)s slot=$(tr ' ' '\n' < /proc/cmdline | sed -n 's/^bootslot=//p') cci=$(cat /sys/kernel/ccci/boot 2>/dev/null)) ====="
 
 # 1. config base — v3.1 (P3 终章): cfg_tool/shmsnap/树整体退役。
 #   蜂窝全功能(锁/制式/飞行/PIN/短信/扫描/拨号)已由 mipc_cellular+dial_keeper+
@@ -140,6 +144,8 @@ done
 glog "ccmni ip: ${IP:-none after 120s}"
 IF=$(echo "$IP" | awk '{print $2}')
 if [ -n "$IF" ]; then
+  _nl=0
+  if netcfg_lock 5; then _nl=1
     # v1.2: stock's netagent didn't add the v4 default route in our env -- the
     # ONE thing we add ourselves. Verified live 2026-10-03: route+NAT =>
     # PC->br-lan->NAT->ccmni1->5G->internet (traceroute hop1=192.168.9.1, 0% loss).
@@ -200,6 +206,9 @@ if [ -n "$IF" ]; then
         ip6tables -C FORWARD -i $IF -o br-lan -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || {
             ip6tables -I FORWARD -i $IF -o br-lan -m state --state ESTABLISHED,RELATED -j ACCEPT
             glog "REPAIR v6 FORWARD $IF->br-lan established (missing -> added rc=$?)"; }
+        # Release before spawning radvd: a long-lived child must not inherit
+        # the netcfg lock fd (it would hold the lock forever).
+        [ "$_nl" = 1 ] && { netcfg_unlock; _nl=0; }
         pidof radvd >/dev/null || /fhrom/bin/radvd -C /data/gw/radvd.conf -p /tmp/radvd.pid -m logfile -l /tmp/radvd.log
         glog "v6: ula+nat66+radvd=$(pidof radvd) on $IF"
         ph "v6 phase done (radvd=$(pidof radvd))"
@@ -208,6 +217,10 @@ if [ -n "$IF" ]; then
         ph "v6 phase skipped (no global v6 on $IF)"
     fi
 
+    [ "$_nl" = 1 ] && netcfg_unlock
+  else
+    glog "WARN netcfg lock timeout: route/nat phase (skipped)"
+  fi
     R1=$(cat /sys/class/net/$IF/statistics/rx_packets 2>/dev/null)
     sleep 10
     R2=$(cat /sys/class/net/$IF/statistics/rx_packets 2>/dev/null)
@@ -228,4 +241,4 @@ if [ -n "$IF" ]; then
 fi
 sh /data/gw/fw_apply.sh apply 2>/dev/null; FWRC=$?
 [ $FWRC -eq 0 ] && glog "fw_apply ok" || glog "WARN fw_apply rc=$FWRC"
-glog "===== rc_netfh v3.11 done (total=$(( $(cut -d. -f1 /proc/uptime) - ${T_BOOT:-0} ))s) ====="
+glog "===== rc_netfh v3.12 done (total=$(( $(cut -d. -f1 /proc/uptime) - ${T_BOOT:-0} ))s) ====="

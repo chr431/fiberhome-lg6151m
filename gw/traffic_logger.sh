@@ -1,5 +1,5 @@
 #!/bin/sh
-# traffic_logger.sh v1.3 — 蜂窝/以太网流量采样器(5 分钟粒度, /data 持久)
+# traffic_logger.sh v1.4 — 蜂窝/以太网流量采样器(5 分钟粒度, /data 持久)
 # 输出: /data/gw/traffic_hist.tsv  每行: epoch drx_c dtx_c drx_e dtx_e (字节增量)
 # 语义: 增量为"距上次采样"; 计数器回绕/接口重建(ccmni 漂移)/重启(新值<旧值)
 #       按新值计(=计数器自身纪元的累计, 自洽); prev 存 /tmp(重启后首拍即
@@ -18,16 +18,15 @@
 # 尺寸守护: 超 40 天(~11520 行)裁剪保留 30 天
 LOG=/data/gw/traffic_hist.tsv
 ST=/tmp/traffic_prev
-# v1.3 (P1-1): single instance + heartbeat (watchdog supervision table)
-_lp=$(cat /tmp/traffic_logger.lock 2>/dev/null)
-if [ -n "$_lp" ] && [ "$_lp" != "$$" ] && kill -0 "$_lp" 2>/dev/null && \
-   grep -qa '/data/gw/traffic_logger.sh' /proc/$_lp/cmdline 2>/dev/null; then
-    echo "traffic_logger: already running pid=$_lp" >&2
+# v1.4 (batch3): shared single-instance lock + heartbeat primitives.
+if [ -r /data/gw/svc_lib.sh ]; then . /data/gw/svc_lib.sh; else echo "traffic_logger: svc_lib.sh missing" >&2; exit 1; fi
+_rc=0; svc_lock traffic_logger /data/gw/traffic_logger.sh || _rc=$?
+if [ "$_rc" != 0 ]; then
+    [ "$_rc" = 1 ] && echo "traffic_logger: already running" >&2 || echo "traffic_logger: lost lock race" >&2
     exit 0
 fi
-echo $$ > /tmp/traffic_logger.lock
 while :; do
-    cut -d. -f1 /proc/uptime > /tmp/traffic_logger.hb 2>/dev/null
+    svc_hb traffic_logger
     CIF=$(ip -o -4 addr show 2>/dev/null | grep -m1 'ccmni.*inet' | awk '{print $2}')
     CRC=0; CTC=0; SRC=none
     [ -n "$CIF" ] && {

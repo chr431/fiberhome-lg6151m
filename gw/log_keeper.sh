@@ -1,5 +1,8 @@
 #!/bin/sh
-# log_keeper.sh v2.4 -- 日志持久化守护（日志改善专项轮）
+# log_keeper.sh v2.5 -- 日志持久化守护（日志改善专项轮）
+#   v2.5 (2026-10-20 stability batch3): 单实例锁/心跳改用 svc_lib 共享原语;
+#   新增 logs/stability_metrics.tsv 长期指标(每 5min: logc 帧/异常/崩溃 +
+#   load/mem/REPAIR 速率), 供 24h 与周级趋势分析; logc 崩溃计数持久化.
 #   v2.4: 每轮重写自己的锁 — 启动竞态残留的旧 pid 会在一个周期内自愈.
 #   v2.3: 写锁后回读校验(与看门狗重启的 check-then-write 竞态不再产生双实例).
 #   v2.2: 手动/监督重启也带镜像时区(TZ 兜底), 日志时间戳不再 UTC.
@@ -62,6 +65,9 @@
 PATH=/data/gw/sbin:/data/gw/bin:$PATH
 export PATH
 [ -z "${TZ:-}" ] && [ -r /etc/TZ ] && TZ=$(cat /etc/TZ 2>/dev/null) && export TZ
+if [ -r /data/gw/svc_lib.sh ]; then . /data/gw/svc_lib.sh; else
+    echo "log_keeper: svc_lib.sh missing" >&2; exit 1
+fi
 LOG=/tmp/log_keeper.log
 DIR=/data/gw/logs
 LOGC=/data/gw/bin/logc
@@ -116,20 +122,13 @@ bootmark() {
 }
 mkdir -p $DIR/tmp
 touch $DIR/syslog.log $DIR/dmesg.log $DIR/.prevup
-# v2.0: single instance — a supervised restart must never double-append
-_lp=$(cat /tmp/log_keeper.lock 2>/dev/null)
-if [ -n "$_lp" ] && [ "$_lp" != "$$" ] && kill -0 "$_lp" 2>/dev/null && \
-   ! grep -q '^State:.*Z' /proc/$_lp/status 2>/dev/null && \
-   grep -qa '/data/gw/log_keeper.sh' /proc/$_lp/cmdline 2>/dev/null; then
-    echo "log_keeper: already running pid=$_lp" >&2
+# v2.0/v2.5: single instance — a supervised restart must never double-append.
+# svc_lock includes the v2.3 check-then-write race guard (settle + re-read).
+_rc=0; svc_lock log_keeper /data/gw/log_keeper.sh || _rc=$?
+if [ "$_rc" != 0 ]; then
+    [ "$_rc" = 1 ] && echo "log_keeper: already running" >&2 || echo "log_keeper: lost lock race" >&2
     exit 0
 fi
-echo $$ > /tmp/log_keeper.lock
-# v2.3: close the check-then-write race with the supervisor: after writing the
-# lock, re-read it. If another instance won, leave immediately (a duplicate
-# would double-append the mirrors).
-sleep 1
-[ "$(cat /tmp/log_keeper.lock 2>/dev/null)" = "$$" ] || { echo "log_keeper: lost lock race" >&2; exit 0; }
 # v2.0: aee NE census — db_history has no process name; the vendor syslog line
 # does.  Called with the newly mirrored syslog text on stdin.
 census() {
@@ -184,13 +183,13 @@ else
     lk "start (new boot boot_id=${_bid:-?} btime=${_bt:-?})"
     bootmark
 fi
-cut -d. -f1 /proc/uptime > /tmp/log_keeper.hb 2>/dev/null
+svc_hb log_keeper
 PREV_UP=$(cut -d. -f1 /proc/uptime)
 DIAG_DONE=""
 while :; do
     sleep 30
-    cut -d. -f1 /proc/uptime > /tmp/log_keeper.hb 2>/dev/null
-    echo $$ > /tmp/log_keeper.lock 2>/dev/null   # v2.4: owner re-asserts the lock
+    svc_hb log_keeper
+    svc_lock_assert log_keeper   # v2.4: owner re-asserts the lock
     # -- boot 检出: uptime 回退 → 分隔行 + 重置锚(环已全新) --
     U=$(cut -d. -f1 /proc/uptime)
     if [ "${PREV_UP:-0}" -gt "$U" ] 2>/dev/null; then
@@ -290,12 +289,30 @@ while :; do
     done
     # -- 每 10 轮(5min)落一行汇总: 持久化规模 + 降噪丢弃量可观测(不静默) --
     CYC=$(( ${CYC:-0} + 1 ))
-    if [ $((CYC % 10)) -eq 0 ]; then
+    if [ $((CYC % 10)) -eq 0 ] || [ "$CYC" = 1 ]; then
         _nf=$(ls $DIR/tmp/*.log 2>/dev/null | wc -l)
         _nb=$(cat $DIR/tmp/*.log 2>/dev/null | wc -c)
         _ds=$((DROP_S - DROP_S0)); _dd=$((DROP_D - DROP_D0))
         DROP_S0=$DROP_S; DROP_D0=$DROP_D
         lk "stream summary: files=$_nf bytes=$_nb denoise_dropped: syslog=$_ds dmesg=$_dd (cum s=$DROP_S d=$DROP_D)"
+        # v2.5 (batch3): long-term metrics ledger.  One line every 5 min, same
+        # cadence as the stream summary; consumed by selftest and by 24h/weekly
+        # trend analysis (logc health, REPAIR rate, memory headroom).
+        _lcf=$(sed -n 's/^frames=\([0-9]*\).*/\1/p' /tmp/logc.stats 2>/dev/null)
+        _lcb=$(sed -n 's/.*bad_frames=\([0-9]*\).*/\1/p' /tmp/logc.stats 2>/dev/null)
+        _lcr=$(sed -n 's/.*resyncs=\([0-9]*\).*/\1/p' /tmp/logc.stats 2>/dev/null)
+        _lcd=$(sed -n 's/.*dropped_bytes=\([0-9]*\).*/\1/p' /tmp/logc.stats 2>/dev/null)
+        _lcio=$(sed -n 's/.*io_errors=\([0-9]*\).*/\1/p' /tmp/logc.stats 2>/dev/null)
+        _lcc=$(ls $DIR/logc_crash 2>/dev/null | wc -l)
+        _rep=$(svc_repairs_1h)
+        _load=$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null | tr ' ' '_')
+        _ma=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo 2>/dev/null)
+        _mfile=$DIR/stability_metrics.tsv
+        echo "$(date +%s) up=$U logc_rc=${_lc:-?} frames=${_lcf:-0} bad=${_lcb:-0} resync=${_lcr:-0} dropped=${_lcd:-0} io=${_lcio:-0} crash=${_lcc:-0} repairs_1h=${_rep:-0} load=$_load memavail=${_ma:-?}KB" >> "$_mfile"
+        _mn=$(wc -l < "$_mfile" 2>/dev/null || echo 0)
+        if [ "${_mn:-0}" -gt 5000 ]; then
+            tail -n 2500 "$_mfile" > "$_mfile.tmp" 2>/dev/null && mv "$_mfile.tmp" "$_mfile"
+        fi
     fi
 
     # -- 每次开机一份诊断包(+180s, 只做一次) --

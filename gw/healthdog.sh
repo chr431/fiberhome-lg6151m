@@ -1,5 +1,5 @@
 #!/bin/sh
-# healthdog.sh v1.4 -- userspace half of healthdog + second-level supervisor.
+# healthdog.sh v1.5 -- userspace half of healthdog + second-level supervisor.
 # v1.4: 内核 armed 标志跨守护重启保持 — 新实例必须先恢复心跳再谈 arm 判定
 #   (现场实测: 重启 healthdog 后 90s 内内核会复位；temp heartbeat loop 应急)。
 #
@@ -46,10 +46,15 @@ if [ ! -e /proc/healthdog ]; then
     [ -f "$MOD" ] && insmod "$MOD" forensic=0 armed=0 2>/dev/null
     [ -e /proc/healthdog ] || { hd "module not loaded"; exit 1; }
 fi
-echo $$ > /tmp/healthdog.lock 2>/dev/null
+if [ -r /data/gw/svc_lib.sh ]; then . /data/gw/svc_lib.sh; else echo "healthdog: svc_lib.sh missing" >&2; exit 1; fi
+_rc=0; svc_lock healthdog /data/gw/healthdog.sh || _rc=$?
+if [ "$_rc" != 0 ]; then
+    [ "$_rc" = 1 ] && echo "healthdog: already running" >&2 || echo "healthdog: lost lock race" >&2
+    exit 0
+fi
 # v1.3: loopback is required by the heartbeat predicate (and was DOWN)
 ip link set lo up 2>/dev/null
-hd "start v1.4 pid=$$ boot_id=$(bid) up=$(up)s lo=$(ip link show lo 2>/dev/null | head -1)"
+hd "start v1.5 pid=$$ boot_id=$(bid) up=$(up)s lo=$(ip link show lo 2>/dev/null | head -1)"
 
 # ---- pstore: rescue the previous boot's console log (P1-5) ---------------
 collect_pstore() {
@@ -103,7 +108,7 @@ esac
 WATCHDOG_TRIES=0
 LAST_RESTART=0
 while :; do
-    echo "$(up)" > "$HB" 2>/dev/null
+    svc_hb healthdog
     u=$(up)
 
     if [ -f "$DISARM" ]; then

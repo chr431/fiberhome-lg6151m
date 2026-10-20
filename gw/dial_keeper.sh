@@ -1,6 +1,8 @@
 #!/bin/sh
 # dial_keeper.sh v1.8 -- 拨号自持守护 (ROADMAP P2, 2026-10-06)
 #
+# v1.9 (2026-10-20 stability batch3): 单实例锁/心跳改用 svc_lib 共享原语;
+#   锁语义(v1.7 绝对路径+非僵尸, v1.8 排除自身)不变.
 # v1.8 (2026-10-19 SIGSEGV 根治轮): 单实例锁排除自身 pid(watchdog spawn 预写
 #   子进程 pid 时不误判 duplicate)。
 # v1.7 (2026-10-19 SIGSEGV 根治轮): 单实例锁判据收紧(绝对路径+非僵尸) — 与
@@ -50,6 +52,7 @@
 #      分支并重置退避, 不等被动宽限。
 #   关键事件(启动/EE/重拨尝试与结果)同时 logger 进 syslog → 经 log_keeper
 #   镜像持久化(事故当晚本守护只写 /tmp, 重启即失, 复盘缺一环)。
+if [ -r /data/gw/svc_lib.sh ]; then . /data/gw/svc_lib.sh; else echo "dial_keeper: svc_lib.sh missing" >&2; exit 1; fi
 LOG=/tmp/dial_keeper.log
 HB=/tmp/dial_keeper.hb
 LOCK=/tmp/dial_keeper.lock
@@ -69,16 +72,13 @@ log_rot() { [ -s $LOG ] && [ "$(wc -l < $LOG 2>/dev/null || echo 0)" -gt $MAXL ]
 # v1.8: 排除自身 pid — watchdog spawn 的预写锁可能是本进程 pid, 不自匹配。
 # v1.7: 锁判据收紧 — 必须命中本脚本绝对路径且非僵尸(锁 pid 复用给含
 #   dial_keeper 字样的其它命令时, 旧判据会让新实例误判 duplicate 永久退出)。
-_lp=$(cat $LOCK 2>/dev/null)
-if [ -n "$_lp" ] && [ "$_lp" != "$$" ] && kill -0 "$_lp" 2>/dev/null \
-   && ! grep -q '^State:.*Z' /proc/$_lp/status 2>/dev/null \
-   && grep -qa '/data/gw/dial_keeper.sh' /proc/$_lp/cmdline 2>/dev/null; then
-    log "duplicate instance pid=$_lp alive — exit (single-instance lock)"
+_rc=0; svc_lock dial_keeper /data/gw/dial_keeper.sh || _rc=$?
+if [ "$_rc" != 0 ]; then
+    [ "$_rc" = 1 ] && log "duplicate instance alive — exit (single-instance lock)" || log "lost lock race — exit"
     exit 0
 fi
-echo $$ > $LOCK
 
-hb() { cut -d. -f1 /proc/uptime > $HB 2>/dev/null; }
+hb() { svc_hb dial_keeper; }
 hb   # v1.2: 启动即写心跳 — 消 watchdog 首见"无心跳文件"窗口(deploy 重启实测命中:
      #   新实例起 ~2s 时 watchdog 判 stale(hb=none) 杀+拉, 属误判; 旧 v1.0 实例
      #   无 hb 文件时该规则仍按设计触发 = 换代码后自动重启)
@@ -168,8 +168,8 @@ ee_count() { ls -d /data/log/aee_exp/db.*.EE 2>/dev/null | wc -l; }
 DOWN=0; B=$MINB
 CYC=0; ZOMBIE=0; APN_LAST=""; APN_SRC_LAST=""; CFUN_LAST=""
 EE_N=$(ee_count)
-log "===== keeper v1.8 start (grace=${GRACE}s poll=${POLL}s mto=${MTO}s ee=${EE_N}; ccmni_up=netagent-lite; trigger=ip+dataplane; fine-log) ====="
-logger -t dial_keeper "keeper v1.8 start (grace=${GRACE}s mto=${MTO}s ee=${EE_N})"
+log "===== keeper v1.9 start (grace=${GRACE}s poll=${POLL}s mto=${MTO}s ee=${EE_N}; ccmni_up=netagent-lite; trigger=ip+dataplane; fine-log) ====="
+logger -t dial_keeper "keeper v1.9 start (grace=${GRACE}s mto=${MTO}s ee=${EE_N})"
 while :; do
     hb; CYC=$((CYC+1)); [ $((CYC % 12)) -eq 0 ] && log_rot
     # v1.1: 模组 EE 事件 = 复位信号 → 强制重拨路径(不等被动宽限)

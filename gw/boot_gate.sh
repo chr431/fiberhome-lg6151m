@@ -1,5 +1,8 @@
 #!/bin/sh
-# boot_gate.sh v1.2 -- real boot health gate (replaces the rc19 120s timer).
+# boot_gate.sh v1.3 -- real boot health gate (replaces the rc19 120s timer).
+# v1.3 (batch3): shared svc_lib lock + minimal parsers (BSS from hostapd control
+#   sockets + sysfs link flags, loopback from sysfs flags); no iw/ip-link probe
+#   in the gate's critical path.
 # v1.2: 不再写 /tmp/watchdog.beat(那是看门狗的数字心跳, 曾被 "107 boot.done" 污染).
 # v1.1: c_gui 加 HTTP 200 功能判据(lo 已修, 本机 HTTP 探活可用).
 #
@@ -38,6 +41,9 @@ set -u
 PATH=/data/gw/sbin:/data/gw/bin:$PATH
 export PATH
 [ -z "${TZ:-}" ] && [ -r /etc/TZ ] && TZ=$(cat /etc/TZ 2>/dev/null) && export TZ
+if [ -r /data/gw/svc_lib.sh ]; then . /data/gw/svc_lib.sh; else
+    echo "boot_gate: svc_lib.sh missing" >&2; exit 1
+fi
 
 HERE=/data/gw
 BB=$HERE/bin/busybox
@@ -68,13 +74,13 @@ PORT() { # $1=port -> 0 when a listener exists (hex local_address in /proc/net/t
 
 # ---- individual checks: 0 = pass ---------------------------------------
 c_lan()    { TMO 4 "ip -4 addr show br-lan | grep -q 'inet 192.168.9.1'"; }
-c_lo()     { TMO 4 "ip link show lo" | grep -q 'LOOPBACK,UP'; }
+c_lo()     { svc_loopback_up; }
 c_ssh()    { pidof dropbear >/dev/null 2>&1 && PORT 22; }
 c_dns()    { pidof dnsmasq >/dev/null 2>&1 && PORT 53; }
 c_gui()    { pidof v3httpd >/dev/null 2>&1 && PORT 80 && \
                 TMO 8 "$BB wget -q -T 4 -O /dev/null http://192.168.9.1/"; }
 c_ubus()   { [ -S /var/run/ubus/ubus.sock ] || [ -S /var/run/ubus.sock ]; }
-c_wifi()   { [ "$(TMO 6 "iw dev" | grep -c 'type AP')" -ge 2 ]; }
+c_wifi()   { [ "$(svc_bss_count)" -ge 2 ]; }
 c_agg()    { TMO 5 "iptables -t mangle -S WANAGG 2>/dev/null | grep -q MARK"; }
 c_rc19()   { [ -f /tmp/rc19.done ]; }
 c_authd() {
@@ -143,7 +149,7 @@ clear_try_a() {
 write_healthy() { # $1=stable(0|1) $2=degraded(0|1) $3=reason
     _tmp=$HEALTHY.tmp
     {
-        echo "# boot health verdict (boot_gate v1.2)"
+        echo "# boot health verdict (boot_gate v1.3)"
         echo "boot_id=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)"
         echo "btime=$(awk '/^btime/{print $2; exit}' /proc/stat 2>/dev/null)"
         echo "epoch=$(date +%s)"
@@ -183,12 +189,11 @@ esac
 
 # ---- daemon --------------------------------------------------------------
 _myid=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
-_mp=$(cat /tmp/boot_gate.lock 2>/dev/null)
-if [ -n "$_mp" ] && [ "$_mp" != "$$" ] && kill -0 "$_mp" 2>/dev/null; then
-    echo "boot_gate: already running pid=$_mp" >&2
+_rc=0; svc_lock boot_gate /data/gw/boot_gate.sh || _rc=$?
+if [ "$_rc" != 0 ]; then
+    [ "$_rc" = 1 ] && echo "boot_gate: already running" >&2 || echo "boot_gate: lost lock race" >&2
     exit 0
 fi
-echo $$ > /tmp/boot_gate.lock
 say "start pid=$$ boot_id=$_myid btime=$(awk '/^btime/{print $2; exit}' /proc/stat 2>/dev/null) core_pattern=$(cat /proc/sys/kernel/core_pattern 2>/dev/null)"
 prog "boot_gate start"
 

@@ -1,5 +1,11 @@
 #!/bin/sh
-# watchdog.sh v1.28 -- on-device continuous invariant monitor.
+# watchdog.sh v1.29 -- on-device continuous invariant monitor.
+# v1.29 (2026-10-20 stability batch3): primitives moved to svc_lib.sh
+#   (lock/heartbeat/2-of-3/rate-limit/port probe + minimal sysfs parsers);
+#   SVC_TABLE moved there and now includes dial_keeper; remaining dynamic
+#   probes replaced (ps->/proc, df/dmesg->static busybox, iw BSS->hostapd
+#   ctrl sockets, hostapd_cli->process+socket+link); HEALTH carries long-term
+#   metrics (logc anomalies, REPAIR rate, zombies, BSS).
 # v1.28 (2026-10-20): 2-of-3 采样确认(P0-3/P1-3 原文语义) + 剩余内联探针
 #   (dmesg/iw/ip/tc/df/ps/station dump)全部过静态 timeout + v3httpd HTTP 200
 #   与 dnsmasq DNS 功能性探针(每 10 轮, 仅告警不重启).
@@ -44,6 +50,11 @@ PATH=/data/gw/sbin:/data/gw/bin:$PATH
 export PATH
 [ -z "${TZ:-}" ] && [ -r /etc/TZ ] && TZ=$(cat /etc/TZ 2>/dev/null) && export TZ
 LOG=/tmp/watchdog.log
+# v1.29: one shared implementation of the supervision primitives.
+if [ -r /data/gw/svc_lib.sh ]; then . /data/gw/svc_lib.sh; else
+    echo "watchdog: svc_lib.sh missing -- refusing to run unsupervised" >&2
+    exit 1
+fi
 STATE=/tmp/watchdog_state
 ALED=/sys/class/gpio/gpio473/value
 CYCLE=30
@@ -76,72 +87,15 @@ toolfault() { # $1=what $2=rc $3=cmd $4=extra
         tail -n 400 "$_l" > "$_l.tmp" 2>/dev/null && mv "$_l.tmp" "$_l"
     fi
 }
-hb_age() { # $1=heartbeat file (uptime seconds); 999999 if missing/non-numeric
-    _v=$(cat "$1" 2>/dev/null)
-    _u=$(cut -d. -f1 /proc/uptime)
-    case "$_v" in ''|*[!0-9]*) echo 999999 ;; *) echo $((_u - _v)) ;; esac
-}
+# v1.29: hb_age()/port_listen()/strike()/rl_ok()/alive() are in svc_lib.sh.
 save_cmdline() { # $1=pid $2=file — cache a service restart recipe
     [ -r "/proc/$1/cmdline" ] || return 1
     tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null | sed 's/ $//' > "$2"
 }
-# v1.27: port liveness from /proc/net/tcp{,6} (hex local_address), no netstat.
-port_listen() { # $1=port
-    _hx=$(printf '%04X' "$1" 2>/dev/null)
-    [ -n "$_hx" ] || return 1
-    for _f in /proc/net/tcp /proc/net/tcp6; do
-        [ -r "$_f" ] || continue
-        awk -v p=":$_hx" '$4=="0A" && substr($2,length($2)-4)==p{f=1} END{exit(f?0:1)}' "$_f" 2>/dev/null && return 0
-    done
-    return 1
-}
-# v1.27: 2-of-3 sample confirmation (analysis P0-3/P1-3). Each service keeps a
-# 3-character history of the last samples ("1" = failure, "0" = pass); the
-# destructive action fires when at least 2 of the last 3 failed (>=60s at the
-# 30s cycle), so one probe glitch never bounces a radio or kills a daemon.
-strike() { # $1=key, records a FAILURE sample -> 0 when 2-of-3 reached
-    _f=/tmp/watchdog_strike_$1
-    _h=$(cat "$_f" 2>/dev/null | tr -d ' \n')
-    case "$_h" in ???*) _h="${_h#?}" ;; esac   # keep only the last 3 samples
-    _h="${_h}1"; echo "$_h" > "$_f"
-    _n=$(echo "$_h" | awk '{n=gsub(/1/,"1"); print n+0}')
-    [ "$_n" -ge 2 ] && { rm -f "$_f"; return 0; }
-    return 1
-}
-strike_clear() { # $1=key, records a PASS sample (keeps the last-3 window)
-    _f=/tmp/watchdog_strike_$1
-    _h=$(cat "$_f" 2>/dev/null | tr -d ' \n')
-    case "$_h" in ???*) _h="${_h#?}" ;; esac
-    echo "${_h}0" > "$_f"
-}
-# per-service restart rate limit: max 3 per hour (tmpfs; reboot resets)
-rl_ok() { # $1=name
-    _f=/tmp/watchdog_svc_$1.rec; _n=0; _t=0
-    [ -r "$_f" ] && read _n _t < "$_f"
-    _now=$(date +%s)
-    case "$_n" in ''|*[!0-9]*) _n=0 ;; esac
-    case "$_t" in ''|*[!0-9]*) _t=$_now ;; esac
-    [ $((_now - _t)) -gt 3600 ] && { _n=0; _t=$_now; }
-    [ "$_n" -ge 3 ] && return 1
-    echo "$((_n + 1)) $_t" > "$_f"
-    return 0
-}
+# v1.29: 2-of-3 confirmation, restart budget and the /proc/net/tcp listener
+# probe are shared primitives in svc_lib.sh (same semantics as v1.27/v1.28).
 
-# v1.20: 单实例判活 — SIGSEGV 家族里 pgrep/grep 自身也会被打死(实测), 仅凭 pgrep
-#   会重复拉起(现场: 3×wan_eth / 2×log_keeper / 2×watchdog)。锁文件记的 pid 活着
-#   且 /proc cmdline 复核匹配 → 视为在跑, 不再起第二个。
-alive() { # $1=pgrep pattern  $2=lock name  $3=cmdline token
-    # v1.27: the single-instance lock is authoritative (exact pid + cmdline
-    # verification). pgrep -f is only the legacy fallback: any process whose
-    # argv merely CONTAINS the pattern (a grep/editor/the admin's own shell)
-    # used to make a dead daemon look alive.
-    _ap=$(cat /tmp/$2.lock 2>/dev/null)
-    [ -n "$_ap" ] && kill -0 "$_ap" 2>/dev/null && \
-        ! grep -q '^State:.*Z' /proc/$_ap/status 2>/dev/null && \
-        grep -qa "/data/gw/$3" /proc/$_ap/cmdline 2>/dev/null && return 0
-    pgrep -f "/data/gw/$3" >/dev/null 2>&1 && return 0
-    return 1
-}
+# v1.29: alive() (lock-first liveness) is in svc_lib.sh.
 spawn() { # $1=lock name  $2=log file  $3...=command
     _sl=$1; _so=$2; shift 2
     # v1.24: stdin 接 /dev/null — 被拉起的守护不再继承调用方的管道
@@ -245,23 +199,18 @@ check_port() { # $1=key $2=port $3=label
         log "FAIL detail $1 out=no listener on :$2 (/proc/net/tcp)"
     fi
 }
+# v1.29: run an svc_lib function inside the bounded check() subshell.
+check_lib() { # $1=key $2=body using svc_lib functions $3=label
+    check "$1" ". /data/gw/svc_lib.sh 2>/dev/null; $2" "$3"
+}
 
-# v1.27: unified supervision for script daemons.
-# Columns: name|pgrep-pattern|lock-token|recipe|heartbeat|max-hb-age
-SVC_TABLE='
-ntp_keeper|ntp_keeper[.]sh|ntp_keeper.sh|sh /data/gw/ntp_keeper.sh|/tmp/ntp_keeper.hb|4200
-traffic_logger|traffic_logger[.]sh|traffic_logger.sh|sh /data/gw/traffic_logger.sh|/tmp/traffic_logger.hb|900
-wifi_guard|wifi_guard[.]sh|wifi_guard.sh|sh /data/gw/wifi_guard.sh|/tmp/wifi_guard.hb|90
-reboot_sched|reboot_sched[.]sh|reboot_sched.sh|sh /data/gw/reboot_sched.sh|/tmp/reboot_sched.hb|900
-led_mgr|led_mgr[.]sh|led_mgr.sh|sh /data/gw/led_mgr.sh|/tmp/led_mgr.hb|60
-fan_mgr|fan_mgr[.]sh|fan_mgr.sh|sh /data/gw/fan_mgr.sh|/tmp/fan_mgr.hb|60
-wan_eth|wan_eth[.]sh|wan_eth.sh|sh /data/gw/wan_eth.sh|/tmp/wan_eth.hb|150
-log_keeper|log_keeper[.]sh|log_keeper.sh|sh /data/gw/log_keeper.sh|/tmp/log_keeper.hb|180
-core_trap|core_trap[.]sh|core_trap.sh|sh /data/gw/core_trap.sh|/tmp/core_trap.hb|600
-healthdog|healthdog[.]sh|healthdog.sh|sh /data/gw/healthdog.sh|/tmp/healthdog.hb|60
-'
-svc_supervise() { # $1=name $2=pattern $3=lock $4=recipe $5=hb $6=maxage
-    _sn=$1; _sp=$2; _st=$3; _sc=$4; _shb=$5; _smax=$6
+# v1.29: the script-daemon table lives in svc_lib.sh (one declaration shared
+# by watchdog and the daemons).  Columns:
+#   name|pgrep-pattern|lock-token|recipe|heartbeat|max-hb-age|env
+# dial_keeper is in the table now; it needs the FH library/PATH environment,
+# which the optional env column supplies on restart.
+svc_supervise() { # $1=name $2=pattern $3=lock $4=recipe $5=hb $6=maxage $7=env
+    _sn=$1; _sp=$2; _st=$3; _sc=$4; _shb=$5; _smax=$6; _sev=$7
     _hb=999999
     [ -n "$_shb" ] && _hb=$(hb_age "$_shb")
     _live=0
@@ -294,10 +243,15 @@ svc_supervise() { # $1=name $2=pattern $3=lock $4=recipe $5=hb $6=maxage
         log "EVT restart $_sn (live=$_live hb=${_hb}s recipe=[$_sc])"
         # v1.27: run a plain "sh /data/gw/<script>" recipe directly (no sh -c
         # wrapper) so $! is the script's own pid and its single-instance lock
-        # matches the pid the watchdog remembers.
+        # matches the pid the watchdog remembers.  v1.29: optional env prefix.
         case "$_sc" in
-        "sh /data/gw/"*) spawn "$_sn" /tmp/$_sn.out sh "/data/gw/$_st" ;;
-        *)               spawn "$_sn" /tmp/$_sn.out sh -c "$_sc" ;;
+        "sh /data/gw/"*)
+            if [ -n "$_sev" ]; then
+                spawn "$_sn" /tmp/$_sn.out env $_sev sh "/data/gw/$_st"
+            else
+                spawn "$_sn" /tmp/$_sn.out sh "/data/gw/$_st"
+            fi ;;
+        *) spawn "$_sn" /tmp/$_sn.out sh -c "$_sc" ;;
         esac
         logger -t watchdog "restarted $_sn"
     else
@@ -334,7 +288,9 @@ run_cycle() {
     check agg_rules "iptables -t mangle -S WANAGG 2>/dev/null | grep -q MARK" "split rules installed"
     check fwmark    "ip rule | grep -q fwmark"       "fwmark policy routing"
     check nat       "iptables -t nat -S POSTROUTING | grep -q MASQ"  "NAT masquerade"
-    check bss       "[ \$(iw dev 2>/dev/null | grep -c 'type AP') -ge 2 ]"  "2+ BSS active"
+    # v1.29: BSS liveness from hostapd control sockets + sysfs link flags
+    # (the old iw probe counted AP-mode netdevs even when hostapd was dead).
+    check_lib bss   "[ \$(svc_bss_count) -ge 2 ]"  "2+ BSS active"
     check_port port80 80 "GUI :80 reachable"
     check_port port22 22 "SSH :22 reachable"
     if [ -f /tmp/boot.done ]; then
@@ -344,49 +300,11 @@ run_cycle() {
     else
         check boot "[ -f /tmp/boot.done ]" "boot chain complete"
     fi
-    check lan_ip    "ip -4 addr show br-lan | grep -q inet"  "LAN IP present"
-    check lo_up     "ip link show lo | grep -q 'LOOPBACK,UP'" "loopback up"
+    check_lib lan_ip "svc_iface_has_v4 br-lan"  "LAN IP present"
+    check_lib lo_up  "svc_loopback_up"          "loopback up"
 
-    # ---- dial_keeper: hb + lock (v1.7/v1.8 semantics preserved) ----
-    _dhb=$(cat /tmp/dial_keeper.hb 2>/dev/null)
-    _dstale=0
-    case "$_dhb" in
-    ''|*[!0-9]*) [ "${UP:-0}" -gt 300 ] && _dstale=1 ;;
-    *) [ $((UP - _dhb)) -gt 90 ] && _dstale=1 ;;
-    esac
-    _kp=$(cat /tmp/dial_keeper.lock 2>/dev/null)
-    _kalive=0
-    if [ -n "$_kp" ] && kill -0 "$_kp" 2>/dev/null \
-       && ! grep -q '^State:.*Z' /proc/$_kp/status 2>/dev/null \
-       && grep -qa '/data/gw/dial_keeper.sh' /proc/$_kp/cmdline 2>/dev/null; then
-        _kalive=1
-    elif pgrep -f 'dial_keepe[r].sh' >/dev/null 2>&1; then
-        _kalive=1
-    fi
-    if [ "$_kalive" = 1 ] && [ "$_dstale" = 0 ]; then
-        set_state keeper 0 "dial keeper"
-        strike_clear dial_keeper
-    else
-        if [ "$_dstale" = 1 ]; then
-            log "WARN  stale dial_keeper heartbeat (hb=${_dhb:-none} up=${UP}) — counting"
-        fi
-        set_state keeper 1 "dial keeper"
-        FAILS=$((FAILS+1))
-        if strike dial_keeper; then
-            log "EVT restart dial_keeper (alive=$_kalive stale=$_dstale old_pid=${_kp:-none} hb=${_dhb:-none} up=${UP})"
-            if [ -n "$_kp" ] && kill -0 "$_kp" 2>/dev/null \
-               && ! grep -q '^State:.*Z' /proc/$_kp/status 2>/dev/null \
-               && grep -qa '/data/gw/dial_keeper.sh' /proc/$_kp/cmdline 2>/dev/null; then
-                kill -9 "$_kp" 2>/dev/null
-            fi
-            export LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib
-            export PATH=/data/gw/sbin:/data/gw/bin:/usr/sbin:/usr/bin:/sbin:/bin:/fhrom/bin:/fhrom/fhshell
-            nohup sh /data/gw/dial_keeper.sh >/dev/null 2>&1 &
-        else
-            log "SKIP  dial_keeper recovery (sample 1/3, need 2/3)"
-        fi
-    fi
-
+    # v1.29: dial_keeper moved into SVC_TABLE (svc_lib.sh); its env column
+    # supplies LD_LIBRARY_PATH/PATH on supervisor restart.
     # ---- dnsmasq: process + :53 listener, restart from cached cmdline ----
     _dp=$(pidof dnsmasq 2>/dev/null)
     if [ -n "$_dp" ] && port_listen 53; then
@@ -516,27 +434,32 @@ run_cycle() {
         fi
     fi
 
-    # ---- unified script-daemon table (v1.27) ----
-    while IFS='|' read -r _n _p _t _r _hb _mx; do
+    # ---- unified script-daemon table (v1.27; moved to svc_lib v1.29) ----
+    while IFS='|' read -r _n _p _t _r _hb _mx _ev; do
         [ -z "$_n" ] && continue
-        svc_supervise "$_n" "$_p" "$_t" "$_r" "$_hb" "$_mx"
+        svc_supervise "$_n" "$_p" "$_t" "$_r" "$_hb" "$_mx" "$_ev"
     done <<EOF
 $(printf '%s\n' "$SVC_TABLE" | sed '/^[[:space:]]*$/d')
 EOF
 
     # ---- hostapd: WPA layer; 3-strike + tool-fault separation ----
+    # v1.29: health decision no longer depends on hostapd_cli (two field
+    # segfaults).  Primary predicate = process + both control sockets + both
+    # BSS links UP (svc_hostapd_up).  hostapd_cli is called once as a bounded
+    # diagnostic when the predicate fails, so a tool crash only lands in the
+    # toolfault ledger.
     _ha=0; _htool=0; _hrc=0
-    if pgrep -f 'hostapd -B' >/dev/null 2>&1; then
-        _try=1
-        while [ "$_try" -le 3 ]; do
-            _hs=$(tmo 5 "hostapd_cli -i ra0 status"); _hrc=$?
-            printf '%s' "$_hs" | grep -q '^state=ENABLED' && { _ha=1; break; }
-            is_toolfault "$_hrc" || break
+    if svc_hostapd_up; then
+        _ha=1
+    elif pgrep -f 'hostapd -B' >/dev/null 2>&1; then
+        _hs=$(tmo 5 "hostapd_cli -i ra0 status"); _hrc=$?
+        if printf '%s' "$_hs" | grep -q '^state=ENABLED'; then
+            log "WARN  hostapd: cli ENABLED but bss predicate failed (bss=$(svc_bss_count))"
+        fi
+        if is_toolfault "$_hrc"; then
             _htool=1
-            toolfault hostapd_cli "$_hrc" "hostapd_cli -i ra0 status" "retry=$_try"
-            sleep 2
-            _try=$((_try + 1))
-        done
+            toolfault hostapd_cli "$_hrc" "hostapd_cli -i ra0 status" "diag=1"
+        fi
     fi
     if [ "$_ha" = 1 ]; then
         set_state hostapd 0 "hostapd WPA layer"
@@ -566,7 +489,7 @@ EOF
             for _s in /var/run/hostapd/ra0 /var/run/hostapd/rai0 /var/run/wpa_supplicant/ra0; do
                 [ -S "$_s" ] && _sock=1
             done
-            _clients=$(tmo 5 "iw dev ra0 station dump" | grep -c '^Station')
+            _clients=$(svc_station_count ra0)
             if [ "$_hn" -lt 3 ] && [ "$_sock" = 1 ]; then
                 _hn=$((_hn + 1)); echo "$_hn $_ht" > /tmp/watchdog_hostapd.rec
                 log "EVT recover hostapd (attempt $_hn/3 this hour; clients=$_clients ctrl_sock=$_sock live=$(pgrep -f 'hostapd -B' | tr '\n' ' '))"
@@ -579,15 +502,11 @@ EOF
                     hostapd -B /var/wlan/hap_2g.conf /var/wlan/hap_5g.conf >>/tmp/watchdog.log 2>&1
                 sleep 5
                 for _v in ra0 rai0; do mwctl dev $_v set no_bcn 0 >/dev/null 2>&1; done
-                _hs=$(tmo 5 "hostapd_cli -i ra0 status"); _hrc=$?
-                if printf '%s' "$_hs" | grep -q '^state=ENABLED'; then
-                    log "OK    hostapd recovered (ra0 ENABLED; clients=$_clients must re-associate)"
+                if svc_hostapd_up; then
+                    log "OK    hostapd recovered (bss=$(svc_bss_count); clients=$_clients must re-associate)"
                     set_state hostapd 0 "hostapd WPA layer"
-                elif is_toolfault "$_hrc"; then
-                    log "WARN  hostapd recovery verification tool failed rc=$_hrc — alert only"
-                    TOOLFAILS=$((TOOLFAILS + 1))
                 else
-                    log "FAIL  hostapd recovery did not reach ENABLED"
+                    log "FAIL  hostapd recovery did not restore the BSS predicate (bss=$(svc_bss_count))"
                 fi
             elif [ "$_sock" = 0 ]; then
                 log "WARN  hostapd down but no control socket — refusing RF bounce (alert only)"
@@ -719,7 +638,8 @@ EOF
     fi
 
     # ---- incremental events ----
-    BCN=$(tmo 8 "dmesg | grep -cE 'AP: Beacon OFF|Beacon lost - Error|Beacon interval is illegal'")
+    # v1.29: static busybox dmesg (vendor dmesg is outside the toolchain farm).
+    BCN=$(svc_dmesg_count 'AP: Beacon OFF|Beacon lost - Error|Beacon interval is illegal')
     BCN_PREV=$(grep '^beacon=' $STATE 2>/dev/null | tail -1 | cut -d= -f2)
     if [ -n "$BCN_PREV" ] && [ "$BCN" -gt "$BCN_PREV" ] 2>/dev/null; then
         log "WARN  beacon events +$((BCN-BCN_PREV))"
@@ -729,7 +649,7 @@ EOF
     mv $STATE.tmp $STATE
 
     # ---- v1.20: SIGSEGV 家族可见化 ----
-    FLT=$(tmo 8 "dmesg | grep -c 'unhandled exception'")
+    FLT=$(svc_dmesg_count 'unhandled exception')
     FLT_PREV=$(cat /tmp/watchdog_faultcount 2>/dev/null)
     if [ -n "$FLT_PREV" ] && [ "$FLT" -gt "$FLT_PREV" ] 2>/dev/null; then
         log "WARN  user-fault +$((FLT-FLT_PREV)) (ring total $FLT) — SIGSEGV family"
@@ -802,12 +722,21 @@ EOF
         _load=$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null)
         _mf=$(awk '/^MemFree:/{print $2}' /proc/meminfo 2>/dev/null)
         _ma=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo 2>/dev/null)
-        _df=$(tmo 8 "df -k /data" | tail -1 | awk '{print $4}')
-        _tf=$(tmo 8 "df -k /tmp" | tail -1 | awk '{print $4}')
+        # v1.29: static busybox df, /proc zombie scan (no ps), long-term metrics.
+        _df=$(svc_df_free /data)
+        _tf=$(svc_df_free /tmp)
         _np=$(ls /proc 2>/dev/null | grep -c '^[0-9]')
-        _nz=$(tmo 8 "ps" | awk '$4 ~ /^Z/{n++} END{print n+0}')
+        _nz=$(svc_zombies)
         _ct=$(cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null)
-        log "HEALTH epoch=$(date +%s) up=${UP}s load=$_load memfree=${_mf:-?}KB memavail=${_ma:-?}KB data_free=${_df:-?}KB tmp_free=${_tf:-?}KB procs=$_np zombies=$_nz conntrack=${_ct:-n/a} cell_if=${CIF:-none} netdev=${CN:-0} qdisc=${CQ:-0}"
+        _lcs=$(cat /tmp/logc.stats 2>/dev/null)
+        _lcbad=$(printf '%s' "$_lcs" | sed -n 's/.*bad_frames=\([0-9]*\).*/\1/p')
+        _lcrs=$(printf '%s' "$_lcs" | sed -n 's/.*resyncs=\([0-9]*\).*/\1/p')
+        _lcio=$(printf '%s' "$_lcs" | sed -n 's/.*io_errors=\([0-9]*\).*/\1/p')
+        _lccrash=$(ls /data/gw/logs/logc_crash 2>/dev/null | wc -l)
+        _rep=$(svc_repairs_1h)
+        _nto=$(cat /tmp/netcfg_lock_timeouts 2>/dev/null || echo 0)
+        _bss=$(svc_bss_count)
+        log "HEALTH epoch=$(date +%s) up=${UP}s load=$_load memfree=${_mf:-?}KB memavail=${_ma:-?}KB data_free=${_df:-?}KB tmp_free=${_tf:-?}KB procs=$_np zombies=$_nz bss=$_bss conntrack=${_ct:-n/a} cell_if=${CIF:-none} netdev=${CN:-0} qdisc=${CQ:-0} logc_bad=${_lcbad:-?} logc_resync=${_lcrs:-?} logc_io=${_lcio:-?} logc_crash=${_lccrash:-0} repairs_1h=${_rep:-0} netlock_to=${_nto:-0}"
         [ "${_df:-0}" -lt 102400 ] 2>/dev/null && log "WARN /data free low: ${_df}KB (<100MB)"
     fi
 
@@ -831,18 +760,19 @@ EOF
 }
 
 # ---- main ----
+case "${1:-}" in
+--version) echo "watchdog v1.29"; exit 0 ;;
+esac
 touch $LOG $STATE
-# v1.20: 看门狗单实例 — 双实例会重复自愈/告警(现场曾出现 2 个)
-_wp=$(cat /tmp/watchdog.lock 2>/dev/null)
-if [ -n "$_wp" ] && [ "$_wp" != "$$" ] && kill -0 "$_wp" 2>/dev/null && \
-   ! grep -q '^State:.*Z' /proc/$_wp/status 2>/dev/null && \
-   grep -qa '/data/gw/watchdog.sh' /proc/$_wp/cmdline 2>/dev/null; then
-    echo "watchdog: already running pid=$_wp" >&2
+# v1.20: 看门狗单实例 — 双实例会重复自愈/告警(现场曾出现 2 个).
+# v1.29: shared lock primitive (same cmdline + zombie verification).
+_rc=0; svc_lock watchdog /data/gw/watchdog.sh || _rc=$?
+if [ "$_rc" != 0 ]; then
+    echo "watchdog: another live instance owns the lock (rc=$_rc)" >&2
     exit 0
 fi
-echo $$ > /tmp/watchdog.lock
-log "===== watchdog v1.28 start (bounded checks + 2-of-3 recovery + unified service table + /proc port probes + boot.healthy recheck; alert LED 5G orange) ====="
-logger -t watchdog "watchdog v1.28 start"
+log "===== watchdog v1.29 start (svc_lib primitives + minimal parsers + batch3 metrics; alert LED 5G orange) ====="
+logger -t watchdog "watchdog v1.29 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

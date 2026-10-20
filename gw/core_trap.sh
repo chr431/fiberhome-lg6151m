@@ -1,5 +1,5 @@
 #!/bin/sh
-# core_trap.sh v1.1 -- daily user-space core capture window (SIGSEGV P3).
+# core_trap.sh v1.2 -- daily user-space core capture window (SIGSEGV P3).
 # v1.1 (2026-10-20 stability P1-5): restore target is now the core_meta.sh
 #   wrapper (which execs aee, so behaviour is unchanged); a start-up check
 #   warns when core_pattern was not wrapped by rc.extend.  Heartbeat for the
@@ -38,8 +38,13 @@ HIST=/data/log/aee_exp/db_history
 # static musl tools read TZ (not /etc/TZ); inherit the image's POSIX TZ string
 [ -z "${TZ:-}" ] && [ -r /etc/TZ ] && TZ=$(cat /etc/TZ 2>/dev/null) && export TZ
 
-# single-instance / watchdog liveness lock
-echo $$ > /tmp/core_trap.lock
+# single-instance / watchdog liveness lock (v1.2 batch3: svc_lib)
+if [ -r /data/gw/svc_lib.sh ]; then . /data/gw/svc_lib.sh; else echo "core_trap: svc_lib.sh missing" >&2; exit 1; fi
+_rc=0; svc_lock core_trap /data/gw/core_trap.sh || _rc=$?
+if [ "$_rc" != 0 ]; then
+    [ "$_rc" = 1 ] && echo "core_trap: already running" >&2 || echo "core_trap: lost lock race" >&2
+    exit 0
+fi
 
 say() {
 	echo "$(date '+%m-%d %H:%M:%S') $*" >> "$LOG"
@@ -160,12 +165,12 @@ case "$_cur" in
 *core_meta.sh*) ;;
 *) say "WARN core_pattern not wrapped: [$_cur] (rc.extend v2.6 should own it)" ;;
 esac
-cut -d. -f1 /proc/uptime > /tmp/core_trap.hb 2>/dev/null
+svc_hb core_trap
 
 trap 'end_window; exit 0' INT TERM HUP
 
 while :; do
-	cut -d. -f1 /proc/uptime > /tmp/core_trap.hb 2>/dev/null
+	svc_hb core_trap
 	if in_window; then
 		[ -f "$ACTIVE" ] || begin_window
 		_use=$(df /tmp 2>/dev/null | awk 'NR==2{gsub("%","",$5); print $5}')

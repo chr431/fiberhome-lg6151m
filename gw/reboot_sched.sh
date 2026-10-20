@@ -1,5 +1,5 @@
 #!/bin/sh
-# reboot_sched.sh v1.3 -- 定时重启守护(出厂默认: 每日 04:00)
+# reboot_sched.sh v1.4 -- 定时重启守护(出厂默认: 每日 04:00)
 # 配置: defaults.conf(只读出厂) 叠 settings.conf(用户稀疏覆盖), 与 NTP/WiFi 族同源;
 #   每轮重读 → GUI 改配置无需重启本守护。
 # v1.2 (2026-10-18 04:00 事件复盘): 触发行同时落 /data/gw/logs/reboots.log(持久) —
@@ -22,17 +22,16 @@ LAST=/data/gw/reboot_sched.last
 REBOOTS=/data/gw/logs/reboots.log
 mkdir -p /data/gw/logs
 rg() { echo "$(date '+%m-%d %H:%M:%S') $*" >> $LOG; }
-# v1.3 (P1-1): single instance + heartbeat (watchdog supervision table)
-_lp=$(cat /tmp/reboot_sched.lock 2>/dev/null)
-if [ -n "$_lp" ] && [ "$_lp" != "$$" ] && kill -0 "$_lp" 2>/dev/null && \
-   grep -qa '/data/gw/reboot_sched.sh' /proc/$_lp/cmdline 2>/dev/null; then
-    echo "reboot_sched: already running pid=$_lp" >&2
+# v1.4 (batch3): shared single-instance lock + heartbeat primitives.
+if [ -r /data/gw/svc_lib.sh ]; then . /data/gw/svc_lib.sh; else echo "reboot_sched: svc_lib.sh missing" >&2; exit 1; fi
+_rc=0; svc_lock reboot_sched /data/gw/reboot_sched.sh || _rc=$?
+if [ "$_rc" != 0 ]; then
+    [ "$_rc" = 1 ] && echo "reboot_sched: already running" >&2 || echo "reboot_sched: lost lock race" >&2
     exit 0
 fi
-echo $$ > /tmp/reboot_sched.lock
 rg "start"
 while :; do
-    cut -d. -f1 /proc/uptime > /tmp/reboot_sched.hb 2>/dev/null
+    svc_hb reboot_sched
     REBOOT_EN=0; REBOOT_TIME=04:00; TZ=""
     [ -r /data/gw/defaults.conf ] && . /data/gw/defaults.conf
     [ -r /data/gw/settings.conf ] && . /data/gw/settings.conf

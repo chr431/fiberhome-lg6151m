@@ -2070,6 +2070,8 @@ def t_p1_logpipe():
     ps = dev("ls /data/gw/logs/pstore 2>/dev/null | wc -l").strip()
     psrc = dev("test -s /sys/fs/pstore/console-ramoops-0 && echo y").strip()
     bootga = dev("grep -c 'boot_btime' /data/gw/log_keeper.sh 2>/dev/null").strip()
+    bidw = dev("cat /data/gw/logs/.boot_id 2>/dev/null").strip()
+    bidc = dev("cat /proc/sys/kernel/random/boot_id 2>/dev/null").strip()
     stats = dev("cat /tmp/logc.stats 2>/dev/null").strip()
 
     def kv(k):
@@ -2081,11 +2083,11 @@ def t_p1_logpipe():
     bad = kv("bad_frames"); rs = kv("resyncs"); io = kv("io_errors")
     pstore_ok = int(ps or 0) >= 1 or psrc != "y"
     ok = (fore == "0" and noise == "0" and pstore_ok
-          and int(bootga or 0) > 0 and io == "0"
+          and int(bootga or 0) > 0 and bidw == bidc and io == "0"
           and bad.isdigit() and rs.isdigit() and int(bad) <= 2 and int(rs) <= 2)
     record(t_p1_logpipe._test_name, "system", ok,
-           "forensic=%s forensic_lines=%s pstore=%s src=%s boot_btime=%s stats=[%s]"
-           % (fore, noise, ps, psrc, bootga, stats))
+           "forensic=%s forensic_lines=%s pstore=%s src=%s boot_btime=%s boot_id_match=%s stats=[%s]"
+           % (fore, noise, ps, psrc, bootga, bidw == bidc, stats))
 
 
 def main():

@@ -261,16 +261,37 @@
    `/proc/net/tcp` 监听判据（不依赖 lo）。
 2. 旧 `healthdog.sh` 的 `ping 127.0.0.1` 健康判据**永远为假**；一旦按 P0-1 的
    方案 arm 内核模块，它会在 90s 后必然硬复位（90s 复位环）。故 `rc.extend v2.6`
-   与 `healthdog v1.3` 都显式 `ip link set lo up`，并把 `lo UP` 纳入 boot 关键链。
+   与 `healthdog v1.4` 都显式 `ip link set lo up`，并把 `lo UP` 纳入 boot 关键链。
 
-### 6.7 验证方式（部署后执行）
+### 6.7 冷启动实测（3 次，第 3 次为最终代码）
 
-- `logc --selftest`、`boot_gate.sh --check` 先做非破坏性判定；
-- 冷启动后断言：`boot.healthy.boot_id == 当前 boot_id`、`stable=1`、
-  `/tmp/boot.done` 在位、`misc[2061]==0x00`、`boot_attempts` 末行 `result=healthy`；
-- `selftest.py` 全量（新增 7 条 stability P0/P1 断言：监督表单实例、心跳新鲜度、
-  core wrapper/selftest/census、healthdog 判据、hostapd/wifi_guard 静态判据、
-  降噪/pstore/BOOT 门禁）。
+| 观测点 | 实测 |
+|---|---|
+| rc19 完成 → `/tmp/rc19.done` | 104s（boot3；boot1/2 均为 104s） |
+| `/tmp/boot.done`（关键链） | 105s（旧实现是固定 120s 定时器） |
+| `/data/gw/boot.healthy` | 105s 写入（boot_id 与当前一致，degraded=0） |
+| LK `TRY_A` | 106s 清零并读回：`pre=0f01… post=0f00… byte1=0`；`misc[2060..] = 0f 00 00 00 00 0e 00 01 02 00` |
+| `stable=1`（10 分钟观察窗） | 601s（boot3；boot2 603s） |
+| healthdog 内核 arm | 609s（boot3；boot2 604s），`armed=1 timeout_s=90`，心跳持续 |
+| 看门狗 10 分钟复检 | `OK boot.healthy re-check at 620s: all gate checks still pass` |
+| 启动尝试台账 | 3 行全部 `result=healthy`（btime 漂移不再影响匹配） |
+| 服务树 | 14 个受监督守护**全部恰 1 实例**；10 个心跳文件新鲜 |
+| `selftest.py` 全量 | **94 pass / 0 fail**（wifi 8/8、gui 10/10、agg 11/11、net 5/5、cellular 22/22、security 8/8、system 30/30） |
+| `deploy.py doctor` | **CLEAN**（115 个登记文件 / MANIFEST 67 项，md5 双向一致，无流浪脚本） |
+
+过程中做过、可复现的破坏性验证：
+
+- **监督表实弹**：把 7 个守护的心跳换成旧格式（999999s）后，看门狗按 3 次确认
+  逐个重启，日志 `EVT restart …` → 30s 后全部 `OK … (recovered)`，`fails=0`。
+- **门禁自愈**：kill `boot_gate` 后，看门狗在 3 次确认（约 90s）后重新拉起，门禁
+  重新写 healthy / 清 TRY_A。
+- **core 取证链**：`ulimit -c unlimited; busybox sh -c 'kill -SEGV $$'` →
+  `cores/meta/…txt`（9.7KB，含 exe/cmdline/status/maps/父进程/PATH）、
+  `ne_events.tsv` 一行 census、aee `db_history` 185→186 且 `db.04.NE` 时间戳更新
+  （证明 wrapper 把 core 完整交给 aee，行为未变）。
+- **armed 跨重启**：healthdog 重启后记录
+  `resuming supervision of an already-armed kernel watchdog`，心跳继续
+  （旧版本会在 90s 后被内核复位；已修）。
 
 ### 6.8 明确未做（诚实清单）
 

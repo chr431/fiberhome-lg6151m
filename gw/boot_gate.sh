@@ -155,9 +155,17 @@ write_healthy() { # $1=stable(0|1) $2=degraded(0|1) $3=reason
 }
 
 mark_attempt() { # $1=result $2=note
+    # v1.0: btime is NOT a stable key — the clock is corrected by NTP after
+    # boot, so /proc/stat btime shifts by seconds (observed 1792455787 in the
+    # ledger vs 1792455788 here).  rc.extend appends exactly one line per
+    # boot, so the last line is this boot's attempt: rewrite it in place.
     [ -f "$ATTEMPTS" ] || return 0
-    _bt=$(awk '/^btime/{print $2; exit}' /proc/stat 2>/dev/null)
-    sed -i "s/^btime=$_bt result=pending.*/btime=$_bt result=$1 note=$2/" "$ATTEMPTS" 2>/dev/null
+    _last=$(tail -n 1 "$ATTEMPTS" 2>/dev/null)
+    [ -n "$_last" ] || return 0
+    _new=$(printf '%s\n' "$_last" | sed "s/result=[a-z]*/result=$1/; s/note=[^ ]*/note=$2/")
+    case "$_new" in *note=*) ;; *) _new="$_new note=$2" ;; esac
+    { sed '$d' "$ATTEMPTS"; printf '%s\n' "$_new"; } > "$ATTEMPTS.tmp" 2>/dev/null \
+        && mv "$ATTEMPTS.tmp" "$ATTEMPTS"
 }
 
 # ---- one-shot modes ------------------------------------------------------

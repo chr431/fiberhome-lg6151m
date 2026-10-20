@@ -654,6 +654,12 @@ EOF
         /usr/bin/atcid >/var/atcid.log 2>&1 &
     fi
     # CFUN 探测同时充当通道活性探针; airplane(CFUN:4)时跳过注册态断言
+    # v1.27 (P0-1): AT 探针降频 — 每 2 轮(60s)一次; 状态在两次之间保持,
+    #   避免每次探针 ≥1s 把 30s 周期拖长(mipc 调用是历史停摆源)。
+    AT_TICK=$(( ${AT_TICK:-0} + 1 ))
+    if [ $((AT_TICK % 2)) -ne 0 ]; then
+        :
+    else
     CFUNR=$(mto --at_cmd 'AT+CFUN?' 2>/dev/null)
     case "$CFUNR" in
     *"CFUN: 4"*)
@@ -680,6 +686,7 @@ EOF
         FAILS=$((FAILS+1))
         ;;
     esac
+    fi
 
     # ---- incremental events ----
     BCN=$(dmesg | grep -cE 'AP: Beacon OFF|Beacon lost - Error|Beacon interval is illegal')

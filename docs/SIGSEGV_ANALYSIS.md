@@ -633,3 +633,92 @@ lr=0x10a3818（fnmatch 内部递归）
 可加一层"崩溃即重试一次"的包装降低运维影响；根治要等写入者定位后重编
 iproute2（我们已能从源码重建，build_static_ip.sh 在位）。
 
+## 12. 2026-10-21 第四轮："机制未知"崩溃的定性 —— 就是 musl 的 printf/stdio
+
+> 本轮只做取证，不改代码。目标：回答"到底还有没有一类我们没命名的崩溃"。
+> 结论：**有，但它不是环境/硬件，而是 musl printf/stdio 的同一个缺陷类**；
+> 已做出 20 行、2 秒内必崩的最小复现器，并把它和 logc/sh 的旧 core 对齐。
+
+### 12.1 `?` 组：不是崩溃（排除）
+
+3 个 `?` 事件（10-20 08:23/08:51/09:43）的 core_meta 文件**全部字段为空**：
+无 btime、无 comm/exe/args/maps、fds=0、**连 `gid`（内核第 4 个参数）都缺失**。
+交叉 aee 台账：这三个时刻**没有任何 NE 记录**（附近只有 08:07/08:16/09:30/09:54）。
+→ 它们不是内核触发的 coredump，而是 core_meta.sh 的手工/测试调用（缺 `%g` 参数）。
+**从崩溃普查中剔除。**
+
+### 12.2 先排除"与程序无关的背景崩溃率"
+
+金丝雀：一个只做 `return 0` 的静态 musl 程序（3944 B），在设备上循环 **30 万次**：
+
+```
+canary noop: 300000 次, 0 崩溃  -> 背景率 < 1e-5（95% CL）
+```
+
+所以"随便什么进程都会随机崩"的假设不成立；后面的崩溃都能归到具体代码路径。
+
+### 12.3 `sh` 组：复现成功，两份 core 都指向 musl stdio/printf
+
+- 复现器 A：`sh` 循环执行 `"$@" >/dev/null 2>&1` + 每 500 轮 `echo > file`，
+  **34,500 轮时 shell 本体 SIGSEGV**；去掉 echo/算术、只留 fork/exec 也能复现
+  （300k 轮内命中）；纯 shell 算术+echo、**不 fork 的 300 万轮 0 崩溃**。
+- core #1（pid 4479）：`si_addr=0`、PC 在 `memcpy`，调用者 `__fwritex`：
+  `f->wpos == NULL` 却仍走 `memcpy(f->wpos, ...)` —— 栈上 FILE 结构被写坏。
+- core #2（pid 2404）：`si_addr = 0xffffffffffffffd8 = -40`，PC 在 `pop_arg` 的
+  va_arg 取值路径，`ap->__gr_top = 0`、`__gr_offs = -40` —— **与 logc v1.3 的
+  崩溃签名逐字段相同**（见 §1/§10）。
+
+### 12.4 最小复现器（决定性）
+
+```
+c
+char b[24];
+for (unsigned long i = 0; i < 200000000UL; i++)
+        snprintf(b, sizeof b, "%ld", (long)i);
+```
+
+- 静态编译，**2 秒内 SIGSEGV**（`arg.i = 1,566,894` -> 约 1/1.6e6 次调用）；
+- `-O0` / `-O1` / `-O2` **全部崩溃**（0–1 秒）-> 不是优化/代码生成问题；
+- 崩溃点：`pop_arg` 的 va_arg，`ap->__stack` 是小整数、`__gr_top=0`；
+  整个 va_list（32 B）被写成 `{小整数, 0, 0x1c28416e00001180, 0}`。
+- 该值的高 32 位 `0x1c28416e` 与 logc 旧 core 的 `__stack` 高 32 位**完全相同**
+  （`0x1c28416e00000680`）-> 同一个缺陷、同一段数据形态。
+
+gdb 观察点（设备自带 gdb）：
+1. 在 `vfprintf` 的 `va_copy(ap2, ap)` 处命中：**复制进来的源 va_list 已经是坏的**
+   （旧值 0x7ff5908bc0 = 栈指针，新值 0x22733 = 小整数）；
+2. 帧布局：`nl_type` 在 `ap2` 下方 **0x30 字节**（12 个 int）处 ——
+   `nl_type[12..15]` 恰好压在 `ap2.__stack/__gr_top` 上（与 §10 的候选一致）。
+
+**尚未钉死**：具体是哪条写指令/哪个越界索引把 ap2 改坏的（下一步用"对 caller 的
+va_list 全程下条件观察点"或与上游 musl 修复对比）。但这不影响定性：
+**故障类 = musl printf/stdio 在 va_list 处理上的缺陷**，不是日志数据、不是硬件、
+不是环境噪声。
+
+### 12.5 家族重新归类
+
+| 崩溃 | 机制 | 状态 |
+|---|---|---|
+| logc（已修） | musl `strftime->snprintf->vfprintf` va_list | v1.4 去 printf，已验证 |
+| **sh** | **musl vfprintf/__fwritex（本轮实锤 + 最小复现器）** | 未修（busybox 内部无法绕过） |
+| grep / pidof / ls / ping | 同上（都经 musl stdio 输出） | 高度同源（待各自 core 确认） |
+| sleep（厂商 busybox） | 疑同上（未取到 core） | 待厂商 `sleep 0` 金丝雀确认 |
+| awk | busybox 数组释放路径 NULL（独立） | v2.7 已移出热路径 |
+| ip | `filter.label` 被写成小整数（独立，疑越界写） | 未修 |
+| hostapd/logd/thermal_core/gdb | 厂商动态 musl；机制未逐个取证 | 不可替换/低优先 |
+| `?` | 非崩溃（手工 core_meta 调用） | 已排除 |
+
+### 12.6 对方案的含义（重要）
+
+1. **修复优先级反转**：真正的大头不是"换组件"，而是 **修 musl 的 printf/stdio**。
+   一个补丁可以同时消掉 logc 类、sh、grep、pidof、ls（约 40/47 次/天），
+   而逐个替换 applet 只能覆盖其中一部分且成本高得多。
+2. **最小复现器让 musl 补丁变得可行**：2 秒一次验证，可以快速迭代
+   `vfprintf.c` 的候选修复；修好后用同一 musl 重编 busybox/ip/我们的工具，
+   整个静态工具面一次性受益。
+3. **厂商动态二进制（hostapd/logd/thermal_core）不受益**（它们链接厂商 libc），
+   仍靠恢复/监督兜底；这部分维持原方案。
+4. **替换方案降级为"第二优先级/兜底"**：netq、logd、小程序替换仍有价值
+   （可控性、可维护性），但不再是"治崩溃"的主线；`sh` 替换在 musl 修好后
+   也不再必要。
+

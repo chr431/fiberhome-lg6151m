@@ -744,3 +744,82 @@ va_list 全程下条件观察点"或与上游 musl 修复对比）。但这不�
    或对 va_list 内存下硬件观察点，钉死写入指令；
 3. 拿到写入者后再决定补丁形态（musl 侧 vs 编译器侧）。
 
+### 12.8 本轮结论汇总与证据索引（2026-10-21 收尾）
+
+**一句话**：崩溃家族的主干已经定性为 **musl printf/stdio 的 va_list 缺陷**
+（2 秒复现器），logc/awk 两条已闭环；sh/grep/pidof/ls 同源待补丁；
+ip 是独立缺陷；"机制未知"里的 `?` 组根本不是崩溃。
+
+#### 最终分类
+
+| 崩溃 | 机制 | 状态 |
+|---|---|---|
+| logc | musl `strftime→snprintf→vfprintf` va_list | **已修**（v1.4 去 printf；零崩溃约 3h） |
+| awk | busybox 数组释放路径 NULL | **已修**（logcut v1.0；A/B 10:0） |
+| sh | musl vfprintf/__fwritex（两份 core、最小复现器） | **未修**（P0 进行中） |
+| grep / pidof / ls / ping | 同上（musl stdio 输出面） | pidof/pgrep **已替换**（procmatch）；其余待 P0 |
+| sleep（厂商 busybox） | 疑同源（未取到 core） | 待厂商 `sleep 0` 金丝雀确认 |
+| ip | `filter.label` 被写成 0x157c0（独立，疑越界写） | 未修（P1 netq 计划中） |
+| hostapd/logd/thermal_core/gdb | 厂商动态 musl；未逐个取证 | 不可替换/靠恢复 |
+| `?` | **不是崩溃**：core_meta 手工/测试调用（全字段空、缺 gid、aee 无 NE） | 已排除 |
+| 背景率 | 静态 `return 0` 金丝雀 30 万次 0 崩 | **不存在程序无关背景率** |
+
+#### 证据索引（本地存档，不入仓）
+
+`_local/archive/stability_2026-10-21/`
+- `cores/`：crash_awk / core_ip / sh / sh2 / pf（5 份 core）
+- `events/`：ne_events.tsv、meta.tar、evidence.tar、soak.tsv（v1.3 vs v1.4 A/B）、
+  crash.72.log（logc gdb 现场）、crash.raw（回放 10/10 不复现）
+- `repro/`：pfcanary 与诊断/候选修复源码
+- `sessions/`：取证与 gdb 观察点脚本
+
+**可复现资产（入公开仓，oneoff 不登记）**：
+`tools/oneoff/printf_repro/`（pfcanary + 变体 + 覆盖 libc 的构建说明）。
+
+#### P0 尝试记录（均仍崩）
+
+| 尝试 | 结果 |
+|---|---|
+| 覆盖 libc 的 `vfprintf.c` | 未打补丁版仍崩 → 环有效 |
+| 上游 master `vfprintf.c` | 10/10 崩 |
+| `vsnprintf` 局部 `va_copy` 再转发 | 10/10 崩 |
+| 4096 缓冲 / `%d` / 固定值 | 各 5/5 崩 |
+| 诊断链 | 报 va_list 进 vfprintf 时已坏；`&ap` 会导致编译器物化副本，观测失真 |
+
+**下一步**：从源码构建 musl，对比 **libc 自身** `-O0/-O1/-O2`；用不取地址的
+字节比较或硬件观察点钉死写入指令；再决定补丁形态。
+
+#### P1 进展（本轮已落地）
+
+`gw/bin/procmatch` v1.0（静态、无 printf 的 pidof/pgrep）：
+- pidof 10 个名字、pgrep -f 6 个模式、pgrep -x/默认 全部与 busybox 一致
+  （多 PID 顺序不同，不影响调用）；
+- `toolchain_init` v1.1 农场覆盖 pidof/pgrep；selftest v2.58；系统自检 **33/33**；
+- 行为修正：busybox `pgrep -x` 漏存活进程，替换后 rc.extend 不再重复拉起
+  dropbear、webs_revive 的 cfgmgr/iotagtd 守卫生效（已逐调用点评估）。
+
+#### 收尾快照（设备，2026-10-21 23:15 CST）
+
+```
+up 2:44, load ~7.5
+logc 1.4 / logcut 1.0 / procmatch 1.0
+/data/gw/sbin/pidof -> /data/gw/bin/procmatch
+/data/gw/sbin/pgrep -> /data/gw/bin/procmatch
+logc_crash/ = 133（无新增）
+ne_events  = 129（其中约 41 条是 P0 金丝雀实验，不是产品故障）
+core_pattern = |/data/gw/core_meta.sh %p %s %u %g
+```
+
+#### 本轮提交
+
+- 公开仓：`e3ba151`（第四轮定性）、`afcfad9`（procmatch + 农场）、
+  `fa9dc54`（P0 记录 + P1 进展）、本次（结论汇总 + oneoff 复现包）。
+- 私有仓：`35c5933`（L31）、`bc8a292`（L32）。
+
+#### 仍未闭环
+
+1. musl va_list 写入者（P0 主线）；
+2. ip 的越界写写入者（P1 netq 兜底）；
+3. `sleep` 同源性确认；
+4. 厂商动态件（hostapd/logd/thermal_core）不可替换，靠恢复。
+

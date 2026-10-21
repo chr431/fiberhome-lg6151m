@@ -310,3 +310,23 @@ logc v1.4（printf-free）、logcut v1.0（awk 数组移除）、log_keeper v2.7
 libc 自身优化级别（详见 `docs/SIGSEGV_ANALYSIS.md` §12.7）。
 
 **P1 剩余**：netq（ip 只读）、ping、sleep、ls——按原计划继续。
+
+#### 0.6.1 procmatch 实机对比（2026-10-21 23:10 CST）
+
+| 用例 | busybox | procmatch | 结论 |
+|---|---|---|---|
+| `pidof dnsmasq/dropbear/v3httpd/logd/ubusd/atcid` | 对应 PID | 同 PID | 一致 |
+| `pidof ql_ril_service/ql_netd/mipc_submonitor/cfgmgr` | 空、rc=1 | 空、rc=1 | 一致 |
+| `pgrep -f 'wan_agg[.]sh'` / `'log_keeper.sh'` / `'watchdog.sh'` / `'/data/gw/wan_agg.sh'` | 对应 PID | 同 PID | 一致 |
+| `pgrep -f 'wifi_up[.]sh'` / `'ql_wifi_sampl[e]'`（当前未运行） | 空 | 空 | 一致 |
+| `pgrep dropbear` / `pgrep v3httpd` | PID 列表 | 同列表 | 一致 |
+| `pgrep -x dropbear` | **空**（busybox -x 漏存活进程） | 2 个 PID | **刻意修正**：rc.extend 不再重复拉起 dropbear；cfgmgr/iotagtd 守卫生效 |
+
+- 多 PID 时 pidof 的输出顺序不同（busybox 非升序，procmatch 按 /proc 扫描序），
+  现有调用只取单 PID 或做存在性判断，不受影响。
+- 部署：`toolchain_init` v1.1 在农场覆盖 `pidof/pgrep`；selftest v2.58 断言
+  版本/农场解析/实跑；系统自检 **33/33**。提交 `afcfad9`。
+
+> 取证资产索引与最终分类见 `docs/SIGSEGV_ANALYSIS.md` §12.8；
+> 原始 core/日志在 `_local/archive/stability_2026-10-21/`。
+

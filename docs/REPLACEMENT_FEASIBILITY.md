@@ -291,3 +291,22 @@ logc v1.4（printf-free）、logcut v1.0（awk 数组移除）、log_keeper v2.7
 **把"更换官方组件"改成"把崩溃面从不可控的第三方件迁移到可控的自研件"，并且只迁移
 性价比高的那一半（ip + 小工具 + 可选的 logd）；sh/awk/hostapd/内核明确保留，
 用监督、取证和受限运行时规范兜住。**
+
+
+### 0.6 实施进展（2026-10-21 深夜，P0/P1 开工）
+
+**P1（已落地第一个组件）**：`gw/bin/procmatch` v1.0 —— 静态、无 printf 的
+`pidof/pgrep` 替代（/proc 扫描 + ERE；pidof NAME...、pgrep [-f] [-x] [-F]）。
+- 与 busybox 在实机逐条对比：pidof 的 10 个名字、pgrep -f 的 6 个模式、pgrep -x
+  与默认模式全部一致（多 PID 时顺序不同，不影响现有调用）；`pgrep -x` 语义
+  比 busybox 正确（busybox -x 漏掉存活进程），顺带消除了 rc.extend 里 dropbear
+  被重复拉起的隐患。
+- `toolchain_init` v1.1 在农场里把 pidof/pgrep 指向 procmatch（缺失回退
+  busybox）；selftest v2.58 断言版本/农场解析/实跑；系统自检 **33/33**。
+- 覆盖：pidof 约 2.7 次/天。
+
+**P0（进行中，尚无补丁）**：复现器 + 覆盖链 + 5 组候选/变量实验，全部仍崩；
+已把范围压到"va_list 传递/构造环节"，下一步用**从源码构建的 musl**对比
+libc 自身优化级别（详见 `docs/SIGSEGV_ANALYSIS.md` §12.7）。
+
+**P1 剩余**：netq（ip 只读）、ping、sleep、ls——按原计划继续。

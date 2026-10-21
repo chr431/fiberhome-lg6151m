@@ -611,3 +611,25 @@ lr=0x4932d4
 4. **取证副作用**：gdb 自身也在家族里（3 次），且高频 spawn 会卡死 dropbear
    （见 AGENTS 陷阱表）。
 
+### 11.7 ip 的第二份 core（本轮已取证，写入者未定位）
+
+同一窗口机制循环 `ip -4 addr show`，**2703 次命中 1 次**（`core.ip.23057`，581632 B），
+与 NE 普查里的 17 次同族：
+
+```
+signal=11 si_addr=0x157c0   pc=0x10a35c0  ldrb w8,[x0]   x0=0x157c0
+lr=0x10a3818（fnmatch 内部递归）
+```
+
+- 调用链：`ip`（`ip/ipaddress.c:ifa_label_match_rta`）→ `fnmatch(filter.label, label, 0)`。
+  崩溃指令在匹配器里读模式串首字节；**模式串指针 = `filter.label` = 0x157c0**。
+- `filter` 在 `0x10f1000`（`adrp x26,#0x10f1000`），`filter.label` 位于 `+0xe28`
+  （.bss，初始为 0）；源码里只有 `filter.label = *argv`（`-label` 参数）会写它，
+  而本条命令没有 `-label`。**即：一个应为 NULL 的全局被写成了小整数 0x157c0**。
+- 0x157c0 = 88000，形态更像长度/偏移而不是指针；与 awk 的 NULL 不同，这里更像
+  **相邻全局被越界写**。写入者尚未定位（需要对该地址下硬件观察点复现一次）。
+
+**对 `ip` 的处置建议**（本轮未改代码）：`ip` 的读路径（`show`）是幂等只读，
+可加一层"崩溃即重试一次"的包装降低运维影响；根治要等写入者定位后重编
+iproute2（我们已能从源码重建，build_static_ip.sh 在位）。
+

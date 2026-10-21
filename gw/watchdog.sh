@@ -481,7 +481,18 @@ EOF
         set_state hostapd 1 "hostapd WPA layer"
         FAILS=$((FAILS+1))
         log "WARN  hostapd not serving (our_pid=$(svc_our_hostapd | tr '\n' ' ') live_socks=$(svc_live_socks) bss=$(svc_bss_count))"
-        if strike hostapd; then
+        # A definitively absent process is not an ambiguous probe: repair it on
+        # this cycle.  2-of-3 stays for "process alive but not serving" (and the
+        # wifi_up/boot guards above still apply).
+        _dead=0; svc_our_hostapd >/dev/null 2>&1 || _dead=1
+        _fire=0
+        if [ "$_dead" = 1 ]; then
+            _fire=1
+            log "EVT hostapd process absent — immediate repair (definitive)"
+        else
+            strike hostapd && _fire=1
+        fi
+        if [ "$_fire" = 1 ]; then
             _hn=0; _ht=0
             [ -r /tmp/watchdog_hostapd.rec ] && read _hn _ht < /tmp/watchdog_hostapd.rec
             _now2=$(date +%s)

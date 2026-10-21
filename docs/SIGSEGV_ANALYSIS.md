@@ -51,7 +51,7 @@ printf 受限输出路径吞下垃圾后破坏自己的栈，任何走到这条 
 
 | 类 | 机制（一句话） | 状态 | 速率/量级 | 锚点 |
 |---|---|---|---|---|
-| **主机制（合并原 A/B/C）** | 外部主控（首要嫌疑=蜂窝 MD，跨重启存活）经失效环形缓冲指针，把 16/32B `{计数器,0[,时钟,0]}` 记录写进**被回收复用进用户进程的物理页**；受害者按被击中数据的形状表现出 va_list 崩溃 / NULL 解引用 / .bss 指针损坏等不同签名 | 定性闭环（9 条证据，§16.2）；活体捕获进行中（哨兵+pageharvest 在位，§16.8） | 剧集期：pfcanary ≤2s 必崩；平静期：0；产品面 47→28 次/天 | §16 |
+| **主机制（合并原 A/B/C）** | 外部主控（蜂窝 MD/ccci-dpmaif 环，含 medmcu）经失效环形缓冲指针，把 16/32B `{计数器,0[,0x680族,0]}` 环记录写进**被回收复用进用户进程的物理页**；受害者按被击中数据的形状表现出 va_list 崩溃 / NULL 解引用 / .bss 指针损坏等不同签名 | **二进制定罪 + 活体捕获完成**（§17：内核反汇编常数直接对上坏值构成 + pageharvest 当场捕获写入与流量突发同窗） | 剧集期：pfcanary ≤2s 必崩；平静期：0；产品面 47→28 次/天 | §16、§17 |
 | ↳ 原 A（logread/logc/sh/grep/pidof/ls/ping/wc/sed…） | 同主机制；musl `pop_arg` 是最高频的污染内存解引用点 → 选集效应让它"看起来"是 libc 缺陷 | 机制已反转；热路径缓解（logc v1.4/logcut/procmatch 去 printf 化）有效保留 | ≈40 次/天（选集效应，非成因） | §16.4 |
 | ↳ 原 B（awk） | 同主机制（NULL 块击中节点指针即可解释）；"busybox awk 数组退出缺陷"**不再必要**且未被独立证明 | 并入主机制；logcut 缓解有效 | 修前 18.4/天 → 0 | §11、§16.3 |
 | ↳ 原 C（ip `filter.label`） | 同主机制：`.bss` 一页内 5 个 16B 块以 16 字节节距喷射（flags/label/flushb/slave_kind…），label 恰好被解引用 | **已闭环并入主机制**（core_ip.core 整页实测） | 11.6/天 | §11.7、§16.3 |
@@ -1262,3 +1262,74 @@ thermal_core/gdb…）的是 B/C 两类**：
 
 > 运维注意：sentinel/pageharvest/memtruth 的崩溃与 core 会计入 ne_events
 > （exe=/data/p0x|/data/p0 与 /tmp/*），普查时按 §13.6/§14 口径扣除。
+
+## 17. 2026-10-22 终局轮：二进制定罪 + 活体捕获（"指控坐实"）
+
+> 本轮按"逆向分析二进制坐实指控"执行，两个方向都拿到了决定性结果：
+> ①内核侧（ccci/dpmaif 驱动）环机制与常数**直接对上坏值构成**；
+> ②pageharvest 在被持有期间**当场捕获外部写入者**落笔。
+> 至此 §16 的机制定性从"最强假设"升级为"二进制级+活体级实证"。
+
+### 17.1 逆向管线（可复现）
+
+- boot 分区内核载荷熵 7.965 bits/B = **加密**（MTK 安全启动），镜像路线不通；
+- 但 `CONFIG_STRICT_DEVMEM` **未启用** + root + `/proc/iomem` 的 "Kernel code"
+  物理范围（0xfd910000-0xfe52ffff）→ 经 `/dev/mem` 直读**运行中内核文本**，
+  12MB 全量落盘；数据段（0xfe6d0000+3.6MB）同理；
+- `/proc/kallsyms`（kptr_restrict=0）6.1 万符号 + capstone → 带符号反汇编
+  （工具链存档 `tmpfiles/p0x/kern/kern_an.py` + ktext/kdata/kallsyms 快照）；
+- `ccmni`/`ccci` 为**内置驱动**（/lib/modules 无对应 .ko）——只能走内核文本。
+
+### 17.2 内核侧定罪链（反汇编锚点）
+
+| # | 事实 | 反汇编锚点 |
+|---|---|---|
+| 1 | **BAT 环条目数 = 0x680/0x780，条目尺寸 = 0x18/0x20，环本体 dma_alloc_attrs(0x20000)** | `dpmaif_bat_init+0x20..0x30`（`csel w20,w20,#0x18`、`csel w0,w0,#0x680`）、`+0x60 bl dma_alloc_attrs` |
+| 2 | **坏值低 16 位 0x680 正是 BAT 环计数**；0x780 在 `dpmaif_start`/`dpmaif_rx_med_data_collect` 复现；受害者坏块 16/24/32B 尺寸=环条目尺寸族 | 同上 + 全文 `movz #0x780` 扫描 |
+| 3 | **RX 数据缓冲 = 伙伴系统普通页**（`__alloc_skb`/`page_frag_alloc_align`+`__build_skb`），dma_map 后 PA 经 BAT 交给 MD 侧 DMA 写入 | `dpmaif_alloc_med_rx_buf+0x194/+0x28c` |
+| 4 | **拆卸顺序**：disable_irq → `dpmaif_stop_hw`（UL/DL idle 轮询**有界**：10 万/160 万次上限，超时仅 dump+printk **继续走**）→ `dpmaif_stop_rx_sw`：`dma_unmap_page_attrs` + `ccci_free_skb`/`put_page` + `__page_frag_cache_drain` **全部归还伙伴系统**，随后 `memset(环,0,条目数<<4)`（**16B 步长**） | `dpmaif_stop+0xf4`、`dpmaif_stop_hw+0x8c..0x2d4`、`dpmaif_stop_rx_sw+0x228..0x2d0` |
+| 5 | 环 PA 编入 **HW 寄存器**（`drv_dpmaif_dl_set_pit_base_addr`：MMIO 写 + dsb）；停止路径**不清理基址寄存器** | `drv_dpmaif_dl_set_pit_base_addr+0x24..0x40` |
+| 6 | 触发面 = ccci MD 状态机经 **ops 函数指针表**调 `{start, pre_stop, stop, syssuspend, sysresume}`（MD 复位/异常/飞行模式/PDP 变更/系统挂起恢复）；停止握手等待 **medmcu** 协处理器 ack | 数据段 0xffffffc0090e93f0 表还原；字符串 "waiting medmcu ack"/"medmcu acked"、"sys_resume no need restore" |
+| 7 | RX 数据通路流量（dmesg `[ccci1/dpmaif]net txq…`）与 ccmni2/3 活跃一致 | 设备日志 |
+
+**结论**：被污染值 = **dpmaif BAT/PIT/FRG 环条目族**（含 0x680 环计数/长度字段 +
+序号计数器）；写入者 = **MD 侧（MD 核/DPMAIF HW/medmcu）经失效环指针继续 DMA**；
+受害页 = 驱动 stop/复位后**归还伙伴系统又被用户进程拿走的 RX 缓冲页/环页**。
+"X 高 32 位"语义与 md 侧时钟/序号有关，未逐字段解出（不影响定性）。
+
+### 17.3 活体捕获（pageharvest，2026-10-22 01:22–01:35）
+
+- 3 个分配周期、**同一虚拟偏移（页尾 0xfc0 起）**反复出现
+  `{0x9d9d,0}{0x9d9d,0}…` / `{0x36d1b,0}…` / `{0x20849,0}…` 的
+  **16 字节节距记录**——页面是我们刚清零的新匿名页，写入发生在持有期间；
+- 计数值 40,349 → 224,539 → 133,193：量级落在历史受害者值域（40K–160K）内、
+  **非单调**（与受害者观测一致）；
+- 首个命中周期的 **netdelta=70,459**（前后周期 55–600）——**写入与蜂窝数据
+  突发同窗**；
+- 同页邻接内容含 `0x10033d68c`（vmemmap/物理页指针形态）等内核侧结构残影，
+  与"环页被回收复用"的页谱一致；
+- 限制：`CONFIG_PROC_PAGE_MONITOR` 未启用 → pagemap 不给 PFN，kpagecount 不可读
+  （该验证位缺失已记录；不影响写入事实本身）。
+
+### 17.4 对 §16.5 候选表的更新
+
+| 候选 | 判定 |
+|---|---|
+| 蜂窝 MD/ccci-dpmaif 环（含 medmcu 握手） | **坐实**（17.2 全链 + 17.3 活体） |
+| WiFi 固件（mt76/connac） | 降为无关（无环常数匹配；X 跨重启存活亦排除） |
+| AP 内核写错地址 | 排除（写入发生在我们的页上，AP 侧无人写它） |
+
+md1img_a 固件**明文**（MTK 头 + md1rom，熵 6.16）——如需 MD 侧逐指令定罪
+（谁写的 0x680 记录），素材在备份镜像 lba 376896 起 640MB。
+
+### 17.5 根修路径细化（替代 §16.6 排序，仍不动手）
+
+1. **首选（内核侧最小补丁）**：`dpmaif_stop_rx_sw`/`dpmaif_stop` 在
+   **idle 等待超时/medmcu ack 异常路径上改为"泄漏不释放"**（leak-on-timeout）：
+   环页与 RX 页不回伙伴系统，仅在 dpmaif 重新 start 成功后统一回收；
+   同时 stop 时清 PIT/BAT 基址寄存器并要求硬件 ack 后才允许 free。
+   一个 ~几十行的 out-of-tree 补丁模块即可钩住（项目已有 .ko 构建/加载先例）。
+2. **LK cmdline 预留**（§16.6-B）保留为兜底：环页是 dma_alloc 动态页，
+   仅当证实失效 PA 跨重启稳定时才可行——优先级下调。
+3. EMI MPU（§16.6-C）保留为最后手段。
+4. 缓解层与监控维持 §16.6-5；`ap_auto_logging=0` 等不变。

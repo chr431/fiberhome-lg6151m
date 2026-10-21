@@ -42,6 +42,26 @@ python tools/deploy.py attic      # 设备侧流浪脚本归档
   出厂只读基线 `gw/agg_pins.default`（**不含任何 MAC**）随版本部署；wan_agg 启动时
   **缺省才写**地播种活文件，已有钉死永不覆盖。格式说明与用法示例见 `tools/agg_pins.conf.example`。
 
+## WiFi 健康判据与手动恢复
+
+- **唯一判据 = 活控制套接字**：`svc_live_socks`（`/proc/net/unix` 里有
+  `/var/run/hostapd/ra0|rai0` 的活端点）+ 自有 hostapd 进程（argv[0] hostapd、
+  参数含 `/var/wlan/hap_*.conf`）。以下**都不算**服务在线：
+  `pidof hostapd`（会命中厂商 global 实例）、`[ -S /var/run/hostapd/ra0 ]`
+  （崩溃后文件残留）、`iw dev ... type AP`（驱动保持 AP 模式）、netdev operstate。
+- 快查：`hostapd_cli -i ra0 status; hostapd_cli -i rai0 status`（都应为
+  `state=ENABLED`）；GUI WiFi 卡片的"2.4/5GHz 正常"与 WiFi 灯均取同一判据。
+- 手动恢复（watchdog 会自动做，以下用于人工兜底）：
+  ```sh
+  . /data/gw/svc_lib.sh
+  for p in $(svc_our_hostapd); do kill "$p"; done
+  rm -f /var/run/hostapd/ra0 /var/run/hostapd/rai0      # 崩溃残留必须清
+  for v in ra0 rai0; do ifconfig $v down; done; sleep 3
+  brctl addif br-lan ra0; brctl addif br-lan rai0
+  LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib       hostapd -B /var/wlan/hap_2g.conf /var/wlan/hap_5g.conf
+  sleep 5; for v in ra0 rai0; do mwctl dev $v set no_bcn 0; done
+  ```
+
 ## 大文件传输（SSH 大块不稳）
 
 1. PC 起 depot：`cd <dir> && python -m http.server 8000`

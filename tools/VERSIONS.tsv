@@ -95,7 +95,7 @@ tools/leak_check.py	2.2	tool	-	敏感词零命中门禁; v2.2: --history 全量�
 docs/ARCHITECTURE.md	1.2	doc	-	架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针); v1.2: batch3 版本表刷新
 docs/GUI_TERMINOLOGY.md	1.2	doc	-	GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git
 gw/watchdog.sh	1.30	manifest	/data/gw/watchdog.sh	持续不变量看门狗; v1.30(WiFi 事故): hostapd 健康=自有进程+活 ra0/rai0 控制套接字; 恢复删残留 socket、不再因无 socket 拒绝; 历史见git
-tools/selftest.py	2.53	tool	-	设备自检; v2.53(WiFi 事故): +t_wifi_ap_service(活控制套接字/自有 hostapd/GUI+LED 判据同源); v2.52: batch3 判据; 历史见git
+tools/selftest.py	2.54	tool	-	设备自检; v2.54(WiFi 事故): +t_wifi_ap_service(svc_our_hostapd 活套接字/GUI+LED 同源); v2.52: batch3 判据; 历史见git
 tools/doc_audit.py	1.2	tool	-	台账↔文档内联标记双向审计; v1.2: 子进程显式 UTF-8(gbk 环境不再中断 deploy 文档门禁); 历史见git
 gw/src/mipc_cellular.c	0.17	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源码; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘
 gw/bin/mipc_cellular	0.17	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘

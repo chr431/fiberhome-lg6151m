@@ -402,3 +402,116 @@ SHA-256 钉死在拉取脚本里，305 个 applet）；ip 用 **iproute2 6.3.0**
 5. **P3 真实 core 回收**：需要下一个 03:20 窗口后按 §1 方法解析
    `/data/gw/logs/cores/`，确认家族 core 与 logread core 同源（libc+0x51ffc
    或其它触发点），再决定是否扩大窗口/频率。
+
+## 10. 2026-10-21 回合：logc 崩溃根因定位 + v1.4（printf-free 记录路径）
+
+> 本轮目标：把 `logc` 的持续 SIGSEGV（不是厂商组件，是我们自己的静态采集器）定位到
+> 具体指令与调用链，并给出可验证的修复。证据在本地 `tmpfiles/round_logc/`
+> （面包屑归档 `evidence/`、崩溃原始流 `crash.raw`、gdb 现场 `crash.72.log`）。
+
+### 10.1 现场规模（先看数，不看猜）
+
+- `/data/gw/logs/logc_crash/` 132 份面包屑 = **109 次不同崩溃**（其余为 log_keeper
+  在 rc!=0 时重复复制同一份 `/tmp/logc.crash`，属取证噪声）；全部 `sig=11`，
+  版本 v1.2×2 + v1.3×107，跨 2026-10-20 00:21 → 10-21 19:45。
+- 崩溃点分布：`buf_len` 几乎恒在 **65536–66336**（一次 read 刚灌入的 ~64KB 块），
+  `frame_off` 0x0d4–0xf8b8、`frame_len` 116–800，`frames_emitted` 54–37887。
+  格式全部合法（同一批运行 `bad_frames=0 resyncs=0`）——**不是帧解析越界**。
+- 同期 `ne_events.tsv`（core_meta 抓到 core 的进程）：static busybox（awk/pidof/
+  sh/ping/grep）44、static ip 17、wpad 2、xtables 1、logread 1 —— 静态工具链也在崩，
+  但 logc 是频率最高的一条（约 7 次/小时）。
+
+### 10.2 取证方法（可复用的两条）
+
+1. **gdb 在设备上直接抓现场**：设备自带 `/usr/bin/gdb 12.1`。构建**同源码同优化**
+   的带符号静态件（`zig cc -O2 -g -static`，不 strip），用
+   `gdb -batch -ex 'handle SIGSEGV stop print nopass' -ex run -ex 'bt full' ...`
+   跑 one-shot 环读；崩溃时 gdb 在 logc 自己的 handler 之前截住信号，拿到
+   PC/寄存器/va_list/各层栈帧。
+2. **`--dump-raw` 留输入**：崩溃那轮的原始流落盘，可 `--stdin` 离线回放。
+   本轮实测：回放**不复现**（10/10 rc=0）→ 触发依赖运行期状态而非单纯字节内容，
+   这条结论本身排除了"某条坏记录"的假设。
+
+复现率（同一二进制、同机、稳态环）：约 **1/220 ~ 1/600** 次 one-shot 全环读取；
+开机环（含 dmesg 引导记录）明显更高（一次 72 轮即命中）。
+
+### 10.3 崩溃现场（决定性证据）
+
+`crash.72.log`（`frames_emitted=1816`，记录是普通内核引导行）：
+
+```
+Program received signal SIGSEGV
+0x10254d0 in printf_core (f=..., fmt="%0*lld", ap=..., nl_arg=..., nl_type=...)
+  at .../musl/src/stdio/vfprintf.c:485
+#1 vfprintf      (fmt=0x10006e0 "%0*lld")
+#2 vsnprintf
+#3 snprintf      (s=..., n=...)
+#4 __strftime_fmt_1 (f=83 'S')
+#5 __strftime_l  ("S %Y" 剩余格式)
+#6 emit_record   (logc.c: strftime(...))
+```
+
+故障指令（`printf_core+892`，即 `w = va_arg(*ap, int)` 的寄存器区取值路径）：
+
+```
+ldr  x9, [x12, #0x18]   ; x9 = ap->__gr_offs = -40
+...
+ldr  x11, [x12, #8]     ; x11 = ap->__gr_top  = 0        ← 坏值
+add  x9, x11, x9        ; x9 = -40
+ldr  w26, [x9]          ; SIGSEGV, si_addr = 0xffffffffffffffd8
+```
+
+崩溃时 vfprintf 帧内的 `ap2`（`va_copy` 的结果）：
+
+```
+__stack  = 0x1c28416e00000680   ← 垃圾
+__gr_top = 0x0                  ← 垃圾（应为调用方保存区地址）
+__vr_top = 0x7fe09feae0         ← 正常
+__gr_offs = -40, __vr_offs = -128  ← 正常（尚未弹过变参）
+```
+
+**与厂商 musl 的旧签名同源**（§1：`__stack` 垃圾 + `__gr_top=0`，偏移字段幸存）。
+区别只是本次发生在 zig/Alpine 同源的 musl 1.2.x 上、且在弹出**第一个**变参时就死。
+
+### 10.4 结论：缺陷不在 logc 的解析器
+
+- 解析器所有游走都限定在 `[buf, buf+flen)`，且 `flen` 先与 `avail` 比对；
+  13 轮设备侧 fuzz + 本轮 2000 轮 in-process fuzz 零命中。
+- 崩溃发生在 **格式固定为 `"%0*lld"`** 的 musl 内部调用上，输入只有合法的
+  `struct tm`；logc 侧唯一参与的是"调用 strftime"这个动作。
+- 因此修复方向不是"更严格的帧校验"，而是**把 printf/va_list 从记录路径里彻底移除**。
+
+### 10.5 修复（logc v1.4）
+
+| 变更 | 说明 |
+|---|---|
+| 手写 ctime 格式 | `localtime_r` + 星期/月名表 + 有界整数输出，产出 `Www Mmm dd HH:MM:SS YYYY`，与 `strftime("%a %b %e %H:%M:%S %Y")` **逐字节一致** |
+| 手写整行拼装 | 时间 + 可选 `[sec.millis] ` + `fac.pri` + ` kernel:` + msg + `\n`，全部 `memcpy`/边界检查，无 `snprintf` |
+| stats 也去 printf | `write_stats` 改 `stats_kv()` 手写；守护热路径上再无 printf 家族 |
+| 超长消息不再中止整轮 | 旧版 `snprintf` 溢出返回 -1 → `consume_records` 返回 SIZE_MAX → 整轮 rc=1（stability_metrics 里的 `logc_rc=1 io=1` 即此）；v1.4 缓冲区按 `MAX_MSG+256` 配足，异常情况只丢该条并计数 |
+| 静态反链断言 | 产物已不含 `strftime` 的 `"%0*lld"` 与 `"%a %b %e"`（`grep -a -F` 可验），selftest v2.55 固化 |
+
+### 10.6 验证
+
+- **输出等价**：同一份 `crash.raw` 分别喂 v1.3/v1.4，`--stdin` 与 `-t` 两种模式
+  `cmp` **逐字节相同**（36439 B）。
+- **A/B 实弹**（同环状态交替跑，2500 轮设计，实际 2407 轮）：
+  **v1.3 rc=139 × 10（20:26:57–20:27:41），v1.4 rc=139 × 0**；两版 rc=1 各 7/6 次
+  （logd 短暂不可用，环境性）。崩溃全部落在 v1.3 一侧且未影响 v1.4。
+- `--selftest` / `--fuzz 2000` PASS；`vercheck` 全绿。
+
+### 10.7 仍未闭环（诚实清单）
+
+1. **va_list 前 16 字节的写入者未定位**：可以确定 `ap2` 是 vfprintf 里对调用方
+   va_list 的 32 字节整拷贝（`ldp q1,q2,[x2]; stp q1,q2,[sp,#0x120]`），且
+   `__vr_top/__gr_offs/__vr_offs` 三个字段被正确复制——只有 `__stack/__gr_top`
+   被换成垃圾。候选是 vfprintf 帧内 `internal_buf[80]`/`nl_arg[10]`/`nl_type[10]`
+   某条越界写（`nl_type[12..15]` 恰好落在 `ap2` 头上），但静态反汇编未能收敛到
+   具体写指令；下一次可用硬件观察点（`watch *(long*)($ap+8) if ...==0`）收口。
+2. **静态 busybox/ip 的同族崩溃仍在**（core_meta 有元数据、aee core 加密）：
+   本轮只根治了我们自己代码里可控的那条链路；第三方静态件若也走 musl printf，
+   风险同源，需要单独取证（core 窗口 / gdb 抓 `ip`）。
+3. **取证副作用（运维注意）**：持续高频 spawn（4 个 gdb 循环，或 2 进程/轮的 soak）
+   会让 dropbear 进入"accept 后 EOF / 无 banner"的卡死态，SSH 不可恢复，
+   只能 `sys_reboot`（GUI `/api/sys_reboot`，实测有效；reboot_sched 因当日
+   `last` 去重不会触发）。取证脚本请限制并发、优先落 `/data`。

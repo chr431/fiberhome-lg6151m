@@ -89,7 +89,7 @@
    （防止射频反复抖动）。必要时按崩溃类型拆分预算（进程缺失 vs 模糊态）。
 3. **厂商 global hostapd 与我们并存**：本次它正是 `pidof hostapd` 谎报的一半原因。它承担
    STA（apcli0）侧职责，未移除；所有判据现在只认自有配置路径的实例。
-4. **logc 崩溃风暴（与本事故独立的观察）**：`/data/gw/logs/logc_crash/` 已有 101 个
-   面包屑（示例：`version=1.3 sig=11 frame_off=43052 frame_len=200 buf_len=65568
-   frames_emitted=7785`），约每 10–40 分钟一次。它不影响 WiFi，但会让日志镜像出现缺口，
-   建议作为下一轮 P1 根因专项（面包屑已把范围收敛到单帧）。
+4. **logc 崩溃风暴（已闭环）**：`/data/gw/logs/logc_crash/` 累计 109 次不同崩溃，
+   根因已定位在 musl `strftime → snprintf("%0*lld") → vfprintf/printf_core` 的
+   va_list 污染（与厂商 musl 同签名），**不是帧解析**；logc v1.4 已把 printf/strftime
+   从记录路径移除，A/B 实测 10 次 vs 0 次。详见 [SIGSEGV_ANALYSIS.md](SIGSEGV_ANALYSIS.md) §10。

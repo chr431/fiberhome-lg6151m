@@ -11,6 +11,8 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
+v2.55 (2026-10-21 SIGSEGV 根因): logc 版本锚点 1.4 + 反链断言(二进制不得再含
+  strftime 的 "%0*lld") — 记录路径去 printf 的回归护栏;
 v2.54 (2026-10-21 WiFi 事故): +t_wifi_ap_service(活控制套接字/自有 hostapd/
   GUI 与 LED 判据同源); v2.51 (2026-10-20): 控制台 stdout/stderr 显式 UTF-8(GBK 终端下 ✓/✗ 打印不再中断套件). 
 v2.50 (2026-10-20 stability P0/P1 batch2): +t_p0_watchdog / t_p0_boot_gate /
@@ -2059,14 +2061,18 @@ def t_p1_forensics():
     lv = dev("/data/gw/bin/logc -V 2>/dev/null").strip()
     st = dev("/data/gw/bin/logc --selftest 2>&1; echo rc=$?").strip()
     fz = dev("/data/gw/bin/logc --fuzz 40 2>&1; echo rc=$?").strip()
+    # v1.4: strftime's "%0*lld" must not be linked in any more -- that musl
+    # vfprintf path is where 109 on-device SIGSEGVs died (2026-10-21).
+    noc = dev("grep -a -F -c '%0*lld' /data/gw/bin/logc 2>/dev/null").strip()
     cen = dev("grep -c 'ne_census' /data/gw/log_keeper.sh /data/gw/watchdog.sh 2>/dev/null").split()
     met = dev("ls /data/gw/logs/cores/meta 2>/dev/null | wc -l").strip()
     ok = (pat.startswith("|/data/gw/core_meta.sh") and ex == "y" and fwd == "y"
-          and lv == "logc 1.3" and "rc=0" in st and "PASS" in fz and "rc=0" in fz
+          and lv == "logc 1.4" and noc == "0"
+          and "rc=0" in st and "PASS" in fz and "rc=0" in fz
           and len(cen) == 2 and all(int(x) > 0 for x in cen if x.isdigit()))
     record(t_p1_forensics._test_name, "system", ok,
-           "pattern=[%s] wrapper=%s fwd=%s logc=%s selftest=[%s] fuzz=[%s] census=%s meta_files=%s"
-           % (pat, ex, fwd, lv, st[-100:], fz[-100:], cen, met))
+           "pattern=[%s] wrapper=%s fwd=%s logc=%s printf_sym=%s selftest=[%s] fuzz=[%s] census=%s meta_files=%s"
+           % (pat, ex, fwd, lv, noc, st[-100:], fz[-100:], cen, met))
 
 
 @test("stability P1: healthdog 综合判据 (稳定窗后 arm / 防环)")

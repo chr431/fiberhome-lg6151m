@@ -42,6 +42,21 @@
  *   truncations, bogus lengths, type swaps, oversized/NUL messages, noise);
  *   pairs with the ASAN build target so the next real crash can be replayed.
  *
+ * v1.4 -- SIGSEGV root cause (2026-10-21): 109 on-device breadcrumbs + a gdb
+ *   backtrace pin the crash inside the toolchain's musl printf:
+ *   emit_record -> strftime -> __strftime_fmt_1 -> snprintf("%0*lld") ->
+ *   vfprintf/printf_core, where the va_list copy in vfprintf's frame already
+ *   had a clobbered __gr_top/__stack (the same signature as the vendor musl
+ *   crash in docs/SIGSEGV_ANALYSIS.md §1).  The frame parser is not involved:
+ *   it is bounded by construction and 13 fuzz rounds never faulted.  The
+ *   record path therefore no longer uses the printf family at all: the
+ *   ctime-style timestamp is formatted by hand (localtime_r + tables) and the
+ *   output line is built with memcpy/bounded integer formatting, so neither
+ *   strftime nor vfprintf is reachable from untrusted records.  A record whose
+ *   text cannot fit is skipped (counted) instead of aborting the whole run --
+ *   the previous snprintf-overflow path returned rc=1 and truncated the ring
+ *   read (observed as logc_rc=1 io=1 in stability_metrics.tsv).
+ *
  * v1.2 -- stability P1-2 hardening:
  *   - SIGSEGV/SIGBUS/SIGABRT/SIGILL handler on an alternate stack writes a
  *     breadcrumb (/tmp/logc.crash): signal, frame offset, frame length, buffer
@@ -76,7 +91,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define LOGC_VERSION "1.3"
+#define LOGC_VERSION "1.4"
 
 /* ---- ubus wire protocol (only what we need) ---------------------------- */
 
@@ -274,24 +289,43 @@ static void dbg(const char *fmt, ...)
 	va_end(ap);
 }
 
+/* v1.4: printf-free helpers (defined below; declared here for write_stats) */
+static size_t put_str_n(char *b, size_t n, size_t cap, const char *s);
+static size_t put_u(char *b, size_t n, size_t cap, unsigned long long v,
+		    int width, char padc);
+
+static void stats_kv(char *b, size_t *n, size_t cap, const char *k,
+		     unsigned long long v)
+{
+	*n = put_str_n(b, *n, cap, k);
+	*n = put_str_n(b, *n, cap, "=");
+	*n = put_u(b, *n, cap, v, 1, '0');
+	*n = put_str_n(b, *n, cap, " ");
+}
+
+/* v1.4: the last snprintf in the daemon's hot path is gone as well. */
 static void write_stats(void)
 {
 	char tmp[256];
-	int fd, n;
+	size_t n = 0;
+	int fd;
 
 	if (!stats_file)
 		return;
-	n = snprintf(tmp, sizeof(tmp),
-		     "frames=%llu bytes=%llu bad_frames=%llu resyncs=%llu "
-		     "dropped_bytes=%llu bad_time=%llu bad_attrs=%llu "
-		     "filtered=%llu io_errors=%llu\n",
-		     st.frames, st.bytes, st.bad_frames, st.resyncs,
-		     st.dropped_bytes, st.bad_time, st.bad_attrs,
-		     st.filtered, st.io_errors);
+	stats_kv(tmp, &n, sizeof(tmp), "frames", st.frames);
+	stats_kv(tmp, &n, sizeof(tmp), "bytes", st.bytes);
+	stats_kv(tmp, &n, sizeof(tmp), "bad_frames", st.bad_frames);
+	stats_kv(tmp, &n, sizeof(tmp), "resyncs", st.resyncs);
+	stats_kv(tmp, &n, sizeof(tmp), "dropped_bytes", st.dropped_bytes);
+	stats_kv(tmp, &n, sizeof(tmp), "bad_time", st.bad_time);
+	stats_kv(tmp, &n, sizeof(tmp), "bad_attrs", st.bad_attrs);
+	stats_kv(tmp, &n, sizeof(tmp), "filtered", st.filtered);
+	stats_kv(tmp, &n, sizeof(tmp), "io_errors", st.io_errors);
+	tmp[n - 1] = '\n';
 	fd = open(stats_file, O_CREAT | O_WRONLY | O_TRUNC, 0644);
 	if (fd < 0)
 		return;
-	if (write(fd, tmp, (size_t)n) != n)
+	if (write(fd, tmp, n) != (ssize_t)n)
 		(void)0;
 	close(fd);
 }
@@ -556,48 +590,120 @@ static int parse_record(const uint8_t *p, size_t avail, struct record *r)
 	return 1;
 }
 
+/* ---- v1.4: printf-free formatting ------------------------------------- */
+
+static size_t put_str_n(char *b, size_t n, size_t cap, const char *s)
+{
+	size_t l = strlen(s);
+
+	if (l > cap - n)
+		l = cap - n;
+	memcpy(b + n, s, l);
+	return n + l;
+}
+
+static size_t put_u(char *b, size_t n, size_t cap, unsigned long long v,
+		    int width, char padc)
+{
+	char t[24];
+	size_t k = 0, d;
+
+	do {
+		t[k++] = (char)('0' + v % 10);
+		v /= 10;
+	} while (v);
+	for (d = k; d < (size_t)width && n < cap; d++)
+		b[n++] = padc;
+	while (k && n < cap)
+		b[n++] = t[--k];
+	return n;
+}
+
+static const char *const wday_name[7] = {
+	"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat",
+};
+
+static const char *const mon_name[12] = {
+	"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+	"Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+};
+
+/* "Www Mmm dd HH:MM:SS YYYY" -- byte-identical to ctime()'s asctime_r format
+ * for 1970..2100, without touching the printf machinery. */
+static size_t fmt_time(char *b, size_t cap, time_t sec)
+{
+	struct tm tm;
+	size_t n = 0;
+
+	if (!localtime_r(&sec, &tm))
+		return 0;
+	if (tm.tm_wday < 0 || tm.tm_wday > 6 || tm.tm_mon < 0 || tm.tm_mon > 11)
+		return 0;
+	n = put_str_n(b, n, cap, wday_name[tm.tm_wday]);
+	n = put_str_n(b, n, cap, " ");
+	n = put_str_n(b, n, cap, mon_name[tm.tm_mon]);
+	n = put_str_n(b, n, cap, " ");
+	n = put_u(b, n, cap, (unsigned long long)tm.tm_mday, 2, ' ');
+	n = put_str_n(b, n, cap, " ");
+	n = put_u(b, n, cap, (unsigned long long)tm.tm_hour, 2, '0');
+	n = put_str_n(b, n, cap, ":");
+	n = put_u(b, n, cap, (unsigned long long)tm.tm_min, 2, '0');
+	n = put_str_n(b, n, cap, ":");
+	n = put_u(b, n, cap, (unsigned long long)tm.tm_sec, 2, '0');
+	n = put_str_n(b, n, cap, " ");
+	{
+		long y = (long)tm.tm_year + 1900;
+
+		if (y < 0)
+			y = 0;
+		n = put_u(b, n, cap, (unsigned long long)y, 4, '0');
+	}
+	return n;
+}
+
 /* Format one record exactly like logread's stdout path:
  *   "<ctime> <facility>.<priority>[ kernel:] <msg>\n"
- * (ctime is rebuilt with localtime_r/strftime; no asctime_r/ctime call).
+ * v1.4: built by hand -- no strftime, no snprintf, no va_list.
  */
 static int emit_record(const struct record *r, int with_ts, regex_t *re)
 {
-	char tbuf[64];
-	char line[8192];
-	struct tm tm;
+	char line[MAX_MSG + 256];
+	size_t n = 0, cap = sizeof(line);
 	time_t sec = (time_t)(r->time_ms / 1000);
-	size_t n;
-	int len;
 
 	if (re && regexec(re, r->msg, 0, NULL, 0) == REG_NOMATCH) {
 		st.filtered++;
 		return 0;
 	}
-	if (!localtime_r(&sec, &tm))
-		return -1;
-	if (!strftime(tbuf, sizeof(tbuf), "%a %b %e %H:%M:%S %Y", &tm))
-		return -1;
 
-	len = snprintf(line, sizeof(line), "%s ", tbuf);
-	if (len < 0 || (size_t)len >= sizeof(line))
-		return -1;
-	if (with_ts) {
-		int k = snprintf(line + len, sizeof(line) - (size_t)len,
-				 "[%lld.%03u] ", (long long)sec,
-				 (unsigned)(r->time_ms % 1000));
-		if (k < 0 || (size_t)k >= sizeof(line) - (size_t)len)
-			return -1;
-		len += k;
+	n = fmt_time(line, cap, sec);
+	if (!n) {
+		/* unrepresentable timestamp: drop this record, never the run */
+		st.bad_time++;
+		return 0;
 	}
-	n = (size_t)len;
-	len = snprintf(line + n, sizeof(line) - n, "%s.%s%s %s\n",
-		       fac_name((r->priority >> 3) & 0x1f),
-		       pri_name(r->priority & 7),
-		       r->source == 0 ? " kernel:" : "",
-		       r->msg);
-	if (len < 0 || (size_t)len >= sizeof(line) - n)
-		return -1;
-	n += (size_t)len;
+	n = put_str_n(line, n, cap, " ");
+	if (with_ts) {
+		n = put_str_n(line, n, cap, "[");
+		n = put_u(line, n, cap, (unsigned long long)sec, 1, '0');
+		n = put_str_n(line, n, cap, ".");
+		n = put_u(line, n, cap, (unsigned long long)(r->time_ms % 1000),
+			  3, '0');
+		n = put_str_n(line, n, cap, "] ");
+	}
+	n = put_str_n(line, n, cap, fac_name((r->priority >> 3) & 0x1f));
+	n = put_str_n(line, n, cap, ".");
+	n = put_str_n(line, n, cap, pri_name(r->priority & 7));
+	if (r->source == 0)
+		n = put_str_n(line, n, cap, " kernel:");
+	n = put_str_n(line, n, cap, " ");
+	if (r->msg_len >= cap - n) {
+		st.bad_attrs++;
+		return 0;
+	}
+	memcpy(line + n, r->msg, r->msg_len);
+	n += r->msg_len;
+	line[n++] = '\n';
 
 	maybe_rotate();
 	if (write_all(out_fd, line, n) != 0) {

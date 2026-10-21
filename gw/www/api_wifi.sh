@@ -1,4 +1,6 @@
-# api_wifi.sh v1.0 — WiFi 域模块 (被 api.sh 按端点懒加载; 依赖核心的 helpers/cfg 助手)
+# api_wifi.sh v1.1 — WiFi 域模块 (被 api.sh 按端点懒加载; 依赖核心的 helpers/cfg 助手)
+# v1.1 (2026-10-21 WiFi 事故): wifi_state 的 hostapd2g/5g 改活控制套接字判据
+#   (原 iw "type AP" 在 hostapd 死后仍为真, GUI 显示“正常”).
 # v1.0 (2026-10-17 架构轮): 自 api.sh v2.74 拆出 — wifi/wifi_adv/band_pin/wifiscan/
 #   wifi_set 端点族。域历史(自 api.sh 头注迁入):
 # v2.68: wifi_state MLO 链路计数修正: 按 Affiliated AP[i] 索引去重 — 每 AP 3 行
@@ -14,8 +16,16 @@
 # ---------- wifi ----------
 wifi_state() {
     cfg_load
-    H2=$(iw dev ra0 info 2>/dev/null | grep -c "type AP")   # v2.15: iw探测, 兼容F3单进程拓扑
-    H5=$(iw dev rai0 info 2>/dev/null | grep -c "type AP")
+    # v1.1 (2026-10-21 WiFi incident): "type AP" only proves the driver kept
+    # AP mode — it stayed 1 for 5.5h after hostapd died and the GUI reported
+    # "正常".  The WPA layer is real only when hostapd's control socket has a
+    # LIVE bound endpoint (/proc/net/unix; a crashed daemon leaves the file).
+    hap_live() {
+        awk -v p="/var/run/hostapd/$1" '$NF==p{f=1} END{exit(f?0:1)}' /proc/net/unix 2>/dev/null \
+            && echo 1 || echo 0
+    }
+    H2=$(hap_live ra0)   # v1.1: 活控制套接字 = WPA 层在服务
+    H5=$(hap_live rai0)
     S2=$(iw dev ra0 info 2>/dev/null | grep -m1 channel | awk '{print $2}')
     S5=$(iw dev rai0 info 2>/dev/null | grep -m1 channel | awk '{print $2}')
     if [ "${INONE:-0}" = 1 ]; then D2="${SSID_BASE:-?}"; D5="${SSID_BASE:-?}"

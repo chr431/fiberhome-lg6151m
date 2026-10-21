@@ -11,7 +11,8 @@ flow through the expected path?). This suite tests BOTH:
   Layer 3  Cross-layer:     API report matches kernel/iptables reality
   Layer 4  End-to-end:      from the PC through the gateway to the internet
 
-v2.51 (2026-10-20): 控制台 stdout/stderr 显式 UTF-8(GBK 终端下 ✓/✗ 打印不再中断套件). 
+v2.53 (2026-10-21 WiFi 事故): +t_wifi_ap_service(活控制套接字/自有 hostapd/
+  GUI 与 LED 判据同源); v2.51 (2026-10-20): 控制台 stdout/stderr 显式 UTF-8(GBK 终端下 ✓/✗ 打印不再中断套件). 
 v2.50 (2026-10-20 stability P0/P1 batch2): +t_p0_watchdog / t_p0_boot_gate /
   t_p1_singletons / t_p1_forensics / t_p1_healthdog / t_p1_radio / t_p1_logpipe —
   限时检查、boot.healthy 门禁与 TRY_A 读回、统一监督表单实例、core_meta 取证链、
@@ -274,6 +275,32 @@ def t_wifi_bss():
     record(t_wifi_bss._test_name, "wifi", ok,
            f"want={sorted(want)} have={sorted(have)}" if not ok else
            f"ifaces={sorted(have)} guest={bool(guest and has_pass)} band={gband}")
+
+
+@test("WiFi AP 服务真实在线 (活控制套接字, 非 type AP)")
+def t_wifi_ap_service():
+    # 2026-10-21 事故: hostapd SIGSEGV 后驱动仍保持 AP 模式、控制 socket 文件
+    # 残留、厂商 global hostapd 仍活 —— 旧的 iw "type AP"/-S/pidof hostapd 判据
+    # 全部为真, WiFi 实际死了 5.5h 而 GUI/灯/看门狗一致报"正常"。
+    # 真相 = 我们的 hostapd 进程 + /proc/net/unix 里的活控制套接字。
+    live = dev("for i in ra0 rai0; do "
+               "awk -v p=/var/run/hostapd/$i '$NF==p{f=1} END{print f?1:0}' /proc/net/unix; "
+               "done").split()
+    ours = dev("for p in /proc/[0-9]*/cmdline; do "
+               "c=$(tr '\0' ' ' < $p 2>/dev/null); "
+               "case \"$c\" in *hostapd*/var/wlan/hap_*) echo y; break;; esac; done").strip()
+    cli = dev("for i in ra0 rai0; do "
+              "hostapd_cli -i $i status 2>/dev/null | grep -c '^state=ENABLED'; done").split()
+    lib = dev("grep -c '/proc/net/unix' /data/gw/svc_lib.sh 2>/dev/null").strip()
+    pidof = dev("grep -c 'pidof hostapd' /data/gw/svc_lib.sh 2>/dev/null").strip()
+    gui = dev("grep -c '/proc/net/unix' /data/gw/www/api_wifi.sh 2>/dev/null").strip()
+    led = dev("grep -c 'svc_bss_count' /data/gw/led_mgr.sh 2>/dev/null").strip()
+    ok = (live == ["1", "1"] and ours == "y" and cli == ["1", "1"]
+          and int(lib or 0) > 0 and pidof == "0"
+          and int(gui or 0) > 0 and int(led or 0) > 0)
+    record(t_wifi_ap_service._test_name, "wifi", ok,
+           "live=%s ours=%s cli=%s lib_unix=%s pidof=%s gui_unix=%s led_bss=%s"
+           % (live, ours or "-", cli, lib, pidof, gui, led))
 
 
 @test("访客 BSS 配置/隔离防火墙一致 (guest_fw)")

@@ -1,5 +1,5 @@
 #!/bin/sh
-# led_mgr.sh v2.9 — 原厂风格指示灯状态守护 (绝对电平驱动 + 自愈 + 全灯覆盖)
+# led_mgr.sh v3.0 — 原厂风格指示灯状态守护 (绝对电平驱动 + 自愈 + 全灯覆盖)
 # v2.8 (2026-10-20 stability batch1): 每 2s 轮写 /tmp/led_mgr.hb — watchdog
 #   用心跳识别“进程活但显示循环卡死”。
 # v2.7 (2026-10-19 SIGSEGV 根治轮): 单实例锁排除自身 pid — watchdog spawn 预写
@@ -126,12 +126,11 @@ bb_data_alive() {
 
 # v2.0: 探测(全部判据的唯一来源; 干跑/一次性入口复用)
 probe() {
-    # WiFi: 任一 AP vif 存在且未 down (v1.2 起: 只查目录存在检测不到 ifdown;
-    #   v2.0: ra0/rai0 双频都要算, 任一在就是"AP 在线"—— 单频 down 另一频仍在)
+    # WiFi: v3.0 (2026-10-21 WiFi 事故) — 灯 = **AP 服务在服务**(hostapd 活控制
+    #   套接字 + 链路 UP)，不是"netdev 存在"。hostapd 崩溃后驱动仍保持 AP 模式，
+    #   旧判据让 WIFI 灯在 WiFi 全死时继续亮 5.5 小时（与 GUI 一起谎报）。
     WIFI=0
-    for vif in ra0 rai0; do
-        [ -d /sys/class/net/$vif ] && [ "$(cat /sys/class/net/$vif/operstate 2>/dev/null)" != "down" ] && { WIFI=1; break; }
-    done
+    [ "$(svc_bss_count)" -ge 1 ] && WIFI=1
     # 5G: 任一 ccmni 有 v4 地址 = 数据面在(v1.9 唯一判据)
     CELL=$(ip -4 addr show 2>/dev/null | grep -A0 ccmni | grep -c "inet " || true)
     [ "$CELL" -gt 0 ] && C5=1 || C5=0
@@ -196,7 +195,7 @@ if [ "$_rc" != 0 ]; then
     exit 0
 fi
 
-llog "===== led_mgr v2.9 start (absolute-level drive + self-heal + 2s poll; svc_lib lock; pid=$$) ====="
+llog "===== led_mgr v3.0 start (absolute-level drive + self-heal + 2s poll; svc_lib lock; pid=$$) ====="
 BCN_LAST=""   # v1.6: 固件信标事件计数(RE实证三条权威标志)
 ST=""         # 仅用于日志: 状态串变化才写日志(灯写入已不依赖它)
 POLL=${LED_POLL:-2}

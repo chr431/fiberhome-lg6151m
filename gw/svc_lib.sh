@@ -1,5 +1,8 @@
 #!/bin/sh
-# svc_lib.sh v1.0 -- shared supervision, lock, heartbeat and minimal-parser library.
+# svc_lib.sh v1.1 -- shared supervision, lock, heartbeat and minimal-parser library.
+# v1.1 (2026-10-21 WiFi incident): hostapd liveness by LIVE control socket
+#   (/proc/net/unix) + our own config path; stale socket files and the vendor
+#   global hostapd no longer count as "our AP is up".
 #
 # Batch 3 (stability P0/P1 structural): one implementation for the primitives
 # that had been copied into every daemon and into watchdog:
@@ -117,25 +120,56 @@ svc_loopback_up() {
     case "$_f" in 0x*|0X*) ;; *) return 1 ;; esac
     [ $((_f & 1)) -ne 0 ] && [ $((_f & 8)) -ne 0 ]
 }
-# Active BSS = hostapd control socket present AND the BSS netdev is UP.
-# This is stricter than "iw dev shows type AP": it also proves the WPA layer
-# (hostapd) is serving the interface, which is the property we actually need.
+# A control-socket FILE can outlive its process: a SIGSEGV leaves the inode in
+# /var/run/hostapd/.  /proc/net/unix lists only sockets that still have a live
+# bound endpoint, so this distinguishes "hostapd is serving" from "a stale
+# socket file exists" (field failure 2026-10-21: the -S test kept the watchdog,
+# boot gate, GUI and LED all reporting healthy for 5.5h after hostapd died).
+svc_sock_live() { # $1=absolute socket path
+    [ -n "$1" ] || return 1
+    awk -v p="$1" '$NF==p{f=1} END{exit(f?0:1)}' /proc/net/unix 2>/dev/null
+}
+# Our AP hostapd: the instance started with /var/wlan/hap_*.conf.  `pidof
+# hostapd` is NOT usable here — the vendor global instance
+# (`hostapd -g /var/run/hostapd/global ...`) stays alive when ours is dead.
+svc_our_hostapd() { # prints pid(s); 0 if at least one is running
+    _found=1
+    for _p in /proc/[0-9]*/cmdline; do
+        [ -r "$_p" ] || continue
+        _c=$(tr '\0' ' ' < "$_p" 2>/dev/null)
+        case "$_c" in
+        *hostapd*/var/wlan/hap_*) _pid=${_p#/proc/}; echo "${_pid%/cmdline}"; _found=0 ;;
+        esac
+    done
+    return $_found
+}
+# Active BSS = a LIVE hostapd control socket AND the BSS netdev is UP.
+# This is stricter than "iw dev shows type AP": it proves the WPA layer is
+# actually serving the interface, which is the property we need.
 svc_bss_count() {
     _n=0
     for _i in ra0 rai0 ra1 rai1; do
-        [ -S "/var/run/hostapd/$_i" ] || continue
+        svc_sock_live "/var/run/hostapd/$_i" || continue
         svc_link_up "$_i" || continue
         _n=$((_n + 1))
     done
     echo $_n
 }
-# hostapd itself: process + both primary control sockets + both links UP.
-# hostapd_cli is no longer part of the health decision (it segfaulted twice
-# in the field); it stays available as a diagnostic only.
+# Live control sockets of the AP interfaces, for logs ("none" when all stale).
+svc_live_socks() {
+    _s=""
+    for _i in ra0 rai0 ra1 rai1; do
+        svc_sock_live "/var/run/hostapd/$_i" && _s="$_s$_i "
+    done
+    echo "${_s:-none}"
+}
+# hostapd itself: our process + both primary live sockets + both links UP.
+# hostapd_cli is not part of the health decision (it segfaulted twice in the
+# field); it stays available as a diagnostic only.
 svc_hostapd_up() {
-    pidof hostapd >/dev/null 2>&1 || return 1
-    [ -S /var/run/hostapd/ra0 ] || return 1
-    [ -S /var/run/hostapd/rai0 ] || return 1
+    svc_our_hostapd >/dev/null 2>&1 || return 1
+    svc_sock_live /var/run/hostapd/ra0 || return 1
+    svc_sock_live /var/run/hostapd/rai0 || return 1
     svc_link_up ra0 && svc_link_up rai0
 }
 # Zombie count from /proc/*/stat (state is the field after the last ')').

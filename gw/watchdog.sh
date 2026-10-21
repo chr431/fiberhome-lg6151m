@@ -1,5 +1,8 @@
 #!/bin/sh
-# watchdog.sh v1.29 -- on-device continuous invariant monitor.
+# watchdog.sh v1.30 -- on-device continuous invariant monitor.
+# v1.30 (2026-10-21 WiFi incident): hostapd liveness by LIVE control sockets
+#   (/proc/net/unix) + our own config path; recovery removes stale sockets and
+#   no longer refuses when none exist.
 # v1.29 (2026-10-20 stability batch3): primitives moved to svc_lib.sh
 #   (lock/heartbeat/2-of-3/rate-limit/port probe + minimal sysfs parsers);
 #   SVC_TABLE moved there and now includes dial_keeper; remaining dynamic
@@ -443,18 +446,19 @@ $(printf '%s\n' "$SVC_TABLE" | sed '/^[[:space:]]*$/d')
 EOF
 
     # ---- hostapd: WPA layer; 3-strike + tool-fault separation ----
-    # v1.29: health decision no longer depends on hostapd_cli (two field
-    # segfaults).  Primary predicate = process + both control sockets + both
-    # BSS links UP (svc_hostapd_up).  hostapd_cli is called once as a bounded
-    # diagnostic when the predicate fails, so a tool crash only lands in the
-    # toolfault ledger.
+    # v1.30 (2026-10-21 WiFi incident): liveness = OUR hostapd (config path
+    # /var/wlan/hap_*) + LIVE control sockets from /proc/net/unix.  A crash
+    # leaves the socket FILE behind, so the old -S test plus `pidof hostapd`
+    # (which matched the vendor global instance) reported healthy for hours
+    # while the AP was dead.  Recovery no longer refuses when no socket exists:
+    # that is exactly the post-crash state, and refusing blocked every repair.
     _ha=0; _htool=0; _hrc=0
     if svc_hostapd_up; then
         _ha=1
-    elif pgrep -f 'hostapd -B' >/dev/null 2>&1; then
+    elif svc_our_hostapd >/dev/null 2>&1; then
         _hs=$(tmo 5 "hostapd_cli -i ra0 status"); _hrc=$?
         if printf '%s' "$_hs" | grep -q '^state=ENABLED'; then
-            log "WARN  hostapd: cli ENABLED but bss predicate failed (bss=$(svc_bss_count))"
+            log "WARN  hostapd: cli ENABLED but live-socket predicate failed (bss=$(svc_bss_count) live=$(svc_live_socks))"
         fi
         if is_toolfault "$_hrc"; then
             _htool=1
@@ -464,7 +468,7 @@ EOF
     if [ "$_ha" = 1 ]; then
         set_state hostapd 0 "hostapd WPA layer"
         strike_clear hostapd
-    elif [ "$_htool" = 1 ] && pgrep -f 'hostapd -B' >/dev/null 2>&1; then
+    elif [ "$_htool" = 1 ] && svc_our_hostapd >/dev/null 2>&1; then
         # control path unusable but daemon alive: retry-safe, alert-only
         set_state hostapd 1 "hostapd WPA layer (control tool failed)"
         FAILS=$((FAILS + 1)); TOOLFAILS=$((TOOLFAILS + 1))
@@ -476,7 +480,7 @@ EOF
     else
         set_state hostapd 1 "hostapd WPA layer"
         FAILS=$((FAILS+1))
-        log "WARN  hostapd not ENABLED (pid=$(pgrep -f 'hostapd -B' | tr '\n' ' '))"
+        log "WARN  hostapd not serving (our_pid=$(svc_our_hostapd | tr '\n' ' ') live_socks=$(svc_live_socks) bss=$(svc_bss_count))"
         if strike hostapd; then
             _hn=0; _ht=0
             [ -r /tmp/watchdog_hostapd.rec ] && read _hn _ht < /tmp/watchdog_hostapd.rec
@@ -484,16 +488,17 @@ EOF
             case "$_hn" in ''|*[!0-9]*) _hn=0 ;; esac
             case "$_ht" in ''|*[!0-9]*) _ht=$_now2 ;; esac
             [ $((_now2 - _ht)) -gt 3600 ] && { _hn=0; _ht=$_now2; }
-            # independent confirmation before touching the radios
-            _sock=0
-            for _s in /var/run/hostapd/ra0 /var/run/hostapd/rai0 /var/run/wpa_supplicant/ra0; do
-                [ -S "$_s" ] && _sock=1
-            done
+            # independent confirmation before touching the radios: log the
+            # live sockets and the affected clients, but never refuse because
+            # the (stale) socket file is absent — a dead daemon must be repaired.
             _clients=$(svc_station_count ra0)
-            if [ "$_hn" -lt 3 ] && [ "$_sock" = 1 ]; then
+            if [ "$_hn" -lt 3 ]; then
                 _hn=$((_hn + 1)); echo "$_hn $_ht" > /tmp/watchdog_hostapd.rec
-                log "EVT recover hostapd (attempt $_hn/3 this hour; clients=$_clients ctrl_sock=$_sock live=$(pgrep -f 'hostapd -B' | tr '\n' ' '))"
-                for _p in $(pgrep -f 'hostapd -B' 2>/dev/null); do kill $_p 2>/dev/null; done
+                log "EVT recover hostapd (attempt $_hn/3 this hour; clients=$_clients live_socks=$(svc_live_socks) our_pid=$(svc_our_hostapd | tr '\n' ' '))"
+                for _p in $(svc_our_hostapd 2>/dev/null); do kill $_p 2>/dev/null; done
+                # a crashed daemon leaves a bound-socket file behind; the new
+                # instance must be able to bind the control interface
+                rm -f /var/run/hostapd/ra0 /var/run/hostapd/rai0
                 for _v in ra0 rai0 ra1 rai1; do ifconfig $_v down 2>/dev/null; done
                 sleep 3
                 brctl addif br-lan ra0 2>/dev/null
@@ -506,10 +511,8 @@ EOF
                     log "OK    hostapd recovered (bss=$(svc_bss_count); clients=$_clients must re-associate)"
                     set_state hostapd 0 "hostapd WPA layer"
                 else
-                    log "FAIL  hostapd recovery did not restore the BSS predicate (bss=$(svc_bss_count))"
+                    log "FAIL  hostapd recovery did not restore the live sockets (our_pid=$(svc_our_hostapd | tr '\n' ' ') live_socks=$(svc_live_socks) bss=$(svc_bss_count))"
                 fi
-            elif [ "$_sock" = 0 ]; then
-                log "WARN  hostapd down but no control socket — refusing RF bounce (alert only)"
             else
                 log "WARN  hostapd down; recovery budget exhausted (3/h) — alert only"
             fi

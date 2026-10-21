@@ -1,5 +1,8 @@
 #!/bin/sh
-# toolchain_init.sh v1.0 -- static userland bootstrap (SIGSEGV P2).
+# toolchain_init.sh v1.1 -- static userland bootstrap (SIGSEGV P2).
+#   v1.1 (census round): after busybox --install, override pidof/pgrep with
+#   /data/gw/bin/procmatch (static, no printf; busybox pidof ~2.7 crashes/day
+#   and its pgrep -x is quirky).  Falls back to busybox when missing.
 #
 # Background: every crash in the 2026-10-19 SIGSEGV family came from a vendor
 # binary dynamically linked against the vendor musl (grep/awk/sh/ip/...).
@@ -20,6 +23,7 @@ set -u
 
 BB=/data/gw/bin/busybox
 IP=/data/gw/bin/ip
+PM=/data/gw/bin/procmatch
 DIR=/data/gw/sbin
 TMP=$DIR.new
 OLD=$DIR.old
@@ -57,11 +61,19 @@ else
 fi
 ln -sf "$BB" "$TMP/sh"
 
+# pidof/pgrep: own static implementation (printf-free /proc scanner)
+if [ -x "$PM" ] && "$PM" -V >/dev/null 2>&1; then
+	ln -sf "$PM" "$TMP/pidof"
+	ln -sf "$PM" "$TMP/pgrep"
+else
+	say "WARN procmatch missing/not executable at $PM -- busybox pidof/pgrep used"
+fi
+
 # atomic-ish swap: old farm aside, new farm in place, old removed
 [ -d "$DIR" ] && mv "$DIR" "$OLD"
 mv "$TMP" "$DIR"
 rm -rf "$OLD"
 
 _n=$(ls "$DIR" | wc -l)
-say "farm ready: $_n applets, busybox=$BB ip=$IP"
+say "farm ready: $_n applets, busybox=$BB ip=$IP pm=$PM"
 exit 0

@@ -2158,6 +2158,22 @@ def t_batch4_awk_arrays():
            % (hits, dl, ak, lv, ls[-80:]))
 
 
+@test("census batch: pidof/pgrep 自研替代在位 (procmatch)")
+def t_batch4_procmatch():
+    # busybox pidof is ~2.7 crashes/day (logs/ne_events.tsv) and pgrep -x is
+    # quirky; the farm now points pidof/pgrep at the static, printf-free
+    # procmatch.  Guard: version, farm resolution, and live behaviour.
+    v = dev("/data/gw/bin/procmatch -V 2>/dev/null").strip()
+    rd_pid = dev("readlink /data/gw/sbin/pidof 2>/dev/null").strip()
+    rd_pg = dev("readlink /data/gw/sbin/pgrep 2>/dev/null").strip()
+    pid = dev("pidof logd 2>/dev/null").strip()
+    pg = dev("pgrep -f 'log_keeper[.]sh' 2>/dev/null").strip()
+    ok = (v == "procmatch 1.0" and rd_pid.endswith("/procmatch")
+          and rd_pg.endswith("/procmatch") and pid != "" and pg != "")
+    record(t_batch4_procmatch._test_name, "system", ok,
+           "ver=%s pidof=%s pgrep=%s logd=[%s] lk=[%s]" % (v, rd_pid, rd_pg, pid, pg))
+
+
 @test("stability batch3: 统一监督/锁/心跳 + netcfg 串行化 + logc fuzz")
 def t_p2_batch3():
     # Structural batch 3 (2026-10-20): one supervision/lock/heartbeat library,

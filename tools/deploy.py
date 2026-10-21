@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""deploy.py v2.25 -- single source of truth for PC<->CPE deployment + drift guard.
+"""deploy.py v2.26 -- single source of truth for PC<->CPE deployment + drift guard.
 
+v2.26 (census round): MANIFEST +gw/bin/procmatch (pidof/pgrep drop-in).
 v2.25 (SIGSEGV family round): MANIFEST +gw/bin/logcut (log_keeper delta()
 replaces busybox awk arrays; see docs/SIGSEGV_ANALYSIS.md section 11).
 v2.24 (batch3): MANIFEST +svc_lib.sh/netlock.sh (the shared supervision and
@@ -60,6 +61,7 @@ MANIFEST = [
     ("gw/bin/ip", "/data/gw/bin/ip"),                   # static iproute2 6.3.0 (P2)
     ("gw/bin/logc", "/data/gw/bin/logc"),               # static syslog collector (P1)
     ("gw/bin/logcut", "/data/gw/bin/logcut"),           # static anchor-tail cutter (replaces awk arrays)
+    ("gw/bin/procmatch", "/data/gw/bin/procmatch"),     # static pidof/pgrep (printf-free /proc scan)
     ("gw/v3_rc10.extend.sh", "/data/gw/rc19.sh"),         # rc19v2: br-lan+wifi+wan stack
     ("gw/wifi_macplan.sh", "/data/gw/wifi_macplan.sh"),  # factory MAC plan (wifi_up BSSIDs + api uplink native-MAC restore; v1.29 split)
     ("gw/wifi_autoch.sh", "/data/gw/wifi_autoch.sh"),    # auto-channel scanner (wifi_up CH=0 path; v1.29 split)

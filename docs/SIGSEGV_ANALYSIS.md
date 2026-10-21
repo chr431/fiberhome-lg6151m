@@ -823,3 +823,116 @@ core_pattern = |/data/gw/core_meta.sh %p %s %u %g
 3. `sleep` 同源性确认；
 4. 厂商动态件（hostapd/logd/thermal_core）不可替换，靠恢复。
 
+
+## 13. 2026-10-22 凌晨：P0 攻坚 —— 从复现器到"崩溃消除"的硬化补丁
+
+本轮目标是把 §12 的"机制定性"推进到可交付形态。结论先说：**崩溃已经可以用一个
+musl 侧补丁彻底消除（对重新链接的二进制），但写入者仍未钉死**；窗口已被压到
+`snprintf` 的 `va_start` 之后、`vfprintf` 的 `va_copy` 之前，也就是
+**va_list 的按值传递副本**这一段。
+
+### 13.1 方法：先校准仪器，再谈结论
+
+| 仪器 | 作用 | 位置 |
+|---|---|---|
+| `p0probe` | 10 个模式一次跑完：自有可变参数 / printf 各形态 / 控制组 | `tools/oneoff/printf_repro/` |
+| `p0probe2..5` | 进程内 SIGSEGV dump（寄存器、PC、PC 处 32 字节、栈窗口、按寄存器指针取区） | 同上 |
+| `p0cal` | **仪表校准**：用已知寄存器/栈炮制一次 fault，逐字段核对 dump | 同上 |
+| `layerchk/` | 用本地副本覆盖 musl 的 `snprintf/vsnprintf/vfprintf`，在每层加 va_list 检查点 | 同上 |
+| `pfscope` | 同一 guard 套在自有可变参数上，比较污染率 | 同上 |
+
+校准中发现并修掉的**仪器自身缺陷**（否则后续结论全是假的）：
+
+1. 行缓冲 `char b[96]` 装不下 173 字节的 32 字节行 → 处理器把 dump 写花；
+   改 `b[256]` + 固定两位十六进制。
+2. `mcontext` 字段名在 musl aarch64 上是 `regs[31]`/`sp`/`pc`/`fault_address`。
+3. 取 `&ap` 对**参数位**的 va_list 会让编译器物化副本（实测 `&ap` 与被调方
+   看到的对象相差 0x200）→ 只在"局部 va_list"或"本来就是指针参数"处校验。
+4. 信号处理器的 `SA_ONSTACK` 在该设备上未生效（`sp_in_alt=0`），
+   但数据段 altstack 已申请，后续以"不依赖 altstack"的方式取样。
+
+校准结果（`/data/p0/cal.txt`）：`si_addr=0x3000`、`fault_address=0x3000`、
+`x10/x11=0x1111…`、`x12=0x3000`、PC 处就是那条 `ldr x13,[x12]`、栈窗口里能读到
+预置的 `0x33…`/`0x11…` 图案 —— 仪表可信。
+
+### 13.2 决定性事实
+
+| # | 事实 | 证据 |
+|---|---|---|
+| 1 | **自有可变参数不崩**：`vsum(1,i)`/`vsum(9,…)`/`vderef` 各 5e7 次 0 崩溃；`vsum` 3e8 次 + 同 guard 检查 **bad=0** | `result2.txt`、`p0devices/` |
+| 2 | **printf 家族全崩**：`%ld`/`%s`/`%e`/`sprintf`/`snprintf(n=0)`/常量参数/静态缓冲 | `result2.txt` |
+| 3 | **纯字面量不崩**：`snprintf(b,24,"abc")` 5e7 次通过 → 与"整数转换路径"强相关 | `result2.txt` |
+| 4 | 崩溃点恒定 `pop_arg`（type=13=PA_LONG）`ldr x8,[x8]`，x8 = `__gr_top+__gr_offs` 或 `[ap]` | 四份 probe4 dump，PC 符号解析 |
+| 5 | `ap == &ap2`（`delta=0`）：pop_arg 用的就是 vfprintf 自己那份 va_list，**不存在指针传错** | `rec.log` |
+| 6 | **第一个变坏的检查点是 `after_va_copy`** → 坏源在调用方（`snprintf` 的 va_list），不是 printf_core 内部 | `cp.log` |
+| 7 | 健康基线：`{__stack=栈地址, __gr_top=栈地址, __vr_top=栈地址, __gr_offs=-48, __vr_offs=-128}` | `pfchk3` baseline |
+| 8 | 坏块形态：**16 字节**被写成类 `{i<<32|0x680, 0}` 的值，落在偏移 0..15 或 16..31 都见过 | `layer.txt`、`dump.*` |
+| 9 | 污染率（guard 命中/调用）：15/2e8 = **7.5e-8**；22/3e8 = **7.3e-8** | `ab.log`、`rec.log` |
+| 10 | SIMD/拷贝代码生成无关：`-mgeneral-regs-only` + 逐字节拷贝的"无副本链"3×1e8 通过（对照同样通过，样本不足以证明差异） | `n.log`/`g.log` |
+
+**对 §12 的一处更正**：`__vr_top = 0x1c28416e00000680` 曾被当作"污染指纹"，
+但本轮在各类坏块里看到同一个 64 位值的**高 32 位就是循环计数器**（如
+`0x0998010a`、`0x1c28416e`），且它在 va_list 的不同偏移出现过。因此指纹
+不成立，判据只能是结构性的：**四个字段是否都指向用户态可访问范围、两个偏移是否
+都为负**。这同时解释了为什么 `sh`/`grep`/`pidof` 等"看起来不同"的崩溃其实是同一形态。
+
+### 13.3 硬化补丁（本轮可交付物）
+
+`layerchk/h_vfprintf.c`：musl `vfprintf.c` 原样 + `pop_arg` 入口 5 行 guard
+
+```c
+#define P0_VA_SANE(ap) ((unsigned long)(ap)->__stack >= 0x1000UL && \
+    (unsigned long)(ap)->__gr_top >= 0x1000UL && \
+    (unsigned long)(ap)->__vr_top >= 0x1000UL && \
+    (ap)->__gr_offs < 0 && (ap)->__vr_offs < 0)
+...
+static void pop_arg(union arg *arg, int type, va_list *ap)
+{
+	if (!P0_VA_SANE(ap)) { __p0_va_guard_hits++; arg->i = 0; return; }
+	...
+```
+
+- 阈值 0x1000 低于 `mmap_min_addr`，正常的栈/寄存器保存区永远不会被误判。
+- 命中时输出 0 而不是解引用野指针 —— 代价是 1e-8 量级的错误数字，远小于一次 SIGSEGV。
+- **链接方式**（关键）：把该文件编成 `hardened_vfprintf.o` 放在 libc **之前**，
+  `snprintf → vsnprintf → vfprintf` 整条链自动获得保护：
+
+```sh
+zig cc -target aarch64-linux-musl -O2 -D_GNU_SOURCE \
+  -I<musl>/src/internal -I<musl>/src/include -I<musl>/include \
+  -I<musl>/arch/aarch64 -I<musl>/arch/generic \
+  -c hardened_vfprintf.c -o hardened_vfprintf.o
+zig cc -target aarch64-linux-musl -O2 -static prog.c hardened_vfprintf.o -o prog
+```
+
+A/B（同一台设备、同一循环、2e8 次 `snprintf("%ld")`）：
+
+| 构建 | 结果 |
+|---|---|
+| 硬化 | `survived calls=200000000 guard_hits=15`，rc=0 |
+| 控制（stock libc） | `Segmentation fault (core dumped)`，rc=139 |
+
+同一补丁也解释了本轮"为什么 §12.7 的十次尝试全部失败"：那些尝试都在改
+`vfprintf.c` 的**逻辑**，而坏值在进入 `vfprintf` 之前就已经在 va_list 里了；
+只有"先校验再解引用"才有效。
+
+### 13.4 仍未闭环（诚实清单）
+
+1. **写入者**：窗口已压到"调用方 va_start 之后、vfprintf va_copy 之前"，即
+   32 字节 va_list 的**按值传递副本**；坏块是 16 字节、内容含循环变量形态。
+   下一步是把检查点推进到 `vsnprintf` 入口/出口与调用方 outgoing 区，
+   或对该 outgoing 区下硬件观察点（PTRACE `NT_ARM_HW_WATCH`）。
+2. **是否与编译器有关**未定：本轮所有实验都用 zig/clang 构建；gcc 侧只有历史
+   core 的间接证据（Alpine busybox 同签名）。
+3. **busybox / iproute2 无法重新链接**，硬化补丁对它们无效 → P1（换组件）仍是
+   这两块的唯一出路。
+
+### 13.5 证据索引（本地，不入仓）
+
+`_local/archive/stability_2026-10-21/p0devices/`：`rec.log`（ap==ap2 + 坏字）、
+`cp.log`（首坏检查点 = after_va_copy）、`ab.log`（硬化 15 命中 0 崩溃 vs 控制组
+段错误）、`pchk.log`（layer 检查点原始记录）、`n.log`/`g.log`（SIMD A/B）、
+`cal.txt`（仪表校准）、`snapshot.txt`。
+`_local/archive/stability_2026-10-21/p0dumps/`：probe4/probe5 的 9 份现场 dump。
+工具源码：`lg6151m-public/tools/oneoff/printf_repro/`（`p0probe*.c`、`p0cal.c`、
+`layerchk/`）。

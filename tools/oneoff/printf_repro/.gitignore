@@ -1,0 +1,3 @@
+# build outputs of the P0 instrument set (never committed)
+out/
+*.o

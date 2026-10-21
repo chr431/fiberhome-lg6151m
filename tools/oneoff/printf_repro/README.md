@@ -52,3 +52,38 @@ M=<zig>/lib/libc/musl
 1. 用 zig **从源码构建 musl**，对比 **libc 自身** `-O0/-O1/-O2`（此前只换过程序的优化级别，libc 一直是预编译 -O2）；
 2. 用不取地址的字节比较或硬件观察点钉死写入指令；
 3. 拿到写入者后再决定补丁形态（musl 侧 vs 编译器侧）。
+
+## 2026-10-22 追加：P0 攻坚套件（分层二分 + 硬化补丁）
+
+§12 的"musl printf va_list 污染"已经用下面的仪器收敛到可交付形态，结论正文见
+`docs/SIGSEGV_ANALYSIS.md` §13。
+
+| 文件 | 用途 |
+|---|---|
+| `p0probe.c` | 10 模式矩阵：自有可变参数 / `%ld` / `%s` / `%e` / `sprintf` / n=0 / 常量参数 / 静态缓冲 / 控制组 |
+| `p0probe2.c` | 加进程内 SIGSEGV dump（寄存器、PC、PC 处 32 字节、栈窗口） |
+| `p0probe3.c` | dump 增加"按寄存器指针取 96 字节" |
+| `p0probe4.c` | 修掉行缓冲溢出（`b[96]`→`b[256]`），固定两位十六进制 |
+| `p0probe5.c` | 直调 `vfprintf` 的模式（判断是否与 vsnprintf 层有关） |
+| `p0cal.c` | **仪表校准**：炮制已知 fault，逐字段核对 dump。改 dump 后必跑 |
+| `layerchk/` | 覆盖 musl stdio 三层的检查点（`p0chk.h` 的 `CHK` 宏）+ 显式无副本链（`my3_vfprintf.c`）+ 硬化补丁（`h_vfprintf.c`） |
+
+### 复现"污染被拦下"的最小闭环
+
+```sh
+# 1) 编硬化版（pop_arg 入口 5 行 guard，见 §13.3）
+sh layerchk/build.sh            # 产出 layerchk/out/{pfguard,pfctl,pfrec,pfcp,pfscope,pfchk3}
+# 2) 推设备（走 deploy.py put），跑 A/B
+/data/p0/pfguard 200000000      # survived calls=200000000 guard_hits=15
+/data/p0/pfctl   200000000      # Segmentation fault (core dumped)
+```
+
+### 关键教训（避免重犯）
+
+1. **先校准 dump 再下结论**。本轮最初的"寄存器与内存矛盾"全部是处理器自己的
+   行缓冲溢出造成的假象。
+2. 取 `&ap` 对**参数位** va_list 会物化副本（实测差 0x200），校验点要放在
+   局部 va_list 或指针参数上。
+3. `__vr_top = 0x1c28416e00000680` **不是**指纹：高 32 位是循环计数器形态的值，
+   会出现在任意偏移。判据必须是"字段是否指向用户可访问范围 + 偏移是否为负"。
+4. 改 `vfprintf.c` 的逻辑无效 —— 坏值在进入它之前就在 va_list 里了。

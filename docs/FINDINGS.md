@@ -949,18 +949,12 @@ ttyCMIPC 端口开合回声。这些模式在**持久镜像落盘前丢弃**（�
 （踢狗何时停止是复位取证的关键）。dmesg 镜像容量 2MB→4MB。实测效果：syslog
 增速 ~4MB/天 → ~0.4MB/天（4MB 上限≈10 天历史），dmesg 增速降约 60%。
 
-**2026-10-19 SIGSEGV 家族与 eth0 误报**：详见 `docs/INCIDENT_2026-10-19.md`。
-要点：厂商 logread 在 `ctime→asctime_r→snprintf→vfprintf` 路径上、对含**开机期记录**
-的 syslog 环有 ~1%/次运行的 SIGSEGV（三份未加密 core 同 PC；清环后 2500 次 0 崩）；
-wan_agg 被子命令 SIGSEGV 打死后 `/tmp/wan_alive` 停更，导致 WAN 灯/GUI 误报有线离线；
-watchdog v1.18–v1.21 补齐 hostapd/wan_agg/fan_mgr 自愈与单实例锁。
+**SIGSEGV 家族（长期）**：机制、判据、速率与证据全部集中在
+`docs/SIGSEGV_ANALYSIS.md`（§0.5 一页总表；历史轮次 §10–§13）。本文不再复述机制，
+只留两条项目相关的现场事实：
 
-**SIGSEGV 家族根治（2026-10-19 晚轮，P1–P4）**：根因是厂商 logread 对 logd
-记录流只信长度字段（无帧校验）+ 厂商 musl 的受限 printf/ctime 路径；族员
-（grep/awk/sh/ip）全部动态链厂商 musl。落地：① 静态 `logc` 采集器（同 ubus fd
-流，逐帧/逐属性校验+重同步+时间戳范围断言，输出与 logread 逐字节一致）；
-② 静态 busybox 1.36.1 + 静态 iproute2 6.3.0，`/data/gw/sbin` 农场经 rc.extend
-前置 PATH，全部常驻守护改用静态解释器/工具；③ 每日 03:20 core 捕获窗口；
-④ watchdog 增加 aee `db_history` 行增量判据（dmesg DABT 被 printk 限流会低估）。
-真机三次冷启动验证，全量 selftest 87 pass / 0 fail。详见
-`docs/SIGSEGV_ANALYSIS.md` §7/§9 与 `docs/INCIDENT_2026-10-19.md` §8。
+1. 子命令被信号打死会让「存在性」判据说谎 —— `/tmp/wan_alive` 停更导致 WAN 灯/GUI
+   误报有线离线，残留套接字文件导致 WiFi「一切正常」（处置见
+   `docs/INCIDENT_2026-10-19.md`、`docs/INCIDENT_2026-10-21_WIFI.md`）。
+2. watchdog v1.19–v1.21 因此补齐 hostapd/wan_agg/fan_mgr 自愈与单实例锁
+   （版本理由见 `docs/ARCHITECTURE.md`）。

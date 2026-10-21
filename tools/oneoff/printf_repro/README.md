@@ -1,8 +1,8 @@
 # printf_repro — musl snprintf 崩溃最小复现（2026-10-21 取证轮）
 
-> 一次性取证资产（oneoff，不登记）。结论正文见
-> `docs/SIGSEGV_ANALYSIS.md` §12，证据存档见
-> `_local/archive/stability_2026-10-21/`。
+> 一次性取证资产（oneoff，不登记）。**机制结论只看
+> `docs/SIGSEGV_ANALYSIS.md`（§0.5 总表 → §12 → §13）**；本文件只说明"怎么复现"。
+> 证据存档见 `_local/archive/stability_2026-10-21/`。
 
 ## 复现
 
@@ -17,11 +17,8 @@ sh tools/oneoff/printf_repro/build.sh /tmp/printf_repro_out
 
 ## 现场
 
-- 崩溃点：`pop_arg` 的 va_arg；`ap->__gr_top = 0`、`__stack` 是小整数；
-  整个 va_list（32 B）被写成 `{小整数, 0, 0x1c28416e00001180, 0}`。
-- 该高 32 位 `0x1c28416e` 与 logc v1.3 的旧 core **完全相同** → 同一缺陷。
-- 帧布局：`nl_type` 在 `ap2` 下方 0x30 字节，`nl_type[12..15]` 正压在
-  `ap2.__stack/__gr_top` 上。
+崩溃点、坏块形态、健康基线与判据见 `docs/SIGSEGV_ANALYSIS.md` §12.3/§13.2
+（含"哪些当时的判断已被推翻"）。一句话：崩在 `pop_arg` 的 va_arg。
 
 ## 覆盖 libc 的迭代环（P0 方法）
 
@@ -47,11 +44,10 @@ M=<zig>/lib/libc/musl
 | 目标缓冲 4096 / `%d` / 固定值 | 各 5/5 崩 → 与值、格式、缓冲大小无关 |
 | 诊断链（三层 va_list 校验） | 报告 va_list 进 vfprintf 时已坏；但"取 &ap 再校验"会被编译器物化副本，观测失真 |
 
-## 下一步
+## 下一步（2026-10-22 更新）
 
-1. 用 zig **从源码构建 musl**，对比 **libc 自身** `-O0/-O1/-O2`（此前只换过程序的优化级别，libc 一直是预编译 -O2）；
-2. 用不取地址的字节比较或硬件观察点钉死写入指令；
-3. 拿到写入者后再决定补丁形态（musl 侧 vs 编译器侧）。
+第 1、2 条已做（分层二分 + 不取地址的校验）。结论、缺口与剩余步骤见
+`docs/SIGSEGV_ANALYSIS.md` §13.2/§13.4（本文不复述机制）。
 
 ## 2026-10-22 追加：P0 攻坚套件（分层二分 + 硬化补丁）
 

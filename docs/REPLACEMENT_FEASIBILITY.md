@@ -47,14 +47,10 @@
 
 ### 0.5.1 新事实
 
-"机制未知"的那一类崩溃已经定性：**就是 musl 的 printf/stdio va_list 缺陷**
-（详见 `docs/SIGSEGV_ANALYSIS.md` §12）。要点：
-
-- 20 行最小复现器（反复 `snprintf(buf,24,"%ld",i)`）在设备上 **2 秒内必崩**，
-  `-O0/-O1/-O2` 全崩 —— 与程序、优化、日志数据无关；
-- 崩溃时 `vfprintf` 帧内的 va_list 被写成小整数（`__gr_top=0`、`__stack` 垃圾），
-  与 logc v1.3、busybox 的 `sh` 两份 core **逐字段同签名**；
-- 金丝雀（只 `return 0` 的静态程序）30 万次 0 崩 —— 不存在"与程序无关的背景率"。
+"机制未知"的那一类崩溃已定性为 **musl printf/stdio 的 va_list 缺陷**，
+机制、判据、速率与证据全部集中在 `docs/SIGSEGV_ANALYSIS.md`（§0.5 总表 → §12 → §13）。
+本节不再复述，只引用两条与本方案直接相关的结论：**① 它与日志数据/程序优化无关；
+② 修它（前置校验补丁）覆盖的崩溃量是"逐个换组件"的 2.5 倍**。
 
 ### 0.5.2 因此排序要改
 
@@ -70,9 +66,9 @@
 
 ### 0.5.3 修订后的路线
 
-- **P0（立即）**：用最小复现器定位 musl 的写入者（观察点已收敛到
-  `vfprintf` 的 `va_copy`/`nl_type` 邻接区），做候选补丁；每轮用
-  复现器 + `sh` fork 循环 + 全量 selftest 验证。
+- **P0（进行中，状态见 SIGSEGV_ANALYSIS.md §13）**：最小复现器 + 分层二分已把窗口压到
+  "调用方 `va_start` 之后、`vfprintf` 的 `va_copy` 之前"；**前置校验补丁已把崩溃消除**
+  （A/B：硬化 0 崩溃 / 对照 SIGSEGV），但**写入者仍未定位**；重编 busybox/ip 尚未做。
 - **P0.5**：用打好补丁的 musl 重编 `gw/bin/busybox`、`gw/bin/ip` 与全部自研工具；
   跑 24h 崩溃台账对比（目标：`sh/grep/pidof` 的 NE 归零）。
 - **P1（仅在 P0 失败时启动）**：按原方案做 netq + pidof/ping/ls/sleep 自研，
@@ -92,27 +88,15 @@
 
 ## 1. 崩溃现状（干净窗口，次/天）
 
-| 组件 | 归属 | 次数 | 速率 | 用户可见性 |
-|---|---|---|---|---|
-| awk | 自建 busybox | 27 | 18.4/d | 低（日志镜像缺口；**本轮已修**） |
-| ip | 自建 iproute2 | 17 | 11.6/d | 低（守护单次读数失败，下一轮重试） |
-| sh + busybox(sh) | 自建 busybox | 7 | 4.8/d | 中（守护整轮中断，watchdog ≤1 周期重启） |
-| grep | 自建 busybox | 4 | 2.7/d | 低（单次过滤失败） |
-| pidof | 自建 busybox | 4 | 2.7/d | 低（单次判活失败） |
-| ? | 未知 | 3 | 2.0/d | 未知（进程在 core_meta 读取前已不可见） |
-| hostapd(wpad) | 官方 | 2 | 1.4/d | **高**（WiFi 全断，直到 watchdog/人工恢复） |
-| iptables | 官方(slot B 的 xtables) | 1 | 0.7/d | 低（规则写入失败，下一轮重试） |
-| logread | 官方 | 1 | 0.7/d | 低（仅 aee 转储时） |
-| ping / ls / sleep | 自建/官方 busybox | 各 1 | 各 0.7/d | 低 |
-| **合计** | | **69** | **46.9/d** | |
+**唯一权威表在 [SIGSEGV_ANALYSIS.md](SIGSEGV_ANALYSIS.md) §14**（含 69 次事件、
+派生基线 ≈28.5 次/天、以及"引用速率时用哪三条口径"）。本节不复述数字。
 
-> 注：awk 的 27 次全部发生在 log_keeper v2.7 之前；修复后该项预期归零。
-> 因此"当前基线"约为 **28.5 次/天**。logc 本体已连续约 1 小时零崩溃（此前约 7 次/小时）。
+与本方案相关的三条判读（不随窗口变化）：
 
-**结论：按用户可见性排序，唯一的高影响项是 hostapd（不可替换），其余都是"短命工具
-单次失败 + 监督重启"的低影响噪声。** 替换方案的主要收益是日志完整性与噪声，而不是可用性。
-
----
+- **用户可见性最高的是 hostapd（不可替换）**，其余都是"短命工具单次失败 + 监督重启"
+  的低影响噪声 —— 替换方案的主要收益是日志完整性与噪声，而不是可用性。
+- ip 与 busybox 小程序合计 ≈17/47 次/天，是"换组件"能拿到的上限。
+- A 类（musl printf）≈40/47 次/天，且换组件拿不到（`sh`/grep/pidof 仍在同一 libc 上）。
 
 ## 2. "自研"的四种粒度（避免把"自研"等同于"从零写"）
 
@@ -153,22 +137,23 @@
 ## 4. 关键技术约束
 
 ### 4.1 运行库：静态 musl 不免疫
-三个已实锤的反例：
-- `logc` v1.3：崩溃在 **musl `strftime → snprintf("%0*lld") → vfprintf`** 的 va_list 污染；
-- 静态 busybox `awk`：**busybox 自身**的数组释放路径在退出时 NULL 解引用（约 1%/次，
-  空数组/满数组都中）；
-- 静态 iproute2 `ip`：`filter.label` 这个 .bss 全局被写成小整数 `0x157c0`，在
-  `fnmatch` 里当指针解引用。
+
+三个反例（logc 的 musl printf、busybox awk 的数组退出清理、iproute2 的
+`filter.label` 越界写）的机制与证据见 `docs/SIGSEGV_ANALYSIS.md` §10/§11/§13 ——
+结论只有一句：**静态链接只切断"厂商 libc"，不切断 musl/组件自身的缺陷**。
 
 因此自研件必须遵守**受限运行时规范**（已在 logc v1.4 / logcut v1.0 落地）：
+
 - 热路径禁用 `printf/snprintf/strftime` 家族与 locale；用有界手写格式化；
 - 解析器不用动态数组/哈希，不信任任何长度字段；先校验后使用；
 - 固定上限 + 显式边界；每个工具自带 `--selftest`，解析类再加 fuzz；
 - 每个工具装 SIGSEGV/SIGBUS handler 写面包屑（`logc` 先例），可选 core 窗口；
 - 静态链接、`-fstack-protector-all`、无多线程、无 dlopen。
+- 若确实需要 libc 的 printf（第三方代码），把
+  `hardened_vfprintf.o`（SIGSEGV_ANALYSIS.md §13.3）放在 libc 之前链接。
 
-**但要诚实**：`sleep 1`（不做格式化、不做解析）也崩过一次，说明还存在我们尚未命名的
-机制。替换方案降低的是"已知三类"的暴露，不是全部。
+**但要诚实**：`sleep 1`（不做格式化、不做解析）也崩过，机制尚未命名
+（SIGSEGV_ANALYSIS.md §13.4 第 3 条）。替换方案降低的是"已知三类"的暴露，不是全部。
 
 ### 4.2 迁移机制：现成的 drop-in 农场
 `gw/toolchain_init.sh` 已经建立 `/data/gw/sbin` 符号链接农场（busybox --install -s），
@@ -305,9 +290,10 @@ logc v1.4（printf-free）、logcut v1.0（awk 数组移除）、log_keeper v2.7
   busybox）；selftest v2.58 断言版本/农场解析/实跑；系统自检 **33/33**。
 - 覆盖：pidof 约 2.7 次/天。
 
-**P0（进行中，尚无补丁）**：复现器 + 覆盖链 + 5 组候选/变量实验，全部仍崩；
-已把范围压到"va_list 传递/构造环节"，下一步用**从源码构建的 musl**对比
-libc 自身优化级别（详见 `docs/SIGSEGV_ANALYSIS.md` §12.7）。
+**P0（有补丁，写入者未定位）**：状态、A/B 数据与补丁形态见
+`docs/SIGSEGV_ANALYSIS.md` §13（§13.3 补丁、§13.4 仍未闭环）。一句话：
+前置校验已把该类崩溃消除（硬化 rc=0 / 对照 SIGSEGV），但"是谁写坏的"还没钉死，
+且 busybox/ip 无法重链接。
 
 **P1 剩余**：netq（ip 只读）、ping、sleep、ls——按原计划继续。
 

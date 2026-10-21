@@ -133,13 +133,24 @@ svc_sock_live() { # $1=absolute socket path
 # hostapd` is NOT usable here — the vendor global instance
 # (`hostapd -g /var/run/hostapd/global ...`) stays alive when ours is dead.
 svc_our_hostapd() { # prints pid(s); 0 if at least one is running
+    # Identity is argv[0] == hostapd (or */hostapd), the config path in argv,
+    # and exe ending in wpad/hostapd.  A mere match of the strings anywhere in
+    # a shell/grep command line is NOT our daemon (that once made a manual
+    # check kill its own shell and could make recovery kill bystanders).
     _found=1
     for _p in /proc/[0-9]*/cmdline; do
         [ -r "$_p" ] || continue
-        _c=$(tr '\0' ' ' < "$_p" 2>/dev/null)
+        _pid=${_p#/proc/}; _pid=${_pid%/cmdline}
+        _c=$(tr '\0' '\n' < "$_p" 2>/dev/null)
+        _a0=$(printf '%s\n' "$_c" | head -n1)
+        case "$_a0" in hostapd|*/hostapd) ;; *) continue ;; esac
         case "$_c" in
-        *hostapd*/var/wlan/hap_*) _pid=${_p#/proc/}; echo "${_pid%/cmdline}"; _found=0 ;;
+        *"/var/wlan/hap_2g.conf"*|*"/var/wlan/hap_5g.conf"*) ;;
+        *) continue ;;
         esac
+        _exe=$(readlink "/proc/$_pid/exe" 2>/dev/null)
+        case "$_exe" in */wpad|*/hostapd) ;; *) continue ;; esac
+        echo "$_pid"; _found=0
     done
     return $_found
 }

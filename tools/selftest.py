@@ -2139,6 +2139,20 @@ def t_p1_logpipe():
            % (fore, noise, ps, psrc, bootga, bidw == bidc, stats, metn, met[:120]))
 
 
+@test("stability batch4: awk 空数组清空回归护栏 (SIGSEGV 家族)")
+def t_batch4_awk_arrays():
+    # busybox awk 1.36.1: creating/clearing an empty array at runtime
+    # (split("", A) / delete A) makes its exit cleanup dereference NULL in
+    # ~1% of runs (2026-10-21 core: ldr w0,[x19,#4] with x19=0).  A/B on the
+    # same 4MB syslog, 400 runs each: 4 crashes with either clear form,
+    # 0 without.  Guard every deployed script, not just log_keeper.
+    hits = dev("grep -lF 'split(\"\"' /data/gw/*.sh /data/gw/www/*.sh 2>/dev/null | wc -l").strip()
+    dl = dev("grep -cF 'delete B' /data/gw/log_keeper.sh 2>/dev/null").strip()
+    ok = (hits == "0" and dl == "0")
+    record(t_batch4_awk_arrays._test_name, "system", ok,
+           "split_empty_files=%s delete_B=%s" % (hits, dl))
+
+
 @test("stability batch3: 统一监督/锁/心跳 + netcfg 串行化 + logc fuzz")
 def t_p2_batch3():
     # Structural batch 3 (2026-10-20): one supervision/lock/heartbeat library,

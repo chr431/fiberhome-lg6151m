@@ -515,3 +515,91 @@ __gr_offs = -40, __vr_offs = -128  ← 正常（尚未弹过变参）
    会让 dropbear 进入"accept 后 EOF / 无 banner"的卡死态，SSH 不可恢复，
    只能 `sys_reboot`（GUI `/api/sys_reboot`，实测有效；reboot_sched 因当日
    `last` 去重不会触发）。取证脚本请限制并发、优先落 `/data`。
+
+## 11. 2026-10-21 第二轮：剩余家族成员（awk 空数组 → busybox 退出路径 NULL）
+
+> logc v1.4 之后，`logc_crash/` 不再增长（133 份为历史存量），但 `ne_events.tsv`
+> 里的**其他成员**仍在崩。本轮用受控 core 窗口抓到第一份非 logc 的 core，定位到
+> 一条与我们脚本直接相关的 busybox awk 缺陷并修复。
+
+### 11.1 家族普查（`ne_events.tsv`，75 次 core_meta 事件）
+
+| comm | 次数 | 备注 |
+|---|---|---|
+| awk | 27 | log_keeper 的 `delta()` 锚行抽取（本轮修复对象） |
+| ip | 17 | `ip -4 addr show` / `ip -o -4 addr show`（led_mgr/wan_agg） |
+| sh | 5 | busybox sh 解释器本体 |
+| grep | 4 | `grep -Fqx` 锚行预检、降噪过滤 |
+| pidof | 4 | watchdog 的 `pidof v3httpd` |
+| gdb | 3 | **取证工具自身**（我们跑 catcher 时） |
+| logd | 2 | 厂商 syslog 守护 |
+| hostapd | 2 | 厂商 wpad |
+| thermal_core / sleep / ls / ping / iptables / logread | 各 1 | 含 **`sleep 1`**（不做任何格式化） |
+| ? | 3 | core_meta 读不到 exe/args（进程已不可见） |
+
+分布是**全天稳态**（不是只在取证时）：10-20 各小时 1–9 次；取证循环期间会叠加
+（20:21–20:27 6 次，含 gdb 自身 3 次）。`sleep` 与 `?` 的存在说明这不是单一
+"printf 用得多"能解释的，家族**至少有两个以上独立缺陷**。
+
+### 11.2 受控 core 窗口（可复用方法）
+
+```
+SAVED=$(cat /proc/sys/kernel/core_pattern)
+echo '/tmp/cores/core.%e.%p' > /proc/sys/kernel/core_pattern
+ulimit -c 8192        # 核心很小(awk 200KB); NT_PRSTATUS 在最前, 截断也能取寄存器
+... 复现/等待 ...
+echo "$SAVED" > /proc/sys/kernel/core_pattern   # 任何退出路径都恢复
+```
+
+窗口开在 21:01，30 秒内 log_keeper 的 awk 自己崩了，得到
+`core.awk.9766`（204800 B）。**注意**：窗口期间 aee 拿不到 core，属已知取舍；
+core_trap 的每日窗口机制保持不变。
+
+### 11.3 core 现场
+
+```
+signal=11 si_code=1(SEGV_MAPERR) si_addr=4
+pc=0x491ab8  ldr w0,[x19,#4]      x19=0        ← NULL+4
+lr=0x4932d4
+调用点 0x4932d0: bl 0x491aa4      ← 上一个 bl 0x4919b8 的返回值直接传入, 未判空
+0x4919b8 返回 [node+0x18]（可能为 NULL, 调用方不检查）
+0x491aa4 遍历 node->items[i] 逐个 free, 最后把 node 清零
+```
+
+寄存器里是正在解析的日志文本（`x11..x17` 为 ASCII、`x8=0xfefefefefefefeff`
+是 strlen 的零字节掩码），说明崩溃发生在 **awk 退出清理**阶段，不是读行阶段。
+
+### 11.4 复现与对照（决定性）
+
+用 log_keeper `delta()` 的**原样脚本**、同一份 4MB `/data/gw/logs/syslog.log`、
+同一锚行（末行），在设备上循环：
+
+| 变体 | 400 次运行 |
+|---|---|
+| 原版：`{ n=0; split("", B); hold=1; next }` | **4 次 SIGSEGV** |
+| `{ n=0; delete B; hold=1; next }` | **4 次 SIGSEGV** |
+| `{ n=0; hold=1; next }`（不碰数组） | **0 次** |
+
+同文件同锚点、崩溃率约 1% → **与输入内容无关**，是"运行期创建/清空空数组"后
+退出路径的堆布局相关缺陷（busybox 1.36.1 awk）。`n=0` 已足够重置输出窗口
+（END 只读 `B[1..n]`），不清理数组没有语义副作用。
+
+### 11.5 修复
+
+| 文件 | 版本 | 变更 |
+|---|---|---|
+| `gw/log_keeper.sh` | 2.6 | `delta()` 不再清空数组（删掉 `split("", B)`）；注释记录证据 |
+| `tools/selftest.py` | 2.56 | `t_batch4_awk_arrays`：部署脚本不得含 `split(""`，log_keeper 不得含 `delete B` |
+
+### 11.6 仍未闭环
+
+1. **ip（17 次）**：iproute2 静态件，与 busybox 不同源；需单独 core 窗口 + 循环
+   `ip -4 addr show` 复现（预算 ~1e-3/次）。若同样落在退出清理，可考虑把
+   led_mgr/wan_agg 的地址读取改成 /proc 解析或加"崩溃重试"。
+2. **sh/grep/pidof/ping/ls/sleep**：单次或低频，尚无 core；`sleep` 的崩溃提示
+   可能存在**启动期**缺陷（与 printf 无关），需要窗口期撞上才能定位。
+3. **logd / thermal_core / wpad**：厂商二进制，只能缓解（降噪/减少 spawn），
+   不能从源码根治。
+4. **取证副作用**：gdb 自身也在家族里（3 次），且高频 spawn 会卡死 dropbear
+   （见 AGENTS 陷阱表）。
+

@@ -1,5 +1,11 @@
 #!/bin/sh
-# log_keeper.sh v2.5 -- 日志持久化守护（日志改善专项轮）
+# log_keeper.sh v2.6 -- 日志持久化守护（日志改善专项轮）
+#   v2.6 (2026-10-21 SIGSEGV 家族轮): delta() 不再清空输出数组(B 只按 n 读) —
+#   busybox 1.36.1 awk 在"运行时创建/清空空数组"后, 退出清理路径会间歇性
+#   SIGSEGV(NULL 解引用, 约 1%/次, 与输入无关、同文件同锚点可复现)。实弹对照
+#   (同一 4MB syslog, 各 400 次): 清空数组 4 崩 / 另一种清空写法 4 崩 /
+#   不碰数组 0 崩。n=0 已足够重置输出窗口, 不清理数组无副作用。
+#   证据: docs/SIGSEGV_ANALYSIS.md §11。
 #   v2.5 (2026-10-20 stability batch3): 单实例锁/心跳改用 svc_lib 共享原语;
 #   新增 logs/stability_metrics.tsv 长期指标(每 5min: logc 帧/异常/崩溃 +
 #   load/mem/REPAIR 速率), 供 24h 与周级趋势分析; logc 崩溃计数持久化.
@@ -79,8 +85,11 @@ DROP_S=0; DROP_D=0; DROP_S0=0; DROP_D0=0
 # 增量抽取: 以 last 锚行在环内定位, 输出其后全部新增行(标准 busybox awk)
 delta() { # $1=ring file $2=last-anchor
     grep -Fqx "$2" "$1" 2>/dev/null || return 1
+    # v2.6: never clear the array here -- busybox awk creates/frees an empty
+    # array and its exit cleanup then dereferences NULL ~1% of runs.  n=0 is
+    # all the reset this needs (only B[1..n] is ever read).
     awk -v last="$2" '
-        index($0, last) == 1 && length($0) == length(last) { n = 0; split("", B); hold = 1; next }
+        index($0, last) == 1 && length($0) == length(last) { n = 0; hold = 1; next }
         hold { B[++n] = $0 }
         END { if (hold) for (i = 1; i <= n; i++) print B[i] }' "$1"
 }

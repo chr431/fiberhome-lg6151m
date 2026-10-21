@@ -2139,18 +2139,23 @@ def t_p1_logpipe():
            % (fore, noise, ps, psrc, bootga, bidw == bidc, stats, metn, met[:120]))
 
 
-@test("stability batch4: awk 空数组清空回归护栏 (SIGSEGV 家族)")
+@test("stability batch4: awk 数组/logcut 回归护栏 (SIGSEGV 家族)")
 def t_batch4_awk_arrays():
-    # busybox awk 1.36.1: creating/clearing an empty array at runtime
-    # (split("", A) / delete A) makes its exit cleanup dereference NULL in
-    # ~1% of runs (2026-10-21 core: ldr w0,[x19,#4] with x19=0).  A/B on the
-    # same 4MB syslog, 400 runs each: 4 crashes with either clear form,
-    # 0 without.  Guard every deployed script, not just log_keeper.
+    # busybox awk 1.36.1: ANY runtime array (empty via split("", A)/delete A,
+    # or filled) can make its exit cleanup dereference NULL in ~1% of runs
+    # (2026-10-21 core: ldr w0,[x19,#4] with x19=0).  On-device A/B: empty
+    # array 4/400, mid-file anchor 2/300, no array 0/400.  delta() therefore
+    # uses our static logcut and no deployed script may use awk arrays.
     hits = dev("grep -lF 'split(\"\"' /data/gw/*.sh /data/gw/www/*.sh 2>/dev/null | wc -l").strip()
     dl = dev("grep -cF 'delete B' /data/gw/log_keeper.sh 2>/dev/null").strip()
-    ok = (hits == "0" and dl == "0")
+    ak = dev("grep -c 'awk -v last=' /data/gw/log_keeper.sh 2>/dev/null").strip()
+    lv = dev("/data/gw/bin/logcut -V 2>/dev/null").strip()
+    ls = dev("/data/gw/bin/logcut --selftest 2>&1; echo rc=$?").strip()
+    ok = (hits == "0" and dl == "0" and ak == "0" and lv == "logcut 1.0"
+          and "PASS" in ls and "rc=0" in ls)
     record(t_batch4_awk_arrays._test_name, "system", ok,
-           "split_empty_files=%s delete_B=%s" % (hits, dl))
+           "split_empty_files=%s delete_B=%s awk_delta=%s logcut=%s selftest=[%s]"
+           % (hits, dl, ak, lv, ls[-80:]))
 
 
 @test("stability batch3: 统一监督/锁/心跳 + netcfg 串行化 + logc fuzz")

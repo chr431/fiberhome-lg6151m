@@ -1,5 +1,11 @@
 #!/bin/sh
-# log_keeper.sh v2.6 -- 日志持久化守护（日志改善专项轮）
+# log_keeper.sh v2.7 -- 日志持久化守护（日志改善专项轮）
+#   v2.7 (2026-10-21 SIGSEGV 家族轮 2): delta() 改调自建静态 logcut —— busybox
+#   awk 只要在运行期存在数组(B 收集锚点后的行), 退出清理就约 1% SIGSEGV;
+#   实测"锚点在文件中段(数组被填充)" 300 次 2 崩, 仅去掉 split 不够。
+#   logcut 单遍扫描 + 一个可增长行缓冲, 无数组/无 printf/无 locale; 锚点按
+#   原始字节精确比较(旧 awk -v 会解释反斜杠转义)。stream() 同时去掉
+#   grep -Fqx 预检(改看 logcut 退出码), 每轮少一次 grep spawn。
 #   v2.6 (2026-10-21 SIGSEGV 家族轮): delta() 不再清空输出数组(B 只按 n 读) —
 #   busybox 1.36.1 awk 在"运行时创建/清空空数组"后, 退出清理路径会间歇性
 #   SIGSEGV(NULL 解引用, 约 1%/次, 与输入无关、同文件同锚点可复现)。实弹对照
@@ -77,21 +83,18 @@ fi
 LOG=/tmp/log_keeper.log
 DIR=/data/gw/logs
 LOGC=/data/gw/bin/logc
+LOGCUT=/data/gw/bin/logcut
 lk() { echo "$(date '+%m-%d %H:%M:%S') $*" >> $LOG; }
 # v1.6: 镜像降噪模式(仅作用于持久镜像; busybox grep -E 实测兼容)
 SYSLOG_DROP='thermal_core\[[0-9]+\]: interval=|mipc_cli\[[0-9]+\]: main:mipc operation (start|end)|mtk_monitor_hang\[[0-9]+\]:|\[ccci[0-9]+/(net|dpmaif|cif)\]|\[ccci[0-9]+/chr\]port ttyCMIPC[0-9]+ (open|close)'
 DMESG_DROP='\[ccci[0-9]+/(net|dpmaif|cif)\]|MCUSYSOFF wake up|mtk_eth_search_port_by_mac_table|mt7992_apply_dpd_flatness_data|\[ccci[0-9]+/chr\]port ttyCMIPC[0-9]+ (open|close)|FORENSIC D:|wdtk-[0-9]+:|\[wdk-[a-z]+\]|hang_detect:|\[thread:[0-9]+\] [0-9-]+ [0-9:.]+ UTC|\[name:spm&\]'
 DROP_S=0; DROP_D=0; DROP_S0=0; DROP_D0=0
-# 增量抽取: 以 last 锚行在环内定位, 输出其后全部新增行(标准 busybox awk)
-delta() { # $1=ring file $2=last-anchor
-    grep -Fqx "$2" "$1" 2>/dev/null || return 1
-    # v2.6: never clear the array here -- busybox awk creates/frees an empty
-    # array and its exit cleanup then dereferences NULL ~1% of runs.  n=0 is
-    # all the reset this needs (only B[1..n] is ever read).
-    awk -v last="$2" '
-        index($0, last) == 1 && length($0) == length(last) { n = 0; hold = 1; next }
-        hold { B[++n] = $0 }
-        END { if (hold) for (i = 1; i <= n; i++) print B[i] }' "$1"
+# 增量抽取: 以 last 锚行在环内定位, 输出其后全部新增行(v2.7: 静态 logcut)
+delta() { # $1=ring file $2=last-anchor -- lines after the LAST exact match
+    # v2.7: busybox awk is gone.  Any runtime array in that build (empty or
+    # filled) can SIGSEGV its exit cleanup ~1% of runs; logcut streams the
+    # file and keeps only one line buffer.
+    $LOGCUT --after-last "$2" "$1"
 }
 append_cap() { # stdin → $1 镜像, 单轮限流 512K, 容量轮转 $2; $3=noboot 跳过 BOOT 重写
     tail -c 524288 >> "$1"
@@ -112,8 +115,7 @@ stream() { # $1=/tmp/xxx.log
     f=$1; [ -s "$f" ] || return 0
     b=$(basename "$f"); dst=$DIR/tmp/$b; anchor=$DIR/.last.$b
     LAST=$(cat "$anchor" 2>/dev/null)
-    if [ -n "$LAST" ] && grep -Fqx "$LAST" "$f" 2>/dev/null; then
-        NEW=$(delta "$f" "$LAST")
+    if [ -n "$LAST" ] && NEW=$(delta "$f" "$LAST"); then
         [ -n "$NEW" ] && printf '%s\n' "$NEW" | append_cap "$dst" $STREAM_CAP noboot
     else
         { echo "-- resync $b $(date '+%F %T') (anchor missing: local rotate/truncate) --"; \

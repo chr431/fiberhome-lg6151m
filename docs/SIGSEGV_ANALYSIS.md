@@ -574,22 +574,30 @@ lr=0x4932d4
 用 log_keeper `delta()` 的**原样脚本**、同一份 4MB `/data/gw/logs/syslog.log`、
 同一锚行（末行），在设备上循环：
 
-| 变体 | 400 次运行 |
+| 变体（锚点=文件末行，数组始终为空） | 400 次运行 |
 |---|---|
 | 原版：`{ n=0; split("", B); hold=1; next }` | **4 次 SIGSEGV** |
 | `{ n=0; delete B; hold=1; next }` | **4 次 SIGSEGV** |
-| `{ n=0; hold=1; next }`（不碰数组） | **0 次** |
+| `{ n=0; hold=1; next }`（从不创建数组） | **0 次** |
 
-同文件同锚点、崩溃率约 1% → **与输入内容无关**，是"运行期创建/清空空数组"后
-退出路径的堆布局相关缺陷（busybox 1.36.1 awk）。`n=0` 已足够重置输出窗口
-（END 只读 `B[1..n]`），不清理数组没有语义副作用。
+**第二轮修正（关键）**：把锚点移到文件**中段**（真实生产形态：锚点后还有新行，
+`B[++n]=$0` 会把 ~18000 行装进数组），仅去掉 `split` 的版本 **300 次仍崩 2 次**。
+所以结论不是"别清空数组"，而是 **这个 busybox awk 只要运行期存在数组，退出清理
+就有约 1% 概率 NULL 解引用**——空数组和满数组都会踩到，崩溃率与堆布局相关、
+与输入内容无关。数组无法"小心使用"，只能移出热路径。
 
 ### 11.5 修复
 
 | 文件 | 版本 | 变更 |
 |---|---|---|
-| `gw/log_keeper.sh` | 2.6 | `delta()` 不再清空数组（删掉 `split("", B)`）；注释记录证据 |
-| `tools/selftest.py` | 2.56 | `t_batch4_awk_arrays`：部署脚本不得含 `split(""`，log_keeper 不得含 `delete B` |
+| `gw/src/logcut.c` → `gw/bin/logcut` | 1.0 | **自建静态锚点截取器**：单遍扫描 + 一个可增长行缓冲，记录"最后一次精确匹配锚行"之后的光标，再把文件尾部拷到 stdout；无数组/无 printf/无 locale；`--check`/`--selftest` |
+| `gw/log_keeper.sh` | 2.7 | `delta()` 改调 `logcut --after-last`（awk 彻底退出该路径）；`stream()` 去掉 `grep -Fqx` 预检，改看 logcut 退出码（每轮少一次 grep spawn） |
+| `tools/selftest.py` | 2.57 | `t_batch4_awk_arrays`：logcut 在位 + `--selftest` PASS + log_keeper 不再含 awk delta + 全脚本无 `split(""` |
+| `tools/deploy.py` | 2.25 | MANIFEST + `gw/bin/logcut` |
+
+语义等价性：旧 awk 对新 logcut，同一 4MB syslog + **文件中段锚点**，输出
+**逐字节相同**（484783 B / 498854 B 两次抽样）。logcut 还有一处更严格：锚点按
+原始字节比较，而 `awk -v` 会解释反斜杠转义（日志里的 `\\` 不再被吃掉）。
 
 ### 11.6 仍未闭环
 

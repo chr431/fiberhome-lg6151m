@@ -936,3 +936,19 @@ A/B（同一台设备、同一循环、2e8 次 `snprintf("%ld")`）：
 `_local/archive/stability_2026-10-21/p0dumps/`：probe4/probe5 的 9 份现场 dump。
 工具源码：`lg6151m-public/tools/oneoff/printf_repro/`（`p0probe*.c`、`p0cal.c`、
 `layerchk/`）。
+
+### 13.6 普查注记：本轮探针自身在 ne_events.tsv 里留了 4 条（勿计入产品故障）
+
+收尾时 \`ne_events.tsv\` 尾部（设备本地时间 2026-10-22 00:0x–00:2x）：
+
+| pid | comm | 归属 |
+|---|---|---|
+| 21168 | \`pfctl\` | **本轮探针**（对照组成员，预期崩） |
+| 22319 | \`pfcp\` | **本轮探针**（未加 guard 的检查点版本，预期崩） |
+| 12033 | \`wc\` | 产品侧：busybox stdio 家族，\`wc -l\` |
+| 18302 | \`grep\` | 产品侧：\`grep -q ^default via <WAN_GW> dev eth0\`（wan_agg） |
+
+结论两点：① 探针崩溃已被 core_meta 记录，做普查时必须按 \`exe=/data/p0/*\` 排除；
+② 同一窗口内产品侧仍有 \`wc\`/\`grep\` 崩溃 —— 家族仍在活动，本轮补丁尚未部署到
+那些二进制（它们没有重链接）。\`cores/meta\` 目录已达 120 文件上限（core_meta 的
+保留策略），因此新崩溃不再新增文件，只有 TSV 行。

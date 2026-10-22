@@ -82,10 +82,10 @@ arm64 是 `unhandled exception: DABT`，`[base+size]` 是**故障指令所在 VM
 | E1 | injwatch4 全程 38min 报 **21 次命中**，全部页尾 0xfc0/word504-505；受害页实测 `st=1`（PageAnon）、rcnt=1、mapping 带 ANON 位 | 注入持续可复现；受害页是用户页 |
 | E2 | 活 PIT 环页尾（0x90800000+0xfc0）内容 `{0x92d7a600,0}{0x92d79e80,0}…` 实测在案；**0x92d7a600 两次被原值注入两个不同用户页** | 写入内容=当前活环记录 ⇒ 写入者是活体环维护者（MD/DPMAIF RX） |
 | E3 | 16B 记录 `{0xe7e0f000,0x80000000,0x30000000,0xa}` 持久存在于已释放的 findpa staging 页（其余内容是 ELF 残影）；记录本身引用另一受害页 0xe7e0f000 | **释放页死后写入**；环记录引用已释放缓冲（与 §4-A5 的 `{PLEN0=4096,DONE=0,ptr→受害页}` 环条目同族） |
-| E4 | 受害 PA（0xe5e86000/0xe7e0f000/0xec12c000）全 RAM 段扫描（0x80000000–0xf0000000，含全部 MD 保留窗）**零引用**（除自匹配与注入记录本身）；7 个 dpmaif 寄存器窗清点**无受害 PA、无陈旧环基址**（只有当前基址及其镜像） | 陈旧列表在 **MD 侧私有持有**，AP 读不到、修不了写入者 |
+| E4 | 受害 PA（0xe5e86000/0xe7e0f000/0xec12c000）全 RAM 段扫描（0x80000000–0xf0000000，含全部 MD 保留窗）**零引用**（除自匹配与注入记录本身）；7 个 dpmaif 寄存器窗清点**无受害 PA、无陈旧环基址**（只有当前基址及其镜像）；**`AT+CFUN=1,1`（MD 完整复位）后注入 1–2 分钟内恢复** | 陈旧列表/其重建机制在 **MD 侧或 DPMAIF HW 内部**，AP 读不到、MD 复位也只暂停 1–2 分钟——运行期持续重建 |
 | E5 | 三个 dma_map 调用点挂 shim 45min：**1465 次 TX 映射零坏页**（全是合法 kmalloc slab skb 数据）；RX/frag 0 次；剧集全程环基址稳定 | **AP 驱动重映射陈旧页被反证**；"驱动交页"假设作废 |
 | E6 | findpa 全 RAM 扫描会命中扫描器自身内核栈（vprintk+112 返回址 + `{pa, pa\|0x7ff}` 相邻重复 + 0xffffffc0… 栈指针） | 仪器自匹配特征（曾导致"驱动在栈上构造描述符"误判，已撤回） |
-| E7 | ABAB：假响应 stub 阻断 `ttyCMIPC6` 每 6s 的端口开合 churn（watchdog 的 `mipc_wan_cli` 探针所致）15min，注入率 1.36→0.41/min | churn 是**贡献者**（降 3–4 倍）不归零；主驱动跟随 ccmni 数据面 RX |
+| E7 | ~~ABAB：阻断 `ttyCMIPC6` 端口 churn 15min，注入率 1.36→0.41/min~~ **⟦v1.1 轮复测撤回**：同法复测（2026-10-22 20:26–20:33）注入率不降反升（1.4→2.3/min）——首轮 3–4 倍下降是剧集相位方差，非因果。**端口 churn 与注入无因果关系** | （结论：端口开合不是泄漏源；活跃源见 §8.6） |
 
 **排除清单**（内容形状/行为学，均实测）：eth0/mt7530（无 MAC 头、非偏移 0）、
 mt76（无 RXWI/帧头）、AP 内核主动写用户页（受害页由用户持有+内容为环记录）、
@@ -197,14 +197,40 @@ MD 列表自然失效/MD 重启——残余期"只降不零"，文档化。崩�
 基线下 7 天期望 182 次，统计判据不敏感）。两臂 A/B（开/关各 7 天）后才谈
 农场退役（§5.2）。
 
-### 8.4 实施状态
+### 8.4 实施状态（2026-10-22 晚收工）
 
-- [ ] 源码 `gw/src/dpquar.c` + 构建 `tools/build_dpquar.sh`
-- [ ] 注册：VERSIONS.tsv + deploy.py MANIFEST
-- [ ] 构建/部署/装载（计数模式）
-- [ ] 站点热度实测分类（记录于源码站点表与 /proc/dpquar 计数）
-- [ ] 隔离启用 + 拨号触发 teardown 验证（writer-hit 观察）
+- [x] 源码 `gw/src/dpquar.c` v1.1 + 构建 `tools/build_dpquar.sh`（已注册+提交）
+- [x] 构建/部署/装载：v1.1 在设备上运行（qmask=0x3c, cap=16384, watch=1）
+- [x] 站点热度实测：TX 完成 ~50/min（tx1，只计数）；RX 回收站点 40min 仅
+  1 次（冷）；teardown 站点仅在 MD stop 时批量触发
+- [x] teardown 全覆盖实测：`AT+CFUN=1,1` → `CCCI_DPMAIF_EVENT_STOP` →
+  32768 次释放调用，**15923 页全隔离零漏网**（evict_full=0、rzero=0、
+  dupe=16845 与双站点成对调用精确对账；v1.0 的 cap=4096 曾溢出 11811 → v1.1）
+- [x] **首次 writer-hit**：在押隔离页 0x933e7000（teardown 池区）被外部写入
+  （whits=1）——"释放页死后写入"类被直接拦截，页未进入复用流
+- [ ] **活跃源覆盖缺口（v1.2 主线，见 §8.6）**：MD 复位后注入 1–2 分钟恢复、
+  注入页与在押页不相交——活跃泄漏走**不经过 6 个 unmap 站点的还页路径**
 - [ ] 长窗验收（7 天两臂）与 rc.extend 开机自载（验收通过后）
+
+运维注意：dpquar 在押页 TTL 24h 后自动归还；MemFree 在 MD 复位+隔离叠加时
+降至 ~200MB（池重建 ×2 + aee 转储），属有界瞬态，若持续下探需查 aee/dial_keeper。
+
+### 8.6 v1.2 待办：还页站点钩（活跃源）
+
+§8.4 实测证明活跃注入源不经 unmap 站点。全驱动**直接还页仅 4 处**（ktext
+扫描锚点，2026-10-22）：
+
+| 站点 | 调用 | 性质 |
+|---|---|---|
+| `dpmaif_stop_rx_sw+0x1a4`（0xffffffc008562ef0） | `__page_frag_cache_drain` | teardown 排空 page_frag 缓存——**不经 unmap，v1.1 未覆盖** |
+| `dpmaif_stop_rx_sw+0x2b0`（0xffffffc008562ffc） | `put_page` | teardown RX 页（unmap 钩已覆盖同批，双保险） |
+| `dpmaif_alloc_med_rx_buf+0x1bc`（0xffffffc00855e28c） | `page_frag_free` | RX 缓冲分配错误路径 |
+| `dpmaif_alloc_med_rx_frag+0x1b0`（0xffffffc00855fc38） | `put_page` | frag 分配错误路径 |
+
+v1.2 = 在 v1.1 基础上加钩这 4 站点（`__page_frag_cache_drain(page, count)`
+与 `page_frag_free(vaddr)`——后者以 vaddr 换 PA）。若活跃源仍不归零，下一步
+对 `ccci_free_skb` 的 7 个调用点（含 `mtk_ccci_close_port+0x1c8`）加计数器
+定位经 skb 的还页路径。E7 已撤回（§3），端口路径暂无嫌疑证据。
 
 ### 8.5 辅助（低成本，非修复）
 

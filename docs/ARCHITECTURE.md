@@ -44,8 +44,8 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `docs/GUI_TERMINOLOGY.md` | **v1.2** | doc | `-` | GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git |
 | `gw/agg_pins.default` | **v1.0** | manifest | `/data/gw/agg_pins.default` | MAC钉死表出厂缺省基线(只读, 不含任何MAC; 设备侧活文件 agg_pins.conf 由 wan_agg 缺省才写地播种, 个人MAC不入库) |
 | `gw/bin/busybox` | **v1.0** | manifest | `/data/gw/bin/busybox` | 静态 aarch64 busybox 1.36.1(Alpine busybox-static 1.36.1-r31, 与厂商同版本); P2 崩溃家族工具链静态化；⟦收口 §22⟧ 工具链自主权载体，对崩溃零改善(§16.7/§22.1) |
-| `gw/bin/dpclamp.ko` | **v1.1** | manifest | `/data/gw/dpclamp.ko` | MD累积陈旧列表排空模块: 周期GFP_HIGHUSER_MOVABLE采样buddy, 页尾注入签名自识别的列表页get_page扣住(有界8192页), 未命中即释放; 与dpquar组成修复栈(dpquar断新漏/本件排存量); v1.1实测: 417K采样扣18页, 用户页注入2/min->0(20min)且写入者仍活跃; v1.0事故: alloc_pages_bulk_array在__free_pages崩溃致21:33重启(已换单页循环) |
-| `gw/bin/dpquar.ko` | **v1.3** | manifest | `/data/gw/dpquar.ko` | dpmaif释放页隔离内核模块: 钩6个 dma_unmap 释放点(直连bl补丁), 隔离页在押TTL+上限(FIFO有界), 页尾writer-hit遥测; 阻断 MD 陈旧缓冲列表写入复用页(SIGSEGV_ANALYSIS §8 根修); 手动 insmod, 开机自载待验收后; v1.1: cap 16MB->64MB(实测teardown池~16K页), qmask默认+RX回收站点(实测40min仅1调用=冷), dup计数拆分dupe/rzero; v1.2: +4个还页站点钩(drain/put/page_frag_free×2, 全驱动仅有的直接还页处, 实值字核验), qmask默认0x3fc——覆盖活跃源理论路径; v1.3: 修复v1.1/v1.2锁内线性去重的二次方开销——teardown 32K调用触发RCU stall panic(2026-10-22 20:45 KE, 设备自愈重启); 改开放寻址哈希O(1)+锁外put_page批量; 全文件重写消除增量编辑引入的格式串/链接类小bug |
+| `gw/bin/dpclamp.ko` | **v1.2** | manifest | `/data/gw/dpclamp.ko` | MD累积陈旧列表排空模块: 周期GFP_HIGHUSER_MOVABLE采样buddy, 页尾注入签名自识别的列表页get_page扣住(有界8192页), 未命中即释放; 与dpquar组成修复栈(dpquar断新漏/本件排存量); v1.1实测: 417K采样扣18页, 用户页注入2/min->0(20min)且写入者仍活跃; v1.0事故: alloc_pages_bulk_array在__free_pages崩溃致21:33重启(已换单页循环); v1.2: 自适应退火(空扫3轮×2周期,10轮后60s巡检)+__GFP_NORETRY/NOWARN+cond_resched+批幅上限4096/默认1024/下限水位150MB——修v1.1固定4096页/8s MOVABLE churn导致的规整压力与00:48 RCU-stall冻结(KE#3) |
+| `gw/bin/dpquar.ko` | **v1.4** | manifest | `/data/gw/dpquar.ko` | dpmaif释放页隔离内核模块: 钩6个 dma_unmap 释放点(直连bl补丁), 隔离页在押TTL+上限(FIFO有界), 页尾writer-hit遥测; 阻断 MD 陈旧缓冲列表写入复用页(SIGSEGV_ANALYSIS §8 根修); 手动 insmod, 开机自载待验收后; v1.1: cap 16MB->64MB(实测teardown池~16K页), qmask默认+RX回收站点(实测40min仅1调用=冷), dup计数拆分dupe/rzero; v1.2: +4个还页站点钩(drain/put/page_frag_free×2, 全驱动仅有的直接还页处, 实值字核验), qmask默认0x3fc——覆盖活跃源理论路径; v1.3: 修复v1.1/v1.2锁内线性去重的二次方开销——teardown 32K调用触发RCU stall panic(2026-10-22 20:45 KE, 设备自愈重启); 改开放寻址哈希O(1)+锁外put_page批量; 全文件重写消除增量编辑引入的格式串/链接类小bug; v1.4: qmask默认0x3f0(RX回收站点回count-only——0x3fc在正常流量下每回收页都被钉, held ~600/min爬到cap抽干RX工作集=00:48渐进冻结的元凶)+watch循环每tick限512页 |
 | `gw/bin/fhstub.so` | **v1.0** | manifest | `/data/gw/fhstub.so` | FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径) |
 | `gw/bin/healthdog.ko` | **v1.0** | manifest | `/data/gw/healthdog.ko` | 取证看门狗内核模块(forensic=1) |
 | `gw/bin/ip` | **v1.0** | manifest | `/data/gw/bin/ip` | 静态 aarch64 iproute2 6.3.0(与厂商 ip -V 同版本, zig cc musl 重建); 输出与厂商逐字节一致, 保留 link add type bridge |
@@ -115,8 +115,8 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/www/index.html` | **v2.32** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.32: 缓存v66) |
 | `gw/www/style.css` | **v2.1** | manifest | `/data/gw/www/style.css` | 控制台主题 |
 | `gw/zz_data_hook` | **v1.1** | manifest | `/data/build/rootfs/etc/init.d/zz_data_hook` | S98数据钩子(v1.1: plain sh——原厂无/etc/rc.common, rc.common式shebang致开机栈全灭; 回归实测发现) |
-| `gw/src/dpclamp.c` | **v1.1** | src | `gw/bin/dpclamp.ko` | dpclamp 源码(同产物; period_s/batch/cap/minfree_kb 参数) |
-| `gw/src/dpquar.c` | **v1.3** | src | `gw/bin/dpquar.ko` | dpquar 源码(同产物; qmask/hold_s/cap/watch 参数) |
+| `gw/src/dpclamp.c` | **v1.2** | src | `gw/bin/dpclamp.ko` | dpclamp 源码(同产物; period_s/batch/cap/minfree_kb 参数) |
+| `gw/src/dpquar.c` | **v1.4** | src | `gw/bin/dpquar.ko` | dpquar 源码(同产物; qmask/hold_s/cap/watch 参数) |
 | `gw/src/fhstub.c` | **v1.0** | src | `gw/bin/fhstub.so` | FH符号桩库源码 |
 | `gw/src/healthdog.c` | **v1.0** | src | `gw/bin/healthdog.ko` | 看门狗模块源码(版本随产物) |
 | `gw/src/logc.c` | **v1.4** | src | `gw/bin/logc` | logc 源码(同产物; 面包屑/dump-raw/selftest/防栈溢出); v1.3: --fuzz; v1.4: printf-free 记录路径 |

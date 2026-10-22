@@ -57,7 +57,13 @@ MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("dpquar: quarantine dpmaif-released pages against MD stale-list writes");
 
 /* ---------- tunables ---------- */
-static int qmask = 0x3fc;	/* quarantine sites 2..9; TX sites count-only */
+/* v1.4: 0x3f0 (teardown unmap + all 4 return sites).  0x3fc (also RX
+ * recycle sites 2/3) was WRONG for steady state: every RX buffer recycle
+ * during normal traffic pinned a page -- held climbed ~600/min until the
+ * cap, draining the driver's RX working set (the progressive wedge behind
+ * the 2026-10-23 00:48 RCU-stall freeze).  RX-recycle pages cycle back to
+ * the driver by design; only teardown-time releases need quarantine. */
+static int qmask = 0x3f0;
 static int hold_s = 86400;	/* quarantine TTL */
 static int cap = 16384;		/* max quarantined pages (64MB = one full pool) */
 static int watch = 1;		/* tail-watch quarantined pages for writer hits */
@@ -395,22 +401,34 @@ static void dq_tick(struct timer_list *t)
 		qhead++;
 		cnt_evict_ttl++;
 	}
-	for (i = qhead; i < qtail_; i++) {
-		struct qent *e = &qtab[i % cap];
-		u64 d;
+	/* writer-hit watch: bounded per tick with a rotating cursor
+	 * (hardening: a large held set must not turn the tick into a long
+	 * lock-held walk; 512 entries/tick covers 16k pages in ~32s) */
+	{
+		static int wcur;
+		int done = 0;
 
-		if (!e->tail)
-			continue;	/* watch off or page unreadable */
-		d = tail_digest(e->page);
-		if (d && d != e->tail) {
-			e->tail = d;
-			if (wh_n < 16) {
-				wh_ev[wh_n][0] = e->pa;
-				wh_ev[wh_n][1] = jiffies;
-				wh_n++;
+		for (i = qhead; i < qtail_ && done < 512; i++) {
+			struct qent *e = &qtab[i % cap];
+			u64 d;
+
+			if (((i - qhead) % cap) < wcur)
+				continue;	/* already watched this cycle */
+			if (!e->tail)
+				continue;	/* watch off or unreadable */
+			d = tail_digest(e->page);
+			done++;
+			if (d && d != e->tail) {
+				e->tail = d;
+				if (wh_n < 16) {
+					wh_ev[wh_n][0] = e->pa;
+					wh_ev[wh_n][1] = jiffies;
+					wh_n++;
+				}
+				cnt_whits++;
 			}
-			cnt_whits++;
 		}
+		wcur = (wcur + 512) % (cap ? cap : 1);
 	}
 	spin_unlock(&q_lock);
 	for (i = 0; i < nrel; i++)

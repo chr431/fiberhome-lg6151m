@@ -35,10 +35,10 @@
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("dpclamp: clamp MD-stale-listed pages out of circulation");
 
-static int period_s = 30;
-static int batch = 512;
+static int period_s = 15;
+static int batch = 1024;
 static int cap = 8192;			/* 32MB max held */
-static int minfree_kb = 100000;		/* stop draining below this MemFree */
+static int minfree_kb = 150000;		/* stop draining below this MemFree (kB) */
 
 module_param_named(period_s, period_s, int, 0444);
 module_param_named(batch, batch, int, 0444);
@@ -58,6 +58,7 @@ static DEFINE_SPINLOCK(c_lock);
 
 static u64 sweeps, alloced, clamped, freed_ok;
 static u64 whits;
+static int idle_sweeps;		/* adaptive cool-down (v1.2) */
 
 static int tail_signature(const u64 *t)
 {
@@ -119,7 +120,8 @@ static int test_and_hold(struct page *pg)
 
 static void clamp_sweep(void)
 {
-	int i, nalloc = batch > 16384 ? 16384 : batch;
+	int i, nalloc = batch > 4096 ? 4096 : batch;
+	int clamped_before = (int)clamped;
 
 	if (si_mem_available() < minfree_kb)	/* kB */
 		return;
@@ -129,8 +131,14 @@ static void clamp_sweep(void)
 		/* HIGHUSER_MOVABLE: the signed pages are ex-anon and live in
 		 * the MOVABLE migrate lists; GFP_KERNEL never samples those
 		 * (147k UNMOVABLE allocs: zero hits, buddyscan: ~47 signed
-		 * pages per scan, 2026-10-22 21:42) */
-		struct page *pg = alloc_page(GFP_HIGHUSER_MOVABLE);
+		 * pages per scan, 2026-10-22 21:42).
+		 * __GFP_NORETRY: fail fast instead of compaction/reclaim
+		 * storms -- the v1.1 fixed 4096-page/8s MOVABLE churn froze
+		 * the box for ~25min and ended in an RCU-stall panic
+		 * (2026-10-23 00:48 KE #3); a missed page transits buddy
+		 * again and is caught by a later sweep. */
+		struct page *pg = alloc_page(GFP_HIGHUSER_MOVABLE |
+					     __GFP_NORETRY | __GFP_NOWARN);
 
 		if (!pg)
 			break;
@@ -140,8 +148,16 @@ static void clamp_sweep(void)
 			continue;
 		}
 		__free_page(pg);
+		if ((i & 0x3f) == 0x3f)
+			cond_resched();
 	}
 	sweeps++;
+	/* adaptive cool-down: sweeps that clamp nothing back the poll off;
+	 * any new clamp snaps back to the fast period */
+	if ((int)clamped > clamped_before)
+		idle_sweeps = 0;
+	else if (idle_sweeps < 1000)
+		idle_sweeps++;
 }
 
 static void dc_workfn(struct work_struct *w);
@@ -166,8 +182,19 @@ static void dc_workfn(struct work_struct *w)
 		}
 		spin_unlock_irqrestore(&c_lock, fl);
 	}
-	if (period_s > 0)
-		schedule_delayed_work(&dc_work, (unsigned long)period_s * HZ);
+	{
+		unsigned long p = (unsigned long)period_s;
+
+		/* v1.2 adaptive ladder: fast only while actively clamping,
+		 * then 2x period, then 60s patrol -- no sustained churn */
+		if (p > 0) {
+			if (idle_sweeps >= 3)
+				p *= 2;
+			if (idle_sweeps >= 10)
+				p = 60;
+			schedule_delayed_work(&dc_work, p * HZ);
+		}
+	}
 }
 
 /* ---------- proc ---------- */
@@ -184,8 +211,8 @@ static ssize_t dc_read(struct file *f, char __user *ub, size_t n, loff_t *off)
 	if (*off == 0) {
 		spin_lock_irqsave(&c_lock, fl);
 		len = scnprintf(pbuf, sizeof(pbuf),
-			"dpclamp sweeps=%llu alloced=%llu clamped=%llu whits=%llu held=%d/%d\n",
-			sweeps, alloced, clamped, whits, ccount, cap);
+			"dpclamp sweeps=%llu alloced=%llu clamped=%llu whits=%llu held=%d/%d idle=%d\n",
+			sweeps, alloced, clamped, whits, ccount, cap, idle_sweeps);
 		spin_unlock_irqrestore(&c_lock, fl);
 		pbuf_len = len;
 		pbuf_ready = 1;

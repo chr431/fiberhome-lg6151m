@@ -211,6 +211,16 @@ MD 列表自然失效/MD 重启——残余期"只降不零"，文档化。崩�
   teardown 32K 连发触发 `panic_on_rcu_stall` → 设备 20:45:57 重启一次
   （aee db.fatal.04.KE: `quarantine_page+0x328 <- dpmaif_stop+0xf8`；
   boot gate 自愈、无损）。v1.3 哈希去重修复并通过同型压力测试。
+- [x] **事故 #3/渐进冻结（2026-10-23 00:48 KE，v1.1 栈被撤的原因）**：
+  设备卡死 ~25min 后 RCU-stall panic（cpu0 timer 饿死 20s，ramoops：
+  控制台 10214s→11719s 静默）。双因修复——
+  ① dpquar qmask=0x3fc 把 RX 回收站点也隔离：正常流量下**每回收页都被钉**
+  （held ~600/min 爬到 cap，抽干驱动 RX 工作集）→ v1.4 qmask=0x3f0
+  （teardown/还页专属，实测 quar 恒 0、held 恒定）；
+  ② dpclamp v1.1 固定 4096 页/8s MOVABLE churn = 持续规整压力 → v1.2
+  自适应退火（空扫退避到 60s 巡检）+ `__GFP_NORETRY` + cond_resched。
+  修复后 10min 观测：dpquar quar=0（rx1=803 只计数）、dpclamp 退火巡检
+  clamped=2、MemFree 稳定 1.27GB。
 - [x] **活跃源已定性与压制（2026-10-22 深夜轮，见 §8.6/§8.7）**：MD 累积
   陈旧列表（MOVABLE 页、固定 PA 集、MD 侧持有）；dpclamp v1.1 上线后
   用户页注入 2/min → 0（20 min），写入者仍活跃（钳制拦截成立）

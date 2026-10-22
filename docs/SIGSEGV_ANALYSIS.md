@@ -224,7 +224,20 @@ MD 列表自然失效/MD 重启——残余期"只降不零"，文档化。崩�
 - [x] **活跃源已定性与压制（2026-10-22 深夜轮，见 §8.6/§8.7）**：MD 累积
   陈旧列表（MOVABLE 页、固定 PA 集、MD 侧持有）；dpclamp v1.1 上线后
   用户页注入 2/min → 0（20 min），写入者仍活跃（钳制拦截成立）
-- [ ] 长窗验收（7 天两臂）与 rc.extend 开机自载（验收通过后）
+- [x] **过夜观察（2026-10-23 07:00 复检，v1.4/v1.2 栈）**：修复栈在位时段
+  （01:05–04:00）残余 NE 2 起——01:38 `mipc_cellular`（api.sh cellular）、
+  01:45 `ip`（wan_agg.sh），受害者均属家族历史集合（sh/ip/grep/logc 族），
+  发生在 dpclamp 收敛尾段（加载后 33/40min），寄存器级确认不可得（aee
+  加密），按时间线+受害者集+无他因归为存量在飞毒页残余；**01:45 后至
+  07:00 零 NE**（含 04:00 重启后 3h 裸窗口）。04:00 重启 = reboot_sched.sh
+  每日定时重启（出厂默认 04:00，reboots.log 连续 5 天同刻；上一 boot
+  控制台全程零 KE/Oops、procd 干净关机序列），**非崩溃**。裸窗口后修复栈
+  07:06 重载（dpquar patched=1 quar=0；dpclamp 首分钟 clamped=1——毒页
+  跨重启仍在流转并被拦截）。判读教训：NE 权威源 =
+  /data/gw/logs/ne_events.tsv（core_meta 包芯），console-ramoops 与持久
+  syslog 均不含 pr_info 级 fault 行，勿以二者为零 NE 的依据。
+- [ ] 长窗验收（7 天两臂）与 rc.extend 开机自载（验收通过后；00:51 与
+  今日 3h 裸窗口均无防护，若剧集复发即成 NE——自载动机加强）
 
 运维注意：dpquar 在押页 TTL 24h 后自动归还；MemFree 在 MD 复位+隔离叠加时
 最低 ~198MB、稳态 ~1.09GB，属有界瞬态。

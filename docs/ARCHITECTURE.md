@@ -44,6 +44,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `docs/GUI_TERMINOLOGY.md` | **v1.2** | doc | `-` | GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git |
 | `gw/agg_pins.default` | **v1.0** | manifest | `/data/gw/agg_pins.default` | MAC钉死表出厂缺省基线(只读, 不含任何MAC; 设备侧活文件 agg_pins.conf 由 wan_agg 缺省才写地播种, 个人MAC不入库) |
 | `gw/bin/busybox` | **v1.0** | manifest | `/data/gw/bin/busybox` | 静态 aarch64 busybox 1.36.1(Alpine busybox-static 1.36.1-r31, 与厂商同版本); P2 崩溃家族工具链静态化；⟦收口 §22⟧ 工具链自主权载体，对崩溃零改善(§16.7/§22.1) |
+| `gw/bin/dpquar.ko` | **v1.0** | manifest | `/data/gw/dpquar.ko` | dpmaif释放页隔离内核模块: 钩6个 dma_unmap 释放点(直连bl补丁), 隔离页在押TTL+上限(FIFO有界), 页尾writer-hit遥测; 阻断 MD 陈旧缓冲列表写入复用页(SIGSEGV_ANALYSIS §8 根修); 手动 insmod, 开机自载待验收后 |
 | `gw/bin/fhstub.so` | **v1.0** | manifest | `/data/gw/fhstub.so` | FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径) |
 | `gw/bin/healthdog.ko` | **v1.0** | manifest | `/data/gw/healthdog.ko` | 取证看门狗内核模块(forensic=1) |
 | `gw/bin/ip` | **v1.0** | manifest | `/data/gw/bin/ip` | 静态 aarch64 iproute2 6.3.0(与厂商 ip -V 同版本, zig cc musl 重建); 输出与厂商逐字节一致, 保留 link add type bridge |
@@ -113,6 +114,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/www/index.html` | **v2.32** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.32: 缓存v66) |
 | `gw/www/style.css` | **v2.1** | manifest | `/data/gw/www/style.css` | 控制台主题 |
 | `gw/zz_data_hook` | **v1.1** | manifest | `/data/build/rootfs/etc/init.d/zz_data_hook` | S98数据钩子(v1.1: plain sh——原厂无/etc/rc.common, rc.common式shebang致开机栈全灭; 回归实测发现) |
+| `gw/src/dpquar.c` | **v1.0** | src | `gw/bin/dpquar.ko` | dpquar 源码(同产物; qmask/hold_s/cap/watch 参数) |
 | `gw/src/fhstub.c` | **v1.0** | src | `gw/bin/fhstub.so` | FH符号桩库源码 |
 | `gw/src/healthdog.c` | **v1.0** | src | `gw/bin/healthdog.ko` | 看门狗模块源码(版本随产物) |
 | `gw/src/logc.c` | **v1.4** | src | `gw/bin/logc` | logc 源码(同产物; 面包屑/dump-raw/selftest/防栈溢出); v1.3: --fuzz; v1.4: printf-free 记录路径 |
@@ -127,6 +129,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/src/wpapmk.c` | **v1.0** | src | `gw/bin/wpapmk` | WPA PMK转换源码(纯C PBKDF2) |
 | `install/run.sh` | **v1.1** | tool | `-` | raw shell自驱脚本(v1.1: 分区次设备号从/proc/partitions动态解析成布局门禁, RP102/RP103通用; v1.0硬编码259:7等) |
 | `tools/agg_pins.conf.example` | **v1.1** | tool | `-` | MAC钉死表模板(真实表设备侧自管, 含个人MAC不入库) |
+| `tools/build_dpquar.sh` | **v1.0** | tool | `-` | dpquar.ko构建(zig cc内核树链, 同build_v3fix) |
 | `tools/build_healthdog.sh` | **v1.0** | tool | `-` | healthdog.ko内核模块构建(内核树) |
 | `tools/build_logc.sh` | **v1.2** | tool | `-` | logc 静态构建(zig cc aarch64-linux-musl; v1.1: -fstack-protector-all); v1.2(batch3): --asan 主机 ASAN/UBSAN 构建 |
 | `tools/build_mipc_cellular.sh` | **v1.1** | tool | `-` | mipc_cellular构建(zig cc aarch64-musl 静态); v1.1: 移除 libqlril 链接(v0.12+ 零 RIL 依赖) |
@@ -135,7 +138,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/build_steth.sh` | **v1.0** | tool | `-` | v3_steth.ko构建 |
 | `tools/build_v3fix.sh` | **v1.1** | tool | `-` | v3_fix.ko构建; v1.1: 路径修正当前布局 + uapi/asm junction 失效改就地复制 + 记录产物错位事故 |
 | `tools/build_v3httpd.sh` | **v1.0** | tool | `-` | v3httpd构建(zig cc aarch64-linux-musl全静态, 同mipc_cellular链) |
-| `tools/deploy.py` | **v2.26** | tool | `-` | 部署/漂移守卫; v2.23: babysit 目标修正为 preinit 实跑的 /data/rescue/babysit.sh + MANIFEST +boot_gate/core_meta; 历史见git; v2.24(batch3): +svc_lib/netlock MANIFEST; v2.25: MANIFEST +gw/bin/logcut; v2.26: MANIFEST +gw/bin/procmatch |
+| `tools/deploy.py` | **v2.27** | tool | `-` | 部署/漂移守卫; v2.23: babysit 目标修正为 preinit 实跑的 /data/rescue/babysit.sh + MANIFEST +boot_gate/core_meta; 历史见git; v2.24(batch3): +svc_lib/netlock MANIFEST; v2.25: MANIFEST +gw/bin/logcut; v2.26: MANIFEST +gw/bin/procmatch; v2.27: MANIFEST +gw/bin/dpquar.ko |
 | `tools/device_local.py.example` | **v1.0** | tool | `-` | 凭证模板(真件gitignored) |
 | `tools/doc_audit.py` | **v1.2** | tool | `-` | 台账↔文档内联标记双向审计; v1.2: 子进程显式 UTF-8(gbk 环境不再中断 deploy 文档门禁); 历史见git |
 | `tools/fetch_static_busybox.sh` | **v1.0** | tool | `-` | Alpine busybox-static 1.36.1-r31 拉取+SHA256 钉死(解包到 gw/bin/busybox) |

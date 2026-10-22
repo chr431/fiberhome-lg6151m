@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
-"""deploy.py v2.26 -- single source of truth for PC<->CPE deployment + drift guard.
+"""deploy.py v2.27 -- single source of truth for PC<->CPE deployment + drift guard.
 
+v2.27 (SIGSEGV root-fix round): MANIFEST +gw/bin/dpquar.ko (dpmaif released-page
+quarantine; see docs/SIGSEGV_ANALYSIS.md section 8). Manual insmod until the
+7-day two-arm acceptance passes.
 v2.26 (census round): MANIFEST +gw/bin/procmatch (pidof/pgrep drop-in).
 v2.25 (SIGSEGV family round): MANIFEST +gw/bin/logcut (log_keeper delta()
 replaces busybox awk arrays; see docs/SIGSEGV_ANALYSIS.md section 11).
@@ -121,6 +124,7 @@ MANIFEST = [
     ("gw/bin/healthdog.ko", "/data/gw/healthdog.ko"),
     ("gw/bin/v3_fix.ko", "/data/gw/v3_fix.ko"),
     ("gw/bin/v3_steth.ko", "/data/gw/v3_steth.ko"),
+    ("gw/bin/dpquar.ko", "/data/gw/dpquar.ko"),           # dpmaif released-page quarantine (SIGSEGV root fix)
     ("gw/udhcpc_eth1.script", "/data/gw/udhcpc_eth1.script"),
     ("gw/defaults.conf", "/data/gw/defaults.conf"),
     ("gw/watchdog.sh", "/data/gw/watchdog.sh"),  # L13: continuous invariant monitor

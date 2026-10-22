@@ -197,46 +197,52 @@ MD 列表自然失效/MD 重启——残余期"只降不零"，文档化。崩�
 基线下 7 天期望 182 次，统计判据不敏感）。两臂 A/B（开/关各 7 天）后才谈
 农场退役（§5.2）。
 
-### 8.4 实施状态（2026-10-22 晚收工）
+### 8.4 实施状态（2026-10-22 晚收工，v1.3）
 
-- [x] 源码 `gw/src/dpquar.c` v1.1 + 构建 `tools/build_dpquar.sh`（已注册+提交）
-- [x] 构建/部署/装载：v1.1 在设备上运行（qmask=0x3c, cap=16384, watch=1）
-- [x] 站点热度实测：TX 完成 ~50/min（tx1，只计数）；RX 回收站点 40min 仅
-  1 次（冷）；teardown 站点仅在 MD stop 时批量触发
-- [x] teardown 全覆盖实测：`AT+CFUN=1,1` → `CCCI_DPMAIF_EVENT_STOP` →
-  32768 次释放调用，**15923 页全隔离零漏网**（evict_full=0、rzero=0、
-  dupe=16845 与双站点成对调用精确对账；v1.0 的 cap=4096 曾溢出 11811 → v1.1）
-- [x] **首次 writer-hit**：在押隔离页 0x933e7000（teardown 池区）被外部写入
-  （whits=1）——"释放页死后写入"类被直接拦截，页未进入复用流
-- [ ] **活跃源覆盖缺口（v1.2 主线，见 §8.6）**：MD 复位后注入 1–2 分钟恢复、
-  注入页与在押页不相交——活跃泄漏走**不经过 6 个 unmap 站点的还页路径**
+- [x] 源码 `gw/src/dpquar.c` v1.3 + 构建 `tools/build_dpquar.sh`（已注册+提交）
+- [x] 构建/部署/装载：v1.3 在设备上运行（qmask=0x3fc, cap=16384, watch=1）
+- [x] 站点热度实测：TX 完成 ~50/min（tx1/tx2，只计数）；RX 回收站点 40min
+  仅 2 次（冷）；teardown 站点（unmap×2 + drain + put）仅 MD stop 时批量触发
+- [x] teardown 全覆盖实测（v1.3，CFUN=1,1 压力测试）：**49373 次调用全 O(1)，
+  15911 页全隔离零漏网**（evict_full=0、rzero=0；put 站点独立首见 964 页）
+- [x] **writer-hit 已捕获**（v1.1 轮）：在押隔离页 0x933e7000（teardown 池区）
+  被外部写入——"释放页死后写入"类被直接拦截，页未进入复用流
+- [x] **事故记录（v1.1/v1.2 被撤载的原因）**：锁内线性去重 = 二次方开销，
+  teardown 32K 连发触发 `panic_on_rcu_stall` → 设备 20:45:57 重启一次
+  （aee db.fatal.04.KE: `quarantine_page+0x328 <- dpmaif_stop+0xf8`；
+  boot gate 自愈、无损）。v1.3 哈希去重修复并通过同型压力测试。
+- [ ] **活跃源未闭合（v1.4 主线，见 §8.6）**：v1.3 全 10 站点在位时注入仍
+  ~2/min（16 hit/8min，受害页移至 0xb2–0xb9 段）——活跃交接不经 dpmaif
+  的 dma_map/unmap/还页路径
 - [ ] 长窗验收（7 天两臂）与 rc.extend 开机自载（验收通过后）
 
 运维注意：dpquar 在押页 TTL 24h 后自动归还；MemFree 在 MD 复位+隔离叠加时
-降至 ~200MB（池重建 ×2 + aee 转储），属有界瞬态，若持续下探需查 aee/dial_keeper。
-
-### 8.6 v1.2 待办：还页站点钩（活跃源）
-
-§8.4 实测证明活跃注入源不经 unmap 站点。全驱动**直接还页仅 4 处**（ktext
-扫描锚点，2026-10-22）：
-
-| 站点 | 调用 | 性质 |
-|---|---|---|
-| `dpmaif_stop_rx_sw+0x1a4`（0xffffffc008562ef0） | `__page_frag_cache_drain` | teardown 排空 page_frag 缓存——**不经 unmap，v1.1 未覆盖** |
-| `dpmaif_stop_rx_sw+0x2b0`（0xffffffc008562ffc） | `put_page` | teardown RX 页（unmap 钩已覆盖同批，双保险） |
-| `dpmaif_alloc_med_rx_buf+0x1bc`（0xffffffc00855e28c） | `page_frag_free` | RX 缓冲分配错误路径 |
-| `dpmaif_alloc_med_rx_frag+0x1b0`（0xffffffc00855fc38） | `put_page` | frag 分配错误路径 |
-
-v1.2 = 在 v1.1 基础上加钩这 4 站点（`__page_frag_cache_drain(page, count)`
-与 `page_frag_free(vaddr)`——后者以 vaddr 换 PA）。若活跃源仍不归零，下一步
-对 `ccci_free_skb` 的 7 个调用点（含 `mtk_ccci_close_port+0x1c8`）加计数器
-定位经 skb 的还页路径。E7 已撤回（§3），端口路径暂无嫌疑证据。
+最低 ~198MB、稳态 ~1.09GB，属有界瞬态。
 
 ### 8.5 辅助（低成本，非修复）
 
 - mipc 探针降频/收敛 6s 端口开合来源（E7：贡献者）；
 - stop 路径 medmcu ack 循环加上限（A6，防"等不到 ack 从泄漏变挂死"）；
 - EMI MPU / memmap 预留维持兜底序位。
+
+### 8.6 v1.4 待办：活跃交接路径（dpmaif 之外）
+
+v1.3 实测（2026-10-22 20:53–21:02）：**全部 10 个 dpmaif 站点（6 unmap +
+4 还页）在押隔离 15911 页零命中的同时，注入以 ~2/min 持续**（16 hit/8min，
+受害页 0xb2–0xb9 段，随 buddy 状态移动）——活跃泄漏源的页交接**不经
+dpmaif 驱动的任何 dma_map/unmap/put_page 路径**。
+
+排除法剩下的交接通道（v1.4 锚点，kallsyms 已定位）：
+
+| 候选通道 | 锚点 | 特征 |
+|---|---|---|
+| 环本体释放（dma_free） | `dma_free_attrs` 在 ccci/dpmaif 的调用点；分配侧 `dpmaif_bat_init+0x60`/`dpmaif_late_init+0x348`（dma_alloc_attrs） | 旧环页=DPMAIF HW 内部保留基址的写入目标——**不在 10 站点内**，v1.4 首选加钩 |
+| ccci IPC/mailbox（ILM/DLM 内嵌 AP DRAM 缓冲 PA） | `ccci_ipc_send_ilm+0x22c` 等族 | PA 经共享内存报文交 MD，不经 dma_map |
+| cci 端口收发缓冲 | `ccci_port_recv_skb+0x144`、`mtk_ccci_send_data+0x284`、`mtk_ccci_close_port+0x1c8` | E7 已证与端口开合无因果，但缓冲交接仍经此族 |
+
+v1.4 优先序：① `dma_free_attrs` 调用点加计数+隔离（环本体假说，成本最低）；
+② cci_ipc 族加"交接 PA 记录"仪器，与 injwatch 受害 PA 求交坐实通道后再隔离；
+③ 若①②均阴性，EMI MPU 收紧上位（§16.6 兜底）。
 
 ## 9. 证据/产物索引
 

@@ -21,16 +21,16 @@
 // Site classification (from ktext disassembly + live counters):
 //   0  dpmaif_relase_tx_buffer+0x184   TX completion loop      hot  (count-only)
 //   1  dpmaif_relase_tx_buffer+0x798   TX bulk/flush loop      warm (count-only)
-//   2  dpmaif_rx_med_data_collect+0xa48  RX recycle (record)  hot  (count-only)
+//   2  dpmaif_rx_med_data_collect+0xa48  RX recycle (record)  cold in practice (1 call/40min) -> quarantine
 //   3  dpmaif_rx_med_data_collect+0xfb8  RX recycle (shadow
-//                                      array {page,dma,?,len})  warm (count-only)
+//                                      array {page,dma,?,len})  cold -> quarantine
 //   4  dpmaif_stop_rx_sw+0x25c        teardown bulk free      cold (quarantine)
 //   5  dpmaif_stop_rx_sw+0x2a8        teardown bulk free      cold (quarantine)
 // Default qmask=0x30 (sites 4,5).  Hot sites stay count-only so a per-packet
 // path can never flood the quarantine; raise the mask only after reading the
 // counters (e.g. if writer-hits stay 0 while injections continue).
 //
-// usage: insmod dpquar.ko [qmask=0x30] [hold_s=86400] [cap=4096] [watch=1]
+// usage: insmod dpquar.ko [qmask=0x3c] [hold_s=86400] [cap=16384] [watch=1]
 //        cat /proc/dpquar
 //        echo reset > /proc/dpquar        (clear event log only)
 #include <linux/module.h>
@@ -51,9 +51,9 @@ MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("dpquar: quarantine dpmaif-released pages against MD stale-list writes");
 
 /* ---------- tunables ---------- */
-static int qmask = 0x30;		/* default: quarantine cold (teardown) sites */
+static int qmask = 0x3c;		/* default: quarantine rx-recycle + teardown sites (2,3,4,5) */
 static int hold_s = 86400;		/* quarantine TTL */
-static int cap = 4096;			/* max quarantined pages (16MB) */
+static int cap = 16384;			/* max quarantined pages (64MB = full RX pool observed 2026-10-22) */
 static int watch = 1;			/* tail-watch quarantined pages */
 static unsigned long p_patchfn = 0xffffffc008122394UL;	/* aarch64_insn_patch_text */
 static unsigned long p_unmap = 0xffffffc00819b1b4UL;	/* dma_unmap_page_attrs */
@@ -94,7 +94,7 @@ static struct qent *qtab;
 static int qcount;			/* valid entries [0..cap) */
 static DEFINE_SPINLOCK(q_lock);
 
-static u64 cnt_call[6], cnt_quar[6], cnt_dup;
+static u64 cnt_call[6], cnt_quar[6], cnt_dupe, cnt_rzero;
 static u64 cnt_evict_ttl, cnt_evict_full, cnt_whits;
 static u64 wh_ev[16][2];		/* {pa, j} of last writer-hits */
 static int wh_n;
@@ -126,7 +126,7 @@ static void quarantine(int si, unsigned long addr)
 	if (!get_page_unless_zero(pg)) {
 		/* refcount 0: page already back in buddy -- too late for it,
 		 * but this is exactly the "freed while still listed" shape. */
-		cnt_dup++;
+		cnt_rzero++;
 		return;
 	}
 	spin_lock(&q_lock);
@@ -134,7 +134,7 @@ static void quarantine(int si, unsigned long addr)
 		if (qtab[i].pa == pa) {	/* already held */
 			put_page(pg);
 			spin_unlock(&q_lock);
-			cnt_dup++;
+			cnt_dupe++;
 			return;
 		}
 	if (qcount >= cap) {		/* FIFO evict oldest */
@@ -324,13 +324,13 @@ static ssize_t dq_read(struct file *f, char __user *ub, size_t n, loff_t *off)
 			"dpquar patched=%d qmask=%#x held=%d/%d whits=%llu\n"
 			"call tx1=%llu tx2=%llu rx1=%llu rx2=%llu st1=%llu st2=%llu\n"
 			"quar tx1=%llu tx2=%llu rx1=%llu rx2=%llu st1=%llu st2=%llu\n"
-			"dup=%llu full=%llu evict_ttl=%llu evict_full=%llu\n",
+			"dupe=%llu rzero=%llu evict_ttl=%llu evict_full=%llu\n",
 			patched, qmask, qcount, cap, cnt_whits,
 			cnt_call[0], cnt_call[1], cnt_call[2],
 			cnt_call[3], cnt_call[4], cnt_call[5],
 			cnt_quar[0], cnt_quar[1], cnt_quar[2],
 			cnt_quar[3], cnt_quar[4], cnt_quar[5],
-			cnt_dup, cnt_evict_ttl, cnt_evict_full);
+			cnt_dupe, cnt_rzero, cnt_evict_ttl, cnt_evict_full);
 		for (i = 0; i < wh_n; i++)
 			len += scnprintf(pbuf + len, sizeof(pbuf) - len,
 				"whit[%d] pa=%#llx j=%llu\n", i,
@@ -385,8 +385,8 @@ static int __init dpquar_init(void)
 {
 	int rc;
 
-	if (cap < 16 || cap > 16384)
-		cap = 4096;
+	if (cap < 16 || cap > 65536)
+		cap = 16384;
 	qtab = kcalloc(cap, sizeof(*qtab), GFP_KERNEL);
 	if (!qtab)
 		return -ENOMEM;

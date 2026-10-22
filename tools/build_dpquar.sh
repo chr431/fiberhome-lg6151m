@@ -3,7 +3,7 @@
 # tools/build_v3fix.sh header for the one-time kernel-header prep).
 # dpquar: quarantine dpmaif-released pages against the MD stale-buffer-list
 # writes (docs/SIGSEGV_ANALYSIS.md §8). Not yet auto-loaded at boot; manual
-# load: insmod /data/gw/dpquar.ko [qmask=0x30] [hold_s=86400] [cap=4096]
+# load: insmod /data/gw/dpquar.ko [qmask=0x3c] [hold_s=86400] [cap=16384]
 set -e
 cd "$(dirname "$0")/.."
 K=../_local/legacy/linux-5.15.134

@@ -117,8 +117,8 @@ gw/bin/logcut	1.0	manifest	/data/gw/bin/logcut	静态锚点截取器: 输出文�
 gw/src/logcut.c	1.0	src	gw/bin/logcut	logcut 源码(同产物; --selftest)
 gw/bin/procmatch	1.0	manifest	/data/gw/bin/procmatch	静态 pidof/pgrep 替代: /proc 扫描 + ERE, 有界手写输出(无 printf/无 locale); 覆盖 busybox pidof(~2.7 次/天崩溃面)与 pgrep(-x 语义修正)；⟦收口 §22⟧ 崩溃面收益=主机制缓解；独立价值=pgrep -x 语义修正
 gw/src/procmatch.c	1.0	src	gw/bin/procmatch	procmatch 源码(同产物)
-gw/bin/dpquar.ko	1.1	manifest	/data/gw/dpquar.ko	dpmaif释放页隔离内核模块: 钩6个 dma_unmap 释放点(直连bl补丁), 隔离页在押TTL+上限(FIFO有界), 页尾writer-hit遥测; 阻断 MD 陈旧缓冲列表写入复用页(SIGSEGV_ANALYSIS §8 根修); 手动 insmod, 开机自载待验收后; v1.1: cap 16MB->64MB(实测teardown池~16K页), qmask默认+RX回收站点(实测40min仅1调用=冷), dup计数拆分dupe/rzero
-gw/src/dpquar.c	1.1	src	gw/bin/dpquar.ko	dpquar 源码(同产物; qmask/hold_s/cap/watch 参数)
+gw/bin/dpquar.ko	1.3	manifest	/data/gw/dpquar.ko	dpmaif释放页隔离内核模块: 钩6个 dma_unmap 释放点(直连bl补丁), 隔离页在押TTL+上限(FIFO有界), 页尾writer-hit遥测; 阻断 MD 陈旧缓冲列表写入复用页(SIGSEGV_ANALYSIS §8 根修); 手动 insmod, 开机自载待验收后; v1.1: cap 16MB->64MB(实测teardown池~16K页), qmask默认+RX回收站点(实测40min仅1调用=冷), dup计数拆分dupe/rzero; v1.2: +4个还页站点钩(drain/put/page_frag_free×2, 全驱动仅有的直接还页处, 实值字核验), qmask默认0x3fc——覆盖活跃源理论路径; v1.3: 修复v1.1/v1.2锁内线性去重的二次方开销——teardown 32K调用触发RCU stall panic(2026-10-22 20:45 KE, 设备自愈重启); 改开放寻址哈希O(1)+锁外put_page批量; 全文件重写消除增量编辑引入的格式串/链接类小bug
+gw/src/dpquar.c	1.3	src	gw/bin/dpquar.ko	dpquar 源码(同产物; qmask/hold_s/cap/watch 参数)
 tools/build_procmatch.sh	1.0	tool	-	procmatch 静态构建(zig cc aarch64-linux-musl)
 tools/build_dpquar.sh	1.0	tool	-	dpquar.ko构建(zig cc内核树链, 同build_v3fix)
 gw/core_trap.sh	1.2	manifest	/data/gw/core_trap.sh	每日 core 捕获窗口(P3); v1.1(stability P1-5): restore 目标改 core_meta wrapper + 启动校验 + 心跳 + 全局配额(60 个/200MB, quota.tsv); v1.2(batch3): svc_lib 锁/心跳

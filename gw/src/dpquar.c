@@ -2,37 +2,43 @@
 // dpquar.ko -- quarantine dpmaif-released pages so the MD's stale buffer list
 // can never write into a page that was recycled to a user process.
 //
-// Mechanism (docs/SIGSEGV_ANALYSIS.md §1/§3): the cellular MD firmware keeps
-// DMA-writing 16/32B ring records into RX buffer page PAs it learned from the
-// AP driver; that list lives MD-side (invisible/unfixable from AP).  The only
-// AP-side lever is to never let those pages flow back into the buddy pool:
-// while a page holds one of our references it can be written by MD, but it can
-// never become a user page -- the write is harmless.
+// Mechanism (docs/SIGSEGV_ANALYSIS.md section 1/3): the cellular MD firmware
+// keeps DMA-writing 16/32B ring records into RX buffer page PAs it learned
+// from the AP driver; that list lives MD-side (invisible/unfixable from AP).
+// The only AP-side lever is to never let those pages flow back into the buddy
+// pool: while a page holds one of our references it can still be written by
+// MD, but it can never become a user page -- the write is harmless.
 //
-// Implementation: patch the six `bl dma_unmap_page_attrs` call sites in the
-// dpmaif driver (direct-bl redirect into module shims; machinery proven by
-// dphook on 2026-10-22).  Each shim optionally takes a reference on the page
-// behind dma_addr (== PA, no IOMMU on this SoC) before the original unmap,
-// parks it in a bounded FIFO quarantine, and calls the original function.
-// A 1Hz pass evicts expired entries (put_page) and diffs the page tail of
-// every quarantined page -- a tail change is a "writer-hit", the direct
-// acceptance readout that the mechanism is real and the fix is effective.
+// Implementation: patch the ten call sites in the dpmaif driver where buffers
+// are unmapped or pages returned (direct-bl redirect into module shims;
+// machinery proven by dphook 2026-10-22).  A shim optionally takes a
+// reference on the page behind the address before the original call, parks it
+// in a bounded FIFO quarantine, then calls the original function.
 //
-// Site classification (from ktext disassembly + live counters):
-//   0  dpmaif_relase_tx_buffer+0x184   TX completion loop      hot  (count-only)
-//   1  dpmaif_relase_tx_buffer+0x798   TX bulk/flush loop      warm (count-only)
-//   2  dpmaif_rx_med_data_collect+0xa48  RX recycle (record)  cold in practice (1 call/40min) -> quarantine
-//   3  dpmaif_rx_med_data_collect+0xfb8  RX recycle (shadow
-//                                      array {page,dma,?,len})  cold -> quarantine
-//   4  dpmaif_stop_rx_sw+0x25c        teardown bulk free      cold (quarantine)
-//   5  dpmaif_stop_rx_sw+0x2a8        teardown bulk free      cold (quarantine)
-// Default qmask=0x30 (sites 4,5).  Hot sites stay count-only so a per-packet
-// path can never flood the quarantine; raise the mask only after reading the
-// counters (e.g. if writer-hits stay 0 while injections continue).
+// v1.3 CRITICAL FIX (2026-10-22 20:45 postmortem): v1.1/v1.2 did the
+// duplicate-page check as a linear scan of the whole table under the table
+// spinlock.  A full teardown (~32768 calls, ~15923 pages) turns that into a
+// quadratic burst of non-preemptible work -> RCU stall -> panic_on_rcu_stall
+// -> device reboot (aee db.fatal.04.KE: quarantine_page+0x328 <-
+// dpmaif_stop+0xf8).  Dedup is now an open-addressing hash (O(1) per call,
+// lock hold bounded), TTL eviction batches put_page outside the lock.
 //
-// usage: insmod dpquar.ko [qmask=0x3c] [hold_s=86400] [cap=16384] [watch=1]
-//        cat /proc/dpquar
-//        echo reset > /proc/dpquar        (clear event log only)
+// Sites (words verified against ktext.bin 2026-10-22; mismatch refuses):
+//  unmap family: dma_unmap_page_attrs(dev, addr, size, dir, attrs), addr=PA
+//   0 dpmaif_relase_tx_buffer+0x184      TX completion    hot  count-only
+//   1 dpmaif_relase_tx_buffer+0x798      TX bulk loop     warm count-only
+//   2 dpmaif_rx_med_data_collect+0xa48   RX recycle       cold -> quarantine
+//   3 dpmaif_rx_med_data_collect+0xfb8   RX recycle/shdw  cold -> quarantine
+//   4 dpmaif_stop_rx_sw+0x25c            teardown unmap   cold -> quarantine
+//   5 dpmaif_stop_rx_sw+0x2a8            teardown unmap   cold -> quarantine
+//  return family: the only four direct page-return sites in the driver
+//   6 dpmaif_stop_rx_sw+0x1a4   __page_frag_cache_drain(page,count)
+//   7 dpmaif_stop_rx_sw+0x2b0   put_page(page)
+//   8 dpmaif_alloc_med_rx_buf+0x1bc   page_frag_free(vaddr)
+//   9 dpmaif_alloc_med_rx_frag+0x1b0   put_page(page)   (error path)
+//
+// usage: insmod dpquar.ko [qmask=0x3fc] [hold_s=86400] [cap=16384] [watch=1]
+//        cat /proc/dpquar ; echo reset > /proc/dpquar
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -51,12 +57,11 @@ MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("dpquar: quarantine dpmaif-released pages against MD stale-list writes");
 
 /* ---------- tunables ---------- */
-static int qmask = 0x3c;		/* default: quarantine rx-recycle + teardown sites (2,3,4,5) */
-static int hold_s = 86400;		/* quarantine TTL */
-static int cap = 16384;			/* max quarantined pages (64MB = full RX pool observed 2026-10-22) */
-static int watch = 1;			/* tail-watch quarantined pages */
+static int qmask = 0x3fc;	/* quarantine sites 2..9; TX sites count-only */
+static int hold_s = 86400;	/* quarantine TTL */
+static int cap = 16384;		/* max quarantined pages (64MB = one full pool) */
+static int watch = 1;		/* tail-watch quarantined pages for writer hits */
 static unsigned long p_patchfn = 0xffffffc008122394UL;	/* aarch64_insn_patch_text */
-static unsigned long p_unmap = 0xffffffc00819b1b4UL;	/* dma_unmap_page_attrs */
 
 module_param_named(qmask, qmask, int, 0444);
 module_param_named(hold_s, hold_s, int, 0444);
@@ -67,39 +72,97 @@ module_param_named(patchfn, p_patchfn, ulong, 0444);
 #define PA_BASE		0x80000000UL
 #define PA_LIM		0xffc00000UL
 #define LINBASE		0xffffff8000000000UL
-#define LINMAP(pa)	(LINBASE + ((unsigned long)(pa) - PA_BASE))
+#define PAOF(va)	((unsigned long)(va) - LINBASE + PA_BASE)
 
-/* ---------- patch sites (verified against ktext.bin 2026-10-22) ---------- */
+/* ---------- patch sites ---------- */
 #define S_TX1	0xffffffc00855e704UL	/* dpmaif_relase_tx_buffer+0x184 */
 #define S_TX2	0xffffffc00855ed18UL	/* dpmaif_relase_tx_buffer+0x798 */
 #define S_RX1	0xffffffc0085606b8UL	/* dpmaif_rx_med_data_collect+0xa48 */
 #define S_RX2	0xffffffc008560c28UL	/* dpmaif_rx_med_data_collect+0xfb8 */
 #define S_ST1	0xffffffc008562fa8UL	/* dpmaif_stop_rx_sw+0x25c */
 #define S_ST2	0xffffffc008562ff4UL	/* dpmaif_stop_rx_sw+0x2a8 */
+#define R_DRAIN	0xffffffc008562ef0UL	/* dpmaif_stop_rx_sw+0x1a4  __page_frag_cache_drain */
+#define R_PUT	0xffffffc008562ffcUL	/* dpmaif_stop_rx_sw+0x2b0  put_page */
+#define R_AFB	0xffffffc00855e28cUL	/* dpmaif_alloc_med_rx_buf+0x1bc  page_frag_free */
+#define R_AFF	0xffffffc00855fc38UL	/* dpmaif_alloc_med_rx_frag+0x1b0  put_page */
 
-static const unsigned long sites[6] = { S_TX1, S_TX2, S_RX1, S_RX2, S_ST1, S_ST2 };
-static const u32 orig_words[6] = {
+#define NSITES	10
+static const unsigned long sites[NSITES] = {
+	S_TX1, S_TX2, S_RX1, S_RX2, S_ST1, S_ST2, R_DRAIN, R_PUT, R_AFB, R_AFF,
+};
+static const u32 orig_words[NSITES] = {
 	0x97f0f2acu, 0x97f0f127u, 0x97f0eabfu, 0x97f0e963u, 0x97f0e083u, 0x97f0e070u,
+	0x97f3f2fdu, 0x97ffeab6u, 0x97f40626u, 0x97fff7a7u,
 };
 
-/* ---------- quarantine table ---------- */
+/* ---------- quarantine table (FIFO + hash dedup) ----------
+ * qtab is the FIFO ring of held pages; hslots[] is an open-addressing index
+ * pa -> qtab position (0 = empty, position stored +1).  Every operation is
+ * O(1); the spinlock is never held across more than a few words of work. */
 struct qent {
 	struct page *page;
 	unsigned long pa;
 	unsigned long j;
-	u64 tail;		/* xor-fold of last 64B, for writer-hit detect */
+	u64 tail;
 };
 
 static struct qent *qtab;
-static int qcount;			/* valid entries [0..cap) */
+static int *hslots;
+static int hmask;
+static int qhead, qtail_;		/* FIFO ring: entries [qhead, qtail_) */
 static DEFINE_SPINLOCK(q_lock);
 
-static u64 cnt_call[6], cnt_quar[6], cnt_dupe, cnt_rzero;
-static u64 cnt_evict_ttl, cnt_evict_full, cnt_whits;
-static u64 wh_ev[16][2];		/* {pa, j} of last writer-hits */
+static u64 cnt_call[NSITES], cnt_quar[NSITES];
+static u64 cnt_dupe, cnt_rzero, cnt_evict_ttl, cnt_evict_full, cnt_whits;
+static u64 wh_ev[16][2];
 static int wh_n;
 
-/* ---------- helpers ---------- */
+static int h_lookup(unsigned long pa, int *slot)
+{
+	int i = (int)((pa >> 12) & (unsigned long)hmask);
+
+	while (hslots[i]) {
+		int p = hslots[i] - 1;
+
+		if (p >= qhead && p < qtail_ && qtab[p].pa == pa) {
+			*slot = i;
+			return 1;
+		}
+		i = (i + 1) & hmask;
+	}
+	*slot = i;
+	return 0;
+}
+
+static void h_erase_pos(int p)
+{
+	int i = (int)((qtab[p].pa >> 12) & (unsigned long)hmask);
+
+	while (hslots[i] && hslots[i] - 1 != p)
+		i = (i + 1) & hmask;
+	if (!hslots[i])
+		return;
+	hslots[i] = 0;
+	{
+		int j = (i + 1) & hmask;
+
+		while (hslots[j]) {
+			int q = hslots[j] - 1;
+			int k = (int)((qtab[q].pa >> 12) & (unsigned long)hmask);
+			int x = i;
+
+			while (x != j && x != k)
+				x = (x + 1) & hmask;
+			if (x == i) {
+				hslots[i] = hslots[j];
+				hslots[j] = 0;
+				i = j;
+			}
+			j = (j + 1) & hmask;
+		}
+	}
+}
+
 static u64 tail_digest(struct page *pg)
 {
 	u64 t[8];
@@ -109,82 +172,138 @@ static u64 tail_digest(struct page *pg)
 	return t[0] ^ t[1] ^ t[2] ^ t[3] ^ t[4] ^ t[5] ^ t[6] ^ t[7];
 }
 
-static void quarantine(int si, unsigned long addr)
+/* core: must stay O(1) and brief -- a full teardown fires it ~32k times
+ * back to back from inside dpmaif_stop (see v1.3 header note). */
+static void quarantine_pa(int si, unsigned long pa)
 {
-	unsigned long pa = addr & ~0xfffUL;
 	struct page *pg;
-	int i;
+	int slot, pos;
 
 	cnt_call[si]++;
 	if (!(qmask & (1 << si)))
 		return;
-	if (pa < PA_BASE || pa >= PA_LIM)
-		return;
-	if (!pfn_valid(pa >> PAGE_SHIFT))
+	if (pa < PA_BASE || pa >= PA_LIM || !pfn_valid(pa >> PAGE_SHIFT))
 		return;
 	pg = compound_head(pfn_to_page(pa >> PAGE_SHIFT));
 	if (!get_page_unless_zero(pg)) {
-		/* refcount 0: page already back in buddy -- too late for it,
-		 * but this is exactly the "freed while still listed" shape. */
-		cnt_rzero++;
+		cnt_rzero++;		/* freed-before-unmap shape */
 		return;
 	}
 	spin_lock(&q_lock);
-	for (i = 0; i < qcount; i++)
-		if (qtab[i].pa == pa) {	/* already held */
-			put_page(pg);
-			spin_unlock(&q_lock);
-			cnt_dupe++;
-			return;
-		}
-	if (qcount >= cap) {		/* FIFO evict oldest */
-		struct qent old = qtab[0];
-
-		memmove(&qtab[0], &qtab[1], (size_t)(cap - 1) * sizeof(*qtab));
-		qcount--;
-		cnt_evict_full++;
-		if (old.page)
-			put_page(old.page);
+	if (h_lookup(pa, &slot)) {
+		put_page(pg);
+		cnt_dupe++;
+		spin_unlock(&q_lock);
+		return;
 	}
-	qtab[qcount].page = pg;
-	qtab[qcount].pa = pa;
-	qtab[qcount].j = jiffies;
-	qtab[qcount].tail = watch ? tail_digest(pg) : 0;
-	qcount++;
+	if (qtail_ - qhead >= cap) {	/* FIFO full: evict oldest */
+		struct qent *old = &qtab[qhead % cap];
+
+		if (old->page)
+			put_page(old->page);
+		h_erase_pos(qhead % cap);
+		qhead++;
+		cnt_evict_full++;
+		h_lookup(pa, &slot);	/* probe hole may have moved */
+	}
+	pos = qtail_ % cap;
+	qtab[pos].page = pg;
+	qtab[pos].pa = pa;
+	qtab[pos].j = jiffies;
+	qtab[pos].tail = watch ? tail_digest(pg) : 0;
+	hslots[slot] = pos + 1;
+	qtail_++;
 	cnt_quar[si]++;
 	spin_unlock(&q_lock);
 }
 
-/* ---------- shims (naked entry per site -> tail-jump into C body) ----------
- * dma_unmap_page_attrs(dev, addr, size, dir, attrs): x0..x4, returns void.
- * Pure tail jump keeps every register intact; the body returns to site+4. */
+static void quarantine_page(int si, struct page *p)
+{
+	if ((unsigned long)p < 0xfffffffe00000000UL ||
+	    (unsigned long)p >= 0xfffffffe02000000UL)
+		return;
+	quarantine_pa(si,
+		      (unsigned long)page_to_pfn(compound_head(p)) << PAGE_SHIFT);
+}
+
+static void quarantine_vaddr(int si, unsigned long va)
+{
+	if (va < LINBASE || va >= 0xffffffc000000000UL)
+		return;
+	quarantine_pa(si, PAOF(va) & ~0xfffUL);
+}
+
+/* ---------- shims ----------
+ * Unmap family (x0..x4, void return): naked entry tail-jumps into a C body
+ * which returns straight to the original caller.  Return family: one shim
+ * per callee signature.  C bodies are extern: the naked asm references the
+ * symbol name and a static symbol would become UNDEF in the .ko. */
 static noinline void dq_body(int si, unsigned long dev, unsigned long addr,
 			     unsigned long size, unsigned long dir,
 			     unsigned long attrs)
 {
-	quarantine(si, addr);
+	quarantine_pa(si, addr & ~0xfffUL);
 	((void (*)(unsigned long, unsigned long, unsigned long, unsigned long,
-		  unsigned long))p_unmap)(dev, addr, size, dir, attrs);
+		  unsigned long))0xffffffc00819b1b4UL)(dev, addr, size, dir, attrs);
 }
 
-/* dq_body##n must have external linkage: the naked asm references the
- * symbol name and an asm-level ref to a `static` fn becomes UNDEF (dphook lesson). */
 #define SHIM(n)								\
 static __attribute__((naked)) void dq_entry##n(void)			\
 {									\
 	__asm__ volatile("b  dq_body" #n ::: "memory");			\
 }									\
-noinline void dq_body##n(unsigned long a, unsigned long b,	\
-				unsigned long c, unsigned long d,	\
-				unsigned long e)			\
+noinline void dq_body##n(unsigned long a, unsigned long b,		\
+			 unsigned long c, unsigned long d,		\
+			 unsigned long e)				\
 {									\
 	dq_body(n, a, b, c, d, e);					\
 }
 
 SHIM(0) SHIM(1) SHIM(2) SHIM(3) SHIM(4) SHIM(5)
 
-static void * const entries[6] = {
+static __attribute__((naked)) void dq_entry6(void)
+{
+	__asm__ volatile("b  dqr_drain" ::: "memory");
+}
+noinline void dqr_drain(unsigned long page, unsigned long count)
+{
+	quarantine_page(6, (struct page *)page);
+	((void (*)(unsigned long, unsigned long))0xffffffc00825fae4UL)(page, count);
+}
+
+static __attribute__((naked)) void dq_entry7(void)
+{
+	__asm__ volatile("b  dqr_put" ::: "memory");
+}
+noinline void dqr_put(unsigned long page)
+{
+	quarantine_page(7, (struct page *)page);
+	((void (*)(unsigned long))0xffffffc00855dad4UL)(page);	/* put_page */
+}
+
+static __attribute__((naked)) void dq_entry8(void)
+{
+	__asm__ volatile("b  dqr_afb" ::: "memory");
+}
+noinline void dqr_afb(unsigned long va)
+{
+	quarantine_vaddr(8, va);
+	((void (*)(unsigned long))0xffffffc00825fb24UL)(va);	/* page_frag_free */
+}
+
+static __attribute__((naked)) void dq_entry9(void)
+{
+	__asm__ volatile("b  dqr_aff" ::: "memory");
+}
+noinline void dqr_aff(unsigned long page)
+{
+	quarantine_page(9, (struct page *)page);
+	((void (*)(unsigned long))0xffffffc00855dad4UL)(page);	/* put_page */
+}
+
+static void * const entries[NSITES] = {
 	dq_entry0, dq_entry1, dq_entry2, dq_entry3, dq_entry4, dq_entry5,
+	dq_entry6, dq_entry7, dq_entry8, dq_entry9,
 };
 
 /* ---------- patching ---------- */
@@ -203,23 +322,21 @@ static int apply_patch(unsigned long site, u32 word)
 {
 	void *addrs[1];
 	u32 insns[1];
-	u32 back;
-	int ok;
+	u32 back = 0;
 
 	addrs[0] = (void *)site;
 	insns[0] = word;
 	if (((patch_fn_t)p_patchfn)(addrs, insns, 1))
 		return -1;
-	back = 0;
 	copy_from_kernel_nofault(&back, (void *)site, 4);
 	return back == word ? 0 : -1;
 }
 
 static int patches_install(void)
 {
-	int i, ok;
+	int i;
 
-	for (i = 0; i < 6; i++) {
+	for (i = 0; i < NSITES; i++) {
 		u32 w = 0;
 
 		if (copy_from_kernel_nofault(&w, (void *)sites[i], 4) ||
@@ -229,15 +346,15 @@ static int patches_install(void)
 			goto unwind;
 		}
 	}
-	for (i = 0; i < 6; i++)
+	for (i = 0; i < NSITES; i++)
 		if (apply_patch(sites[i], bl_to(sites[i],
 						(unsigned long)entries[i]))) {
 			pr_err("dpquar: patch site %d failed\n", i);
 			goto unwind;
 		}
 	patched = 1;
-	pr_info("dpquar: 6 shims installed qmask=%#x hold_s=%d cap=%d watch=%d\n",
-		qmask, hold_s, cap, watch);
+	pr_info("dpquar: %d shims installed qmask=%#x hold_s=%d cap=%d watch=%d\n",
+		NSITES, qmask, hold_s, cap, watch);
 	return 0;
 unwind:
 	while (--i >= 0)
@@ -251,7 +368,7 @@ static void patches_remove(void)
 
 	if (!patched)
 		return;
-	for (i = 5; i >= 0; i--)
+	for (i = NSITES - 1; i >= 0; i--)
 		if (apply_patch(sites[i], orig_words[i]))
 			pr_err("dpquar: RESTORE FAILED site %d %#lx\n", i, sites[i]);
 	patched = 0;
@@ -263,46 +380,41 @@ static struct timer_list dq_timer;
 
 static void dq_tick(struct timer_list *t)
 {
-	int i;
+	struct page *rel[64];
+	int nrel = 0, i;
 
 	spin_lock(&q_lock);
-	for (i = 0; i < qcount; ) {
-		if (time_after(jiffies, qtab[i].j + (unsigned long)hold_s * HZ)) {
-			if (watch) {
-				u64 d = tail_digest(qtab[i].page);
+	while (qhead < qtail_ && nrel < 64) {
+		struct qent *e = &qtab[qhead % cap];
 
-				if (d && d != qtab[i].tail && wh_n < 16) {
-					wh_ev[wh_n][0] = qtab[i].pa;
-					wh_ev[wh_n][1] = jiffies;
-					wh_n++;
-					cnt_whits++;
-				}
-			}
-			put_page(qtab[i].page);
-			memmove(&qtab[i], &qtab[i + 1],
-				(size_t)(qcount - i - 1) * sizeof(*qtab));
-			qcount--;
-			cnt_evict_ttl++;
-			continue;
-		}
-		i++;
+		if (!time_after(jiffies, e->j + (unsigned long)hold_s * HZ))
+			break;
+		if (e->page)
+			rel[nrel++] = e->page;
+		h_erase_pos(qhead % cap);
+		qhead++;
+		cnt_evict_ttl++;
 	}
-	if (watch) {
-		for (i = 0; i < qcount; i++) {
-			u64 d = tail_digest(qtab[i].page);
+	for (i = qhead; i < qtail_; i++) {
+		struct qent *e = &qtab[i % cap];
+		u64 d;
 
-			if (d && d != qtab[i].tail) {
-				qtab[i].tail = d;
-				if (wh_n < 16) {
-					wh_ev[wh_n][0] = qtab[i].pa;
-					wh_ev[wh_n][1] = jiffies;
-					wh_n++;
-				}
-				cnt_whits++;
+		if (!e->tail)
+			continue;	/* watch off or page unreadable */
+		d = tail_digest(e->page);
+		if (d && d != e->tail) {
+			e->tail = d;
+			if (wh_n < 16) {
+				wh_ev[wh_n][0] = e->pa;
+				wh_ev[wh_n][1] = jiffies;
+				wh_n++;
 			}
+			cnt_whits++;
 		}
 	}
 	spin_unlock(&q_lock);
+	for (i = 0; i < nrel; i++)
+		put_page(rel[i]);
 	mod_timer(&dq_timer, jiffies + HZ);
 }
 
@@ -313,23 +425,27 @@ static int pbuf_len, pbuf_ready;
 static ssize_t dq_read(struct file *f, char __user *ub, size_t n, loff_t *off)
 {
 	int len = 0, chunk, r, i;
+	unsigned long fl;
 
 	if (pbuf_ready && *off >= pbuf_len)
 		return 0;
 	if (*off == 0) {
-		unsigned long fl;
-
 		spin_lock_irqsave(&q_lock, fl);
 		len += scnprintf(pbuf + len, sizeof(pbuf) - len,
-			"dpquar patched=%d qmask=%#x held=%d/%d whits=%llu\n"
-			"call tx1=%llu tx2=%llu rx1=%llu rx2=%llu st1=%llu st2=%llu\n"
-			"quar tx1=%llu tx2=%llu rx1=%llu rx2=%llu st1=%llu st2=%llu\n"
+			"dpquar patched=%d qmask=%#x held=%d/%d whits=%llu\n",
+			patched, qmask, qtail_ - qhead, cap, cnt_whits);
+		len += scnprintf(pbuf + len, sizeof(pbuf) - len,
+			"call tx1=%llu tx2=%llu rx1=%llu rx2=%llu st1=%llu st2=%llu drain=%llu put=%llu afb=%llu aff=%llu\n",
+			cnt_call[0], cnt_call[1], cnt_call[2], cnt_call[3],
+			cnt_call[4], cnt_call[5], cnt_call[6], cnt_call[7],
+			cnt_call[8], cnt_call[9]);
+		len += scnprintf(pbuf + len, sizeof(pbuf) - len,
+			"quar tx1=%llu tx2=%llu rx1=%llu rx2=%llu st1=%llu st2=%llu drain=%llu put=%llu afb=%llu aff=%llu\n",
+			cnt_quar[0], cnt_quar[1], cnt_quar[2], cnt_quar[3],
+			cnt_quar[4], cnt_quar[5], cnt_quar[6], cnt_quar[7],
+			cnt_quar[8], cnt_quar[9]);
+		len += scnprintf(pbuf + len, sizeof(pbuf) - len,
 			"dupe=%llu rzero=%llu evict_ttl=%llu evict_full=%llu\n",
-			patched, qmask, qcount, cap, cnt_whits,
-			cnt_call[0], cnt_call[1], cnt_call[2],
-			cnt_call[3], cnt_call[4], cnt_call[5],
-			cnt_quar[0], cnt_quar[1], cnt_quar[2],
-			cnt_quar[3], cnt_quar[4], cnt_quar[5],
 			cnt_dupe, cnt_rzero, cnt_evict_ttl, cnt_evict_full);
 		for (i = 0; i < wh_n; i++)
 			len += scnprintf(pbuf + len, sizeof(pbuf) - len,
@@ -388,13 +504,23 @@ static int __init dpquar_init(void)
 	if (cap < 16 || cap > 65536)
 		cap = 16384;
 	qtab = kcalloc(cap, sizeof(*qtab), GFP_KERNEL);
-	if (!qtab)
+	hmask = 1;
+	while (hmask < cap * 2)
+		hmask <<= 1;
+	hmask--;
+	hslots = kcalloc(hmask + 1, sizeof(*hslots), GFP_KERNEL);
+	if (!qtab || !hslots) {
+		kfree(qtab);
+		kfree(hslots);
 		return -ENOMEM;
+	}
 	rc = patches_install();
 	if (rc) {
 		pr_err("dpquar: shim install failed (%d), aborting\n", rc);
 		kfree(qtab);
+		kfree(hslots);
 		qtab = NULL;
+		hslots = NULL;
 		return rc;
 	}
 	timer_setup(&dq_timer, dq_tick, 0);
@@ -413,16 +539,17 @@ static void __exit dpquar_exit(void)
 	patches_remove();
 	if (qtab) {
 		spin_lock(&q_lock);
-		for (i = 0; i < qcount; i++)
-			put_page(qtab[i].page);
-		qcount = 0;
+		for (i = qhead; i < qtail_; i++)
+			if (qtab[i % cap].page)
+				put_page(qtab[i % cap].page);
+		qhead = qtail_ = 0;
 		spin_unlock(&q_lock);
 		kfree(qtab);
+		kfree(hslots);
 		qtab = NULL;
+		hslots = NULL;
 	}
-	pr_info("dpquar: unloaded quar_total=%llu whits=%llu\n",
-		cnt_quar[0] + cnt_quar[1] + cnt_quar[2] + cnt_quar[3] +
-		cnt_quar[4] + cnt_quar[5], cnt_whits);
+	pr_info("dpquar: unloaded\n");
 }
 
 module_init(dpquar_init);

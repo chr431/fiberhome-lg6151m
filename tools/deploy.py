@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""deploy.py v2.27 -- single source of truth for PC<->CPE deployment + drift guard.
+"""deploy.py v2.28 -- single source of truth for PC<->CPE deployment + drift guard.
+
+v2.28 (stale-list drain round): MANIFEST +gw/bin/dpclamp.ko (MOVABLE-page
+clamp; complements dpquar).
 
 v2.27 (SIGSEGV root-fix round): MANIFEST +gw/bin/dpquar.ko (dpmaif released-page
 quarantine; see docs/SIGSEGV_ANALYSIS.md section 8). Manual insmod until the
@@ -125,6 +128,7 @@ MANIFEST = [
     ("gw/bin/v3_fix.ko", "/data/gw/v3_fix.ko"),
     ("gw/bin/v3_steth.ko", "/data/gw/v3_steth.ko"),
     ("gw/bin/dpquar.ko", "/data/gw/dpquar.ko"),           # dpmaif released-page quarantine (SIGSEGV root fix)
+    ("gw/bin/dpclamp.ko", "/data/gw/dpclamp.ko"),           # MD stale-list drain (SIGSEGV root fix, part 2)
     ("gw/udhcpc_eth1.script", "/data/gw/udhcpc_eth1.script"),
     ("gw/defaults.conf", "/data/gw/defaults.conf"),
     ("gw/watchdog.sh", "/data/gw/watchdog.sh"),  # L13: continuous invariant monitor

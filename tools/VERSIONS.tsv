@@ -30,7 +30,7 @@ gw/bin/v3_steth.ko	1.0	manifest	/data/gw/v3_steth.ko	hook槽位听诊器(bias/in
 gw/src/healthdog.c	1.0	src	gw/bin/healthdog.ko	看门狗模块源码(版本随产物)
 gw/src/v3_fix.c	1.2	src	gw/bin/v3_fix.ko	TTL/解绑模块源码(版本随产物); v1.2 随产物重建
 gw/src/v3_steth.c	1.0	src	gw/bin/v3_steth.ko	听诊器模块源码(版本随产物)
-tools/deploy.py	2.27	tool	-	部署/漂移守卫; v2.23: babysit 目标修正为 preinit 实跑的 /data/rescue/babysit.sh + MANIFEST +boot_gate/core_meta; 历史见git; v2.24(batch3): +svc_lib/netlock MANIFEST; v2.25: MANIFEST +gw/bin/logcut; v2.26: MANIFEST +gw/bin/procmatch; v2.27: MANIFEST +gw/bin/dpquar.ko
+tools/deploy.py	2.28	tool	-	部署/漂移守卫; v2.23: babysit 目标修正为 preinit 实跑的 /data/rescue/babysit.sh + MANIFEST +boot_gate/core_meta; 历史见git; v2.24(batch3): +svc_lib/netlock MANIFEST; v2.25: MANIFEST +gw/bin/logcut; v2.26: MANIFEST +gw/bin/procmatch; v2.27: MANIFEST +gw/bin/dpquar.ko; v2.28: +gw/bin/dpclamp.ko
 tools/serial_server.py	1.7	tool	-	常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets)
 tools/serial_cmd.py	1.3	tool	-	串口命令瘦客户端(marker输出捕获; v1.3示例路径更新)
 tools/lk_flip2.py	1.1	tool	-	LK 一键翻槽(a|b, misc[2060]字节)
@@ -119,8 +119,11 @@ gw/bin/procmatch	1.0	manifest	/data/gw/bin/procmatch	静态 pidof/pgrep 替代: 
 gw/src/procmatch.c	1.0	src	gw/bin/procmatch	procmatch 源码(同产物)
 gw/bin/dpquar.ko	1.3	manifest	/data/gw/dpquar.ko	dpmaif释放页隔离内核模块: 钩6个 dma_unmap 释放点(直连bl补丁), 隔离页在押TTL+上限(FIFO有界), 页尾writer-hit遥测; 阻断 MD 陈旧缓冲列表写入复用页(SIGSEGV_ANALYSIS §8 根修); 手动 insmod, 开机自载待验收后; v1.1: cap 16MB->64MB(实测teardown池~16K页), qmask默认+RX回收站点(实测40min仅1调用=冷), dup计数拆分dupe/rzero; v1.2: +4个还页站点钩(drain/put/page_frag_free×2, 全驱动仅有的直接还页处, 实值字核验), qmask默认0x3fc——覆盖活跃源理论路径; v1.3: 修复v1.1/v1.2锁内线性去重的二次方开销——teardown 32K调用触发RCU stall panic(2026-10-22 20:45 KE, 设备自愈重启); 改开放寻址哈希O(1)+锁外put_page批量; 全文件重写消除增量编辑引入的格式串/链接类小bug
 gw/src/dpquar.c	1.3	src	gw/bin/dpquar.ko	dpquar 源码(同产物; qmask/hold_s/cap/watch 参数)
+gw/bin/dpclamp.ko	1.1	manifest	/data/gw/dpclamp.ko	MD累积陈旧列表排空模块: 周期GFP_HIGHUSER_MOVABLE采样buddy, 页尾注入签名自识别的列表页get_page扣住(有界8192页), 未命中即释放; 与dpquar组成修复栈(dpquar断新漏/本件排存量); v1.1实测: 417K采样扣18页, 用户页注入2/min->0(20min)且写入者仍活跃; v1.0事故: alloc_pages_bulk_array在__free_pages崩溃致21:33重启(已换单页循环)
+gw/src/dpclamp.c	1.1	src	gw/bin/dpclamp.ko	dpclamp 源码(同产物; period_s/batch/cap/minfree_kb 参数)
 tools/build_procmatch.sh	1.0	tool	-	procmatch 静态构建(zig cc aarch64-linux-musl)
 tools/build_dpquar.sh	1.0	tool	-	dpquar.ko构建(zig cc内核树链, 同build_v3fix)
+tools/build_dpclamp.sh	1.0	tool	-	dpclamp.ko构建(zig cc内核树链)
 gw/core_trap.sh	1.2	manifest	/data/gw/core_trap.sh	每日 core 捕获窗口(P3); v1.1(stability P1-5): restore 目标改 core_meta wrapper + 启动校验 + 心跳 + 全局配额(60 个/200MB, quota.tsv); v1.2(batch3): svc_lib 锁/心跳
 tools/build_logc.sh	1.2	tool	-	logc 静态构建(zig cc aarch64-linux-musl; v1.1: -fstack-protector-all); v1.2(batch3): --asan 主机 ASAN/UBSAN 构建
 tools/fuzz_logc.py	1.1	tool	-	logc 帧解析器在设备侧的结构化 fuzz(合法帧+截断+伪长度+类型污染+噪声; 崩溃留面包屑并保存语料); v1.1(batch3): --inproc 设备内 fuzz

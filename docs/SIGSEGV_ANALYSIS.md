@@ -211,9 +211,9 @@ MD 列表自然失效/MD 重启——残余期"只降不零"，文档化。崩�
   teardown 32K 连发触发 `panic_on_rcu_stall` → 设备 20:45:57 重启一次
   （aee db.fatal.04.KE: `quarantine_page+0x328 <- dpmaif_stop+0xf8`；
   boot gate 自愈、无损）。v1.3 哈希去重修复并通过同型压力测试。
-- [ ] **活跃源未闭合（v1.4 主线，见 §8.6）**：v1.3 全 10 站点在位时注入仍
-  ~2/min（16 hit/8min，受害页移至 0xb2–0xb9 段）——活跃交接不经 dpmaif
-  的 dma_map/unmap/还页路径
+- [x] **活跃源已定性与压制（2026-10-22 深夜轮，见 §8.6/§8.7）**：MD 累积
+  陈旧列表（MOVABLE 页、固定 PA 集、MD 侧持有）；dpclamp v1.1 上线后
+  用户页注入 2/min → 0（20 min），写入者仍活跃（钳制拦截成立）
 - [ ] 长窗验收（7 天两臂）与 rc.extend 开机自载（验收通过后）
 
 运维注意：dpquar 在押页 TTL 24h 后自动归还；MemFree 在 MD 复位+隔离叠加时
@@ -221,28 +221,57 @@ MD 列表自然失效/MD 重启——残余期"只降不零"，文档化。崩�
 
 ### 8.5 辅助（低成本，非修复）
 
-- mipc 探针降频/收敛 6s 端口开合来源（E7：贡献者）；
+- mipc 探针降频/收敛 6s 端口开合来源（⟦E7 已撤回因果，仅降噪价值⟧）；
 - stop 路径 medmcu ack 循环加上限（A6，防"等不到 ack 从泄漏变挂死"）；
 - EMI MPU / memmap 预留维持兜底序位。
 
-### 8.6 v1.4 待办：活跃交接路径（dpmaif 之外）
+### 8.6 活跃源定性（已解决，2026-10-22 深夜轮）
 
-v1.3 实测（2026-10-22 20:53–21:02）：**全部 10 个 dpmaif 站点（6 unmap +
-4 还页）在押隔离 15911 页零命中的同时，注入以 ~2/min 持续**（16 hit/8min，
-受害页 0xb2–0xb9 段，随 buddy 状态移动）——活跃泄漏源的页交接**不经
-dpmaif 驱动的任何 dma_map/unmap/put_page 路径**。
+v1.3 实测排除 + 三轮新仪器后，**活跃源已定性并压制**：
 
-排除法剩下的交接通道（v1.4 锚点，kallsyms 已定位）：
+**排除**（全部实测锚点）：
+- dpmaif 全 10 站点在押零命中时注入仍 ~2/min → 交接不经 dpmaif dma 路径；
+- **环本体**：ktext 全文 cci/dpmaif **零 `dma_free_attrs` 调用点**——环只分配
+  （bat_init+0x60/late_init+0x348）不释放（每次队列重建泄漏性保留），永远不回
+  buddy，当不了受害页；
+- **cci_ipc/ILM**：`ccci_ipc_send_ilm` 为拷贝进 skb 路径，不交 PA；
+- **端口 churn**：E7 复测撤回（无因果）。
 
-| 候选通道 | 锚点 | 特征 |
+**buddyscan 定性**（自底向上：扫 buddy 页注入签名，buddy 页保留前属主内容）：
+- 陈旧列表人口直接可见：**~400 个固定 PA 的 4K 页集合**（6 min 内 distinct=402、
+  192 个 ≥5 次重现、单页最高 113 次；45s 窗口 44 进 44 出 ≈1 页/s 被写）；
+- 记录形态：**同值记录喷多页**（`{0,0x5e,0}` 族与 `{6,0,…,0x70014,0}` 族），
+  非逐槽异值的环游标——状态/广播类写入；
+- 成员页除尾部记录外**内容全零**（ex-anon/零填页）；前属主考古因此不可用；
+- 4 个稳定成员 findpa 交叉：全部为扫描器自匹配（§3-E6 特征）——**AP 侧零引用，
+  列表在 MD 侧私有持有**，与 E4 一致；跨 MD 温复位存活（CFUN=1,1 后 1–2 min 恢复）。
+
+**关键盲区发现（migrate 类型）**：列表成员是 ex-anon 页，位于 **MOVABLE 迁移
+链表**；`GFP_KERNEL` 分配只从 UNMOVABLE 链表取页——dpclamp v1.0 用 GFP_KERNEL
+**147K 次采样零命中**（同期 buddyscan 每轮 ~47 张签名页）。这是此前一切"抓不到
+交接"的分配侧原因。换 `GFP_HIGHUSER_MOVABLE` 后立即命中。
+
+### 8.7 修复栈与字段判决（dpquar + dpclamp）
+
+**完整修复 = 两件**（写入者本身在 MD 侧不可修，AP 侧掐断页面供给）：
+
+| 件 | 作用 | 机制 |
 |---|---|---|
-| 环本体释放（dma_free） | `dma_free_attrs` 在 ccci/dpmaif 的调用点；分配侧 `dpmaif_bat_init+0x60`/`dpmaif_late_init+0x348`（dma_alloc_attrs） | 旧环页=DPMAIF HW 内部保留基址的写入目标——**不在 10 站点内**，v1.4 首选加钩 |
-| ccci IPC/mailbox（ILM/DLM 内嵌 AP DRAM 缓冲 PA） | `ccci_ipc_send_ilm+0x22c` 等族 | PA 经共享内存报文交 MD，不经 dma_map |
-| cci 端口收发缓冲 | `ccci_port_recv_skb+0x144`、`mtk_ccci_send_data+0x284`、`mtk_ccci_close_port+0x1c8` | E7 已证与端口开合无因果，但缓冲交接仍经此族 |
+| `dpquar` v1.3（§8.2） | **断新漏** | 钩 dpmaif 全 10 个 unmap/还页点，teardown 释放页加引用隔离（实测 49373 调用 15911 页零漏网） |
+| `dpclamp` v1.1 | **排存量** | 周期 `GFP_HIGHUSER_MOVABLE` 批量采样 buddy，页尾注入签名**自识别**的列表页 get_page 扣住（cap 8192 页有界），未命中即释放；writer-hit 遥测 |
 
-v1.4 优先序：① `dma_free_attrs` 调用点加计数+隔离（环本体假说，成本最低）；
-② cci_ipc 族加"交接 PA 记录"仪器，与 injwatch 受害 PA 求交坐实通道后再隔离；
-③ 若①②均阴性，EMI MPU 收紧上位（§16.6 兜底）。
+**字段判决（2026-10-22 21:37–21:57，重启后干净态）**：两件在位，
+dpclamp 417K 次采样扣住 18 张列表页（收敛持续），**用户页注入 2/min → 0
+（20 min 零命中）**，同期 buddyscan 显示写入者仍以 ~1 页/s 活跃于空闲页
+（P(0|无效)=e^-40）——列表成员在到达用户之前被钳制。dpclamp v1.0 事故记录：
+`alloc_pages_bulk_array` 在 `__free_pages` 崩溃（21:33 KE，设备自愈重启），
+v1.1 改单页循环。
+
+**剩余工作**：① 长窗两臂验收（7 天，§8.3 口径：whits>0 机制确认 + injwatch
+零命中保持）；② rc.extend 开机自载两模块（验收后）；③ 观察 dpclamp 收敛上界
+（= 列表真实大小，决定是否值得 memmap 钉死：若命中 PA 集跨重启稳定，
+§16.6-B 的 memmap 预留可作为永久替代——待跨重启宇宙对比）；④ E8 撤回的
+"端口 churn"不再追。
 
 ## 9. 证据/产物索引
 

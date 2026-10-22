@@ -1,5 +1,10 @@
 #!/bin/sh
-# rc.extend.sh v2.6 -- slot-aware dispatcher (shared /data between v2/v3)
+# rc.extend.sh v2.7 -- slot-aware dispatcher (shared /data between v2/v3)
+# v2.7 (SIGSEGV §8.4): DMA 注入修复栈开机自载 — dpquar(断新漏)+dpclamp(排存量)
+#   在 modem 环境/守护动物园拉起之前同步 insmod(仅 slot-a; dpquar init 逐点
+#   校验内核原文, 内核不匹配即 REFUSE+回滚+insmod 失败, 官方内核上零风险);
+#   动机: reboot_sched 每日 04:00 定时重启后修复栈缺席成裸窗口(10-23 00:51 NE
+#   与 3h 裸窗口实证), 7d 两臂验收经操作者决定取消(2026-10-23), 自载提前转正。
 # v2.5: TZ 取自自管配置(settings>defaults)而非早期 /etc/TZ(厂商 boot 会先写 UTC)。
 # v2.4: TZ 解析提前到 toolchain_init 之前(静态工具链自举日志也走镜像时区)。
 # v2.2 (SIGSEGV P2/P3): static userland bootstrap — toolchain_init.sh builds
@@ -146,6 +151,16 @@ case "$slot" in
      ;;
   *) # v3: full stack (forensics, flight rc19, TTL/hnat are v3 duties)
      logger -t rc.extend "slot=$slot: v3 rc19.sh"
+     # --- v2.7 (SIGSEGV §8.4): fix stack auto-load, BEFORE modem env/daemons --
+     # dpquar first (stop new leak at source), then dpclamp (drain the backlog).
+     # Idempotent (lsmod guard), failure logs and boot continues unprotected --
+     # same posture as any pre-v2.7 boot, never a boot blocker.
+     lsmod | grep -q '^dpquar ' || { insmod /data/gw/dpquar.ko 2>/dev/null \
+         && logger -t rc.extend "dpquar auto-loaded (qmask=0x3f0)" \
+         || logger -t rc.extend "dpquar insmod FAILED (kernel mismatch?)"; }
+     lsmod | grep -q '^dpclamp ' || { insmod /data/gw/dpclamp.ko 2>/dev/null \
+         && logger -t rc.extend "dpclamp auto-loaded" \
+         || logger -t rc.extend "dpclamp insmod FAILED"; }
      # v1.6: route A -- FH modem-stack environment parallel to our layer
      # (dial: mobilenetwork 过渡期 + dial_keeper 兜底; rc19 skips rmmod+dial_5g via MODE.fh gate)
      # v1.7 (D2 开箱审查): MODE.fh 首刷自建 — kit 从不创建该标志, 纯原厂直刷时

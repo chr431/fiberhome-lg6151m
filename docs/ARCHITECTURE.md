@@ -83,7 +83,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/night_report.sh` | **v1.0** | manifest | `/data/gw/night_report.sh` | 夜间体检报告 |
 | `gw/ntp_keeper.sh` | **v1.5** | manifest | `/data/gw/ntp_keeper.sh` | 每小时NTP守时(多源; 设备无RTC); v1.4(P1-1): 单实例锁; v1.3: 首同步失败 60s 重试+心跳; v1.2: 时区自愈; 历史见git; v1.5(batch3): svc_lib 锁/心跳 |
 | `gw/radvd.conf` | **v1.0** | manifest | `/data/gw/radvd.conf` | IPv6 SLAAC+RDNSS通告(br-lan, ULA fd42:9ac1:7e50::/64) |
-| `gw/rc.extend.sh` | **v2.6** | manifest | `/data/rc.extend.sh` | 槽位调度器; v2.6(stability P0-2/P1-5): boot 尝试台账+条件清 TRY_A(上次 healthy 且非快速重启)+boot_gate 终判; core_pattern 改 core_meta wrapper; healthdog forensic 按 marker; 历史见git |
+| `gw/rc.extend.sh` | **v2.7** | manifest | `/data/rc.extend.sh` | 槽位调度器; v2.7(SIGSEGV §8.4): dpquar/dpclamp 修复栈开机自载(仅slot-a, 先于modem环境; dpquar逐点校验内核原文,不匹配即拒载=官方内核零风险); v2.6: boot台账+条件清TRY_A+core_meta wrapper; 历史见git |
 | `gw/rc_netfh.sh` | **v3.12** | manifest | `/data/gw/rc_netfh.sh` | 路线A: FH modem栈环境; v3.10(日志加密轮): 相位计时+settle 每10s ccmni 清单+route/NAT REPAIR+fw_apply rc+总耗时; v3.9: RIL 四件套全退役, 读/写路径直连; v3.11(日志加密轮补): 日志行补 epoch 时间基准(跨日志关联); v3.12(batch3): route/NAT 相位 netcfg 串行化 |
 | `gw/reboot_sched.sh` | **v1.4** | manifest | `/data/gw/reboot_sched.sh` | 定时重启守护; v1.3(P1-1): 单实例锁+心跳; v1.2: 触发行先落 /data+sync; 历史见git; v1.4(batch3): svc_lib 锁/心跳 |
 | `gw/svc_lib.sh` | **v1.1** | manifest | `/data/gw/svc_lib.sh` | 共享监督/锁/心跳/最小解析器库; v1.1(WiFi 事故): hostapd 判据改**活控制套接字**(/proc/net/unix)+自有配置路径, 残留 socket 文件与厂商 global hostapd 不再算在线; 历史见git |

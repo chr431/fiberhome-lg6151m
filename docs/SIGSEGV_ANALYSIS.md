@@ -260,6 +260,13 @@ MD 列表自然失效/MD 重启——残余期"只降不零"，文档化。崩�
   "固定 PA 集"仅 boot 内成立**；dpclamp 每 boot 重排水既是必然也是正确
   架构（新 boot T+21min clamped=11，与上 boot T+28min clamped=7 同量级），
   memmap= 排除理由再添一层（离散且跨重启不稳定）。
+  **常态首数据点（13:15 复检，自载 boot T+5h24m）**：受保护 boot 内 1 起
+  NE（12:54:07 `ip -o -4 addr show`，wan_agg.sh 子进程，单发即逝父循环
+  自续，core_meta 在档）——"压制非清零"均衡的实测体现：单点速率 ~0.2/h
+  vs 修复前基线 26/d≈1.1/h（~5×，单事件样本置信区间宽，仅作量级参考）。
+  系统面零恶化：零重启、零 KE、MemFree 1.275GB 平稳、clamped=94 均速
+  ~0.29/min 无棘轮（cap 8192 的 1.1%）、dpquar held=0/quar=0、
+  selftest 98/98 全绿。
 
 运维注意：dpquar 在押页 TTL 24h 后自动归还；MemFree 在 MD 复位+隔离叠加时
 最低 ~198MB、稳态 ~1.09GB，属有界瞬态。

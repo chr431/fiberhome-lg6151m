@@ -1,5 +1,7 @@
 #!/bin/sh
-# svc_lib.sh v1.1 -- shared supervision, lock, heartbeat and minimal-parser library.
+# svc_lib.sh v1.2 -- shared supervision, lock, heartbeat and minimal-parser library.
+# v1.2 (2026-10-24 USB 轮): SVC_TABLE +usb_mgr(USB-C 设备模式服务管理; 心跳
+#   周期 15s, max-hb-age=180; recipe 带 daemon 参数)。
 # v1.1 (2026-10-21 WiFi incident): hostapd liveness by LIVE control socket
 #   (/proc/net/unix) + our own config path; stale socket files and the vendor
 #   global hostapd no longer count as "our AP is up".
@@ -243,4 +245,5 @@ log_keeper|log_keeper[.]sh|log_keeper.sh|sh /data/gw/log_keeper.sh|/tmp/log_keep
 core_trap|core_trap[.]sh|core_trap.sh|sh /data/gw/core_trap.sh|/tmp/core_trap.hb|600|
 healthdog|healthdog[.]sh|healthdog.sh|sh /data/gw/healthdog.sh|/tmp/healthdog.hb|60|
 dial_keeper|dial_keeper[.]sh|dial_keeper.sh|sh /data/gw/dial_keeper.sh|/tmp/dial_keeper.hb|90|LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib PATH=/data/gw/sbin:/data/gw/bin:/usr/sbin:/usr/bin:/sbin:/bin:/fhrom/bin:/fhrom/fhshell
+usb_mgr|usb_mgr[.]sh|usb_mgr.sh|sh /data/gw/usb_mgr.sh daemon|/tmp/usb_mgr.hb|180|
 '

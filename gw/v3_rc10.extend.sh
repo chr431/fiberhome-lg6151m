@@ -1,5 +1,8 @@
 #!/bin/sh
-# rc19.sh v2 (=local v3_rc10.extend.sh) v2.34 -- Frankenstein v3.1: br-lan world + WiFi.
+# rc19.sh v2 (=local v3_rc10.extend.sh) v2.35 -- Frankenstein v3.1: br-lan world + WiFi.
+# v2.35 (2026-10-24 USB 轮): +usb_mgr 守护(USB-C 设备模式服务补完: rndis0 桥入
+#        br-lan=PC 即 LAN 客户端; 总开关 USB_ENABLED/USB_ADB/USB_CONSOLE 走
+#        defaults+settings, GUI 可改; OFF=停厂商 keepalive+解绑 UDC, 口全灭)。
 # v2.34 (2026-10-20 stability P0-2): 120s 定时器标记退役 — /tmp/boot.done 改由
 #        boot_gate.sh 在"关键启动链实测通过"后写入(LAN IP+SSH+DHCP/DNS+GUI 监听
 #        + rc19 完成); 本脚本在关键相位写 /tmp/boot.progress 供 babysit 判进展,
@@ -184,6 +187,10 @@ pgrep -f log_keeper.sh >/dev/null || nohup sh /data/gw/log_keeper.sh >/dev/null 
 # v2.31 (SIGSEGV P3): daily core-capture window (aee core_pattern owner).
 #   watchdog restarts it if killed; it self-heals a stale window at start.
 pgrep -f core_trap.sh >/dev/null || nohup sh /data/gw/core_trap.sh >/dev/null 2>&1 &
+
+# --- v2.35: USB-C 设备模式服务管理(厂商遗留 g1 gadget 链在位, 此处只补服务层;
+#     rndis0 桥入 br-lan + 总开关; watch 由 SVC_TABLE 兜底)
+pgrep -f usb_mgr.sh >/dev/null || nohup sh /data/gw/usb_mgr.sh daemon >/dev/null 2>&1 &
 
 # --- v2.16: 可插拔上行认证守护 — conf 里 AUTHD_CMD 为任意认证程序
 # v2.21: static 档案开机重应用 — MAC 伪装与静态 IP 是运行态, 断电/重启即丢

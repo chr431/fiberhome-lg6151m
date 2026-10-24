@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+v2.59 (2026-10-24 USB 轮): +t_usb_service/t_usb_dataplane(USB-C 设备模式:
+  守护/UDC 绑定/SVC_TABLE + rndis0 桥接不变量, 按 USB_ENABLED 分档断言)。
 """selftest.py -- assertion-based functional test suite for the LG6151M gateway.
 
 Design principle: L13 (2026-10-05) -- "feature silently broken until manual
@@ -2156,6 +2158,48 @@ def t_batch4_awk_arrays():
     record(t_batch4_awk_arrays._test_name, "system", ok,
            "split_empty_files=%s delete_B=%s awk_delta=%s logcut=%s selftest=[%s]"
            % (hits, dl, ak, lv, ls[-80:]))
+
+
+@test("usb: 设备模式服务面 (usb_mgr 守护/gadget绑定/键位)")
+def t_usb_service():
+    # USB 轮 (2026-10-24): 厂商遗留 g1 gadget 链 + usb_mgr 服务补完.
+    #   控制面: 守护活 + UDC 绑定 + SVC_TABLE 行; 状态面: status 输出形状.
+    # 按当前 USB_ENABLED 分档断言(1=在役契约; 0=全灭契约).
+    en = dev("sh /data/gw/usb_mgr.sh status 2>/dev/null | head -1").strip()
+    dpid = dev("pgrep -f 'usb_mgr[.]sh daemon' 2>/dev/null").strip()
+    udc = dev("cat /config/usb_gadget/g1/UDC 2>/dev/null").strip()
+    row = dev("grep -c 'usb_mgr' /data/gw/svc_lib.sh 2>/dev/null").strip()
+    st = dev("sh /data/gw/usb_mgr.sh status 2>/dev/null").strip()
+    keys = all(("enabled=" in st) and ("udc=" in st) and ("bridge=" in st)
+               and ("adbd=" in st) and ("gate=" in st) and ("getty=" in st))
+    if "enabled=1" in en:
+        ok = (dpid != "" and udc == "11201000.usb" and row != "0" and keys)
+        note = "on daemon=%s udc=%s" % (dpid or "MISSING", udc)
+    elif "enabled=0" in en:
+        ok = (udc != "11201000.usb" and keys)
+        note = "off udc=[%s] (unbound expected)" % udc
+    else:
+        ok, note = False, "status unreadable"
+    record(t_usb_service._test_name, "system", ok, note)
+
+
+@test("usb: RNDIS 数据面不变量 (rndis0 桥入 br-lan)")
+def t_usb_dataplane():
+    # 数据面: enabled=1 时 rndis0 必须是 br-lan 成员且 UP — "PC 即 LAN 客户端"
+    # 的充要条件; enabled=0 时必须不在桥中(隔离不变量).
+    en = dev("sh /data/gw/usb_mgr.sh status 2>/dev/null | head -1").strip()
+    br = dev("brctl show br-lan 2>/dev/null | grep -cw rndis0").strip()
+    fl = dev("cat /sys/class/net/rndis0/flags 2>/dev/null").strip()
+    iup = "1" if fl.startswith("0x") and (int(fl, 16) & 1) else "0"
+    if "enabled=1" in en:
+        ok = (br == "1" and iup == "1")
+        note = "bridge=%s ifup=%s" % (br, iup)
+    elif "enabled=0" in en:
+        ok = (br == "0")
+        note = "bridge=%s (detached expected)" % br
+    else:
+        ok, note = False, "status unreadable"
+    record(t_usb_dataplane._test_name, "system", ok, note)
 
 
 @test("census batch: pidof/pgrep 自研替代在位 (procmatch)")

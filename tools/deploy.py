@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """deploy.py v2.28 -- single source of truth for PC<->CPE deployment + drift guard.
 
-v2.28 (stale-list drain round): MANIFEST +gw/bin/dpclamp.ko (MOVABLE-page
+v2.29 (USB round): MANIFEST +gw/usb_mgr.sh +gw/www/api_usb.sh (USB-C
+de   device-mode service layer).
+# v2.28 (stale-list drain round): MANIFEST +gw/bin/dpclamp.ko (MOVABLE-page
 clamp; complements dpquar).
 
 v2.27 (SIGSEGV root-fix round): MANIFEST +gw/bin/dpquar.ko (dpmaif released-page
@@ -69,6 +71,7 @@ MANIFEST = [
     ("gw/bin/logcut", "/data/gw/bin/logcut"),           # static anchor-tail cutter (replaces awk arrays)
     ("gw/bin/procmatch", "/data/gw/bin/procmatch"),     # static pidof/pgrep (printf-free /proc scan)
     ("gw/v3_rc10.extend.sh", "/data/gw/rc19.sh"),         # rc19v2: br-lan+wifi+wan stack
+    ("gw/usb_mgr.sh", "/data/gw/usb_mgr.sh"),             # USB-C device-mode service mgr (rndis0->br-lan + switches)
     ("gw/wifi_macplan.sh", "/data/gw/wifi_macplan.sh"),  # factory MAC plan (wifi_up BSSIDs + api uplink native-MAC restore; v1.29 split)
     ("gw/wifi_autoch.sh", "/data/gw/wifi_autoch.sh"),    # auto-channel scanner (wifi_up CH=0 path; v1.29 split)
     ("gw/wifi_up.sh", "/data/gw/wifi_up.sh"),      # AP bring-up (factory recipe)
@@ -110,6 +113,7 @@ MANIFEST = [
     ("gw/www/api_agg.sh", "/data/gw/www/api_agg.sh"),   # API agg+uplink-domain module (lazy-loaded; v2.75 split)
     ("gw/www/api_cell.sh", "/data/gw/www/api_cell.sh"), # API cellular-domain module (lazy-loaded; v2.75 split)
     ("gw/www/api_sms.sh", "/data/gw/www/api_sms.sh"),   # API sms-domain module (lazy-loaded; v2.75 split)
+    ("gw/www/api_usb.sh", "/data/gw/www/api_usb.sh"),   # API usb-domain module (USB-C device-mode switches; USB round)
     ("gw/www/api.sh", "/data/gw/www/api.sh"),        # JSON endpoints (core router; sources domain modules)
     ("gw/www/index.html", "/data/gw/www/index.html"),    # console page
     ("gw/www/style.css", "/data/gw/www/style.css"),     # theme

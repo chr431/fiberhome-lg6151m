@@ -1,5 +1,7 @@
 #!/bin/sh
-# log_keeper.sh v2.7 -- 日志持久化守护（日志改善专项轮）
+# log_keeper.sh v2.8 -- 日志持久化守护（日志改善专项轮）
+#   v2.8 (SIGSEGV §8.10.2): stability_metrics.tsv +fix-stack 列
+#   (clamp/dheld/deeps/episodes, 绝对计数, -1=模块缺席) —— NE 计数同表可判相关性。
 #   v2.7 (2026-10-21 SIGSEGV 家族轮 2): delta() 改调自建静态 logcut —— busybox
 #   awk 只要在运行期存在数组(B 收集锚点后的行), 退出清理就约 1% SIGSEGV;
 #   实测"锚点在文件中段(数组被填充)" 300 次 2 崩, 仅去掉 split 不够。
@@ -318,8 +320,15 @@ while :; do
         _rep=$(svc_repairs_1h)
         _load=$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null | tr ' ' '_')
         _ma=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo 2>/dev/null)
+        # v2.8 (SIGSEGV §8.10.2): fix-stack telemetry -- absolute counters
+        # (daily 04:00 reboot resets them; deltas computed offline). -1 marks
+        # "module absent" so it never reads as a healthy zero.
+        _dcl=$(sed -n 's/^dpclamp .* clamped=\([0-9]*\).*/\1/p' /proc/dpclamp 2>/dev/null)
+        _dch=$(sed -n 's/^dpclamp .* held=\([0-9]*\)\//\1/p' /proc/dpclamp 2>/dev/null)
+        _dcd=$(sed -n 's/^deep deeps=\([0-9]*\).*/\1/p' /proc/dpclamp 2>/dev/null)
+        _dce=$(sed -n 's/^trig episodes=\([0-9]*\).*/\1/p' /proc/dpclamp 2>/dev/null)
         _mfile=$DIR/stability_metrics.tsv
-        echo "$(date +%s) up=$U logc_rc=${_lc:-?} frames=${_lcf:-0} bad=${_lcb:-0} resync=${_lcr:-0} dropped=${_lcd:-0} io=${_lcio:-0} crash=${_lcc:-0} repairs_1h=${_rep:-0} load=$_load memavail=${_ma:-?}KB" >> "$_mfile"
+        echo "$(date +%s) up=$U logc_rc=${_lc:-?} frames=${_lcf:-0} bad=${_lcb:-0} resync=${_lcr:-0} dropped=${_lcd:-0} io=${_lcio:-0} crash=${_lcc:-0} repairs_1h=${_rep:-0} load=$_load memavail=${_ma:-?}KB clamp=${_dcl:--1} dheld=${_dch:--1} deeps=${_dcd:--1} episodes=${_dce:--1}" >> "$_mfile"
         _mn=$(wc -l < "$_mfile" 2>/dev/null || echo 0)
         if [ "${_mn:-0}" -gt 5000 ]; then
             tail -n 2500 "$_mfile" > "$_mfile.tmp" 2>/dev/null && mv "$_mfile.tmp" "$_mfile"

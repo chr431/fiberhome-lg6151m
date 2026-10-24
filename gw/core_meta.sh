@@ -1,5 +1,9 @@
 #!/bin/sh
-# core_meta.sh v1.0 -- core_pattern metadata wrapper (stability P1-2/P1-5).
+# core_meta.sh v1.1 -- core_pattern metadata wrapper (stability P1-2/P1-5).
+# v1.1 (SIGSEGV 8.10.2): NE-as-probe -- poke /proc/dpclamp "deep" before
+#   handing the core to aee (episode-reactive drain; module-side cooldown).
+#   Census hygiene: argv newlines/tabs are squashed (multi-line args broke
+#   TSV rows) and pre-NTP-sync epochs get an unsync=1 marker column.
 #
 # aee owns /proc/sys/kernel/core_pattern as
 #     |/sbin/aee_core_forwarder /tmp %p %s %u %g
@@ -78,13 +82,21 @@ ARGS=$(tr '\0' ' ' < /proc/$PID/cmdline 2>/dev/null | head -c 600)
 } > "$F" 2>/dev/null
 
 # one-line census (watchdog appends this to its WARN when aee NE increments)
-[ -s "$F" ] && echo "$_ts	$PID	${COMM:-?}	sig=$SIG	exe=${EXE:-?}	args=${ARGS:-?}" >> "$TSV" 2>/dev/null
+# v1.1: unsync marker when the clock is obviously pre-NTP (epoch < 2025-01-01)
+# so boot-window NE rows can be told apart instead of landing in 1970 buckets
+_us=""
+[ -z "${_ts:-}" ] || [ "$_ts" -lt 1735689600 ] 2>/dev/null && _us="	unsync=1"
+[ -s "$F" ] && echo "$_ts	$PID	${COMM:-?}	sig=$SIG	exe=${EXE:-?}	args=${ARGS:-?}$_us" >> "$TSV" 2>/dev/null
 
 # quota: keep the 120 newest metadata files
 _n=$(ls "$DIR" 2>/dev/null | wc -l)
 if [ "${_n:-0}" -gt 120 ]; then
     ls -t "$DIR" 2>/dev/null | tail -n +121 | while read -r _f; do rm -f "$DIR/$_f"; done
 fi
+
+# v1.1: NE probe -- tell dpclamp a crash just happened (best effort, fast
+# fail when the module is absent; rate limiting lives inside the module)
+echo deep > /proc/dpclamp 2>/dev/null
 
 # --- hand the core to aee exactly as before (stdin untouched) -------------
 if [ -x /sbin/aee_core_forwarder ]; then

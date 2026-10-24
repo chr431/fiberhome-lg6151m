@@ -44,7 +44,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `docs/GUI_TERMINOLOGY.md` | **v1.2** | doc | `-` | GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git |
 | `gw/agg_pins.default` | **v1.0** | manifest | `/data/gw/agg_pins.default` | MAC钉死表出厂缺省基线(只读, 不含任何MAC; 设备侧活文件 agg_pins.conf 由 wan_agg 缺省才写地播种, 个人MAC不入库) |
 | `gw/bin/busybox` | **v1.0** | manifest | `/data/gw/bin/busybox` | 静态 aarch64 busybox 1.36.1(Alpine busybox-static 1.36.1-r31, 与厂商同版本); P2 崩溃家族工具链静态化；⟦收口 §22⟧ 工具链自主权载体，对崩溃零改善(§16.7/§22.1) |
-| `gw/bin/dpclamp.ko` | **v1.2** | manifest | `/data/gw/dpclamp.ko` | MD累积陈旧列表排空模块: 周期GFP_HIGHUSER_MOVABLE采样buddy, 页尾注入签名自识别的列表页get_page扣住(有界8192页), 未命中即释放; 与dpquar组成修复栈(dpquar断新漏/本件排存量); v1.1实测: 417K采样扣18页, 用户页注入2/min->0(20min)且写入者仍活跃; v1.0事故: alloc_pages_bulk_array在__free_pages崩溃致21:33重启(已换单页循环); v1.2: 自适应退火(空扫3轮×2周期,10轮后60s巡检)+__GFP_NORETRY/NOWARN+cond_resched+批幅上限4096/默认1024/下限水位150MB——修v1.1固定4096页/8s MOVABLE churn导致的规整压力与00:48 RCU-stall冻结(KE#3) |
+| `gw/bin/dpclamp.ko` | **v1.3** | manifest | `/data/gw/dpclamp.ko` | MD陈旧列表排空模块(剧集反应式, SIGSEGV §8.10 设计落地); v1.3: +deep两阶段全链遍历排空(全order×migratetype, rmqueue/__isolate_free_page 同款会计, 锁窗每list一次)+三路触发(whits/NE探针300s冷却/开机预热)+burst(batch1024背靠背<=90s硬帽10min, 3空轮早停)+SMP轮转+D1-D4修复(digest双XOR/watch游标/签名窗4槽+PA形/proc v2+16条环形台账); 持有页单引用(v1.2每页漏一引用至重启); v1.2: 自适应退火修00:48 KE#3; v1.0事故: bulk alloc __free_pages KE |
 | `gw/bin/dpquar.ko` | **v1.4** | manifest | `/data/gw/dpquar.ko` | dpmaif释放页隔离内核模块: 钩6个 dma_unmap 释放点(直连bl补丁), 隔离页在押TTL+上限(FIFO有界), 页尾writer-hit遥测; 阻断 MD 陈旧缓冲列表写入复用页(SIGSEGV_ANALYSIS §8 根修); 手动 insmod, 开机自载待验收后; v1.1: cap 16MB->64MB(实测teardown池~16K页), qmask默认+RX回收站点(实测40min仅1调用=冷), dup计数拆分dupe/rzero; v1.2: +4个还页站点钩(drain/put/page_frag_free×2, 全驱动仅有的直接还页处, 实值字核验), qmask默认0x3fc——覆盖活跃源理论路径; v1.3: 修复v1.1/v1.2锁内线性去重的二次方开销——teardown 32K调用触发RCU stall panic(2026-10-22 20:45 KE, 设备自愈重启); 改开放寻址哈希O(1)+锁外put_page批量; 全文件重写消除增量编辑引入的格式串/链接类小bug; v1.4: qmask默认0x3f0(RX回收站点回count-only——0x3fc在正常流量下每回收页都被钉, held ~600/min爬到cap抽干RX工作集=00:48渐进冻结的元凶)+watch循环每tick限512页 |
 | `gw/bin/fhstub.so` | **v1.0** | manifest | `/data/gw/fhstub.so` | FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径) |
 | `gw/bin/healthdog.ko` | **v1.0** | manifest | `/data/gw/healthdog.ko` | 取证看门狗内核模块(forensic=1) |
@@ -64,7 +64,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/ccmni_up.sh` | **v1.2** | manifest | `/data/gw/ccmni_up.sh` | netagent-lite: MIPC 拨号+ccmni 落地(deact+act→解析→flush+add+mtu); v1.1(日志加密轮): 入口旧地址/deact/act rc+耗时/响应/flush/add rc/总耗时全程留痕; 不写路由/NAT; v1.2(batch3): 地址落地 netcfg 串行化 |
 | `gw/cellular_replay.sh` | **v2.1** | manifest | `/data/gw/cellular_replay.sh` | 蜂窝锁定开机重放(频段/小区锁到cfgmgr树, 树每次开机由出厂档案重建) |
 | `gw/consfeed.sh` | **v1.0** | manifest | `/data/gw/consfeed.sh` | v2 控制台喂食器(无setsid,v2_access拉起) |
-| `gw/core_meta.sh` | **v1.0** | manifest | `/data/gw/core_meta.sh` | core_pattern 元数据 wrapper(P1-2/P1-5): 记录 exe/cmdline/status/maps/父进程/PATH/dmesg 尾后 exec aee forwarder(行为不变, stdin 不碰) |
+| `gw/core_meta.sh` | **v1.1** | manifest | `/data/gw/core_meta.sh` | core_pattern 元数据 wrapper; v1.1(SIGSEGV §8.10.2): NE 即探测器(exec aee 前 echo deep > /proc/dpclamp, 模块侧冷却); args 换行/制表符清洗(修 104 行 TSV 破行)+pre-NTP epoch 加 unsync=1 标记(M1); v1.0: 记录 exe/cmdline/status/maps/父进程/PATH/dmesg 尾后 exec aee forwarder(行为不变, stdin 不碰) |
 | `gw/core_trap.sh` | **v1.2** | manifest | `/data/gw/core_trap.sh` | 每日 core 捕获窗口(P3); v1.1(stability P1-5): restore 目标改 core_meta wrapper + 启动校验 + 心跳 + 全局配额(60 个/200MB, quota.tsv); v1.2(batch3): svc_lib 锁/心跳 |
 | `gw/defaults.conf` | **v1.9** | manifest | `/data/gw/defaults.conf` | 统一配置只读出厂基线(444); v1.9(USB 轮): +USB_ENABLED/USB_ADB/USB_CONSOLE(USB-C 设备模式三开关); 消费方source叠加settings.conf稀疏覆盖 |
 | `gw/diag_dump.sh` | **v1.2** | manifest | `/data/gw/diag_dump.sh` | 一键诊断包(脱敏); v1.2(SIGSEGV P1/P2): 环读取改静态 logc + 静态工具链自述; v1.1: 结束行带生成时刻；⟦收口 §22⟧ 非根因 |
@@ -77,13 +77,13 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/guest_fw.sh` | **v1.7** | manifest | `/data/gw/guest_fw.sh` | 访客隔离防火墙v1.6(审计P0: GUEST_ISOLATE开关删除=强制隔离; 兼容需求改由主WiFi终端频段锁定承接; 历史版本见git); v1.7(batch3): sync netcfg 串行化 |
 | `gw/healthdog.sh` | **v1.5** | manifest | `/data/gw/healthdog.sh` | 看门狗用户态心跳 + 二级监督; v1.4: 跨重启恢复已 arm 内核的心跳(否则 90s 复位); v1.3: lo 强制 up; v1.2(P0-1): 稳定窗后主动 arm + 重启环保护栏 + pstore 回收; 历史见git; v1.5(batch3): svc_lib 锁/心跳 |
 | `gw/led_mgr.sh` | **v3.0** | manifest | `/data/gw/led_mgr.sh` | 原厂风格LED守护; v3.0(WiFi 事故): WiFi 灯=AP 服务在服务(svc_bss_count 活套接字+链路), 不再是 netdev 存在; 历史见git |
-| `gw/log_keeper.sh` | **v2.7** | manifest | `/data/gw/log_keeper.sh` | 日志持久化守护; v2.4: 每轮重写锁(竞态残留自愈); v2.3: 写锁回读; v2.2: TZ; v2.1: BOOT 门禁 boot_id; v2.0(P1-5): 单实例锁+ne_census+面包屑; 历史见git; v2.5(batch3): svc_lib 锁/心跳 + stability_metrics.tsv 长期指标; v2.6(SIGSEGV 家族轮): delta() 不再清空 awk 输出数组(busybox 1.36.1 空数组创建/清理→退出路径间歇 SIGSEGV, 1%/次; 对照 4/400 vs 0/400); v2.7(SIGSEGV 家族轮 2): delta() 改自建静态 logcut(awk 任意运行期数组→退出清理 ~1% SIGSEGV, 实测中段锚点 300 次 2 崩); stream() 去掉 grep -Fqx 预检；⟦收口 §22⟧ v2.6/v2.7 的因果解释(busybox awk 缺陷)已被 §16/§21 推翻；保留理由=少 spawn/无数组(缓解)，非根因修复 |
+| `gw/log_keeper.sh` | **v2.8** | manifest | `/data/gw/log_keeper.sh` | 日志持久化守护; v2.8(SIGSEGV §8.10.2): stability_metrics.tsv +fix-stack 列(clamp/dheld/deeps/episodes, -1=模块缺席)与 NE 计数同表判相关性; v2.7: delta() 改自建静态 logcut; ⟦收口 §22⟧ v2.6/v2.7 的 awk 缺陷因果解释已被推翻, 保留理由=少 spawn/无数组(缓解); 历史见git |
 | `gw/mipc_dial_trace.sh` | **v1.0** | manifest | `/data/gw/mipc_dial_trace.sh` | 5G 拨号取证(xtrace 抓真参) |
 | `gw/netlock.sh` | **v1.0** | manifest | `/data/gw/netlock.sh` | 路由/防火墙/地址写方串行化(batch3): flock(静态 busybox)+可重入+REPAIR 台账/小时速率 |
 | `gw/night_report.sh` | **v1.0** | manifest | `/data/gw/night_report.sh` | 夜间体检报告 |
 | `gw/ntp_keeper.sh` | **v1.5** | manifest | `/data/gw/ntp_keeper.sh` | 每小时NTP守时(多源; 设备无RTC); v1.4(P1-1): 单实例锁; v1.3: 首同步失败 60s 重试+心跳; v1.2: 时区自愈; 历史见git; v1.5(batch3): svc_lib 锁/心跳 |
 | `gw/radvd.conf` | **v1.0** | manifest | `/data/gw/radvd.conf` | IPv6 SLAAC+RDNSS通告(br-lan, ULA fd42:9ac1:7e50::/64) |
-| `gw/rc.extend.sh` | **v2.7** | manifest | `/data/rc.extend.sh` | 槽位调度器; v2.7(SIGSEGV §8.4): dpquar/dpclamp 修复栈开机自载(仅slot-a, 先于modem环境; dpquar逐点校验内核原文,不匹配即拒载=官方内核零风险); v2.6: boot台账+条件清TRY_A+core_meta wrapper; 历史见git |
+| `gw/rc.extend.sh` | **v2.8** | manifest | `/data/rc.extend.sh` | 槽位调度器; v2.8(SIGSEGV §8.10.2): 自载加 panic 感知守卫(上次 pstore 背景帧含修复栈函数即跳载, 受保护启动)+自载结果写 fixstack.log(M2 补丁); v2.7: dpquar/dpclamp 修复栈开机自载(仅slot-a, dpquar逐点校验内核原文,不匹配即拒载); v2.6: boot台账+条件清TRY_A+core_meta wrapper; 历史见git |
 | `gw/rc_netfh.sh` | **v3.12** | manifest | `/data/gw/rc_netfh.sh` | 路线A: FH modem栈环境; v3.10(日志加密轮): 相位计时+settle 每10s ccmni 清单+route/NAT REPAIR+fw_apply rc+总耗时; v3.9: RIL 四件套全退役, 读/写路径直连; v3.11(日志加密轮补): 日志行补 epoch 时间基准(跨日志关联); v3.12(batch3): route/NAT 相位 netcfg 串行化 |
 | `gw/reboot_sched.sh` | **v1.4** | manifest | `/data/gw/reboot_sched.sh` | 定时重启守护; v1.3(P1-1): 单实例锁+心跳; v1.2: 触发行先落 /data+sync; 历史见git; v1.4(batch3): svc_lib 锁/心跳 |
 | `gw/svc_lib.sh` | **v1.2** | manifest | `/data/gw/svc_lib.sh` | 共享监督/锁/心跳/最小解析器库; v1.2(USB 轮): SVC_TABLE +usb_mgr; v1.1(WiFi 事故): hostapd 判据改活控制套接字; 历史见git |
@@ -117,7 +117,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/www/index.html` | **v2.33** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.33: 缓存v67) |
 | `gw/www/style.css` | **v2.1** | manifest | `/data/gw/www/style.css` | 控制台主题 |
 | `gw/zz_data_hook` | **v1.1** | manifest | `/data/build/rootfs/etc/init.d/zz_data_hook` | S98数据钩子(v1.1: plain sh——原厂无/etc/rc.common, rc.common式shebang致开机栈全灭; 回归实测发现) |
-| `gw/src/dpclamp.c` | **v1.2** | src | `gw/bin/dpclamp.ko` | dpclamp 源码(同产物; period_s/batch/cap/minfree_kb 参数) |
+| `gw/src/dpclamp.c` | **v1.3** | src | `gw/bin/dpclamp.ko` | dpclamp 源码(同产物; period_s/batch/cap/minfree_kb/warmup/cool_s 参数) |
 | `gw/src/dpquar.c` | **v1.4** | src | `gw/bin/dpquar.ko` | dpquar 源码(同产物; qmask/hold_s/cap/watch 参数) |
 | `gw/src/fhstub.c` | **v1.0** | src | `gw/bin/fhstub.so` | FH符号桩库源码 |
 | `gw/src/healthdog.c` | **v1.0** | src | `gw/bin/healthdog.ko` | 看门狗模块源码(版本随产物) |

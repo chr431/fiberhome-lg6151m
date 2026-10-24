@@ -2256,6 +2256,24 @@ def t_p2_batch3():
            % (sl, nl, dlock, wl, flock, rows, led, fz[-80:]))
 
 
+@test("fixstack: dpquar/dpclamp 在位且 v1.3 遥测面活着 (§8.10.2)")
+def t_fixstack():
+    # SIGSEGV 修复栈部署契约: 双模块装载, dpquar 补丁生效, dpclamp v1.3 的
+    # /proc v2 遥测(deep/burst/trig 段)可读 —— 自载/热换后的常驻断言。
+    dq = dev("head -1 /proc/dpquar 2>/dev/null").strip()
+    dc = dev("head -1 /proc/dpclamp 2>/dev/null").strip()
+    d2 = dev("grep -c '^deep deeps=' /proc/dpclamp 2>/dev/null").strip()
+    b2 = dev("grep -c '^burst bursts=' /proc/dpclamp 2>/dev/null").strip()
+    t2 = dev("grep -c '^trig episodes=' /proc/dpclamp 2>/dev/null").strip()
+    ring = dev("grep -c '^ring$' /proc/dpclamp 2>/dev/null").strip()
+    ok = (dq.startswith("dpquar patched=1")
+          and dc.startswith("dpclamp") and "clamped=" in dc
+          and d2 == "1" and b2 == "1" and t2 == "1" and ring == "1")
+    record(t_fixstack._test_name, "system", ok,
+           "dpquar=[%s] dpclamp=[%s] deep=%s burst=%s trig=%s ring=%s"
+           % (dq[:44], dc[:64], d2, b2, t2, ring))
+
+
 def main():
     # v2.51: the suite prints ✓/✗; a Windows GBK console raised
     # UnicodeEncodeError mid-run (aborting deploy.py's post-deploy gate).

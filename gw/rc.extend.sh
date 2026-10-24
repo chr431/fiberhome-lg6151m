@@ -1,5 +1,10 @@
 #!/bin/sh
-# rc.extend.sh v2.7 -- slot-aware dispatcher (shared /data between v2/v3)
+# rc.extend.sh v2.8 -- slot-aware dispatcher (shared /data between v2/v3)
+# v2.8 (SIGSEGV §8.10.2): panic-aware autoload guard -- 上次 pstore 背景帧含
+#   修复栈函数名即跳载(dpclamp v1.3 引入 deep 遍历, KE 复发时受保护启动交
+#   操作者裁决); 自载结果写 fixstack.log(syslog 丢早期窗的补丁, M2)。
+#   背景帧匹配只认 backtrace 形态 "func+0x"/"task:dpclampd", 不匹配模块
+#   自身的常规 pr_info 日志(防误跳)。
 # v2.7 (SIGSEGV §8.4): DMA 注入修复栈开机自载 — dpquar(断新漏)+dpclamp(排存量)
 #   在 modem 环境/守护动物园拉起之前同步 insmod(仅 slot-a; dpquar init 逐点
 #   校验内核原文, 内核不匹配即 REFUSE+回滚+insmod 失败, 官方内核上零风险);
@@ -155,12 +160,22 @@ case "$slot" in
      # dpquar first (stop new leak at source), then dpclamp (drain the backlog).
      # Idempotent (lsmod guard), failure logs and boot continues unprotected --
      # same posture as any pre-v2.7 boot, never a boot blocker.
-     lsmod | grep -q '^dpquar ' || { insmod /data/gw/dpquar.ko 2>/dev/null \
-         && logger -t rc.extend "dpquar auto-loaded (qmask=0x3f0)" \
-         || logger -t rc.extend "dpquar insmod FAILED (kernel mismatch?)"; }
-     lsmod | grep -q '^dpclamp ' || { insmod /data/gw/dpclamp.ko 2>/dev/null \
-         && logger -t rc.extend "dpclamp auto-loaded" \
-         || logger -t rc.extend "dpclamp insmod FAILED"; }
+     # v2.8: panic guard + fixstack.log 台账(见文件头)。
+     if grep -qsE '(dc_main|run_deep|grab_cand|process_block|dpclampd|quarantine_page)\+0x|task:dpclampd' \
+             /sys/fs/pstore/console-ramoops* 2>/dev/null; then
+         logger -t rc.extend "FIXSTACK SKIP: last panic backtrace names fix-stack"
+         echo "$(date -u +%FT%TZ) SKIP dpquar/dpclamp autoload: last pstore names fix-stack in backtrace" \
+             >> /data/gw/logs/fixstack.log 2>/dev/null
+     else
+         lsmod | grep -q '^dpquar ' || { insmod /data/gw/dpquar.ko 2>/dev/null \
+             && logger -t rc.extend "dpquar auto-loaded (qmask=0x3f0)" \
+             || logger -t rc.extend "dpquar insmod FAILED (kernel mismatch?)"; }
+         lsmod | grep -q '^dpclamp ' || { insmod /data/gw/dpclamp.ko 2>/dev/null \
+             && logger -t rc.extend "dpclamp auto-loaded (v1.3 deep+burst)" \
+             || logger -t rc.extend "dpclamp insmod FAILED"; }
+         echo "$(date -u +%FT%TZ) autoload: dpquar=$(lsmod | grep -c '^dpquar ') dpclamp=$(lsmod | grep -c '^dpclamp ')" \
+             >> /data/gw/logs/fixstack.log 2>/dev/null
+     fi
      # v1.6: route A -- FH modem-stack environment parallel to our layer
      # (dial: mobilenetwork 过渡期 + dial_keeper 兜底; rc19 skips rmmod+dial_5g via MODE.fh gate)
      # v1.7 (D2 开箱审查): MODE.fh 首刷自建 — kit 从不创建该标志, 纯原厂直刷时

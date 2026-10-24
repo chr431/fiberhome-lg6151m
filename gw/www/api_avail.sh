@@ -46,11 +46,14 @@ get_avail() {
         elif [ "$r" -lt "$OVR" ] && [ "$OVR" -gt 2 ]; then OV="$lv"; OVR=$r; fi
     done < "$LAST"
 
-    # 近 24h 覆盖率 (nodata 占比反向)
-    COV=$(awk -v t="$TODAY" -v y="$YDAY" -F'|' \
+    # 近 24h 覆盖率 (nodata 占比反向; v1.1: 并入当前小时在累计的 avail_hist)
+    _c1=$(awk -v t="$TODAY" -v y="$YDAY" -F'|' \
         'substr($1,1,8)==t || substr($1,1,8)==y {ok+=$3; dg+=$4; dn+=$5; nd+=$6}
-         END {tot=ok+dg+dn+nd; if (tot>0) printf "%.1f", (tot-nd)*100/tot; else print "0"}' \
-        "$HIST" 2>/dev/null)
+         END {printf "%d %d %d %d", ok, dg, dn, nd}' "$HIST" 2>/dev/null)
+    _c2=$(awk -F'|' '{ok+=$2; dg+=$3; dn+=$4; nd+=$5}
+         END {printf "%d %d %d %d", ok, dg, dn, nd}' /tmp/avail_hist 2>/dev/null)
+    COV=$(echo "$_c1 $_c2" | awk '{ok=$1+$5; dg=$2+$6; dn=$3+$7; nd=$4+$8; tot=ok+dg+dn+nd;
+         if (tot>0) printf "%.1f", (tot-nd)*100/tot; else print "0"}')
 
     printf '{"ok":true,"overall":"%s","overall_cn":"%s","coverage":%s,"components":[' \
         "$OV" "$(lvl_cn "$OV")" "${COV:-0}"

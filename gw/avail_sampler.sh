@@ -1,5 +1,5 @@
 #!/bin/sh
-# avail_sampler.sh v1.3 -- 组件可用性采样器 (AVAILABILITY_DESIGN §3, 防假绿轮)
+# avail_sampler.sh v1.4 -- 组件可用性采样器 (AVAILABILITY_DESIGN §3, 防假绿轮)
 #
 # 由 log_keeper v2.9 每 10min 调用 (CYC%20 + CYC=1 首采); 单遍有界、无循环、
 # 无守护 —— 崩溃只留一行 NE 台账, 下一窗自愈, 覆盖率指标如实扣分。
@@ -115,10 +115,15 @@ while IFS= read -r _l; do
 done < "$WINT.ne" >> "$WINT.nea"
 sort -u "$WINT.nea" -o "$WINT.nea" 2>/dev/null
 
-REP_N=$(wc -l < "$WINT.rl" 2>/dev/null || echo 0)
-SMS_FAIL=$(grep -c 'sms send failed' "$WINT.al" 2>/dev/null || echo 0)
-WIFI_GUARD_WARN=$(grep -c 'wifi_guard' "$WINT.sl" 2>/dev/null || echo 0)
-DEAUTH_N=$(grep -c 'reason=3' "$WINT.dl" 2>/dev/null || echo 0)
+# v1.4: grep -c 无匹配时输出 0 且 exit 1, "|| echo 0" 会拼出两行坏数值
+# (bad number 实弹); 计数变量一律 case 守卫归零
+num0() { case "$1" in ''|*[!0-9]*) echo 0 ;; *) echo "$1" ;; esac; }
+# 两步式取数: 避免 "$(... "$x" ...)" 双层嵌套引号(ash 解析器分歧点)
+_t=$(wc -l < "$WINT.rl" 2>/dev/null);               REP_N=$(num0 "$_t")
+_t=$(grep -c 'sms send failed' "$WINT.al" 2>/dev/null); SMS_FAIL=$(num0 "$_t")
+_t=$(grep -c 'wifi_guard' "$WINT.sl" 2>/dev/null);  WIFI_GUARD_WARN=$(num0 "$_t")
+_t=$(grep -c 'reason=3' "$WINT.dl" 2>/dev/null);    DEAUTH_N=$(num0 "$_t")
+NE_N=$(num0 "$NE_N")
 
 sig_has() { grep -qx "$2" "$1" 2>/dev/null; }
 ne_attr() { sig_has "$WINT.nea" "$1"; }

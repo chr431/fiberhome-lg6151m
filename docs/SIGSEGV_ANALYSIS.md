@@ -365,6 +365,116 @@ v1.1 改单页循环。
   人为 MD 复位（CFUN=1,1 压测 49373 次 teardown）远超原厂自然率
   （3.3 个月 2 起）。
 
+## 8.9 残余 NE 实测画像与现行修复栈遗漏分析（2026-10-24/25 轮）
+
+> 10-23 收尾轮的"常态首数据点"（T+5h 单发，~0.2/h）低估了残余率。本轮以 48h
+> 台账 + 实时仪器（buddyscan/dpclamp 计数器二采）复核，为 §8.10 设计供证。
+
+### 8.9.1 残余率实况（ne_events.tsv，§2.3 排除规则外全数保留）
+
+| 日期 | NE 数 | 形态 |
+|---|---|---|
+| 10-20 | 54 | 修复前基线窗（44.2/d 口径同期） |
+| 10-21 | 92 | 同上 |
+| 10-22 | 30 | 修复栈开发/事故日 |
+| 10-23 | 25 | 修复栈 07:06 自载上线 |
+| 10-24 | 48 | **无台阶下降**：全天 ~1–2/h 滴漏 + 剧集簇 |
+
+- 剧集簇：10-24 00:39–00:45 连发 12 起（串流双客户端时段）、20:49–21:27 连发 8 起。
+- 受害者全集为经典家族（§5 生态）：静态 ip/grep/awk/cut/date/wc/ping/logread/iptables
+  与守护级 hostapd×2（累计）/dnsmasq/watchdog.sh×2/healthdog.sh/led_mgr.sh×2/dial_keeper.sh
+  ——静态农场同样中招（§4-A3 口径）。守护级恢复链实证有效（rc19/rc.extend pgrep 循环
+  重生 + watchdog 3/h 重启预算），观察到的中断均在秒~分钟级。
+- 观察窗新增（10-24 23:49–10-25 00:15，boot T+37~63min，无人工扰动）：
+  ip（23:52）、sleep（00:13）各 1 起 = 自然滴漏 ~2/h 的当场实证。
+
+### 8.9.2 现行栈实时状态（同窗实测锚点）
+
+- dpquar patched=1 qmask=0x3f0，quar=0/held=0（本 boot 无 MD stop）——活跃源本就
+  绕过全部 dpmaif 站点（§8.6），**现役角色=MD 复位保险，非日常防御**。
+- dpclamp（boot T+51min）sweeps=120 alloced=122880 clamped=20 held=20 whits=0；
+  14min 二采 +48 sweeps/+10 clamp（0.7/min，快周期自持）——机制成立、集合在收缩。
+- buddyscan 同刻普查（5 轮×2s）：每轮 48 命中、10s 窗 distinct=65、≥5 次重现 32
+  ——签名自由页存量仍在，成员秒级进出空闲链表；held=20 之外仍有 ~45 可见成员。
+- buddyinfo：order-0 仅 420 页 vs 空闲总量 ~31.7 万页（95% 在 order≥9 块内）。
+- 采样成本：1024 页 sweep ≈ 2.5s（sweeps 时间差推算）。
+- 部署一致性：dpquar/dpclamp/rc.extend/core_meta md5 与仓一致（差异仅 #DEPLOY 戳）。
+
+### 8.9.3 遗漏/缺陷清单
+
+结构性遗漏（残余率的成因，非回归）：
+
+- **S1 阶层盲区**：order-0 采样只见本 CPU pcp+order-0 热池；签名页与空闲伙伴合并入
+  高阶块后不可见（且 order-0 非空+NORETRY 下采样不触发分裂），直到分配压力拆块才
+  重新暴露。
+- **S2 SMP 可见性**：system_wq 单 CPU 执行，1024 次 alloc/free 在同一 pcp FIFO 里
+  循环同一小池（alloced=122880 而独立可见池 ~10³ 页量级）；其他 CPU pcp 不可见。
+- **S3 UNMOVABLE 成员嫌疑**：本轮 buddyscan 考古字段（a8）见内核指针残影成员——
+  若属 UNMOVABLE 迁移链，GFP_HIGHUSER_MOVABLE 采样永不可见（§8.6 migrate 盲区的
+  反方向）。
+- **S4 原位投毒不可防**：写入者对 PA 直写不问分配状态；页在持有时被写=原位损坏
+  （E1 本质）。dpclamp 只能压缩"自由态可见存量"，压不掉分配态命中。
+- **S5 无剧集反应**：idle 退火到 60s 巡检，剧集窗口内新签名页要等下一轮 sweep；
+  首 NE 后无任何加速——滴漏与簇的共同窗口来源。
+
+实现缺陷（dpclamp v1.2 源码级）：
+
+- **D1** `test_and_hold` 存 digest 时 `t[3]` 被 XOR 两次（t[3]^t[3]=0）≠ watch 用的
+  `tail_digest()`——首轮 watch 对 t[3]≠0 页产生伪 writer-hit（whits 污染一次后自愈）。
+- **D2** watch 每轮只扫 ctab[0..255]——held>256 后尾部页永不监视（cap=8192 下必发）。
+- **D3** 签名窗只认末 64B 的 t[0]/t[1] 两个 16B 槽位——记录单独落在 0xFD0/0xFD8 的
+  页漏判（本轮 65 页宇宙未见该形态，风险降级但存在）。
+- **D4** 无 /proc 写接口、无 episode 台账——触发与运维反推都无处落。
+
+测量面缺口：**M1** ne_events 有 104 行 epoch 无效行（pre-NTP 落账）+ 多行 args 破坏
+TSV 结构（boot 窗口 NE 不可统计）；**M2** 开机自载在 syslog/dmesg 零留痕（本 boot
+grep=0，只能靠 lsmod 事后确认）；**M3** logread 单发崩溃 6 起/天，spawn 方未定位；
+**M4** 两臂对照取消后无压制效果基线，只能对 10-20/21 的 25.8–44.2/d 口头对比。
+
+**结论**：dpclamp 的机制与方向成立（持续收敛、无 KE 复发、内存稳态），残余率是
+"覆盖=单 CPU 热池 + 反应=固定周期"的必然结果。下一轮方向=事件反应+深度遍历（§8.10）。
+
+## 8.10 下一轮方案设计：dpclamp v1.3（剧集反应式 + 深度排空）【设计稿，未实施】
+
+> 设计原则：F1 冻结不变（不新增用户态替换）；内核改动限定 dpclamp 本体 + 一个
+> /proc 写接口 + core_meta 一行触发；dpquar 不动；v1.2 可随时 rmmod 回退。
+
+1. **深度排空（deep drain，主武器）**：两阶段遍历全部 buddy 空闲链表（全
+   order × 全 migratetype，不问 S1/S2/S3 的阶层与类型）——
+   阶段一（持 zone->lock）：仅摘链表头页指针入本地有界数组，不读内容（锁窗目标
+   <5ms/zone）；阶段二（无锁）：读页尾签名；命中页重取锁复核（PageBuddy 仍在 +
+   签名仍在，容忍竞态）后按 rmqueue 语义整块取下、释放无签名兄弟页、仅扣住签名页
+   （order-N 块按 2^N 记 cap）。依据：buddyscan 已在生产反复实证该遍历安全（本轮
+   5×23624 页零异常）。pcp 仍由 burst 覆盖（pcp 无稳定遍历面）。
+2. **触发器三路**：
+   - T-a 内核：whits delta≥1 → deep+burst（前置修复 D1；剧集期写入者每秒级重写
+     集合，检测延迟≈1 个 watch tick）；
+   - T-b 用户态：core_meta v1.1 在 exec aee 前追加 `echo deep > /proc/dpclamp`
+     （/proc 已 0666）——**NE 即探测器**，零内核风险，覆盖"whits 未鸣而 NE 先至"
+     的窗口（受害者生态保证每个剧集至少一次 NE 可供触发）；
+   - T-c 开机：insmod 后立即 deep×1 + burst 90s（= §8.4 备案未实施的预热排水，
+     覆盖 04:00 定时重启后毒页跨重启流转窗）。
+3. **burst 模式（次武器，覆盖 pcp 热池）**：sweep 完成即续（实测 4096 批 ≈10s/
+   轮），时长 ≤90s、有 clamp 续期、硬帽 10min；NORETRY/NOWARN/minfree/cond_resched
+   全继承；连续 3 轮空 burst 提前终止。与 KE#3 的本质区别：事件驱动有界 vs 固定
+   周期无退火。
+4. **SMP 轮转**：sweep/deep 间轮换 kthread CPU 亲和性（4 核轮转），覆盖各 CPU pcp
+   （关 S2 的采样侧）。
+5. **缺陷修复**：D1 双 XOR；D2 watch 改滚动游标；D3 签名窗扩到 t[0..3]（单块命中，
+   other-count 判据不变）；D4 /proc 增 episodes/bursts/deeps/last_trig 与触发来源。
+6. **配套测量面**（非 dpclamp 本体）：core_meta v1.1（args 去换行、epoch 无效标
+   `unsync`，关 M1）；自载与触发留痕写 /data/gw/logs/fixstack.log（关 M2）；
+   logread spawn 方定位一轮（M3）。
+7. **边界（不做并明示）**：不 hook 分配路径；S4（分配态原位投毒）不可防——残余
+   下限存在；deep 只在事件触发/手动时执行，不进任何热路径。
+
+**预期与验收口径（先立后做）**：剧集簇（00:39–00:45 型 12 起/6min）预期压到 ≤3 起
+（首 NE 触发 deep 当轮清空可见自由面，残余=S4 原位命中）；常态滴漏目标 ≤0.5/h
+（现 ~1–2/h），不以零为目标；台账=episodes/deeps 计数 + ne_events 7 天滚动 +
+deep 前后 buddyscan distinct 对比（预期 deep 后 →≈0、随集合重建回升——回升速率
+即 MD 侧列表重建率的直接量测）。**风险门禁**：实施前过 KE#3 同类风险评估（deep
+锁窗 + burst churn 上限），异常即回退 v1.2（rmmod 幂等，rc.extend 自载不变）。
+
 ## 9. 证据/产物索引
 
 - 本地（不入仓）：`tmpfiles/`（core×3、libc/logread 反汇编正本、p0x/kern

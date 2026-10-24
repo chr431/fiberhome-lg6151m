@@ -130,7 +130,7 @@
 | VoIP(SIP 话机) | sip+baresip+SLIC 驱动链 | ✗（移动版无话机硬件，原厂也空转）| `✗` |
 | DDNS | 4 客户端(ddnsd/inadyn/ez-ipupdate/花生壳) | ✗ | `✗` |
 | VPN 服务器 | IPSec/L2TP/PPTP 全家(strongSwan+xl2tpd) | ✗ | `✗` 如需再评估 |
-| USB 功能 | RNDIS+ADB+双 ACM+USB 升级验签 | ✗(adbd 未启用) | `✗` |
+| USB 功能 | RNDIS+ADB+双 ACM+USB 升级验签 | RNDIS 数据口桥入 LAN(PC 即 LAN 客户端)+ADB/串口控制台子开关(默认关)+GUI 总开关(usb_mgr; host 模式板上 TCPC 未贴=电气死路) | `▲` 服务补完+显式门控(原厂 ADB 门默认开) | <!--CLM:CLM-USB-DEV--> |
 | NTP | sysntpd(禁用!)+scd 体系+ntpdate | ntp_keeper 多服务器+跳变实测校验 | `▲`（原厂 sysntpd 竟是禁用的）|
 | 定时重启 | 无（仅手动重启）| reboot_sched 每日定时(默认04:00)+GUI 可改/可停+五重护栏 | `+`（实弹 76s 回升）| <!--CLM:CLM-REBOOT-SCHED-->
 | 日志持久化/诊断包 | logread 内存环(易刷爆)+/tmp 日志重启即失 | log_keeper 增量镜像+/tmp快照+boot分隔 + diag_dump 脱敏诊断包(GUI/开机/SSH 三入口) | `+` | <!--CLM:CLM-LOGKEEP-->

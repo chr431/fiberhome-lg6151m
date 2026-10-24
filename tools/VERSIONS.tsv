@@ -3,8 +3,8 @@
 gw/agg_pins.default	1.0	manifest	/data/gw/agg_pins.default	MAC钉死表出厂缺省基线(只读, 不含任何MAC; 设备侧活文件 agg_pins.conf 由 wan_agg 缺省才写地播种, 个人MAC不入库)
 gw/rc.extend.sh	2.7	manifest	/data/rc.extend.sh	槽位调度器; v2.7(SIGSEGV §8.4): dpquar/dpclamp 修复栈开机自载(仅slot-a, 先于modem环境; dpquar逐点校验内核原文,不匹配即拒载=官方内核零风险); v2.6: boot台账+条件清TRY_A+core_meta wrapper; 历史见git
 gw/v3_rc10.extend.sh	2.35	manifest	/data/gw/rc19.sh	v3 启动编排 rc19v2; v2.35(USB 轮): +usb_mgr 守护(USB-C 设备模式: rndis0 桥入 br-lan+三开关); v2.34(P0-2): boot_gate 健康门禁; 历史见git
-gw/usb_mgr.sh	1.0	manifest	/data/gw/usb_mgr.sh	USB-C 设备模式服务管理(总开关+数据/ADB/控制台); 厂商遗留 g1 gadget(RNDIS+ADB+2xACM)只补服务层: rndis0 桥入 br-lan=PC 即 LAN 客户端; OFF=停 keepalive+解绑 UDC 口全灭; 硬件为仅设备模式(host 电气死路, 板上 TCPC 未贴)
-gw/www/api_usb.sh	1.0	manifest	/data/gw/www/api_usb.sh	API USB 域模块(usb 状态/usb_set 三开关; 状态单一事实源=usb_mgr.sh status)
+gw/usb_mgr.sh	1.1	manifest	/data/gw/usb_mgr.sh	USB-C 设备模式服务管理(总开关+数据/ADB/控制台); 厂商遗留 g1 gadget(RNDIS+ADB+2xACM)只补服务层: rndis0 桥入 br-lan=PC 即 LAN 客户端; OFF=停 keepalive+解绑 UDC 口全灭; 硬件为仅设备模式(host 电气死路, 板上 TCPC 未贴)
+gw/www/api_usb.sh	1.1	manifest	/data/gw/www/api_usb.sh	API USB 域模块(usb 状态/usb_set 三开关); v1.1: 状态行解析修复; 状态单一事实源=usb_mgr.sh status
 gw/wifi_macplan.sh	1.0	manifest	/data/gw/wifi_macplan.sh	出厂 MAC 派生计划(自 wifi_up v1.29 拆出; api uplink 的 eth0 原生 MAC 还原同步收敛到此唯一实现 — 原内联副本缺两级兜底属算法漂移实例)
 gw/wifi_autoch.sh	1.1	manifest	/data/gw/wifi_autoch.sh	WiFi 自动选道器; v1.1(日志加密轮): 输出 # 注释行记录扫描规模/候选/评分(源码时无害) — 选道依据可复盘; IDC 安全掩码+候选{1,6}
 gw/wifi_up.sh	1.29	manifest	/data/gw/wifi_up.sh	mt7992 AP 工厂配方(v1.29 架构轮: MAC 派生拆出 wifi_macplan.sh + 自动选道拆出 wifi_autoch.sh, 主文件收敛为拉起配方本体, 变量/契约零变化; v1.28: 候选收敛安全集深部{1,6}; 历史见git)

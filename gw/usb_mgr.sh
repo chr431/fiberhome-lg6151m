@@ -1,6 +1,10 @@
 #!/bin/sh
-# usb_mgr.sh v1.0 -- USB-C(设备模式)服务管理: 总开关 + 数据/ADB/控制台三个子功能
-#
+# usb_mgr.sh v1.1 -- USB-C(设备模式)服务管理: 总开关 + 数据/ADB/控制台三个子功能
+# v1.1(OFF 竞态修复): usb_off 重排为"先杀 keepalive 再停服务再解绑" — v1.0 的
+#   gate_set 先杀 adbd, 1s 轮询的 restart_usb.sh 抢先发现 ep1 缺失跑了
+#   usb.init start(重绑 UDC+重生 adbd+再孵化新 keepalive), 后续 pkill/unbind 被
+#   新循环反杀, OFF 假成功(实测 23:05 复活)。现 OFF 不再碰 gate(adbd 反正要死),
+#   keepalive 循环杀到死为止, 解绑后验证 UDC 为空, 失败重试一轮。
 # 硬件/软件事实(2026-10-24 实测定案, 见私有仓 docs):
 #   - 机身 USB-C = 仅设备(peripheral)能力的 USB-C 母座: 板上 TCPC(HD3SS3220)/
 #     PS5169/buck-boost 均未贴装(i2c 总线实测无应答), host 模式电气死路;
@@ -86,18 +90,35 @@ usb_on() {
         LOG "WARN: $IF absent (usb_net not loaded?)"
     fi
 }
+kill_keepalive() { # 杀到死为止(usb.init start 会再孵化, 故循环确认)
+    i=0
+    while [ $i -lt 5 ]; do
+        pkill -9 -f "restart_usb" 2>/dev/null
+        pgrep -f "restart_usb" >/dev/null 2>&1 || return 0
+        sleep 1; i=$((i+1))
+    done
+    return 1
+}
+
 usb_off() {
     console_stop
-    gate_set 0
+    # 顺序即安全: keepalive(唯一重绑者)先死, 之后无人能复活链路
+    kill_keepalive
     /etc/init.d/usb.init stop >/dev/null 2>&1
-    pkill -f "restart_usb[.]sh" 2>/dev/null   # 必须先于解绑(否则 1s 内自动重绑)
-    kill $(pidof $ADBD) 2>/dev/null
+    kill -9 $(pidof $ADBD) 2>/dev/null
     echo "" > "$G/UDC" 2>/dev/null            # 解绑 = 主机侧设备消失
     if [ -d /sys/class/net/$IF ]; then
         brctl delif $BR $IF 2>/dev/null
         ip link set $IF down 2>/dev/null
     fi
-    LOG "usb OFF (port dead)"
+    # OFF 不许假成功: UDC 仍绑定 = 有复活者, 补杀一轮再解绑
+    if [ -n "$(cat $G/UDC 2>/dev/null)" ]; then
+        LOG "WARN: UDC still bound after off, retrying"
+        kill_keepalive
+        kill -9 $(pidof $ADBD) 2>/dev/null
+        echo "" > "$G/UDC" 2>/dev/null
+    fi
+    LOG "usb OFF (udc=[$(cat $G/UDC 2>/dev/null)])"
 }
 
 apply_state() {
@@ -146,6 +167,10 @@ daemon)
             fi
             keepalive_alive || nohup /etc/restart_usb.sh >/dev/null 2>&1 &
             [ "$(conf_val USB_CONSOLE 0)" = "1" ] && console_start
+        else
+            # v1.1: OFF 态同样矫正(假复活的兜底)
+            keepalive_alive && { kill_keepalive; kill -9 $(pidof $ADBD) 2>/dev/null; echo "" > "$G/UDC" 2>/dev/null; }
+            [ -n "$(cat $G/UDC 2>/dev/null)" ] && { kill_keepalive; echo "" > "$G/UDC" 2>/dev/null; }
         fi
         sleep 15
     done

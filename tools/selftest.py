@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """selftest.py -- assertion-based functional test suite for the LG6151M gateway.
 v2.59 (2026-10-24 USB 轮): +t_usb_service/t_usb_dataplane(USB-C 设备模式:
-  守护/UDC 绑定/SVC_TABLE + rndis0 桥接不变量, 按 USB_ENABLED 分档断言)。
+  守护/UDC 绑定/SVC_TABLE + rndis0 桥接不变量, 按 USB_ENABLED 分档断言);
+  t_usb_service 的 all() 误传单布尔已改直接 and 链。
 
 Design principle: L13 (2026-10-05) -- "feature silently broken until manual
 inspection" happened three times because we only checked control plane
@@ -2170,8 +2171,8 @@ def t_usb_service():
     udc = dev("cat /config/usb_gadget/g1/UDC 2>/dev/null").strip()
     row = dev("grep -c 'usb_mgr' /data/gw/svc_lib.sh 2>/dev/null").strip()
     st = dev("sh /data/gw/usb_mgr.sh status 2>/dev/null").strip()
-    keys = all(("enabled=" in st) and ("udc=" in st) and ("bridge=" in st)
-               and ("adbd=" in st) and ("gate=" in st) and ("getty=" in st))
+    keys = (("enabled=" in st) and ("udc=" in st) and ("bridge=" in st)
+            and ("adbd=" in st) and ("gate=" in st) and ("getty=" in st))
     if "enabled=1" in en:
         ok = (dpid != "" and udc == "11201000.usb" and row != "0" and keys)
         note = "on daemon=%s udc=%s" % (dpid or "MISSING", udc)

@@ -43,6 +43,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `docs/ARCHITECTURE.md` | **v1.2** | doc | `-` | 架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针); v1.2: batch3 版本表刷新 |
 | `docs/GUI_TERMINOLOGY.md` | **v1.2** | doc | `-` | GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git |
 | `gw/agg_pins.default` | **v1.0** | manifest | `/data/gw/agg_pins.default` | MAC钉死表出厂缺省基线(只读, 不含任何MAC; 设备侧活文件 agg_pins.conf 由 wan_agg 缺省才写地播种, 个人MAC不入库) |
+| `gw/avail_sampler.sh` | **v1.0** | manifest | `/data/gw/avail_sampler.sh` | 组件可用性采样器(AVAILABILITY_DESIGN §3): log_keeper 10min 驱动, 单遍有界无守护; 判据复用 watchdog_state(0=ok 迁移式快照+cycle 新鲜度)+设置态 off 判定; 窗口信号=行数游标法(EVT restart/NE 三规则归属/REPAIR); 输出 hourly(rotate 2400)/daily(跨日归并)/transitions(rotate 2000)+/tmp/avail_last 快照; busybox awk 仅标量累加 |
 | `gw/bin/busybox` | **v1.0** | manifest | `/data/gw/bin/busybox` | 静态 aarch64 busybox 1.36.1(Alpine busybox-static 1.36.1-r31, 与厂商同版本); P2 崩溃家族工具链静态化；⟦收口 §22⟧ 工具链自主权载体，对崩溃零改善(§16.7/§22.1) |
 | `gw/bin/dpclamp.ko` | **v1.3** | manifest | `/data/gw/dpclamp.ko` | MD陈旧列表排空模块(剧集反应式, SIGSEGV §8.10 设计落地); v1.3: +deep两阶段全链遍历排空(全order×migratetype, rmqueue/__isolate_free_page 同款会计, 锁窗每list一次)+三路触发(whits/NE探针300s冷却/开机预热)+burst(batch1024背靠背<=90s硬帽10min, 3空轮早停)+SMP轮转+D1-D4修复(digest双XOR/watch游标/签名窗4槽+PA形/proc v2+16条环形台账); 持有页单引用(v1.2每页漏一引用至重启); v1.2: 自适应退火修00:48 KE#3; v1.0事故: bulk alloc __free_pages KE |
 | `gw/bin/dpquar.ko` | **v1.4** | manifest | `/data/gw/dpquar.ko` | dpmaif释放页隔离内核模块: 钩6个 dma_unmap 释放点(直连bl补丁), 隔离页在押TTL+上限(FIFO有界), 页尾writer-hit遥测; 阻断 MD 陈旧缓冲列表写入复用页(SIGSEGV_ANALYSIS §8 根修); 手动 insmod, 开机自载待验收后; v1.1: cap 16MB->64MB(实测teardown池~16K页), qmask默认+RX回收站点(实测40min仅1调用=冷), dup计数拆分dupe/rzero; v1.2: +4个还页站点钩(drain/put/page_frag_free×2, 全驱动仅有的直接还页处, 实值字核验), qmask默认0x3fc——覆盖活跃源理论路径; v1.3: 修复v1.1/v1.2锁内线性去重的二次方开销——teardown 32K调用触发RCU stall panic(2026-10-22 20:45 KE, 设备自愈重启); 改开放寻址哈希O(1)+锁外put_page批量; 全文件重写消除增量编辑引入的格式串/链接类小bug; v1.4: qmask默认0x3f0(RX回收站点回count-only——0x3fc在正常流量下每回收页都被钉, held ~600/min爬到cap抽干RX工作集=00:48渐进冻结的元凶)+watch循环每tick限512页 |
@@ -77,7 +78,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/guest_fw.sh` | **v1.7** | manifest | `/data/gw/guest_fw.sh` | 访客隔离防火墙v1.6(审计P0: GUEST_ISOLATE开关删除=强制隔离; 兼容需求改由主WiFi终端频段锁定承接; 历史版本见git); v1.7(batch3): sync netcfg 串行化 |
 | `gw/healthdog.sh` | **v1.5** | manifest | `/data/gw/healthdog.sh` | 看门狗用户态心跳 + 二级监督; v1.4: 跨重启恢复已 arm 内核的心跳(否则 90s 复位); v1.3: lo 强制 up; v1.2(P0-1): 稳定窗后主动 arm + 重启环保护栏 + pstore 回收; 历史见git; v1.5(batch3): svc_lib 锁/心跳 |
 | `gw/led_mgr.sh` | **v3.0** | manifest | `/data/gw/led_mgr.sh` | 原厂风格LED守护; v3.0(WiFi 事故): WiFi 灯=AP 服务在服务(svc_bss_count 活套接字+链路), 不再是 netdev 存在; 历史见git |
-| `gw/log_keeper.sh` | **v2.8** | manifest | `/data/gw/log_keeper.sh` | 日志持久化守护; v2.8(SIGSEGV §8.10.2): stability_metrics.tsv +fix-stack 列(clamp/dheld/deeps/episodes, -1=模块缺席)与 NE 计数同表判相关性; v2.7: delta() 改自建静态 logcut; ⟦收口 §22⟧ v2.6/v2.7 的 awk 缺陷因果解释已被推翻, 保留理由=少 spawn/无数组(缓解); 历史见git |
+| `gw/log_keeper.sh` | **v2.9** | manifest | `/data/gw/log_keeper.sh` | 日志持久化守护; v2.9(可用性轮 P1): 驱动 avail_sampler(10min 节拍 CYC%20+CYC=1 首采, 无新守护); v2.8: stability_metrics +fix-stack 列; v2.7: delta() 改静态 logcut; 历史见git |
 | `gw/mipc_dial_trace.sh` | **v1.0** | manifest | `/data/gw/mipc_dial_trace.sh` | 5G 拨号取证(xtrace 抓真参) |
 | `gw/netlock.sh` | **v1.0** | manifest | `/data/gw/netlock.sh` | 路由/防火墙/地址写方串行化(batch3): flock(静态 busybox)+可重入+REPAIR 台账/小时速率 |
 | `gw/night_report.sh` | **v1.0** | manifest | `/data/gw/night_report.sh` | 夜间体检报告 |
@@ -98,24 +99,25 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/wan_agg.sh` | **v3.5** | manifest | `/data/gw/wan_agg.sh` | 双上行聚合主管; v3.2(日志加密轮): TICK(30s)汇总+探活逐目标+硬截止/authd/W2_READY 边沿+主路写失败留痕; v3.1: 探活实证选承载口(僵尸口); 历史见git; v3.3(日志加密轮补): 日志行补 epoch 时间基准(跨日志关联); v3.5(batch3): 自持单实例锁(手动重启不再双写) + main/transition netcfg 串行化 |
 | `gw/wan_agg_lib.sh` | **v1.3** | manifest | `/data/gw/wan_agg_lib.sh` | 聚合引擎落地层+conf 管理库; v1.2(日志加密轮): ensure_rules 每次补装记 REPAIR+rc(规则被外力蒸发不再静默); v1.1: +cell_iface_pick(探活实证选承载口); v1.3(batch3): netcfg 串行化 + REPAIR 台账 |
 | `gw/wan_eth.sh` | **v1.5** | manifest | `/data/gw/wan_eth.sh` | 有线 WAN(eth0) 接口管理守护; v1.4(P1-1): 单实例锁; v1.3(batch1): 心跳供 watchdog 判卡死; 历史见git; v1.5(batch3): svc_lib + netcfg 串行化/REPAIR 台账 |
-| `gw/watchdog.sh` | **v1.30** | manifest | `/data/gw/watchdog.sh` | 持续不变量看门狗; v1.30(WiFi 事故): hostapd 健康=自有进程+活 ra0/rai0 控制套接字; 恢复删残留 socket、不再因无 socket 拒绝; 历史见git |
+| `gw/watchdog.sh` | **v1.31** | manifest | `/data/gw/watchdog.sh` | 持续不变量看门狗; v1.31(可用性轮): +bss2g/bss5g/bss_guest/radvd 判决键(纯 set_state 行, 供 avail_sampler 分频组件; 旧 bss 键保留)+每轮 cycle=<epoch> 新鲜度键(set_state 迁移式写入使全绿时段文件不动, 采样器以此判监督层活着)+修正 v1.30 轮遗漏的版本串(--version/横幅仍写 v1.29); v1.30: hostapd 健康=活控制套接字; 历史见git |
 | `gw/webs_revive.sh` | **v1.3** | manifest | `/data/gw/webs_revive.sh` | 原厂GUI复活器(自足nginx conf; 手动拉起) |
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_autoch.sh` | **v1.1** | manifest | `/data/gw/wifi_autoch.sh` | WiFi 自动选道器; v1.1(日志加密轮): 输出 # 注释行记录扫描规模/候选/评分(源码时无害) — 选道依据可复盘; IDC 安全掩码+候选{1,6} |
 | `gw/wifi_guard.sh` | **v1.6** | manifest | `/data/gw/wifi_guard.sh` | BA/TX 停滞自动恢复守卫; v1.5: 启动日志版本对齐; v1.4: 每轮重写锁; v1.3: iw/tc 限时; v1.2(P1-4): 连续 4 样本+前置+限频+心跳; 历史见git; v1.6(batch3): svc_lib 锁/心跳 + 站数解析 |
 | `gw/wifi_macplan.sh` | **v1.0** | manifest | `/data/gw/wifi_macplan.sh` | 出厂 MAC 派生计划(自 wifi_up v1.29 拆出; api uplink 的 eth0 原生 MAC 还原同步收敛到此唯一实现 — 原内联副本缺两级兜底属算法漂移实例) |
 | `gw/wifi_up.sh` | **v1.29** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.29 架构轮: MAC 派生拆出 wifi_macplan.sh + 自动选道拆出 wifi_autoch.sh, 主文件收敛为拉起配方本体, 变量/契约零变化; v1.28: 候选收敛安全集深部{1,6}; 历史见git) |
-| `gw/www/api.sh` | **v2.78** | manifest | `/data/gw/www/api.sh` | API 核心路由器+helpers; v2.78(USB 轮): +usb/usb_set 域(api_usb.sh); v2.76: +请求级日志; v2.75: 域模块懒加载; 历史见git |
+| `gw/www/api.sh` | **v2.79** | manifest | `/data/gw/www/api.sh` | API 核心路由器+helpers; v2.79(可用性轮): +avail 域(api_avail.sh); v2.78: +usb/usb_set 域; v2.76: +请求级日志; v2.75: 域模块懒加载; 历史见git |
 | `gw/www/api_agg.sh` | **v1.1** | manifest | `/data/gw/www/api_agg.sh` | API 聚合+上行域模块; v1.1(日志加密轮): 权重/模式/钉死/上行档案变更写 api.log(凭证脱敏) |
+| `gw/www/api_avail.sh` | **v1.0** | manifest | `/data/gw/www/api_avail.sh` | API 可用性域模块(avail): 只读聚合 avail_daily+hourly(今日实时)+transitions → 90 天日条(degraded 半权/维护窗排除/无数据不进分母)+事件倒序 30 条+24h 覆盖率+总体(上行组最差优先); ash 纪律=循环重定向式读文件(无管道子壳回传问题) |
 | `gw/www/api_cell.sh` | **v1.1** | manifest | `/data/gw/www/api_cell.sh` | API 蜂窝域模块; v1.1(日志加密轮): cells 成败/耗时、锁频/锁小区/制式/飞行/扫描/PIN 动作写 api.log(PIN 值脱敏) |
 | `gw/www/api_lan.sh` | **v1.0** | manifest | `/data/gw/www/api_lan.sh` | API LAN 服务域模块(v2.75 拆出: dhcp/dhcp_static/fw 族; fw_apply.sh 改域内懒加载 — 原对全部请求无条件 source) |
 | `gw/www/api_sms.sh` | **v1.2** | manifest | `/data/gw/www/api_sms.sh` | API 短信域模块; v1.2(日志加密轮): 发送成败/长度/模组原始响应写 api.log(号码仅末4位, 内容不落盘); v1.1: AT+EMGS 路线 |
 | `gw/www/api_sys.sh` | **v1.3** | manifest | `/data/gw/www/api_sys.sh` | API 系统/状态域模块; v1.3(日志加密轮): traffic 选口回退/qdisc 缺失留痕; v1.2: /api/traffic 增 if 字段; v1.1: 探活实证选口 |
 | `gw/www/api_usb.sh` | **v1.1** | manifest | `/data/gw/www/api_usb.sh` | API USB 域模块(usb 状态/usb_set 三开关); v1.1: 状态行解析修复; 状态单一事实源=usb_mgr.sh status |
 | `gw/www/api_wifi.sh` | **v1.1** | manifest | `/data/gw/www/api_wifi.sh` | API WiFi 域模块; v1.1(WiFi 事故): hostapd2g/5g 改活控制套接字判据(iw type AP 在 hostapd 死后仍为真 → GUI 谎报正常); 历史见git |
-| `gw/www/app.js` | **v3.52** | manifest | `/data/gw/www/app.js` | 控制台SPA; v3.52: 系统页 USB-C 接口卡片(三开关+实况); 历史见git |
-| `gw/www/index.html` | **v2.33** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.33: 缓存v67) |
-| `gw/www/style.css` | **v2.1** | manifest | `/data/gw/www/style.css` | 控制台主题 |
+| `gw/www/app.js` | **v3.53** | manifest | `/data/gw/www/app.js` | 控制台SPA; v3.53: 可用性页(总体横幅+组件 90 天状态条+事件表+覆盖率, api avail); 历史见git |
+| `gw/www/index.html` | **v2.34** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.34: +可用性导航, 缓存v68) |
+| `gw/www/style.css` | **v2.2** | manifest | `/data/gw/www/style.css` | 控制台主题; v2.2: 可用性页样式(横幅/90 天条/事件) |
 | `gw/zz_data_hook` | **v1.1** | manifest | `/data/build/rootfs/etc/init.d/zz_data_hook` | S98数据钩子(v1.1: plain sh——原厂无/etc/rc.common, rc.common式shebang致开机栈全灭; 回归实测发现) |
 | `gw/src/dpclamp.c` | **v1.3** | src | `gw/bin/dpclamp.ko` | dpclamp 源码(同产物; period_s/batch/cap/minfree_kb/warmup/cool_s 参数) |
 | `gw/src/dpquar.c` | **v1.4** | src | `gw/bin/dpquar.ko` | dpquar 源码(同产物; qmask/hold_s/cap/watch 参数) |
@@ -143,7 +145,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/build_steth.sh` | **v1.0** | tool | `-` | v3_steth.ko构建 |
 | `tools/build_v3fix.sh` | **v1.1** | tool | `-` | v3_fix.ko构建; v1.1: 路径修正当前布局 + uapi/asm junction 失效改就地复制 + 记录产物错位事故 |
 | `tools/build_v3httpd.sh` | **v1.0** | tool | `-` | v3httpd构建(zig cc aarch64-linux-musl全静态, 同mipc_cellular链) |
-| `tools/deploy.py` | **v2.29** | tool | `-` | 部署/漂移守卫; v2.23: babysit 目标修正为 preinit 实跑的 /data/rescue/babysit.sh + MANIFEST +boot_gate/core_meta; 历史见git; v2.24(batch3): +svc_lib/netlock MANIFEST; v2.25: MANIFEST +gw/bin/logcut; v2.26: MANIFEST +gw/bin/procmatch; v2.27: MANIFEST +gw/bin/dpquar.ko; v2.28: +gw/bin/dpclamp.ko |
+| `tools/deploy.py` | **v2.30** | tool | `-` | 部署/漂移守卫; v2.30(可用性轮): MANIFEST +avail_sampler/api_avail; v2.29: +usb_mgr/api_usb; v2.27/2.28: +dpquar/dpclamp; 历史见git |
 | `tools/device_local.py.example` | **v1.0** | tool | `-` | 凭证模板(真件gitignored) |
 | `tools/doc_audit.py` | **v1.2** | tool | `-` | 台账↔文档内联标记双向审计; v1.2: 子进程显式 UTF-8(gbk 环境不再中断 deploy 文档门禁); 历史见git |
 | `tools/fetch_static_busybox.sh` | **v1.0** | tool | `-` | Alpine busybox-static 1.36.1-r31 拉取+SHA256 钉死(解包到 gw/bin/busybox) |
@@ -162,7 +164,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/rescue_shadow.py` | **v1.0** | tool | `-` | shadow.override未bind网络救援(getpass旧口令→只读探针: 文件md5/grep行为单测/部署钩子sh -x跟踪→从.bak恢复+重bind; 依赖rc.extend v2.1) |
 | `tools/rotate_toor.py` | **v1.4** | tool | `-` | toor口令轮换器; v1.4: 轮换前存档.bak(rc.extend v2.1回退源); 历史见git |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
-| `tools/selftest.py` | **v2.59** | tool | `-` | 设备自检; v2.59(USB 轮): +t_usb_service/t_usb_dataplane; v2.54(WiFi 事故): +t_wifi_ap_service; 历史见git |
+| `tools/selftest.py` | **v2.60** | tool | `-` | 设备自检; v2.60(可用性轮): +t_avail(采样心跳/名单/数据文件/域路由/watchdog 新键); v2.59: +t_usb_service/t_usb_dataplane; 历史见git |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |
 | `tools/serial_server.py` | **v1.7** | tool | `-` | 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets) |
 | `tools/upgrade_slot.py` | **v1.0** | tool | `-` | SSH整槽升级器(P3第一档: vercheck/槽位/空间预检→md5门禁→dd备份旧p26→写新镜像→挂载sanity断言(toor/rcS/#v3:/procd)→失败自动整槽还原不重启→清TRY_A→reboot; PC侧轮询日志+回连终检; --dry-run) |

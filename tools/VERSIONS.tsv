@@ -1,9 +1,11 @@
 # VERSIONS.tsv (public export -- rows filtered to exported set)
 #VER-REGISTRY
+gw/avail_sampler.sh	1.0	manifest	/data/gw/avail_sampler.sh	组件可用性采样器(AVAILABILITY_DESIGN §3): log_keeper 10min 驱动, 单遍有界无守护; 判据复用 watchdog_state(0=ok 迁移式快照+cycle 新鲜度)+设置态 off 判定; 窗口信号=行数游标法(EVT restart/NE 三规则归属/REPAIR); 输出 hourly(rotate 2400)/daily(跨日归并)/transitions(rotate 2000)+/tmp/avail_last 快照; busybox awk 仅标量累加
 gw/agg_pins.default	1.0	manifest	/data/gw/agg_pins.default	MAC钉死表出厂缺省基线(只读, 不含任何MAC; 设备侧活文件 agg_pins.conf 由 wan_agg 缺省才写地播种, 个人MAC不入库)
 gw/rc.extend.sh	2.8	manifest	/data/rc.extend.sh	槽位调度器; v2.8(SIGSEGV §8.10.2): 自载加 panic 感知守卫(上次 pstore 背景帧含修复栈函数即跳载, 受保护启动)+自载结果写 fixstack.log(M2 补丁); v2.7: dpquar/dpclamp 修复栈开机自载(仅slot-a, dpquar逐点校验内核原文,不匹配即拒载); v2.6: boot台账+条件清TRY_A+core_meta wrapper; 历史见git
 gw/v3_rc10.extend.sh	2.35	manifest	/data/gw/rc19.sh	v3 启动编排 rc19v2; v2.35(USB 轮): +usb_mgr 守护(USB-C 设备模式: rndis0 桥入 br-lan+三开关); v2.34(P0-2): boot_gate 健康门禁; 历史见git
 gw/usb_mgr.sh	1.1	manifest	/data/gw/usb_mgr.sh	USB-C 设备模式服务管理(总开关+数据/ADB/控制台); 厂商遗留 g1 gadget(RNDIS+ADB+2xACM)只补服务层: rndis0 桥入 br-lan=PC 即 LAN 客户端; OFF=停 keepalive+解绑 UDC 口全灭; 硬件为仅设备模式(host 电气死路, 板上 TCPC 未贴)
+gw/www/api_avail.sh	1.0	manifest	/data/gw/www/api_avail.sh	API 可用性域模块(avail): 只读聚合 avail_daily+hourly(今日实时)+transitions → 90 天日条(degraded 半权/维护窗排除/无数据不进分母)+事件倒序 30 条+24h 覆盖率+总体(上行组最差优先); ash 纪律=循环重定向式读文件(无管道子壳回传问题)
 gw/www/api_usb.sh	1.1	manifest	/data/gw/www/api_usb.sh	API USB 域模块(usb 状态/usb_set 三开关); v1.1: 状态行解析修复; 状态单一事实源=usb_mgr.sh status
 gw/wifi_macplan.sh	1.0	manifest	/data/gw/wifi_macplan.sh	出厂 MAC 派生计划(自 wifi_up v1.29 拆出; api uplink 的 eth0 原生 MAC 还原同步收敛到此唯一实现 — 原内联副本缺两级兜底属算法漂移实例)
 gw/wifi_autoch.sh	1.1	manifest	/data/gw/wifi_autoch.sh	WiFi 自动选道器; v1.1(日志加密轮): 输出 # 注释行记录扫描规模/候选/评分(源码时无害) — 选道依据可复盘; IDC 安全掩码+候选{1,6}
@@ -32,7 +34,7 @@ gw/bin/v3_steth.ko	1.0	manifest	/data/gw/v3_steth.ko	hook槽位听诊器(bias/in
 gw/src/healthdog.c	1.0	src	gw/bin/healthdog.ko	看门狗模块源码(版本随产物)
 gw/src/v3_fix.c	1.2	src	gw/bin/v3_fix.ko	TTL/解绑模块源码(版本随产物); v1.2 随产物重建
 gw/src/v3_steth.c	1.0	src	gw/bin/v3_steth.ko	听诊器模块源码(版本随产物)
-tools/deploy.py	2.29	tool	-	部署/漂移守卫; v2.23: babysit 目标修正为 preinit 实跑的 /data/rescue/babysit.sh + MANIFEST +boot_gate/core_meta; 历史见git; v2.24(batch3): +svc_lib/netlock MANIFEST; v2.25: MANIFEST +gw/bin/logcut; v2.26: MANIFEST +gw/bin/procmatch; v2.27: MANIFEST +gw/bin/dpquar.ko; v2.28: +gw/bin/dpclamp.ko
+tools/deploy.py	2.30	tool	-	部署/漂移守卫; v2.30(可用性轮): MANIFEST +avail_sampler/api_avail; v2.29: +usb_mgr/api_usb; v2.27/2.28: +dpquar/dpclamp; 历史见git
 tools/serial_server.py	1.7	tool	-	常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets)
 tools/serial_cmd.py	1.3	tool	-	串口命令瘦客户端(marker输出捕获; v1.3示例路径更新)
 tools/lk_flip2.py	1.1	tool	-	LK 一键翻槽(a|b, misc[2060]字节)
@@ -50,10 +52,10 @@ gw/www/api_lan.sh	1.0	manifest	/data/gw/www/api_lan.sh	API LAN 服务域模块(v
 gw/www/api_agg.sh	1.1	manifest	/data/gw/www/api_agg.sh	API 聚合+上行域模块; v1.1(日志加密轮): 权重/模式/钉死/上行档案变更写 api.log(凭证脱敏)
 gw/www/api_cell.sh	1.1	manifest	/data/gw/www/api_cell.sh	API 蜂窝域模块; v1.1(日志加密轮): cells 成败/耗时、锁频/锁小区/制式/飞行/扫描/PIN 动作写 api.log(PIN 值脱敏)
 gw/www/api_sms.sh	1.2	manifest	/data/gw/www/api_sms.sh	API 短信域模块; v1.2(日志加密轮): 发送成败/长度/模组原始响应写 api.log(号码仅末4位, 内容不落盘); v1.1: AT+EMGS 路线
-gw/www/api.sh	2.78	manifest	/data/gw/www/api.sh	API 核心路由器+helpers; v2.78(USB 轮): +usb/usb_set 域(api_usb.sh); v2.76: +请求级日志; v2.75: 域模块懒加载; 历史见git
-gw/www/index.html	2.33	manifest	/data/gw/www/index.html	v3控制台页面(v2.33: 缓存v67)
-gw/www/style.css	2.1	manifest	/data/gw/www/style.css	控制台主题
-gw/www/app.js	3.52	manifest	/data/gw/www/app.js	控制台SPA; v3.52: 系统页 USB-C 接口卡片(三开关+实况); 历史见git
+gw/www/api.sh	2.79	manifest	/data/gw/www/api.sh	API 核心路由器+helpers; v2.79(可用性轮): +avail 域(api_avail.sh); v2.78: +usb/usb_set 域; v2.76: +请求级日志; v2.75: 域模块懒加载; 历史见git
+gw/www/index.html	2.34	manifest	/data/gw/www/index.html	v3控制台页面(v2.34: +可用性导航, 缓存v68)
+gw/www/style.css	2.2	manifest	/data/gw/www/style.css	控制台主题; v2.2: 可用性页样式(横幅/90 天条/事件)
+gw/www/app.js	3.53	manifest	/data/gw/www/app.js	控制台SPA; v3.53: 可用性页(总体横幅+组件 90 天状态条+事件表+覆盖率, api avail); 历史见git
 tools/agg_pins.conf.example	1.1	tool	-	MAC钉死表模板(真实表设备侧自管, 含个人MAC不入库)
 gw/fan_mgr.sh	1.6	manifest	/data/gw/fan_mgr.sh	原厂梯度温控风扇; v1.5(P1-1): 单实例锁; v1.4: 心跳; 历史见git; v1.6(batch3): svc_lib 锁/心跳
 gw/fan_mode.conf	1.0	manifest	/data/gw/fan_mode.conf	风扇模式:performance|silent(静音+6°C偏移)
@@ -66,7 +68,7 @@ gw/ntp_keeper.sh	1.5	manifest	/data/gw/ntp_keeper.sh	每小时NTP守时(多源; 
 gw/reboot_sched.sh	1.4	manifest	/data/gw/reboot_sched.sh	定时重启守护; v1.3(P1-1): 单实例锁+心跳; v1.2: 触发行先落 /data+sync; 历史见git; v1.4(batch3): svc_lib 锁/心跳
 gw/core_meta.sh	1.1	manifest	/data/gw/core_meta.sh	core_pattern 元数据 wrapper; v1.1(SIGSEGV §8.10.2): NE 即探测器(exec aee 前 echo deep > /proc/dpclamp, 模块侧冷却); args 换行/制表符清洗(修 104 行 TSV 破行)+pre-NTP epoch 加 unsync=1 标记(M1); v1.0: 记录 exe/cmdline/status/maps/父进程/PATH/dmesg 尾后 exec aee forwarder(行为不变, stdin 不碰)
 gw/boot_gate.sh	1.3	manifest	/data/gw/boot_gate.sh	启动健康门禁(P0-2); v1.2: 不写 watchdog.beat(避免污染数字心跳); v1.1: GUI 判据加 HTTP 200; v1.0: 关键链门禁+boot.healthy+TRY_A 读回+10min 稳定窗; v1.3(batch3): svc_lib 锁 + BSS/lo 最小解析
-gw/log_keeper.sh	2.8	manifest	/data/gw/log_keeper.sh	日志持久化守护; v2.8(SIGSEGV §8.10.2): stability_metrics.tsv +fix-stack 列(clamp/dheld/deeps/episodes, -1=模块缺席)与 NE 计数同表判相关性; v2.7: delta() 改自建静态 logcut; ⟦收口 §22⟧ v2.6/v2.7 的 awk 缺陷因果解释已被推翻, 保留理由=少 spawn/无数组(缓解); 历史见git
+gw/log_keeper.sh	2.9	manifest	/data/gw/log_keeper.sh	日志持久化守护; v2.9(可用性轮 P1): 驱动 avail_sampler(10min 节拍 CYC%20+CYC=1 首采, 无新守护); v2.8: stability_metrics +fix-stack 列; v2.7: delta() 改静态 logcut; 历史见git
 gw/diag_dump.sh	1.2	manifest	/data/gw/diag_dump.sh	一键诊断包(脱敏); v1.2(SIGSEGV P1/P2): 环读取改静态 logc + 静态工具链自述; v1.1: 结束行带生成时刻；⟦收口 §22⟧ 非根因
 tools/lk_flash_v4_eth1.py	1.1	tool	-	v1.1路径随项目根迁移; eth1刷入实证器(全链条: 陷阱→raw shell→eth1起链[历史疑点:PHY仅ifup后attach]→curl传输→deploy2自驱→重启回v4.1)
 tools/lk_flash_v4.py	1.1	tool	-	v1.1路径随项目根迁移; 终版刷入器(LK陷阱→raw shell→/dev/null修复→curl送deploy2.sh→后台自驱+轮询deploy.log→重启监测; 修三雷: uclient罢工/&需/dev/null/串口前台等待吃首字符)
@@ -96,8 +98,8 @@ gw/defaults.conf	1.9	manifest	/data/gw/defaults.conf	统一配置只读出厂基
 tools/leak_check.py	2.2	tool	-	敏感词零命中门禁; v2.2: --history 全量扫提交正文(%B, 原仅扫标题%s可漏检消息体); v2.1: 修复 PAT_PARTS NameError; 历史见git
 docs/ARCHITECTURE.md	1.2	doc	-	架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针); v1.2: batch3 版本表刷新
 docs/GUI_TERMINOLOGY.md	1.2	doc	-	GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git
-gw/watchdog.sh	1.30	manifest	/data/gw/watchdog.sh	持续不变量看门狗; v1.30(WiFi 事故): hostapd 健康=自有进程+活 ra0/rai0 控制套接字; 恢复删残留 socket、不再因无 socket 拒绝; 历史见git
-tools/selftest.py	2.59	tool	-	设备自检; v2.59(USB 轮): +t_usb_service/t_usb_dataplane; v2.54(WiFi 事故): +t_wifi_ap_service; 历史见git
+gw/watchdog.sh	1.31	manifest	/data/gw/watchdog.sh	持续不变量看门狗; v1.31(可用性轮): +bss2g/bss5g/bss_guest/radvd 判决键(纯 set_state 行, 供 avail_sampler 分频组件; 旧 bss 键保留)+每轮 cycle=<epoch> 新鲜度键(set_state 迁移式写入使全绿时段文件不动, 采样器以此判监督层活着)+修正 v1.30 轮遗漏的版本串(--version/横幅仍写 v1.29); v1.30: hostapd 健康=活控制套接字; 历史见git
+tools/selftest.py	2.60	tool	-	设备自检; v2.60(可用性轮): +t_avail(采样心跳/名单/数据文件/域路由/watchdog 新键); v2.59: +t_usb_service/t_usb_dataplane; 历史见git
 tools/doc_audit.py	1.2	tool	-	台账↔文档内联标记双向审计; v1.2: 子进程显式 UTF-8(gbk 环境不再中断 deploy 文档门禁); 历史见git
 gw/src/mipc_cellular.c	0.17	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源码; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘
 gw/bin/mipc_cellular	0.17	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘

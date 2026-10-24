@@ -1,5 +1,7 @@
 #!/bin/sh
-# log_keeper.sh v2.8 -- 日志持久化守护（日志改善专项轮）
+# log_keeper.sh v2.9 -- 日志持久化守护（日志改善专项轮）
+#   v2.9 (可用性轮 P1): 驱动 avail_sampler.sh (10min 节拍 CYC%20 + CYC=1 首采;
+#   单遍有界, 崩溃只留 NE 一行, 覆盖率指标自会体现 — AVAILABILITY_DESIGN §3)。
 #   v2.8 (SIGSEGV §8.10.2): stability_metrics.tsv +fix-stack 列
 #   (clamp/dheld/deeps/episodes, 绝对计数, -1=模块缺席) —— NE 计数同表可判相关性。
 #   v2.7 (2026-10-21 SIGSEGV 家族轮 2): delta() 改调自建静态 logcut —— busybox
@@ -303,6 +305,10 @@ while :; do
     # -- 每 10 轮(5min)落一行汇总: 持久化规模 + 降噪丢弃量可观测(不静默) --
     CYC=$(( ${CYC:-0} + 1 ))
     if [ $((CYC % 10)) -eq 0 ] || [ "$CYC" = 1 ]; then
+        # v2.9: 可用性采样器 (10min 节拍; 首采即时) — 无新守护的设计前提
+        if [ $((CYC % 20)) -eq 0 ] || [ "$CYC" = 1 ]; then
+            sh /data/gw/avail_sampler.sh >/dev/null 2>&1 || true
+        fi
         _nf=$(ls $DIR/tmp/*.log 2>/dev/null | wc -l)
         _nb=$(cat $DIR/tmp/*.log 2>/dev/null | wc -c)
         _ds=$((DROP_S - DROP_S0)); _dd=$((DROP_D - DROP_D0))

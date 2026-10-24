@@ -1,5 +1,9 @@
 #!/bin/sh
-# watchdog.sh v1.30 -- on-device continuous invariant monitor.
+# watchdog.sh v1.31 -- on-device continuous invariant monitor.
+# v1.31 (2026-10-25 可用性轮): +bss2g/bss5g/bss_guest/radvd 判决键(纯 set_state
+#   行, 供 avail_sampler 分频组件; 旧 bss 键保留)+每轮 cycle=<epoch> 新鲜度键
+#   (set_state 迁移式写入使全绿时段文件不动, 采样器以此判监督层活着);
+#   顺带修正 v1.30 轮遗漏的 --version/启动横幅版本串(仍写 v1.29)。
 # v1.30 (2026-10-21 WiFi incident): hostapd liveness by LIVE control sockets
 #   (/proc/net/unix) + our own config path; recovery removes stale sockets and
 #   no longer refuses when none exist.
@@ -266,6 +270,11 @@ run_cycle() {
     FAILS=0
     TOOLFAILS=0
     UP=$(cut -d. -f1 /proc/uptime)
+    # v1.31 (可用性轮): 每轮刷新 cycle 新鲜度键 — set_state 是迁移式写入,
+    # 无此键则全绿时段 state 文件 mtime/内容不动, 采样器无法判监督层活着。
+    grep -v '^cycle=' $STATE 2>/dev/null > $STATE.tmp
+    echo "cycle=$(date +%s)" >> $STATE.tmp
+    mv $STATE.tmp $STATE
     # v1.15: 时钟跳变检测 — NTP 校时/回拨会让本地时间戳不可跨段比较; epoch 与
     #   uptime 增量不一致即留痕(设备无 RTC, 开机曾出现 8h 跳变)。
     _NOW=$(date +%s)
@@ -294,6 +303,12 @@ run_cycle() {
     # v1.29: BSS liveness from hostapd control sockets + sysfs link flags
     # (the old iw probe counted AP-mode netdevs even when hostapd was dead).
     check_lib bss   "[ \$(svc_bss_count) -ge 2 ]"  "2+ BSS active"
+    # v1.31 (可用性轮): 分频/访客/radvd 判决键 — 纯 set_state 行, 零决策逻辑;
+    # bss2g/bss5g 供 avail_sampler 分频组件, 旧 bss 键保留(boot_gate 等消费者不变)
+    check_lib bss2g  "svc_sock_live /var/run/hostapd/ra0  && svc_link_up ra0"  "WiFi 2.4G BSS live"
+    check_lib bss5g  "svc_sock_live /var/run/hostapd/rai0 && svc_link_up rai0" "WiFi 5G BSS live"
+    check_lib bss_guest ". /data/gw/defaults.conf 2>/dev/null; . /data/gw/settings.conf 2>/dev/null; [ \"\${GUEST:-0}\" = 1 ] || exit 0; _g=0; svc_sock_live /var/run/hostapd/ra1  && svc_link_up ra1  && _g=1; svc_sock_live /var/run/hostapd/rai1 && svc_link_up rai1 && _g=1; [ \"\$_g\" = 1 ]" "guest BSS live (when enabled)"
+    check_lib radvd  "pgrep radvd >/dev/null 2>&1" "radvd v6 RA daemon"
     check_port port80 80 "GUI :80 reachable"
     check_port port22 22 "SSH :22 reachable"
     if [ -f /tmp/boot.done ]; then
@@ -775,7 +790,7 @@ EOF
 
 # ---- main ----
 case "${1:-}" in
---version) echo "watchdog v1.29"; exit 0 ;;
+--version) echo "watchdog v1.31"; exit 0 ;;
 esac
 touch $LOG $STATE
 # v1.20: 看门狗单实例 — 双实例会重复自愈/告警(现场曾出现 2 个).
@@ -785,8 +800,8 @@ if [ "$_rc" != 0 ]; then
     echo "watchdog: another live instance owns the lock (rc=$_rc)" >&2
     exit 0
 fi
-log "===== watchdog v1.29 start (svc_lib primitives + minimal parsers + batch3 metrics; alert LED 5G orange) ====="
-logger -t watchdog "watchdog v1.29 start"
+log "===== watchdog v1.31 start (svc_lib primitives + minimal parsers + batch3 metrics; avail keys; alert LED 5G orange) ====="
+logger -t watchdog "watchdog v1.31 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

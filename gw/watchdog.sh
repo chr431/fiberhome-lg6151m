@@ -794,7 +794,7 @@ EOF
 
 # ---- main ----
 case "${1:-}" in
---version) echo "watchdog v1.31"; exit 0 ;;
+--version) echo "watchdog v1.32"; exit 0 ;;
 esac
 touch $LOG $STATE
 # v1.20: 看门狗单实例 — 双实例会重复自愈/告警(现场曾出现 2 个).
@@ -804,8 +804,8 @@ if [ "$_rc" != 0 ]; then
     echo "watchdog: another live instance owns the lock (rc=$_rc)" >&2
     exit 0
 fi
-log "===== watchdog v1.31 start (svc_lib primitives + minimal parsers + batch3 metrics; avail keys; alert LED 5G orange) ====="
-logger -t watchdog "watchdog v1.31 start"
+log "===== watchdog v1.32 start (svc_lib primitives + minimal parsers + batch3 metrics; avail keys; radvd-when-deployed; alert LED 5G orange) ====="
+logger -t watchdog "watchdog v1.32 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

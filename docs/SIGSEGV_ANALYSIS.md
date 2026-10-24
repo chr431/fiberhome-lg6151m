@@ -279,8 +279,8 @@ MD 列表自然失效/MD 重启——残余期"只降不零"，文档化。崩�
   **hostapd NE #2（02:55:53，修复栈在位、剧集残余；-B 工作守护被杀，
   守卫 02:55 自动重生，中断≈秒级，客户端重连尖峰在 ping idx2–12 可见）**
   ——"压制非清零"的守护级受害实证（累计：hostapd×2、dnsmasq×1）；
-  可选加固（dpclamp 开机预热排水，覆盖 10-22 04:00 类重启窗剧集）已
-  备案未实施（KE#3 后需单独风险评估）。
+  可选加固（dpclamp 开机预热排水，覆盖 10-22 04:00 类重启窗剧集）——**已随
+  v1.3 实施（§8.10.3，2026-10-25）**。
 
 运维注意：dpquar 在押页 TTL 24h 后自动归还；MemFree 在 MD 复位+隔离叠加时
 最低 ~198MB、稳态 ~1.09GB，属有界瞬态。
@@ -436,7 +436,7 @@ grep=0，只能靠 lsmod 事后确认）；**M3** logread 单发崩溃 6 起/天
 **结论**：dpclamp 的机制与方向成立（持续收敛、无 KE 复发、内存稳态），残余率是
 "覆盖=单 CPU 热池 + 反应=固定周期"的必然结果。下一轮方向=事件反应+深度遍历（§8.10）。
 
-## 8.10 下一轮方案设计：dpclamp v1.3（剧集反应式 + 深度排空）【设计稿，未实施】
+## 8.10 下一轮方案设计：dpclamp v1.3（剧集反应式 + 深度排空）【已实施，见 §8.10.3】
 
 > 设计原则：F1 冻结不变（不新增用户态替换）；内核改动限定 dpclamp 本体 + 一个
 > /proc 写接口 + core_meta 一行触发；dpquar 不动；v1.2 可随时 rmmod 回退。
@@ -535,6 +535,43 @@ grep=0，只能靠 lsmod 事后确认）；**M3** logread 单发崩溃 6 起/天
 deep 前后 buddyscan distinct 对比（预期 deep 后 →≈0、随集合重建回升——回升速率
 即 MD 侧列表重建率的直接量测）。**风险门禁**：实施前过 KE#3 同类风险评估（deep
 锁窗 + burst churn 上限），异常即回退 v1.2（rmmod 幂等，rc.extend 自载不变）。
+
+### 8.10.3 实施与实机验收（2026-10-25 凌晨轮）
+
+落地版本：dpclamp v1.3 + core_meta v1.1 + rc.extend v2.8（panic 感知自载守卫 +
+fixstack.log）+ log_keeper v2.8（metrics +clamp/dheld/deeps/episodes 列，-1=模块
+缺席）+ selftest t_fixstack（36/36 绿含新增）。39 个未解析符号全部对内核树逐一
+核实已导出（含 contig_page_data/__mod_zone_page_state/split_page/
+set_cpus_allowed_ptr/__num_online_cpus）；deep 摘块语义与 rmqueue/
+__isolate_free_page 逐行对齐（NR_FREE_PAGES/CMA 统计 + page->index pcp 迁移型 +
+导出的 split_page 分裂兄弟页），free 路径垃圾 index 由内核钳制兜底（已核 5.15
+源码 free_unref_page 的 ≥MIGRATE_PCPTYPES 回落）。
+
+实测要点（全部 /proc/dpclamp v2 + dmesg + buddyscan 现场）：
+
+- **deep 实弹（首轮，冷缓存）**：95ms 走完全部空闲链表（1799 块头 / 314,145
+  子页尾读 ≈ 全量空闲池），114 候选块 re-verify **114/114 全部摘除成功**，344 页
+  扣住，锁窗峰值 122µs。≥8 页自动升级 burst 的链路当场触发。
+- **存量瞬时清零 + 写入者重建直接实证**：deep 后 buddyscan 仍有 ~50 distinct
+  （20–30s 窗口内重现）——不是 deep 漏（100% 候选命中），而是 MD 侧 ~1 页/s 的
+  持续重签：**"触发器+burst 反应式"的设计前提被当场证实**。人工风暴（1Hz×22 轮
+  force deep + burst）累计 30 deeps/226 块摘除，锁窗峰值 317µs，零异常。
+- **sweep 成本校准（sweep_us 遥测首功）**：1024 页 sweep 真实 CPU ≈ **550µs**
+  （§8.10.1 表中 2.5–8s 的 wall 估计几乎全是幻影负载下的调度延迟）——性能预算
+  全面宽裕，稳态成本实际 ~0.0005% 单核/巡检。
+- **性能 A/B（严格重叠）**：持续 deep+burst 负载中 PC→CPE ping p50=1ms /
+  p90=2ms / max=3ms，与无负载基线逐分位一致（§8.10.2 门禁 p50≤+0.5/p95≤+2 通过）。
+- **warm-up（T-c）**：默认参数重载后 boot deep 自动执行（62 块/65 页/2ms 热缓存）
+  → burst esca 升级 → 3 空轮 2ms 早停——开机预热排水（§8.4 备案项）闭环。
+- **NE 探针链（T-b）**：kill -SEGV 实弹 → core_meta v1.1 落干净单行 TSV（args
+  换行清洗生效）+ meta 文件 + `echo deep` 到达模块；boot deep 后 30s 内被 300s
+  冷却正确抑制（suppressed=1，设计行为）。接受路径与 force 同代码分支已验。
+- **未实弹项**：whits 触发（本窗写入者未击中持有页）；neprobe 接受路径与抑制
+  同分支。二者留给常态运行自然覆盖。
+
+**常态观察开始**：指标 = ne_events 7 天滚动（对照 §8.9.1 的 10-23/24 基线 25–48/d
+与剧集簇 12 起/6min）+ stability_metrics 新列；04:00 定时重启将首次带 rc.extend
+v2.8 panic 守卫 + warm-up 全链上机。
 
 ## 9. 证据/产物索引
 

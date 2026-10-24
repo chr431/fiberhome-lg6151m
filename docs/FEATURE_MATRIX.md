@@ -66,17 +66,17 @@
 | 功能 | 原厂 | 自研 | 评 |
 |---|---|---|---|
 | 5G 拨号 | mobilenetwork→ql_netd→MIPC | 同底层链(rc_netfh 最小军) | `=` |
-| 载波/小区信息 | 树 RadioSignalParameter(16 CA 列) | 树读(过渡)+AT CSQ+mipc nw_get_signal(RSRP) | `=` `⏳`去树化 |
-| 锁频段 | 树→mobilenetwork→ql_nw_set_band_mode(MIPC) | 同链(cfg_cmd 写树+快照重放) | `=` `⏳` 自研直连 libqlril |
-| 锁小区 | 树→AT+EMMCHLCK | 同链 | `=` `⏳` AT 直发 |
+| 载波/小区信息 | 树 RadioSignalParameter(16 CA 列) | mipc_cellular cells 直连(16 邻区实弹全对; 树仅 engine=tree 回退) | `=` |
+| 锁频段 | 树→mobilenetwork→ql_nw_set_band_mode(MIPC) | mipc 直连(engine=mipc 缺省, v0.12+ 零 RIL 依赖; 树路径仅回退) | `=` |
+| 锁小区 | 树→AT+EMMCHLCK | AT+EMMCHLCK 直发(P3.5 实弹) | `=` |
 | SIM/IMEI/PLMN | 树+AT | 树+AT(CPIN/COPS/CGSN/CCID 双源交叉验证) | `=` |
 | PIN 管理 | ubus mobile_network update_pin_info | 同 | `=` |
-| 短信 | 收(MIPC IND→树)+发(mn_send_sms) | 收(AT+CMGL 只读)；发禁用(CMGS 交互毒死承载) | `▼` 只收不发是工程取舍 |
+| 短信 | 收(MIPC IND→树)+发(mn_send_sms) | 收(AT+CMGL)；发(AT+EMGS 直发经 atcid 通道, api_sms v1.2; CMGS 交互毒性的旧路线仍禁) | `=` |
 | 流量统计/限额 | mobilenetwork 轮询 /proc/net/dev | ubus traffic_statistics+自管日/月限额+GUI | `=` |
 | 制式/飞行 | 树→AT+erat / ql_dm | 同链 | `=` |
 | 组网模式 SA/NSA/双 | 树 ENDC→fh_set_endc→ql_nw_set_nr_disable_mode | 同款 API（mipc_cellular endc）+变更自动重附+GUI 下拉 | `=` |
-| PLMN 扫描 | RIL_NW_NETWORK_SCAN | ubus start_search_network | `=` |
-| 信号事件流 | ril.unsol.nw.signal 推送 | 轮询 | `▼` `⏳` |
+| PLMN 扫描 | RIL_NW_NETWORK_SCAN | ql_nw_network_scan 原生集成(api v2.31; 旧 ubus 过渡实现已废) | `=` |
+| 信号事件流 | ril.unsol.nw.signal 推送 | SSE 3s 事件流(v3httpd v2.4+api sse)+轮询兜底 | `=` |
 
 ### 2.3 网络/WAN
 

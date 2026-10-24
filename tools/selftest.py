@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
+"""selftest.py -- assertion-based functional test suite for the LG6151M gateway.
 v2.59 (2026-10-24 USB 轮): +t_usb_service/t_usb_dataplane(USB-C 设备模式:
   守护/UDC 绑定/SVC_TABLE + rndis0 桥接不变量, 按 USB_ENABLED 分档断言)。
-"""selftest.py -- assertion-based functional test suite for the LG6151M gateway.
 
 Design principle: L13 (2026-10-05) -- "feature silently broken until manual
 inspection" happened three times because we only checked control plane

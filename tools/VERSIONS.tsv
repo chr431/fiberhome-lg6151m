@@ -1,6 +1,6 @@
 # VERSIONS.tsv (public export -- rows filtered to exported set)
 #VER-REGISTRY
-gw/avail_sampler.sh	1.2	manifest	/data/gw/avail_sampler.sh	组件可用性采样器; v1.2(防假绿轮): ①FAIL-detail 窗口迁移捕获(短时自愈故障必记账, 根治迁移快照+稀疏采样盲区) ②dp5g/dpeth/authd_state 结果组合(IP在但不通→deg, 双路全死→agg down, 会话静默死→auth down) ③dpclamp sweep 前进/metrics 停更活性(进程在≠管线在) ④WiFi guard 告警/reason=3 风暴窗 ⑤usb off 语义; v1.1: touch/radvd6/键映射; 判据分级审计见 AVAILABILITY_DESIGN §8.2
+gw/avail_sampler.sh	1.3	manifest	/data/gw/avail_sampler.sh	组件可用性采样器; v1.3: metrics 活性改读台账首列 epoch(busybox date -r 是 RFC2822 语义非 mtime, 演练轮实测); v1.2(防假绿轮): ①FAIL-detail 窗口迁移捕获(短时自愈故障必记账, 根治迁移快照+稀疏采样盲区) ②dp5g/dpeth/authd_state 结果组合(IP在但不通→deg, 双路全死→agg down, 会话静默死→auth down) ③dpclamp sweep 前进/metrics 停更活性(进程在≠管线在) ④WiFi guard 告警/reason=3 风暴窗 ⑤usb off 语义; v1.1: touch/radvd6/键映射; 判据分级审计见 AVAILABILITY_DESIGN §8.2
 gw/agg_pins.default	1.0	manifest	/data/gw/agg_pins.default	MAC钉死表出厂缺省基线(只读, 不含任何MAC; 设备侧活文件 agg_pins.conf 由 wan_agg 缺省才写地播种, 个人MAC不入库)
 gw/rc.extend.sh	2.8	manifest	/data/rc.extend.sh	槽位调度器; v2.8(SIGSEGV §8.10.2): 自载加 panic 感知守卫(上次 pstore 背景帧含修复栈函数即跳载, 受保护启动)+自载结果写 fixstack.log(M2 补丁); v2.7: dpquar/dpclamp 修复栈开机自载(仅slot-a, dpquar逐点校验内核原文,不匹配即拒载); v2.6: boot台账+条件清TRY_A+core_meta wrapper; 历史见git
 gw/v3_rc10.extend.sh	2.35	manifest	/data/gw/rc19.sh	v3 启动编排 rc19v2; v2.35(USB 轮): +usb_mgr 守护(USB-C 设备模式: rndis0 桥入 br-lan+三开关); v2.34(P0-2): boot_gate 健康门禁; 历史见git

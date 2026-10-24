@@ -1,5 +1,5 @@
 #!/bin/sh
-# avail_sampler.sh v1.2 -- 组件可用性采样器 (AVAILABILITY_DESIGN §3, 防假绿轮)
+# avail_sampler.sh v1.3 -- 组件可用性采样器 (AVAILABILITY_DESIGN §3, 防假绿轮)
 #
 # 由 log_keeper v2.9 每 10min 调用 (CYC%20 + CYC=1 首采); 单遍有界、无循环、
 # 无守护 —— 崩溃只留一行 NE 台账, 下一窗自愈, 覆盖率指标如实扣分。
@@ -161,8 +161,11 @@ SW=$(sed -n 's/^dpclamp v1.[0-9]* sweeps=\([0-9]*\).*/\1/p' /proc/dpclamp 2>/dev
 SW_STUCK=0
 if [ -n "$SW" ] && [ -n "$oSW" ] && [ "$SW" = "$oSW" ]; then SW_STUCK=1; fi
 # 日志管线结果: stability_metrics 停更 (5min 节拍, >16min 视为断流)
+# v1.3: 活性时刻读台账末行首列 epoch —— busybox date -r 是 RFC2822 输出语义
+#       非文件 mtime(演练轮实测 bad number), 设备又无 stat; 台账自带 epoch。
 MET_STALE=0
-_mt=$(date -r "$DIR/stability_metrics.tsv" +%s 2>/dev/null || echo 0)
+_mt=$(tail -1 "$DIR/stability_metrics.tsv" 2>/dev/null | cut -f1)
+case "$_mt" in ''|*[!0-9]*) _mt=0 ;; esac
 [ "$_mt" -gt 0 ] && [ $((NOW - _mt)) -gt 960 ] && MET_STALE=1
 # authd 会话态 (进程在≠会话活; 静默切断型故障的会话级判据)
 AUTH_DOWN=0

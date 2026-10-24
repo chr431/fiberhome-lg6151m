@@ -1,6 +1,6 @@
 # VERSIONS.tsv (public export -- rows filtered to exported set)
 #VER-REGISTRY
-gw/avail_sampler.sh	1.1	manifest	/data/gw/avail_sampler.sh	组件可用性采样器(AVAILABILITY_DESIGN §3): log_keeper 10min 驱动, 单遍有界无守护; 判据复用 watchdog_state(0=ok 迁移式快照+cycle 新鲜度)+设置态 off 判定; 窗口信号=行数游标法(EVT restart/NE 三规则归属/REPAIR); v1.1: 首采 touch 数据文件+radvd 无 ULA 记 off(未部署≠故障)+modem_reg/atcid 键映射; 输出 hourly(rotate 2400)/daily(跨日归并)/transitions(rotate 2000)+/tmp/avail_last 快照; busybox awk 仅标量累加
+gw/avail_sampler.sh	1.2	manifest	/data/gw/avail_sampler.sh	组件可用性采样器; v1.2(防假绿轮): ①FAIL-detail 窗口迁移捕获(短时自愈故障必记账, 根治迁移快照+稀疏采样盲区) ②dp5g/dpeth/authd_state 结果组合(IP在但不通→deg, 双路全死→agg down, 会话静默死→auth down) ③dpclamp sweep 前进/metrics 停更活性(进程在≠管线在) ④WiFi guard 告警/reason=3 风暴窗 ⑤usb off 语义; v1.1: touch/radvd6/键映射; 判据分级审计见 AVAILABILITY_DESIGN §8.2
 gw/agg_pins.default	1.0	manifest	/data/gw/agg_pins.default	MAC钉死表出厂缺省基线(只读, 不含任何MAC; 设备侧活文件 agg_pins.conf 由 wan_agg 缺省才写地播种, 个人MAC不入库)
 gw/rc.extend.sh	2.8	manifest	/data/rc.extend.sh	槽位调度器; v2.8(SIGSEGV §8.10.2): 自载加 panic 感知守卫(上次 pstore 背景帧含修复栈函数即跳载, 受保护启动)+自载结果写 fixstack.log(M2 补丁); v2.7: dpquar/dpclamp 修复栈开机自载(仅slot-a, dpquar逐点校验内核原文,不匹配即拒载); v2.6: boot台账+条件清TRY_A+core_meta wrapper; 历史见git
 gw/v3_rc10.extend.sh	2.35	manifest	/data/gw/rc19.sh	v3 启动编排 rc19v2; v2.35(USB 轮): +usb_mgr 守护(USB-C 设备模式: rndis0 桥入 br-lan+三开关); v2.34(P0-2): boot_gate 健康门禁; 历史见git
@@ -98,8 +98,8 @@ gw/defaults.conf	1.9	manifest	/data/gw/defaults.conf	统一配置只读出厂基
 tools/leak_check.py	2.2	tool	-	敏感词零命中门禁; v2.2: --history 全量扫提交正文(%B, 原仅扫标题%s可漏检消息体); v2.1: 修复 PAT_PARTS NameError; 历史见git
 docs/ARCHITECTURE.md	1.2	doc	-	架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针); v1.2: batch3 版本表刷新
 docs/GUI_TERMINOLOGY.md	1.2	doc	-	GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git
-gw/watchdog.sh	1.32	manifest	/data/gw/watchdog.sh	持续不变量看门狗; v1.32(可用性轮修正): radvd 键无 ULA(未部署 v6)时 pass(键=1 只表示已部署而守护死); v1.31(可用性轮): +bss2g/bss5g/bss_guest/radvd 判决键(纯 set_state 行, 供 avail_sampler 分频组件; 旧 bss 键保留)+每轮 cycle=<epoch> 新鲜度键(set_state 迁移式写入使全绿时段文件不动, 采样器以此判监督层活着)+修正 v1.30 轮遗漏的版本串(--version/横幅仍写 v1.29); v1.30: hostapd 健康=活控制套接字; 历史见git
-tools/selftest.py	2.60	tool	-	设备自检; v2.60(可用性轮): +t_avail(采样心跳/名单/数据文件/域路由/watchdog 新键); v2.59: +t_usb_service/t_usb_dataplane; 历史见git
+gw/watchdog.sh	1.33	manifest	/data/gw/watchdog.sh	持续不变量看门狗; v1.33(防假绿轮): +http200/dnssvc/dp5g/dpeth 结果探针键(监听≠在服务/IP在≠数据面通 — 历史四次全绿谎言的判据级根治, AVAILABILITY_DESIGN §8; 实测本机 127 不可达须打 LAN 地址); v1.32: radvd 无 ULA pass; v1.31: avail 键+cycle; 历史见git
+tools/selftest.py	2.61	tool	-	设备自检; v2.61(防假绿轮): t_avail 键断言扩至 8(加 http200/dnssvc/dp5g/dpeth 结果探针)+watchdog v1.33 锚; v2.60: +t_avail; 历史见git
 tools/doc_audit.py	1.2	tool	-	台账↔文档内联标记双向审计; v1.2: 子进程显式 UTF-8(gbk 环境不再中断 deploy 文档门禁); 历史见git
 gw/src/mipc_cellular.c	0.17	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源码; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘
 gw/bin/mipc_cellular	0.17	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘

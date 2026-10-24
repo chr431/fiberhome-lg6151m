@@ -190,3 +190,71 @@ GUI（app.js PAGES.avail）
 | watchdog_state 迁移式快照被误读为"每窗判决" | sampler 以"文件龄+当前键值"为准，龄超限整体 nodata（不猜） |
 | 判据键补丁改变 watchdog 行为 | 只加 set_state 行（零决策逻辑），走 selftest+push 门禁 |
 | 维护窗误算故障（04:00 重启慢） | 窗宽取 reboots.log 触发时刻→boot.healthy 时刻实测+2min 余量 |
+
+## 8. 防假绿架构（2026-10-25 防假绿轮, v1.2/v1.33 实施）
+
+### 8.1 病理：四次历史全绿谎言的共同根因
+
+| 事故 | 谎言判据 | 真相 |
+|---|---|---|
+| L28 (10-21) WiFi 死 5.7h | pidof 命中厂商 global 实例 / socket 文件残留 / iw type AP / netdev 存在 | hostapd 早已 SIGSEGV, 客户端连上即断 |
+| v3.44 (10-2x) 状态页 | carrier 在 + IP 在 = "已连接" | 数据面死数分钟 |
+| hostapd "ENABLED" | 控制面应答正常 | 信标停发 (mwctl no_bcn), 需独立接收者才能证实 |
+| NE 无声发生 (10-19~24) | (无可视化面) | 44/d 崩溃在台账里沉默发生 |
+
+共同根因两条：**①存在性判据（进程/端口/IP/规则在）冒充结果判据（服务真的
+在服务）**；**②迁移式快照 + 稀疏采样：采样间隔内发生过又自愈的故障, 采样时
+快照已回绿, 账面恒绿。**
+
+### 8.2 判据分级制（架构规则一）
+
+每个组件的判据必须标注级别, L1-only 组件在审计表中显式登记为已知盲区:
+
+- **L1 存在性**: 进程活/端口监听/IP 在/规则在 —— 只证明"配置意图仍在"。
+- **L2 服务级**: 协议真实应答 (HTTP 200 / DNS 应答 / 控制套接字活+链路)。
+- **L3 结果级**: 端到端数据面 (双路径 ICMP / 会话态 / 事件流无风暴)。
+
+分级审计表（v1.2/v1.33 后的现状）:
+
+| 组件 | 判据 | 级别 | 残余盲区 |
+|---|---|---|---|
+| sys.gui | port80(L1)+**http200**(L2) | L2 | — |
+| lan.bridge | dnsmasq/lan/lo(L1)+**dnssvc**(L2) | L2 | — |
+| wan.cellular | ccmni/IP(L1)+**dp5g**(L3)+modem_reg | L3 | — |
+| wan.ethernet | wan_eth(L1)+**dpeth**(L3) | L3 | — |
+| wan.agg | 规则在(L1)+**双路全死→down**(L3) | L3 | 单路死由对应组件记 deg |
+| wan.auth | authd(L1)+**authd_state 会话态**(L3) | L3 | — |
+| sys.logging | 守护(L1)+**metrics 停更**(L2) | L2 | — |
+| sys.kernel | 模块在(L1)+**sweep 计数前进**(L2) | L2 | KE 由 pstore/boot 守卫另覆盖 |
+| lan.wifi2g/5g | 活套接字+链路(L2)+**guard 告警/reason=3 风暴窗**(L3) | L2+ | 信标物理停发依赖 wifi_guard 告警泛化, 无独立接收者 |
+| feat.sms | mipc(L1)+**api.log 发送失败窗**(L3) | L2+ | — |
+| sys.ssh | port22(L1) | **L1-only, 已知盲区** | dropbear accept-EOF 卡死类不可探测; 每日 SSH 实连即事实演练 |
+| sys.boot/supervisor | boot_gate 判据/cycle 新鲜度 | L2 | — |
+| feat.led/fan/ntp/reboot/cellctl/usb/nat | SVC 心跳/键(L1~L2) | L1~L2 | LED 外观性; nat 无流级探针(REPAIR 速率兜底); fan 温度信号列 P2 |
+
+### 8.3 窗口迁移捕获（架构规则二）
+
+watchdog_state 是**最后已知态**, 任何 key=0 只证明"采样瞬间已恢复"。因此:
+**每个绿色窗必须由"窗口内无 FAIL 迁移"支撑** —— 采样器用行数游标扫窗口内
+watchdog.log 的 `FAIL detail <key>` 行, 命中组件该窗记 deg（自愈也记账,
+对应"短暂但真实发生过"）。事件表 cause=probe。这条规则使采样间隔内的短时
+outage 从结构性不可见变为必记账。
+
+### 8.4 假状态演练制度化（架构规则三, L28 原则）
+
+"判据必须专门验证假状态——杀掉服务后判据必须变假, 否则判据在撒谎。"
+- **每次判据改动**（watchdog 键/sampler 规则）必须附一次假状态实弹: 停最
+  低危组件（led_mgr 类）→ 断言判据变红+事件落账 → 恢复 → 断言下一窗记 deg。
+- 本轮首个样本: 2026-10-25 led_mgr 演练（见 §8.5 实施记录）。
+- 演练结果记入本节; 无演练记录的判据改动视为未完成。
+
+### 8.5 实施记录
+
+- watchdog v1.33: +http200/dnssvc/dp5g/dpeth 四个结果探针键（实测: 本机
+  127.0.0.1 探测不可达——v3httpd 只绑 LAN IP、dnsmasq 不听 lo——探针必须打
+  192.168.9.1, 此为 L27 教训的精确边界）。
+- sampler v1.2: ①FAIL-detail 窗口捕获 ②dp/auth/state 结果组合 ③dpclamp
+  sweep 前进/metrics 停更活性 ④WiFi guard 告警/reason=3 风暴窗 ⑤usb off
+  ⑥atcid 映射 ⑦api.log/dmesg.log 两个新游标。
+- 探针命令全部先在设备实测（curl 200@LAN ✓ / nslookup@LAN 应答 ✓ /
+  双路 ICMP ✓ / authd_state 单行 up|down ✓ / USB_ENABLED 键 ✓）再入代码。

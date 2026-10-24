@@ -1982,7 +1982,7 @@ def t_watchdog_aee():
     cnt = dev("cat /tmp/watchdog_aeecount 2>/dev/null").strip()
     hist = dev("wc -l < /data/log/aee_exp/db_history 2>/dev/null").strip()
     st = dev("grep -cE '^core_?trap=' /tmp/watchdog_state 2>/dev/null").strip()
-    ver = dev("grep -c 'watchdog v1.32 start' /tmp/watchdog.log 2>/dev/null").strip()
+    ver = dev("grep -c 'watchdog v1.33 start' /tmp/watchdog.log 2>/dev/null").strip()
     ok = False
     if code not in ("", "0") and cnt.isdigit() and hist.isdigit():
         ok = abs(int(cnt) - int(hist)) <= 2 and int(st or 0) > 0 and int(ver or 0) > 0
@@ -2282,14 +2282,15 @@ def t_avail():
     gap = dev("up=$(cut -d. -f1 /proc/uptime); hb=$(cat /tmp/avail_sampler.hb 2>/dev/null); "
               "[ -n \"$hb\" ] && echo $((up - hb)) || echo -1").strip()
     roster = dev("wc -l < /tmp/avail_last 2>/dev/null").strip()
-    keys = dev("for k in bss2g bss5g radvd cycle; do grep -c \"^$k=\" /tmp/watchdog_state 2>/dev/null; done").split()
+    keys = dev("for k in bss2g bss5g radvd cycle http200 dnssvc dp5g dpeth; do "
+               "grep -c \"^$k=\" /tmp/watchdog_state 2>/dev/null; done").split()
     hf = dev("test -f /data/gw/logs/avail_hourly.tsv; echo $?").strip()
     tf = dev("test -f /data/gw/logs/avail_transitions.tsv; echo $?").strip()
     syn = dev("sh -n /data/gw/avail_sampler.sh 2>&1 && sh -n /data/gw/www/api_avail.sh 2>&1; echo $?").strip()
     rte = dev("grep -c '^    avail)' /data/gw/www/api.sh 2>/dev/null").strip()
     ok = (gap.lstrip("-").isdigit() and 0 <= int(gap) <= 1500
           and roster.isdigit() and int(roster) >= 24
-          and len(keys) == 4 and all(x == "1" for x in keys)
+          and len(keys) == 8 and all(x == "1" for x in keys)
           and hf == "0" and tf == "0" and syn == "0" and rte == "1")
     record(t_avail._test_name, "system", ok,
            "hb_gap=%s roster=%s keys=%s hf=%s tf=%s syntax=%s route=%s"

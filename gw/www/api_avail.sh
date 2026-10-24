@@ -1,5 +1,5 @@
 #!/bin/sh
-# api_avail.sh v1.0 -- API 可用性域模块 (AVAILABILITY_DESIGN §4.1)
+# api_avail.sh v1.1 -- API 可用性域模块 (AVAILABILITY_DESIGN §4.1)
 # GET avail: 组件名单/当前态/90 天日条/事件表 — 只读聚合, 无写路径。
 # 数据源: /tmp/avail_last(名单+now, sampler 写) + avail_daily.tsv(历史日)
 #        + avail_hourly.tsv(今日实时) + avail_transitions.tsv(事件)

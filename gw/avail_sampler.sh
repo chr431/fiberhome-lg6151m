@@ -1,5 +1,5 @@
 #!/bin/sh
-# avail_sampler.sh v1.0 -- 组件可用性采样器 (docs/AVAILABILITY_DESIGN.md §3)
+# avail_sampler.sh v1.1 -- 组件可用性采样器 (docs/AVAILABILITY_DESIGN.md §3)
 #
 # 由 log_keeper v2.9 每 10min 调用 (CYC%20 + CYC=1 首采); 单遍有界、无循环、
 # 无守护 —— 崩溃只留一行 NE 台账, 下一窗自愈, 覆盖率指标如实扣分。
@@ -16,6 +16,8 @@
 #   /tmp/avail_sess                    游标+直方图会话态
 #   /tmp/avail_sampler.hb              svc_hb 兼容心跳
 #
+# v1.1: 首采即 touch 数据文件; radvd 组件无 ULA(本 boot 未部署 v6)→off 非故障;
+#   补 modem_reg→蜂窝/atcid→控制面键映射(TICK 清单发现)。
 # 纪律: busybox awk 只用标量累加 (数组清理缺陷教训, 见 log_keeper v2.7);
 #       NE 归属三规则 (§2): args 含守护脚本名 / exe==守护本体 / 其余不归属。
 
@@ -31,6 +33,7 @@ TF=$DIR/avail_transitions.tsv
 NOW=$(date +%s)
 HOUR=$(date +%Y%m%d%H)
 TODAY=$(date +%Y%m%d)
+touch "$HF" "$DF" "$TF" 2>/dev/null   # 首采即存在 (内容仍只在小时/跨日边界写入)
 
 cut -d. -f1 /proc/uptime > "$HB" 2>/dev/null
 
@@ -150,13 +153,13 @@ lan.bridge|LAN/DHCP/DNS|局域网|K:dnsmasq+lan_ip+lo_up
 lan.wifi2g|WiFi 2.4G|局域网|s:wifi2g
 lan.wifi5g|WiFi 5G|局域网|s:wifi5g
 lan.guest|访客网络|局域网|s:guest
-lan.radvd|IPv6 通告|局域网|k:radvd
-wan.cellular|5G 蜂窝|上行|K:ccmni_up+dial_keeper
+lan.radvd|IPv6 通告|局域网|s:radvd6
+wan.cellular|5G 蜂窝|上行|K:ccmni_up+dial_keeper+modem_reg
 wan.ethernet|以太 WAN|上行|k:wan_eth
 wan.agg|聚合引擎|上行|K:wan_agg+agg_rules+fwmark
 wan.auth|上行认证|上行|s:auth
 wan.nat|NAT/防火墙|上行|k:nat
-feat.cellctl|蜂窝控制面|功能|k:mipc_tool
+feat.cellctl|蜂窝控制面|功能|K:mipc_tool+atcid
 feat.sms|短信|功能|k:mipc_tool
 feat.usb|USB 设备模式|功能|k:usb_mgr
 feat.led|LED 指示|功能|k:led_mgr
@@ -180,6 +183,12 @@ level_of() { # $1=判据串 → 级别 (op/deg/down/nodata/off)
     s:guest)
         [ "$GUEST_ON" = 1 ] || { echo off; return; }
         lk bss_guest
+        ;;
+    s:radvd6)
+        # 本 boot WAN 无全局 v6 时 rc_netfh v6 相位整体跳过(ULA/radvd 均无) —
+        # 功能未部署 ≠ 故障: 无 ULA → off; 有 ULA 才按 radvd 键判
+        ip -6 addr show br-lan 2>/dev/null | grep -q 'fd42:9ac1:7e50' || { echo off; return; }
+        lk radvd
         ;;
     s:auth)
         [ "$AUTH_ON" = 1 ] || { echo off; return; }

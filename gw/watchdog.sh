@@ -1,5 +1,7 @@
 #!/bin/sh
-# watchdog.sh v1.31 -- on-device continuous invariant monitor.
+# watchdog.sh v1.32 -- on-device continuous invariant monitor.
+# v1.32 (同轮修正): radvd 键无 ULA(未部署 v6)时 pass — 键=1 只表示已部署而
+#   守护死(v4-only 上行不再误报)。
 # v1.31 (2026-10-25 可用性轮): +bss2g/bss5g/bss_guest/radvd 判决键(纯 set_state
 #   行, 供 avail_sampler 分频组件; 旧 bss 键保留)+每轮 cycle=<epoch> 新鲜度键
 #   (set_state 迁移式写入使全绿时段文件不动, 采样器以此判监督层活着);
@@ -308,7 +310,9 @@ run_cycle() {
     check_lib bss2g  "svc_sock_live /var/run/hostapd/ra0  && svc_link_up ra0"  "WiFi 2.4G BSS live"
     check_lib bss5g  "svc_sock_live /var/run/hostapd/rai0 && svc_link_up rai0" "WiFi 5G BSS live"
     check_lib bss_guest ". /data/gw/defaults.conf 2>/dev/null; . /data/gw/settings.conf 2>/dev/null; [ \"\${GUEST:-0}\" = 1 ] || exit 0; _g=0; svc_sock_live /var/run/hostapd/ra1  && svc_link_up ra1  && _g=1; svc_sock_live /var/run/hostapd/rai1 && svc_link_up rai1 && _g=1; [ \"\$_g\" = 1 ]" "guest BSS live (when enabled)"
-    check_lib radvd  "pgrep radvd >/dev/null 2>&1" "radvd v6 RA daemon"
+    # v1.32: 无 ULA = 本 boot 未部署 v6(rc_netfh v6 相位跳过) → 该检查直接
+    # pass(rvd 键=1 只表示"已部署而守护死"); 否则会把 v4-only 上行误报成故障。
+    check_lib radvd  "ip -6 addr show br-lan 2>/dev/null | grep -q 'fd42:9ac1:7e50' || exit 0; pgrep radvd >/dev/null 2>&1" "radvd v6 RA daemon (when deployed)"
     check_port port80 80 "GUI :80 reachable"
     check_port port22 22 "SSH :22 reachable"
     if [ -f /tmp/boot.done ]; then

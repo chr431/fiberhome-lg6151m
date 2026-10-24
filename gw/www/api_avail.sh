@@ -69,10 +69,15 @@ get_avail() {
             set -- $(day_pct "$ok" "$dg" "$dn" "$nd" "$mi")
             printf '{"d":"%s","pct":%s,"cls":"%s"},' "$d" "$1" "$2" >> "$T.days"
         done < "$T.rows2"
-        # 今日实时 (从小时行标量聚合)
+        # 今日实时 = 已落盘小时行 + 当前小时在累计的 /tmp/avail_hist (v1.1:
+        # 首个小时边界前页面也有真实今日条, 而非灰条等到整点)
         set -- $(awk -v t="$TODAY" -v c="$id" -F'|' \
             'substr($1,1,8)==t && $2==c {ok+=$3; dg+=$4; dn+=$5; nd+=$6; mi+=$7}
              END {printf "%d %d %d %d %d", ok, dg, dn, nd, mi}' "$HIST" 2>/dev/null)
+        _h=$(awk -v c="$id" -F'|' \
+            '$1==c {ok+=$2; dg+=$3; dn+=$4; nd+=$5; mi+=$6}
+             END {printf "%d %d %d %d %d", ok, dg, dn, nd, mi}' /tmp/avail_hist 2>/dev/null)
+        [ -n "$_h" ] && set -- $(echo "$_h $@" | awk '{printf "%d %d %d %d %d", $1+$6, $2+$7, $3+$8, $4+$9, $5+$10}')
         _p=$(day_pct "$@"); _pct=${_p% *}; _cls=${_p#* }
         printf '{"d":"%s","pct":%s,"cls":"%s"}' "$TODAY" "$_pct" "$_cls" >> "$T.days"
         # 近 90 天事件计数

@@ -397,7 +397,9 @@ v1.1 改单页循环。
 - buddyscan 同刻普查（5 轮×2s）：每轮 48 命中、10s 窗 distinct=65、≥5 次重现 32
   ——签名自由页存量仍在，成员秒级进出空闲链表；held=20 之外仍有 ~45 可见成员。
 - buddyinfo：order-0 仅 420 页 vs 空闲总量 ~31.7 万页（95% 在 order≥9 块内）。
-- 采样成本：1024 页 sweep ≈ 2.5s（sweeps 时间差推算）。
+- 采样成本：1024 页 sweep wall **2.5–8s**（91s 双采样精测：退火态 2 sweep/91s，
+  含幻影 load 8 下 kworker 调度延迟；4 核 arm64）——v1.2 快周期稳态折合单核
+  17–50% wall，此为 v1.3 性能预算的对照基线（§8.10.1）。
 - 部署一致性：dpquar/dpclamp/rc.extend/core_meta md5 与仓一致（差异仅 #DEPLOY 戳）。
 
 ### 8.9.3 遗漏/缺陷清单
@@ -451,13 +453,16 @@ grep=0，只能靠 lsmod 事后确认）；**M3** logread 单发崩溃 6 起/天
      集合，检测延迟≈1 个 watch tick）；
    - T-b 用户态：core_meta v1.1 在 exec aee 前追加 `echo deep > /proc/dpclamp`
      （/proc 已 0666）——**NE 即探测器**，零内核风险，覆盖"whits 未鸣而 NE 先至"
-     的窗口（受害者生态保证每个剧集至少一次 NE 可供触发）；
+     的窗口（受害者生态保证每个剧集至少一次 NE 可供触发）。模块侧冷却 300s 合并
+     同源触发；deep 命中 ≥8 签名页才升级 burst（NE 探测默认只买 deep 的 ~1s，
+     不买 burst 的 90s）；
    - T-c 开机：insmod 后立即 deep×1 + burst 90s（= §8.4 备案未实施的预热排水，
      覆盖 04:00 定时重启后毒页跨重启流转窗）。
-3. **burst 模式（次武器，覆盖 pcp 热池）**：sweep 完成即续（实测 4096 批 ≈10s/
-   轮），时长 ≤90s、有 clamp 续期、硬帽 10min；NORETRY/NOWARN/minfree/cond_resched
-   全继承；连续 3 轮空 burst 提前终止。与 KE#3 的本质区别：事件驱动有界 vs 固定
-   周期无退火。
+3. **burst 模式（次武器，覆盖 pcp 热池）**：batch=1024 背靠背（sweep 完成即续；
+   实测 1024 批 wall 2.5–8s → 90s 场 ≈11–30 轮、11–30K 页采样；4096 为参数上限
+   不作缺省），时长 ≤90s、有 clamp 续期、硬帽 10min；NORETRY/NOWARN/minfree/
+   cond_resched 全继承；连续 3 轮空 burst 提前终止。与 KE#3 的本质区别：事件驱动
+   有界 vs 固定周期无退火。
 4. **SMP 轮转**：sweep/deep 间轮换 kthread CPU 亲和性（4 核轮转），覆盖各 CPU pcp
    （关 S2 的采样侧）。
 5. **缺陷修复**：D1 双 XOR；D2 watch 改滚动游标；D3 签名窗扩到 t[0..3]（单块命中，
@@ -467,6 +472,62 @@ grep=0，只能靠 lsmod 事后确认）；**M3** logread 单发崩溃 6 起/天
    logread spawn 方定位一轮（M3）。
 7. **边界（不做并明示）**：不 hook 分配路径；S4（分配态原位投毒）不可防——残余
    下限存在；deep 只在事件触发/手动时执行，不进任何热路径。
+
+### 8.10.1 性能预算（实现前分析）
+
+**结论：可接受——稳态成本低于现行 v1.2，增量全部落在事件触发的有界突发
+（单核、秒级、占空比 <1%），数据面零新增钩子；且"dpclamp 高强度采样"这一
+负载类已有两轮 A/B 判清白。**
+
+已有实证（成本上界，2026-10-24 03:00 串流卡顿轮，同方法论可复用为部署门禁）：
+- 带载 A/B：25.8Mbps×210s，修复栈在/撤，eth 路径 ping 逐百分位一致
+  （p50 1.4ms / p95 12ms）；
+- 强制扫描 A/B：fresh insmod batch=4096 剧集强度扫描进行中，真实串流路径
+  （PC→WiFi 客户端）三态 p50 全部 3–4ms，扫描阶段反而最干净。
+→ 未测面只剩 deep 的锁窗与 burst 的节律，两者均有硬界（见下表护栏）。
+
+成本模型（4 核 arm64 实测锚点，本轮新测）：
+
+| 项 | 成本 | 锚点/推算 |
+|---|---|---|
+| v1.2 稳态·快周期 | 1024 页 sweep wall **2.5–8s** / 15s 周期 ≈ 单核 17–50% wall | 91s 双采样（含幻影 load 8 下调度延迟；band 上界含 kworker 等待） |
+| v1.2 稳态·退火 | 同上 / 60s ≈ 单核 4–13% | 同上（idle=14 态实测 2 sweep/91s + 1 次 clamp 即回快周期） |
+| v1.3 巡检（拟 120s） | ≈ 单核 2–7% | 反应性改由触发器承担，巡检可拉长 |
+| deep 单轮 | 全子页尾读 ~31.6 万页 ≈ **0.3–1s 单核**；每命中块取还 ~1ms | buddyscan 同法实测（4725 子页尾读 + 180K PFN 探测 ≤2s；deep 免探测直取链表头 ~1473 块，只多读尾不探 PFN） |
+| deep 锁窗 | 摘链表头指针 ≤256 条/块 ≈ **≤25µs/次持锁** | 1473 块头 × ~100ns/条，分块取放 |
+| burst 单场 | batch 1024 背靠背 ≤90s ≈ 11–30 轮、11–30K 页采样 | sweep wall 实测外推 |
+| 触发频率 | deep：NE 基线 1–2/h，冷却 300s 合并 → ≤48 次/d，累计 <1min/d；burst：仅剧集（实测 2–4/d）×≤90s → **占空比 <0.5%** | §8.9.1 残余率 |
+| 内存 | deep 相位数组分块 ≤64KB；命中页受 cap 8192 页（32MB 硬界）记账；块级瞬时扣取当轮归还兄弟页 | 现有 ctab 结构复用 |
+
+设计内建护栏：巡检拉长（稳态较 v1.2 降 ~2×）；NE 探测只买 deep 不买 burst
+（≥8 签名页或 whits 才升级）；锁窗分块 + cond_resched；burst 硬帽 10min + 3 空轮
+早停 + minfree 150MB 门槛不变；**热路径（转发/软中断/分配快速路径）零新增接触**
+——pcp/zone 锁接触均为微秒级窗口，且已被强制扫描 A/B 的负载类覆盖。
+
+### 8.10.2 遥测方案（实现后）
+
+1. **/proc/dpclamp v2**：累计段（现有 + deeps/deep_pages/deep_clamped/bursts/
+   burst_sweeps/burst_clamped/episodes）＋尾延段（deep_ms_last/max、
+   deep_lockus_last/max、burst_ms_last/max、**sweep_us_last**——标定单页成本，
+   消本轮测量 band 的不确定度）＋**环形台账**（最近 16 次触发，一行一条：
+   ts/来源 whit|neprobe|boot|manual/时长/walked/clamped/lockus_max）。
+2. **fixstack.log**（/data/gw/logs/，关 M2）：rc.extend 自载行用户态直写（不依赖
+   syslog 早期窗）；运行期 trigger/complete 由模块 pr_info 走 syslog（此时 syslog
+   已在位）。
+3. **stability_metrics.tsv 扩列**（log_keeper 小版本：clamp=/held=/deeps_1h=/
+   episodes_1h=/trig_last=，5min 快照）——与 NE 计数同族文件，长期趋势与相关性
+   一张表可判。
+4. **性能验收 A/B（部署门禁，复用 10-24 03:00 方法论）**：基线臂 v1.2 在位、
+   实验臂 v1.3 在位且负载中手动 deep×1+burst×1；通过线 p50 差 ≤0.5ms、p95 差
+   ≤2ms（参考三态噪声底 3–4ms）；boot.healthy 时刻回归 ≤+5s（boot_gate 台账）。
+   任一超标 → 不转正。
+5. **效果验收台账**：oneoff 脚本（/proc 环形 + ne_events 7 天滚动）按 §8.10 口径
+   出数：剧集簇 ≤3 起、滴漏 ≤0.5/h、deep 后 buddyscan distinct →≈0 及回升速率
+   （= MD 列表重建率量测）。
+6. **安全遥测与自动回退**：deep_lockus_max >25ms（5× 设计目标）→ 自动降块长 +
+   WARN；rc.extend 自载守卫——上次 pstore/panic 记录含 dpclamp 字样则本次跳载
+   修复栈并告警（受保护启动，人工介入）；panic_on_rcu_stall + healthdog pstore
+   回收已在位，KE 复发可归因、可一键回退 v1.2（rmmod 幂等）。
 
 **预期与验收口径（先立后做）**：剧集簇（00:39–00:45 型 12 起/6min）预期压到 ≤3 起
 （首 NE 触发 deep 当轮清空可见自由面，残余=S4 原位命中）；常态滴漏目标 ≤0.5/h

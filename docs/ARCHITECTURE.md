@@ -91,7 +91,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/traffic_logger.sh` | **v1.4** | manifest | `/data/gw/traffic_logger.sh` | 流量采样器; v1.3(P1-1): 单实例锁+心跳; v1.2b: 基线带源标记; 历史见git; v1.4(batch3): svc_lib 锁/心跳 |
 | `gw/udhcpc_eth1.script` | **v1.0** | manifest | `/data/gw/udhcpc_eth1.script` | eth1口 udhcpc 事件钩子(补登记) |
 | `gw/udhcpc_wan.script` | **v1.0** | manifest | `/data/gw/udhcpc_wan.script` | WAN口 udhcpc 事件钩子(接口无关化) |
-| `gw/usb_mgr.sh` | **v1.0** | manifest | `/data/gw/usb_mgr.sh` | USB-C 设备模式服务管理(总开关+数据/ADB/控制台); 厂商遗留 g1 gadget(RNDIS+ADB+2xACM)只补服务层: rndis0 桥入 br-lan=PC 即 LAN 客户端; OFF=停 keepalive+解绑 UDC 口全灭; 硬件为仅设备模式(host 电气死路, 板上 TCPC 未贴) |
+| `gw/usb_mgr.sh` | **v1.1** | manifest | `/data/gw/usb_mgr.sh` | USB-C 设备模式服务管理(总开关+数据/ADB/控制台); 厂商遗留 g1 gadget(RNDIS+ADB+2xACM)只补服务层: rndis0 桥入 br-lan=PC 即 LAN 客户端; OFF=停 keepalive+解绑 UDC 口全灭; 硬件为仅设备模式(host 电气死路, 板上 TCPC 未贴) |
 | `gw/v2_access.sh` | **v6.1** | manifest | `/data/gw/v2_access.sh` | v2 极简访问层(串口/SSH/DHCP/防火墙22,零守护干涉) |
 | `gw/v3_babysit_v2.sh` | **v3.0** | manifest | `/data/rescue/babysit.sh` | 启动保姆; v3.0(P0-2): 进展式 T1=240s(无进展 120s 才杀 rcS/mipc_wan_cli) + T2=600s(仍无进展才翻 B) + 900s 硬帽 + 决策落 /data; 目标路径改为 preinit 实跑的 /data/rescue/babysit.sh; 历史见git |
 | `gw/v3_rc10.extend.sh` | **v2.35** | manifest | `/data/gw/rc19.sh` | v3 启动编排 rc19v2; v2.35(USB 轮): +usb_mgr 守护(USB-C 设备模式: rndis0 桥入 br-lan+三开关); v2.34(P0-2): boot_gate 健康门禁; 历史见git |
@@ -111,7 +111,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/www/api_lan.sh` | **v1.0** | manifest | `/data/gw/www/api_lan.sh` | API LAN 服务域模块(v2.75 拆出: dhcp/dhcp_static/fw 族; fw_apply.sh 改域内懒加载 — 原对全部请求无条件 source) |
 | `gw/www/api_sms.sh` | **v1.2** | manifest | `/data/gw/www/api_sms.sh` | API 短信域模块; v1.2(日志加密轮): 发送成败/长度/模组原始响应写 api.log(号码仅末4位, 内容不落盘); v1.1: AT+EMGS 路线 |
 | `gw/www/api_sys.sh` | **v1.3** | manifest | `/data/gw/www/api_sys.sh` | API 系统/状态域模块; v1.3(日志加密轮): traffic 选口回退/qdisc 缺失留痕; v1.2: /api/traffic 增 if 字段; v1.1: 探活实证选口 |
-| `gw/www/api_usb.sh` | **v1.0** | manifest | `/data/gw/www/api_usb.sh` | API USB 域模块(usb 状态/usb_set 三开关; 状态单一事实源=usb_mgr.sh status) |
+| `gw/www/api_usb.sh` | **v1.1** | manifest | `/data/gw/www/api_usb.sh` | API USB 域模块(usb 状态/usb_set 三开关); v1.1: 状态行解析修复; 状态单一事实源=usb_mgr.sh status |
 | `gw/www/api_wifi.sh` | **v1.1** | manifest | `/data/gw/www/api_wifi.sh` | API WiFi 域模块; v1.1(WiFi 事故): hostapd2g/5g 改活控制套接字判据(iw type AP 在 hostapd 死后仍为真 → GUI 谎报正常); 历史见git |
 | `gw/www/app.js` | **v3.52** | manifest | `/data/gw/www/app.js` | 控制台SPA; v3.52: 系统页 USB-C 接口卡片(三开关+实况); 历史见git |
 | `gw/www/index.html` | **v2.33** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.33: 缓存v67) |

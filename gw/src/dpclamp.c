@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-// dpclamp.ko v1.3 -- episode-reactive stale-page clamp + deep free-list drain.
+// dpclamp.ko v1.4 -- episode-reactive stale-page clamp + deep free-list drain.
 //
 // Complement to dpquar (which stops NEW pages entering the MD stale list at
 // dpmaif teardown).  The MD-side accumulated stale list keeps being rewritten
@@ -8,7 +8,26 @@
 // set by two structural gaps: sampling only sees one CPU's pcp + the order-0
 // freelist (95% of free memory hides inside order>=9 blocks), and nothing
 // accelerates when an episode starts (idle ladder cools to 60s patrol).
-// Analysis and design: docs/SIGSEGV_ANALYSIS.md section 8.9/8.10.
+// Analysis and design: docs/SIGSEGV_ANALYSIS.md section 8.9/8.10/8.11.
+//
+// v1.4 adds (T1 schedule + T3 cross-boot set persistence):
+//   * scheduled deep -- deep_every_s (default 60, 0=off) runs the full buddy
+//     walk on a timer, not only on triggers.  Rationale (10-25 analysis): the
+//     NE happens when MD writes a page WHILE it is allocated to a victim; a
+//     signed page sitting free in buddy is a loaded gun that only a deep can
+//     defuse (sweeps see pcp only).  60s cadence bounds the exposure window
+//     to ~one minute at ~0.3% CPU (95ms per walk, measured).
+//   * PFN seed -- /proc/dpclamp_seed accepts newline/space separated hex PFNs
+//     (streaming safe across write() chunk boundaries), takes each from the
+//     buddy allocator O(1) under zone->lock (PageBuddy head -> list_del +
+//     rmqueue-parity accounting -> split -> hold target, free siblings) with
+//     NO signature requirement: membership was vetted by past-boot
+//     signatures.  /data/gw/dpclamp_pfns.txt is fed by rc.extend right after
+//     insmod, so a stable MD stale set is preempted before userspace churns
+//     those pages -- the deterministic zero-NE path if the set repeats
+//     across boots (the seed counters double as the T3 probe verdict).
+//   * /proc/dpclamp_pfns -- one held PFN per line, harvested per boot by
+//     log_keeper into logs/dpclamp_pfn/<boot_id>.txt for cross-boot diffs.
 //
 // v1.3 adds:
 //   * deep drain -- two-phase traversal of ALL buddy free lists (every order,
@@ -31,8 +50,11 @@
 //
 // usage: insmod dpclamp.ko [period_s=120] [batch=1024] [cap=8192]
 //                    [minfree_kb=150000] [warmup=1] [cool_s=300]
+//                    [deep_every_s=60]
 //        cat /proc/dpclamp          ; echo deep > /proc/dpclamp  (NE probe)
 //        echo force > /proc/dpclamp ; echo burst > /proc/dpclamp (manual)
+//        cat /data/gw/dpclamp_pfns.txt > /proc/dpclamp_seed     (boot seed)
+//        cat /proc/dpclamp_pfns     (held set, one hex PFN per line)
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -51,6 +73,7 @@
 #include <linux/wait.h>
 #include <linux/ktime.h>
 #include <linux/vmstat.h>
+#include <linux/mutex.h>
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("dpclamp: clamp MD-stale-listed pages out of circulation");
@@ -60,7 +83,8 @@ static int batch = 1024;
 static int cap = 8192;			/* 32MB max held */
 static int minfree_kb = 150000;		/* stop draining below this MemFree (kB) */
 static int warmup = 1;			/* deep+burst right after load (T-c) */
-static int cool_s = 300;		/* NE-probe cooldown window */
+static int cool_s = 300;			/* NE-probe cooldown window */
+static int deep_every_s = 60;		/* v1.4: scheduled deep cadence (0=off) */
 
 module_param_named(period_s, period_s, int, 0444);
 module_param_named(batch, batch, int, 0444);
@@ -68,6 +92,7 @@ module_param_named(cap, cap, int, 0444);
 module_param_named(minfree_kb, minfree_kb, int, 0444);
 module_param_named(warmup, warmup, int, 0444);
 module_param_named(cool_s, cool_s, int, 0444);
+module_param_named(deep_every_s, deep_every_s, int, 0444);
 
 #define PA_BASE		0x80000000UL
 #define PA_END		0xef000000UL	/* RAM top per iomem (main seg ends 0xeeefffff) */
@@ -77,9 +102,10 @@ module_param_named(cool_s, cool_s, int, 0444);
 #define RINGN		16
 
 /* trigger sources */
-enum { SRC_WHIT = 0, SRC_NEPROBE, SRC_BOOT, SRC_MANUAL, SRC_ESCA, SRC_N };
+enum { SRC_WHIT = 0, SRC_NEPROBE, SRC_BOOT, SRC_MANUAL, SRC_ESCA, SRC_PATROL,
+       SRC_N };
 static const char *src_name[SRC_N] =
-	{ "whit", "neprobe", "boot", "manual", "esca" };
+	{ "whit", "neprobe", "boot", "manual", "esca", "patrol" };
 
 struct cent {
 	struct page *page;
@@ -107,6 +133,8 @@ static u64 sweep_us_last;
 static int idle_sweeps, watch_pos;
 static u64 deeps, d_heads, d_walked, d_cands, d_kept, d_grabbed;
 static u64 d_ms_last, d_ms_max, d_lockus_last, d_lockus_max;
+static u64 pd_deeps;				/* v1.4: scheduled (patrol) deeps */
+static u64 s_fed, s_ok, s_miss_nb, s_dup;	/* v1.4: seed counters */
 static u64 bursts, b_sweeps, b_clamped, b_ms_last, b_ms_max;
 static u64 episodes, suppressed;
 static int last_src = -1;
@@ -474,9 +502,219 @@ static void watch_tick(void)
 	}
 }
 
+/* ---------- v1.4: PFN seed (deterministic cross-boot preemption) ---------- */
+
+/* Take one PFN out of the buddy allocator unconditionally (no signature
+ * check -- membership was vetted by past-boot signatures).  O(1) under
+ * zone->lock: PageBuddy is only ever set on a free block HEAD, so a hit
+ * means the page fronts a block on some free list of its order and
+ * list_del() needs no list walk.  Accounting mirrors grab_cand()/rmqueue:
+ * free_area[order].nr_free--, __mod_zone_freepage_state (pageblock mt, so
+ * CMA pages decrement NR_FREE_CMA_PAGES symmetrically with free_one_page),
+ * page->index = mt for the later pcp free path.  The block is then split,
+ * the seeded page held, unsigned siblings freed.  Returns 1 took+held,
+ * 0 miss (allocated / tail of a free block / dup), -1 invalid pfn. */
+static int seed_take(unsigned long pfn)
+{
+	struct page *pg;
+	struct zone *z;
+	unsigned int o, mt, k, npgs;
+	unsigned long pa = pfn << PAGE_SHIFT, fl;
+	u64 t[8];
+	int i, dup = 0;
+
+	if (!pfn_valid(pfn))
+		return -1;
+	pg = pfn_to_page(pfn);
+	spin_lock(&c_lock);
+	for (i = 0; i < ccount; i++)
+		if (ctab[i].pa == pa)
+			dup = 1;
+	spin_unlock(&c_lock);
+	if (dup) {
+		s_dup++;
+		return 0;
+	}
+	z = page_zone(pg);
+	spin_lock_irqsave(&z->lock, fl);
+	if (!PageBuddy(pg)) {		/* allocated, or tail inside a free block */
+		spin_unlock_irqrestore(&z->lock, fl);
+		return 0;
+	}
+	o = page_private(pg);
+	mt = get_pageblock_migratetype(pg);
+	list_del(&pg->lru);
+	set_page_private(pg, 0);
+	__ClearPageBuddy(pg);
+	z->free_area[o].nr_free--;
+	__mod_zone_freepage_state(z, -(1 << o), mt);
+	pg->index = mt;			/* set_pcppage_migratetype parity */
+	spin_unlock_irqrestore(&z->lock, fl);
+	set_page_count(pg, 1);
+	npgs = 1u << o;
+	if (o > 0)
+		split_page(pg, o);	/* exported; refcounts siblings */
+	for (k = 1; k < npgs; k++) {
+		__free_page(pg + k);
+		if ((k & 0x3f) == 0x3f)
+			cond_resched();
+	}
+	if (copy_from_kernel_nofault(t, page_address(pg) + (PAGE_SIZE - 64), 64))
+		memset(t, 0, sizeof(t));
+	if (hold_owned(pg, t)) {
+		s_ok++;
+		return 1;
+	}
+	/* dup raced in, or cap reached: we still own one reference -- give it back */
+	__free_page(pg);
+	return 0;
+}
+
+/* /proc/dpclamp_seed: streaming-tolerant hex PFN feed.  `cat file >` may
+ * split the list across several write() calls; a partial token at a chunk
+ * boundary is carried over. */
+static DEFINE_MUTEX(seed_mu);
+static char scarry[17];
+static int scarry_n;
+
+static ssize_t seed_write(struct file *f, const char __user *ub, size_t n,
+			  loff_t *off)
+{
+	char *k;
+	size_t i;
+	unsigned long v;
+	ssize_t done = n;
+
+	if (n > 262144)
+		n = 262144;
+	k = kmalloc(n, GFP_KERNEL);
+	if (!k)
+		return -ENOMEM;
+	if (copy_from_user(k, ub, n)) {
+		kfree(k);
+		return -EFAULT;
+	}
+	mutex_lock(&seed_mu);
+	for (i = 0; i < n; i++) {
+		char ch = k[i];
+		int hex = (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') ||
+			  (ch >= 'A' && ch <= 'F');
+
+		if (hex) {
+			if (scarry_n < (int)sizeof(scarry) - 1)
+				scarry[scarry_n++] = ch;
+		} else if (scarry_n) {
+			scarry[scarry_n] = 0;
+			scarry_n = 0;
+			if (kstrtoul(scarry, 16, &v) == 0) {
+				s_fed++;
+				if (seed_take(v) == 0)
+					s_miss_nb++;
+			}
+		}
+	}
+	mutex_unlock(&seed_mu);
+	kfree(k);
+	return done;
+}
+
+static char sbuf[128];
+static int sbuf_len, sbuf_ready;
+
+static int seed_fill(void)
+{
+	sbuf_len = scnprintf(sbuf, sizeof(sbuf),
+		"seed fed=%llu ok=%llu miss_nb=%llu dup=%llu carry=%d\n",
+		s_fed, s_ok, s_miss_nb, s_dup, scarry_n);
+	return sbuf_len;
+}
+
+static ssize_t seed_read(struct file *f, char __user *ub, size_t n, loff_t *off)
+{
+	int len, chunk, r;
+
+	if (sbuf_ready && *off >= sbuf_len)
+		return 0;
+	if (*off == 0) {
+		sbuf_len = seed_fill();
+		sbuf_ready = 1;
+	}
+	chunk = sbuf_len - (int)*off;
+	if (chunk <= 0)
+		return 0;
+	if (chunk > (int)n)
+		chunk = n;
+	r = copy_to_user(ub, sbuf + *off, chunk);
+	if (r)
+		return -EFAULT;
+	*off += chunk;
+	if (*off >= sbuf_len)
+		sbuf_ready = 0;
+	return chunk;
+}
+
+static loff_t seed_lseek(struct file *f, loff_t off, int whence) { return 0; }
+
+static const struct proc_ops seed_ops = {
+	.proc_read = seed_read,
+	.proc_write = seed_write,
+	.proc_lseek = seed_lseek,
+};
+
+/* /proc/dpclamp_pfns: the held set, one hex PFN per line (log_keeper
+ * snapshots it once per boot for cross-boot set diffs). */
+static char *pfnbuf;			/* kvmalloc'd cap*16 at init */
+
+static int pfns_fill(void)
+{
+	int len = 0, i;
+	unsigned long fl;
+
+	spin_lock_irqsave(&c_lock, fl);
+	for (i = 0; i < ccount && len < (cap * 16) - 16; i++)
+		len += scnprintf(pfnbuf + len, (cap * 16) - len, "%lx\n",
+				 ctab[i].pa >> PAGE_SHIFT);
+	spin_unlock_irqrestore(&c_lock, fl);
+	return len;
+}
+
+static int pfnbuf_len, pfnbuf_ready;
+
+static ssize_t pfns_read(struct file *f, char __user *ub, size_t n, loff_t *off)
+{
+	int len, chunk, r;
+
+	if (pfnbuf_ready && *off >= pfnbuf_len)
+		return 0;
+	if (*off == 0) {
+		pfnbuf_len = pfns_fill();
+		pfnbuf_ready = 1;
+	}
+	chunk = pfnbuf_len - (int)*off;
+	if (chunk <= 0)
+		return 0;
+	if (chunk > (int)n)
+		chunk = n;
+	r = copy_to_user(ub, pfnbuf + *off, chunk);
+	if (r)
+		return -EFAULT;
+	*off += chunk;
+	if (*off >= pfnbuf_len)
+		pfnbuf_ready = 0;
+	return chunk;
+}
+
+static loff_t pfns_lseek(struct file *f, loff_t off, int whence) { return 0; }
+
+static const struct proc_ops pfns_ops = {
+	.proc_read = pfns_read,
+	.proc_lseek = pfns_lseek,
+};
+
 /* ---------- SMP rotation ---------- */
 
 static int next_cpu;
+
 
 static void rotate_cpu(void)
 {
@@ -496,6 +734,12 @@ static void rotate_cpu(void)
 static int dc_main(void *arg)
 {
 	unsigned long next_patrol = jiffies;
+	/* v1.4 (T1): scheduled deep.  Signed pages hiding in order>=1 buddy
+	 * blocks are invisible to pcp sweeps; without a timer they wait for the
+	 * NEXT victim to trigger an episode.  60s cadence defuses them inside
+	 * one exposure window at ~0.3% CPU (measured 95ms/walk). */
+	unsigned long next_sdeep = deep_every_s > 0 ?
+		jiffies + (unsigned long)deep_every_s * HZ : 0;
 
 	if (warmup) {
 		rotate_cpu();
@@ -549,6 +793,13 @@ static int dc_main(void *arg)
 			spin_unlock_irqrestore(&t_lock, fl);
 			continue;	/* back-to-back inside burst */
 		}
+		if (deep_every_s > 0 && time_after_eq(jiffies, next_sdeep)) {
+			next_sdeep = jiffies + (unsigned long)deep_every_s * HZ;
+			rotate_cpu();
+			pd_deeps++;
+			run_deep(SRC_PATROL);
+			continue;
+		}
 		if (time_after_eq(jiffies, next_patrol)) {
 			rotate_cpu();
 			run_sweep();
@@ -579,16 +830,19 @@ static int dc_fill(void)
 
 	spin_lock_irqsave(&c_lock, fl);
 	len += scnprintf(pbuf + len, sizeof(pbuf) - len,
-		"dpclamp v1.3 sweeps=%llu alloced=%llu clamped=%llu freed=%llu "
+		"dpclamp v1.4 sweeps=%llu alloced=%llu clamped=%llu freed=%llu "
 		"whits=%llu held=%d/%d idle=%d sweep_us=%llu\n",
 		sweeps, alloced, clamped, freed_ok, whits, ccount, cap,
 		idle_sweeps, sweep_us_last);
 	spin_unlock_irqrestore(&c_lock, fl);
 	len += scnprintf(pbuf + len, sizeof(pbuf) - len,
-		"deep deeps=%llu heads=%llu walked=%llu cands=%llu keptgrab=%llu "
+		"deep deeps=%llu sched=%llu heads=%llu walked=%llu cands=%llu keptgrab=%llu "
 		"grabbed=%llu ms_last=%llu ms_max=%llu lockus_last=%llu lockus_max=%llu\n",
-		deeps, d_heads, d_walked, d_cands, clamped, d_grabbed,
+		deeps, pd_deeps, d_heads, d_walked, d_cands, clamped, d_grabbed,
 		d_ms_last, d_ms_max, d_lockus_last, d_lockus_max);
+	len += scnprintf(pbuf + len, sizeof(pbuf) - len,
+		"seed fed=%llu ok=%llu miss_nb=%llu dup=%llu\n",
+		s_fed, s_ok, s_miss_nb, s_dup);
 	spin_lock_irqsave(&t_lock, fl);
 	len += scnprintf(pbuf + len, sizeof(pbuf) - len,
 		"burst bursts=%llu sweeps=%llu clamped=%llu ms_last=%llu "
@@ -670,17 +924,27 @@ static int __init dpclamp_init(void)
 	ctab = kcalloc(cap, sizeof(*ctab), GFP_KERNEL);
 	if (!ctab)
 		return -ENOMEM;
+	pfnbuf = kvmalloc(cap * 16, GFP_KERNEL);
+	if (!pfnbuf) {
+		kfree(ctab);
+		return -ENOMEM;
+	}
 	proc_create("dpclamp", 0666, NULL, &dc_ops);
+	proc_create("dpclamp_seed", 0644, NULL, &seed_ops);
+	proc_create("dpclamp_pfns", 0444, NULL, &pfns_ops);
 	dct = kthread_run(dc_main, NULL, "dpclampd");
 	if (IS_ERR(dct)) {
 		err = PTR_ERR(dct);
 		dct = NULL;
+		remove_proc_entry("dpclamp_pfns", NULL);
+		remove_proc_entry("dpclamp_seed", NULL);
 		remove_proc_entry("dpclamp", NULL);
+		kvfree(pfnbuf);
 		kfree(ctab);
 		return err;
 	}
-	pr_info("dpclamp: v1.3 ready (patrol=%ds batch=%d warmup=%d)\n",
-		period_s, batch, warmup);
+	pr_info("dpclamp: v1.4 ready (patrol=%ds deep_every=%ds batch=%d warmup=%d)\n",
+		period_s, deep_every_s, batch, warmup);
 	return 0;
 }
 
@@ -689,6 +953,8 @@ static void __exit dpclamp_exit(void)
 	int i;
 
 	remove_proc_entry("dpclamp", NULL);	/* no new triggers */
+	remove_proc_entry("dpclamp_seed", NULL);
+	remove_proc_entry("dpclamp_pfns", NULL);
 	if (dct) {
 		wake_up_interruptible(&dc_wait);
 		kthread_stop(dct);	/* waits out an in-flight deep (<=1s) */
@@ -699,8 +965,9 @@ static void __exit dpclamp_exit(void)
 	ccount = 0;
 	spin_unlock(&c_lock);
 	kfree(ctab);
-	pr_info("dpclamp: unloaded clamped=%llu whits=%llu deeps=%llu\n",
-		clamped, whits, deeps);
+	kvfree(pfnbuf);
+	pr_info("dpclamp: unloaded clamped=%llu whits=%llu deeps=%llu seed_ok=%llu\n",
+		clamped, whits, deeps, s_ok);
 }
 
 module_init(dpclamp_init);

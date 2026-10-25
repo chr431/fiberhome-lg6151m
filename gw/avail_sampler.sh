@@ -1,8 +1,17 @@
 #!/bin/sh
-# avail_sampler.sh v1.4 -- 组件可用性采样器 (AVAILABILITY_DESIGN §3, 防假绿轮)
+# avail_sampler.sh v1.5 -- 组件可用性采样器 (AVAILABILITY_DESIGN §3, 防假绿轮)
 #
 # 由 log_keeper v2.9 每 10min 调用 (CYC%20 + CYC=1 首采); 单遍有界、无循环、
 # 无守护 —— 崩溃只留一行 NE 台账, 下一窗自愈, 覆盖率指标如实扣分。
+#
+# v1.5 (2026-10-25 假红实弹): NE 死者不再单独把组件打成 deg, 只做迁移 cause
+#   注记。实弹: 11:03 部署残留的旧 watchdog 实例被 NE 收走, 主实例全程健康
+#   (TICK 流连续), 采样器却按 cmdline 匹配记了 sys.supervisor 10min 退化;
+#   11:27 led_mgr 同型(受害者是刚被拉起的新生进程, 主实例健在)。
+#   归因修正: 真实守护死亡必留窗口证据 (watchdog FAIL detail 键 / EVT restart
+#   行) — 那两个信号保留置态权; NE 匹配只说明"窗口内有个同名进程死了",
+#   死者可能是残留实例/新生替换/一次性子进程, 不构成组件故障证据。
+#   覆盖无缺口: 守护真死 → svc_supervise 下一轮(≤60s)写 FAIL 键 → 窗口捕获。
 #
 # v1.2 (防假绿轮) —— 历史上四次"全绿撒谎"(L28 WiFi 死 5.7h / v3.44 数据面
 #   死载波在 / hostapd 信标停发 / NE 无声发生)的共同根因: 存在性判据冒充
@@ -357,9 +366,11 @@ echo "$TABLE" | while IFS='|' read -r id name grp src; do
     [ -n "$id" ] || continue
     lv=$(level_of "$src")
     # 窗口信号叠加 (只降 op→deg)
+    # v1.5: ne_attr 退出置态条件 (假红根因, 见文件头); 真实死亡由
+    #       fail_key_hit(FAIL 键)与 RST_COMPS(重启事件)兜住, NE 仅注记 cause。
     if [ "$lv" = op ]; then
         _keys=$(KEYS_OF "$id")
-        if ne_attr "$id" || printf '%s\n' "$RST_COMPS" | grep -qx "$id" \
+        if printf '%s\n' "$RST_COMPS" | grep -qx "$id" \
            || fail_key_hit "$_keys"; then
             lv=deg
         fi

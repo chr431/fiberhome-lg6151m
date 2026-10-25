@@ -1,5 +1,8 @@
 #!/bin/sh
-# rc.extend.sh v2.8 -- slot-aware dispatcher (shared /data between v2/v3)
+# rc.extend.sh v2.9 -- slot-aware dispatcher (shared /data between v2/v3)
+# v2.9 (SIGSEGV §8.11 T3): dpclamp 装载后立即喂跨启动陈旧集种子
+#   (cat dpclamp_pfns.txt > /proc/dpclamp_seed, 在守护动物园搅动内存之前);
+#   union 文件由 log_keeper v2.10 从 /proc/dpclamp_pfns 维护。
 # v2.8 (SIGSEGV §8.10.2): panic-aware autoload guard -- 上次 pstore 背景帧含
 #   修复栈函数名即跳载(dpclamp v1.3 引入 deep 遍历, KE 复发时受保护启动交
 #   操作者裁决); 自载结果写 fixstack.log(syslog 丢早期窗的补丁, M2)。
@@ -171,8 +174,19 @@ case "$slot" in
              && logger -t rc.extend "dpquar auto-loaded (qmask=0x3f0)" \
              || logger -t rc.extend "dpquar insmod FAILED (kernel mismatch?)"; }
          lsmod | grep -q '^dpclamp ' || { insmod /data/gw/dpclamp.ko 2>/dev/null \
-             && logger -t rc.extend "dpclamp auto-loaded (v1.3 deep+burst)" \
+             && logger -t rc.extend "dpclamp auto-loaded (v1.4 sched-deep+seed)" \
              || logger -t rc.extend "dpclamp insmod FAILED"; }
+         # v2.9 (SIGSEGV §8.11 T3): feed the cross-boot stale-PFN union right
+         # after insmod, before the daemon zoo churns those pages -- a stable
+         # MD stale set then never reaches a victim (no first-NE tax per
+         # boot). Seed stats land in fixstack.log for the T3 verdict.
+         if lsmod | grep -q '^dpclamp ' && [ -s /data/gw/dpclamp_pfns.txt ]; then
+             cat /data/gw/dpclamp_pfns.txt > /proc/dpclamp_seed 2>/dev/null \
+                 && logger -t rc.extend "dpclamp seed fed" \
+                 || logger -t rc.extend "dpclamp seed feed FAILED"
+             echo "$(date -u +%FT%TZ) seed: $(cat /proc/dpclamp_seed 2>/dev/null)" \
+                 >> /data/gw/logs/fixstack.log 2>/dev/null
+         fi
          echo "$(date -u +%FT%TZ) autoload: dpquar=$(lsmod | grep -c '^dpquar ') dpclamp=$(lsmod | grep -c '^dpclamp ')" \
              >> /data/gw/logs/fixstack.log 2>/dev/null
      fi

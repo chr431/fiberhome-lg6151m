@@ -1,8 +1,8 @@
 # VERSIONS.tsv (public export -- rows filtered to exported set)
 #VER-REGISTRY
-gw/avail_sampler.sh	1.4	manifest	/data/gw/avail_sampler.sh	组件可用性采样器; v1.4: grep -c 计数 case 守卫(无匹配输出0且exit1, 回退echo拼出两行坏数值, 实弹修); v1.3: metrics 活性读台账首列 epoch(busybox date -r 是 RFC2822 语义非 mtime); v1.2(防假绿轮): FAIL-detail 窗口迁移捕获 + dp/authd_state 结果组合 + 内核sweep前进/metrics停更活性 + WiFi guard告警/reason=3风暴 + usb off; v1.1: touch/radvd6/键映射; 判据分级审计见 AVAILABILITY_DESIGN §8.2
+gw/avail_sampler.sh	1.5	manifest	/data/gw/avail_sampler.sh	组件可用性采样器; v1.5(假红实弹): NE 死者退出置态条件只做 cause 注记(11:03 残留 watchdog 实例被 NE 收走, 主实例全程健康却记 10min 退化; 真实死亡由 FAIL 键/重启事件窗口兜住, 覆盖无缺口; 证伪演练=selftest t_avail_ne_drill); v1.4: grep -c case 守卫; v1.3: metrics 活性读台账 epoch; v1.2(防假绿): 窗口迁移+结果组合+活性+WiFi 信号+usb off; 判据分级审计见 AVAILABILITY_DESIGN §8
 gw/agg_pins.default	1.0	manifest	/data/gw/agg_pins.default	MAC钉死表出厂缺省基线(只读, 不含任何MAC; 设备侧活文件 agg_pins.conf 由 wan_agg 缺省才写地播种, 个人MAC不入库)
-gw/rc.extend.sh	2.8	manifest	/data/rc.extend.sh	槽位调度器; v2.8(SIGSEGV §8.10.2): 自载加 panic 感知守卫(上次 pstore 背景帧含修复栈函数即跳载, 受保护启动)+自载结果写 fixstack.log(M2 补丁); v2.7: dpquar/dpclamp 修复栈开机自载(仅slot-a, dpquar逐点校验内核原文,不匹配即拒载); v2.6: boot台账+条件清TRY_A+core_meta wrapper; 历史见git
+gw/rc.extend.sh	2.9	manifest	/data/rc.extend.sh	槽位调度器; v2.9(SIGSEGV §8.11 T3): dpclamp 装载后即喂跨启动陈旧集种子(cat dpclamp_pfns.txt > /proc/dpclamp_seed, 守护动物园拉起前), seed 统计入 fixstack.log; v2.8: 自载 panic 感知守卫+fixstack.log; v2.7: 修复栈开机自载; v2.6: boot台账+条件清TRY_A; 历史见git
 gw/v3_rc10.extend.sh	2.35	manifest	/data/gw/rc19.sh	v3 启动编排 rc19v2; v2.35(USB 轮): +usb_mgr 守护(USB-C 设备模式: rndis0 桥入 br-lan+三开关); v2.34(P0-2): boot_gate 健康门禁; 历史见git
 gw/usb_mgr.sh	1.1	manifest	/data/gw/usb_mgr.sh	USB-C 设备模式服务管理(总开关+数据/ADB/控制台); 厂商遗留 g1 gadget(RNDIS+ADB+2xACM)只补服务层: rndis0 桥入 br-lan=PC 即 LAN 客户端; OFF=停 keepalive+解绑 UDC 口全灭; 硬件为仅设备模式(host 电气死路, 板上 TCPC 未贴)
 gw/www/api_avail.sh	1.1	manifest	/data/gw/www/api_avail.sh	API 可用性域模块(avail): v1.1: 今日条并入当前小时累计(/tmp/avail_hist, 首小时边界前不再灰条); 只读聚合 avail_daily+hourly(今日实时)+transitions → 90 天日条(degraded 半权/维护窗排除/无数据不进分母)+事件倒序 30 条+24h 覆盖率+总体(上行组最差优先); ash 纪律=循环重定向式读文件(无管道子壳回传问题)
@@ -15,7 +15,7 @@ gw/wan_eth.sh	1.5	manifest	/data/gw/wan_eth.sh	有线 WAN(eth0) 接口管理守�
 gw/wan_agg.sh	3.5	manifest	/data/gw/wan_agg.sh	双上行聚合主管; v3.2(日志加密轮): TICK(30s)汇总+探活逐目标+硬截止/authd/W2_READY 边沿+主路写失败留痕; v3.1: 探活实证选承载口(僵尸口); 历史见git; v3.3(日志加密轮补): 日志行补 epoch 时间基准(跨日志关联); v3.5(batch3): 自持单实例锁(手动重启不再双写) + main/transition netcfg 串行化
 gw/traffic_logger.sh	1.4	manifest	/data/gw/traffic_logger.sh	流量采样器; v1.3(P1-1): 单实例锁+心跳; v1.2b: 基线带源标记; 历史见git; v1.4(batch3): svc_lib 锁/心跳
 gw/udhcpc_wan.script	1.0	manifest	/data/gw/udhcpc_wan.script	WAN口 udhcpc 事件钩子(接口无关化)
-gw/healthdog.sh	1.5	manifest	/data/gw/healthdog.sh	看门狗用户态心跳 + 二级监督; v1.4: 跨重启恢复已 arm 内核的心跳(否则 90s 复位); v1.3: lo 强制 up; v1.2(P0-1): 稳定窗后主动 arm + 重启环保护栏 + pstore 回收; 历史见git; v1.5(batch3): svc_lib 锁/心跳
+gw/healthdog.sh	1.6	manifest	/data/gw/healthdog.sh	看门狗用户态心跳 + 二级监督; v1.6(守护面加固): beacon 监视不再依赖 ARMED(未武装窗口 watchdog 确证死亡原先无人复活, 300s 限频)+宽恕重启 1→2(连续 NE 不再直接升级 90s 内核复位, lo 死的 D-storm 仍立即复位); v1.4: 跨重启恢复 armed 心跳; v1.2(P0-1): 主动 arm+防环+pstore 回收; 历史见git
 gw/v3_babysit_v2.sh	3.0	manifest	/data/rescue/babysit.sh	启动保姆; v3.0(P0-2): 进展式 T1=240s(无进展 120s 才杀 rcS/mipc_wan_cli) + T2=600s(仍无进展才翻 B) + 900s 硬帽 + 决策落 /data; 目标路径改为 preinit 实跑的 /data/rescue/babysit.sh; 历史见git
 gw/night_report.sh	1.0	manifest	/data/gw/night_report.sh	夜间体检报告
 gw/wifi_guard.sh	1.6	manifest	/data/gw/wifi_guard.sh	BA/TX 停滞自动恢复守卫; v1.5: 启动日志版本对齐; v1.4: 每轮重写锁; v1.3: iw/tc 限时; v1.2(P1-4): 连续 4 样本+前置+限频+心跳; 历史见git; v1.6(batch3): svc_lib 锁/心跳 + 站数解析
@@ -68,7 +68,7 @@ gw/ntp_keeper.sh	1.5	manifest	/data/gw/ntp_keeper.sh	每小时NTP守时(多源; 
 gw/reboot_sched.sh	1.4	manifest	/data/gw/reboot_sched.sh	定时重启守护; v1.3(P1-1): 单实例锁+心跳; v1.2: 触发行先落 /data+sync; 历史见git; v1.4(batch3): svc_lib 锁/心跳
 gw/core_meta.sh	1.1	manifest	/data/gw/core_meta.sh	core_pattern 元数据 wrapper; v1.1(SIGSEGV §8.10.2): NE 即探测器(exec aee 前 echo deep > /proc/dpclamp, 模块侧冷却); args 换行/制表符清洗(修 104 行 TSV 破行)+pre-NTP epoch 加 unsync=1 标记(M1); v1.0: 记录 exe/cmdline/status/maps/父进程/PATH/dmesg 尾后 exec aee forwarder(行为不变, stdin 不碰)
 gw/boot_gate.sh	1.3	manifest	/data/gw/boot_gate.sh	启动健康门禁(P0-2); v1.2: 不写 watchdog.beat(避免污染数字心跳); v1.1: GUI 判据加 HTTP 200; v1.0: 关键链门禁+boot.healthy+TRY_A 读回+10min 稳定窗; v1.3(batch3): svc_lib 锁 + BSS/lo 最小解析
-gw/log_keeper.sh	2.9	manifest	/data/gw/log_keeper.sh	日志持久化守护; v2.9(可用性轮 P1): 驱动 avail_sampler(10min 节拍 CYC%20+CYC=1 首采, 无新守护); v2.8: stability_metrics +fix-stack 列; v2.7: delta() 改静态 logcut; 历史见git
+gw/log_keeper.sh	2.10	manifest	/data/gw/log_keeper.sh	日志持久化守护; v2.10(SIGSEGV §8.11 T3): dpclamp 持有集收割(union 喂下次开机种子 + 每 boot 快照 dpfn_pfn/<boot_id>.txt 跨启动 diff 探针); v2.9: 驱动 avail_sampler; v2.8: stability_metrics +fix-stack 列; v2.7: 静态 logcut; 历史见git
 gw/diag_dump.sh	1.2	manifest	/data/gw/diag_dump.sh	一键诊断包(脱敏); v1.2(SIGSEGV P1/P2): 环读取改静态 logc + 静态工具链自述; v1.1: 结束行带生成时刻；⟦收口 §22⟧ 非根因
 tools/lk_flash_v4_eth1.py	1.1	tool	-	v1.1路径随项目根迁移; eth1刷入实证器(全链条: 陷阱→raw shell→eth1起链[历史疑点:PHY仅ifup后attach]→curl传输→deploy2自驱→重启回v4.1)
 tools/lk_flash_v4.py	1.1	tool	-	v1.1路径随项目根迁移; 终版刷入器(LK陷阱→raw shell→/dev/null修复→curl送deploy2.sh→后台自驱+轮询deploy.log→重启监测; 修三雷: uclient罢工/&需/dev/null/串口前台等待吃首字符)
@@ -99,7 +99,7 @@ tools/leak_check.py	2.2	tool	-	敏感词零命中门禁; v2.2: --history 全量�
 docs/ARCHITECTURE.md	1.2	doc	-	架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针); v1.2: batch3 版本表刷新
 docs/GUI_TERMINOLOGY.md	1.2	doc	-	GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git
 gw/watchdog.sh	1.34	manifest	/data/gw/watchdog.sh	持续不变量看门狗; v1.34(防假绿修正): dp5g 探针改'任一带 IP 的 ccmni 可通'(irat 承载切换实弹: 10-25 09:46 ccmni2→ccmni3, 探针锚死旧口=假红; 绝对路径去 PATH 变量); v1.33: +http200/dnssvc/dp5g/dpeth 结果探针键; v1.32: radvd 无 ULA pass; 历史见git
-tools/selftest.py	2.63	tool	-	设备自检; v2.63: p0 防抖(wan_agg 模式切换瞬时拆装规则, 40s 复采); v2.62: watchdog 横幅断言持久 syslog 兜底(TICK 轮转挤横幅)+p0 排除瞬态结果探针键(监督键须干净/探针键归可用性窗口判定, irat 切换实弹)+v1.34 锚; v2.61: t_avail 键断言扩 8; 历史见git
+tools/selftest.py	2.64	tool	-	设备自检; v2.63: p0 防抖(wan_agg 模式切换瞬时拆装规则, 40s 复采); v2.62: watchdog 横幅断言持久 syslog 兜底(TICK 轮转挤横幅)+p0 排除瞬态结果探针键(监督键须干净/探针键归可用性窗口判定, irat 切换实弹)+v1.34 锚; v2.61: t_avail 键断言扩 8; 历史见git
 tools/doc_audit.py	1.2	tool	-	台账↔文档内联标记双向审计; v1.2: 子进程显式 UTF-8(gbk 环境不再中断 deploy 文档门禁); 历史见git
 gw/src/mipc_cellular.c	0.17	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源码; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘
 gw/bin/mipc_cellular	0.17	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘
@@ -123,8 +123,8 @@ gw/bin/procmatch	1.0	manifest	/data/gw/bin/procmatch	静态 pidof/pgrep 替代: 
 gw/src/procmatch.c	1.0	src	gw/bin/procmatch	procmatch 源码(同产物)
 gw/bin/dpquar.ko	1.4	manifest	/data/gw/dpquar.ko	dpmaif释放页隔离内核模块: 钩6个 dma_unmap 释放点(直连bl补丁), 隔离页在押TTL+上限(FIFO有界), 页尾writer-hit遥测; 阻断 MD 陈旧缓冲列表写入复用页(SIGSEGV_ANALYSIS §8 根修); 手动 insmod, 开机自载待验收后; v1.1: cap 16MB->64MB(实测teardown池~16K页), qmask默认+RX回收站点(实测40min仅1调用=冷), dup计数拆分dupe/rzero; v1.2: +4个还页站点钩(drain/put/page_frag_free×2, 全驱动仅有的直接还页处, 实值字核验), qmask默认0x3fc——覆盖活跃源理论路径; v1.3: 修复v1.1/v1.2锁内线性去重的二次方开销——teardown 32K调用触发RCU stall panic(2026-10-22 20:45 KE, 设备自愈重启); 改开放寻址哈希O(1)+锁外put_page批量; 全文件重写消除增量编辑引入的格式串/链接类小bug; v1.4: qmask默认0x3f0(RX回收站点回count-only——0x3fc在正常流量下每回收页都被钉, held ~600/min爬到cap抽干RX工作集=00:48渐进冻结的元凶)+watch循环每tick限512页
 gw/src/dpquar.c	1.4	src	gw/bin/dpquar.ko	dpquar 源码(同产物; qmask/hold_s/cap/watch 参数)
-gw/bin/dpclamp.ko	1.3	manifest	/data/gw/dpclamp.ko	MD陈旧列表排空模块(剧集反应式, SIGSEGV §8.10 设计落地); v1.3: +deep两阶段全链遍历排空(全order×migratetype, rmqueue/__isolate_free_page 同款会计, 锁窗每list一次)+三路触发(whits/NE探针300s冷却/开机预热)+burst(batch1024背靠背<=90s硬帽10min, 3空轮早停)+SMP轮转+D1-D4修复(digest双XOR/watch游标/签名窗4槽+PA形/proc v2+16条环形台账); 持有页单引用(v1.2每页漏一引用至重启); v1.2: 自适应退火修00:48 KE#3; v1.0事故: bulk alloc __free_pages KE
-gw/src/dpclamp.c	1.3	src	gw/bin/dpclamp.ko	dpclamp 源码(同产物; period_s/batch/cap/minfree_kb/warmup/cool_s 参数)
+gw/bin/dpclamp.ko	1.4	manifest	/data/gw/dpclamp.ko	MD陈旧列表排空模块; v1.4(SIGSEGV §8.11 T1+T3): 定时 deep(deep_every_s=60, 签名页在一窗内拆除, 0.3% CPU)+PFN 种子(/proc/dpclamp_seed 跨启动集预抢, 无签名要求=确定性清零路径)+/proc/dpclamp_pfns 持有集导出(收割做跨 boot diff 探针); v1.3: +deep两阶段全链遍历排空(全order×migratetype, rmqueue/__isolate_free_page 同款会计, 锁窗每list一次)+三路触发(whits/NE探针300s冷却/开机预热)+burst(batch1024背靠背<=90s硬帽10min, 3空轮早停)+SMP轮转+D1-D4修复(digest双XOR/watch游标/签名窗4槽+PA形/proc v2+16条环形台账); 持有页单引用(v1.2每页漏一引用至重启); v1.2: 自适应退火修00:48 KE#3; v1.0事故: bulk alloc __free_pages KE
+gw/src/dpclamp.c	1.4	src	gw/bin/dpclamp.ko	dpclamp 源码(同产物; period_s/batch/cap/minfree_kb/warmup/cool_s/deep_every_s 参数)
 tools/build_procmatch.sh	1.0	tool	-	procmatch 静态构建(zig cc aarch64-linux-musl)
 tools/build_dpquar.sh	1.0	tool	-	dpquar.ko构建(zig cc内核树链, 同build_v3fix)
 tools/build_dpclamp.sh	1.0	tool	-	dpclamp.ko构建(zig cc内核树链)

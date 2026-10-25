@@ -2096,12 +2096,12 @@ def t_p1_forensics():
 def t_p1_healthdog():
     hd = dev("cat /proc/healthdog 2>/dev/null").strip()
     st = dev("grep -c 'ARM REFUSED' /tmp/healthdog.log 2>/dev/null").strip()
-    start = dev("grep -c 'start v1.5' /tmp/healthdog.log 2>/dev/null").strip()
+    start = dev("grep -c 'start v1.6' /tmp/healthdog.log 2>/dev/null").strip()
     hb = dev("cat /tmp/healthdog.hb 2>/dev/null").strip()
     up = dev("cut -d. -f1 /proc/uptime").strip()
     fresh = hb.isdigit() and up.isdigit() and (int(up) - int(hb)) < 90
     # armed=1 is legitimate only after a stable window; the heartbeat file and
-    # the v1.2 start line are mandatory either way.
+    # the v1.6 start line are mandatory either way.
     ok = (int(start or 0) >= 1 and fresh and "armed=" in hd)
     record(t_p1_healthdog._test_name, "system", ok,
            "hd=[%s] start=%s hb=%s fresh=%s refused=%s" % (hd, start, hb, fresh, st))
@@ -2270,22 +2270,26 @@ def t_p2_batch3():
            % (sl, nl, dlock, wl, flock, rows, led, fz[-80:]))
 
 
-@test("fixstack: dpquar/dpclamp 在位且 v1.3 遥测面活着 (§8.10.2)")
+@test("fixstack: dpquar/dpclamp 在位且 v1.4 遥测面活着 (§8.10.2/§8.11)")
 def t_fixstack():
-    # SIGSEGV 修复栈部署契约: 双模块装载, dpquar 补丁生效, dpclamp v1.3 的
-    # /proc v2 遥测(deep/burst/trig 段)可读 —— 自载/热换后的常驻断言。
+    # SIGSEGV 修复栈部署契约: 双模块装载, dpquar 补丁生效, dpclamp v1.4 的
+    # /proc v2 遥测(deep/burst/trig/seed 段 + pfns 导出)可读 —— 自载/热换后
+    # 的常驻断言。sched 计数前进性由 avail_sampler 的 SW_STUCK 通道覆盖。
     dq = dev("head -1 /proc/dpquar 2>/dev/null").strip()
     dc = dev("head -1 /proc/dpclamp 2>/dev/null").strip()
     d2 = dev("grep -c '^deep deeps=' /proc/dpclamp 2>/dev/null").strip()
     b2 = dev("grep -c '^burst bursts=' /proc/dpclamp 2>/dev/null").strip()
     t2 = dev("grep -c '^trig episodes=' /proc/dpclamp 2>/dev/null").strip()
     ring = dev("grep -c '^ring$' /proc/dpclamp 2>/dev/null").strip()
+    sd = dev("grep -c '^seed fed=' /proc/dpclamp 2>/dev/null").strip()
+    pf = dev("test -r /proc/dpclamp_pfns; echo $?").strip()
     ok = (dq.startswith("dpquar patched=1")
           and dc.startswith("dpclamp") and "clamped=" in dc
-          and d2 == "1" and b2 == "1" and t2 == "1" and ring == "1")
+          and d2 == "1" and b2 == "1" and t2 == "1" and ring == "1"
+          and sd == "1" and pf == "0")
     record(t_fixstack._test_name, "system", ok,
-           "dpquar=[%s] dpclamp=[%s] deep=%s burst=%s trig=%s ring=%s"
-           % (dq[:44], dc[:64], d2, b2, t2, ring))
+           "dpquar=[%s] dpclamp=[%s] deep=%s burst=%s trig=%s ring=%s seed=%s pfns_rc=%s"
+           % (dq[:44], dc[:64], d2, b2, t2, ring, sd, pf))
 
 
 
@@ -2309,6 +2313,32 @@ def t_avail():
     record(t_avail._test_name, "system", ok,
            "hb_gap=%s roster=%s keys=%s hf=%s tf=%s syntax=%s route=%s"
            % (gap, roster, keys, hf, tf, syn, rte))
+
+@test("avail: NE 假归因演练 (v1.5: 死者≠活实例不得置 deg)")
+def t_avail_ne_drill():
+    # 2026-10-25 假红实弹的证伪演练 (判据变更必须带演练): 注入一条
+    # cmdline=watchdog.sh 的伪 NE 行 + 回退 ne 游标 + 手动跑一轮采样器,
+    # 断言 sys.supervisor 不产生 op->deg (主实例全程健康, 11:03 事故里
+    # 死者是部署残留实例)。结束后删伪行并把游标钉回真实行数, 不留污染。
+    pre = dev("wc -l < /data/gw/logs/ne_events.tsv").strip()
+    pretr = dev("wc -l < /data/gw/logs/avail_transitions.tsv").strip()
+    if not (pre.isdigit() and pretr.isdigit()):
+        record(t_avail_ne_drill._test_name, "system", False, "ledger unreadable")
+        return
+    dev("printf '%s\t99999\tsh\tsig=11\texe=/data/gw/bin/busybox"
+        "\targs=sh /data/gw/watchdog.sh\n' >> /data/gw/logs/ne_events.tsv")
+    dev("sed -i \"4s/.*/%s/\" /tmp/avail_sess" % pre)
+    dev("sh /data/gw/avail_sampler.sh >/dev/null 2>&1; echo ran", timeout=45)
+    sup = dev("tail -n +%d /data/gw/logs/avail_transitions.tsv 2>/dev/null | "
+              "grep -c 'sys.supervisor'" % (int(pretr) + 1)).strip()
+    lv = dev("grep '^sys.supervisor|' /tmp/avail_last 2>/dev/null | "
+             "cut -d'|' -f4").strip()
+    # cleanup: 伪行删除 + 游标钉回真实行数(防下一窗重扫全史)
+    dev("sed -i '$d' /data/gw/logs/ne_events.tsv; "
+        "_n=$(wc -l < /data/gw/logs/ne_events.tsv); sed -i \"4s/.*/$_n\" /tmp/avail_sess")
+    ok = (sup == "0" and lv == "op")
+    record(t_avail_ne_drill._test_name, "system", ok,
+           "supervisor_transitions_in_window=%s level=%s" % (sup, lv))
 
 
 def main():

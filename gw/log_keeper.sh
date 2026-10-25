@@ -1,5 +1,8 @@
 #!/bin/sh
-# log_keeper.sh v2.9 -- 日志持久化守护（日志改善专项轮）
+# log_keeper.sh v2.10 -- 日志持久化守护（日志改善专项轮）
+#   v2.10 (SIGSEGV §8.11 T3): dpclamp 持有集收割 — 每 5min 读 /proc/dpclamp_pfns
+#   维护 union(/data/gw/dpclamp_pfns.txt, 喂下次开机种子) + 每 boot 快照
+#   (logs/dpclamp_pfn/<boot_id>.txt, held 数变化才重写; 跨启动 diff 探针)。
 #   v2.9 (可用性轮 P1): 驱动 avail_sampler.sh (10min 节拍 CYC%20 + CYC=1 首采;
 #   单遍有界, 崩溃只留 NE 一行, 覆盖率指标自会体现 — AVAILABILITY_DESIGN §3)。
 #   v2.8 (SIGSEGV §8.10.2): stability_metrics.tsv +fix-stack 列
@@ -308,6 +311,27 @@ while :; do
         # v2.9: 可用性采样器 (10min 节拍; 首采即时) — 无新守护的设计前提
         if [ $((CYC % 20)) -eq 0 ] || [ "$CYC" = 1 ]; then
             sh /data/gw/avail_sampler.sh >/dev/null 2>&1 || true
+        fi
+        # v2.10 (SIGSEGV §8.11 T3): dpclamp 持有集台账 — union 文件喂下次
+        # 开机的种子(rc.extend v2.9), 每 boot 快照(held 数变化才重写)是
+        # 跨启动集合 diff 的探针证据。busybox sort 标量管道, 无 awk 数组。
+        if [ -r /proc/dpclamp_pfns ]; then
+            cat /proc/dpclamp_pfns > /tmp/dpfn.$$ 2>/dev/null
+            if [ -s /tmp/dpfn.$$ ]; then
+                _bid2=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
+                _sf=$DIR/dpclamp_pfn/$_bid2.txt
+                _n1=$(wc -l < /tmp/dpfn.$$ 2>/dev/null)
+                _n2=$(wc -l < "$_sf" 2>/dev/null)
+                case "$_n2" in ''|*[!0-9]*) _n2=-1 ;; esac
+                if [ "$_n1" != "$_n2" ]; then
+                    mkdir -p $DIR/dpclamp_pfn 2>/dev/null
+                    mv /tmp/dpfn.$$ "$_sf" 2>/dev/null
+                fi
+                cat /data/gw/dpclamp_pfns.txt "$_sf" 2>/dev/null | sort -u \
+                    > /data/gw/dpclamp_pfns.txt.tmp 2>/dev/null \
+                    && mv /data/gw/dpclamp_pfns.txt.tmp /data/gw/dpclamp_pfns.txt
+                rm -f /tmp/dpfn.$$ 2>/dev/null
+            fi
         fi
         _nf=$(ls $DIR/tmp/*.log 2>/dev/null | wc -l)
         _nb=$(cat $DIR/tmp/*.log 2>/dev/null | wc -c)

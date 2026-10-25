@@ -1406,8 +1406,12 @@ def t_sys_kernel():
 def t_sys_wd2():
     # watchdog.sh (L13) 必须在跑, 且 /tmp/watchdog_state 无 key=1 残留
     alive = dev("pgrep -f watchdog.sh | head -1").strip()
-    state = dev("grep '=1$' /tmp/watchdog_state 2>/dev/null")
-    ok = bool(alive) and not state.strip()
+    # v2.62: 排除结果探针键(dp5g/dpeth/http200/dnssvc) — 它们天然瞬态(irat 承载
+    # 切换/上游抖动), 语义归可用性系统做窗口降级判定; p0 的"未恢复故障"只约束
+    # 监督面键(守护/端口/规则/判决)。存在性键必须干净, 探针键只要求存在。
+    state = dev("grep '=1$' /tmp/watchdog_state 2>/dev/null | grep -vE '^(dp5g|dpeth|http200|dnssvc)='")
+    probes = dev("grep -cE '^(dp5g|dpeth|http200|dnssvc)=' /tmp/watchdog_state 2>/dev/null").strip()
+    ok = bool(alive) and not state.strip() and probes == "4"
     det = f"pid={alive}" + (f" FAILing={state.strip().splitlines()[0]}" if state.strip() else "")
     record(t_sys_wd2._test_name, "system", ok, det)
 

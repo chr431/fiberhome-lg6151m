@@ -1411,6 +1411,12 @@ def t_sys_wd2():
     # 监督面键(守护/端口/规则/判决)。存在性键必须干净, 探针键只要求存在。
     state = dev("grep '=1$' /tmp/watchdog_state 2>/dev/null | grep -vE '^(dp5g|dpeth|http200|dnssvc)='")
     probes = dev("grep -cE '^(dp5g|dpeth|http200|dnssvc)=' /tmp/watchdog_state 2>/dev/null").strip()
+    if state.strip():
+        # v2.63: 防抖 — wan_agg 模式切换会瞬时拆装 agg_rules/fwmark(状态是迁移式
+        # 快照, 单点采样会误报); 40s 后复采, 仍红才算"未恢复"
+        import time as _t
+        _t.sleep(40)
+        state = dev("grep '=1$' /tmp/watchdog_state 2>/dev/null | grep -vE '^(dp5g|dpeth|http200|dnssvc)='")
     ok = bool(alive) and not state.strip() and probes == "4"
     det = f"pid={alive}" + (f" FAILing={state.strip().splitlines()[0]}" if state.strip() else "")
     record(t_sys_wd2._test_name, "system", ok, det)

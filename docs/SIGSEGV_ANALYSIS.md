@@ -573,6 +573,33 @@ __isolate_free_page 逐行对齐（NR_FREE_PAGES/CMA 统计 + page->index pcp �
 与剧集簇 12 起/6min）+ stability_metrics 新列；04:00 定时重启将首次带 rc.extend
 v2.8 panic 守卫 + warm-up 全链上机。
 
+### 8.10.4 首夜验收（2026-10-25 10:45 轮；08:00 定时任务因 PC 夜间重启丢失, 手动补跑）
+
+对 §8.10 预立口径逐项判决（窗口 10-25 01:00–10:45，9.75h，含 04:00 定时重启）：
+
+| 指标 | 目标 | 实测 | 判决 |
+|---|---|---|---|
+| 常态滴漏 | ≤0.5 NE/h | 稳态窗（05:00–10:45, 5.75h）**1 起 = 0.17/h**；全程 7 起/9.75h=0.72/h（污染源已注明：01h×3=默认参数重载过渡窗, 03h×1=可用性系统部署期守护重启churn, 04h×1=04:00 boot 窗, 09:46 ping×1=自然滴漏） | **PASS** |
+| 剧集簇 | ≤3 起/簇 | 最大 3（01h 过渡窗）；无连发簇 | **PASS** |
+| 内核异常 | 零 KE | 本 boot dmesg 零 Oops/panic；pstore 04:00 文件=正常归档的上次控制台（厂商 WiFi 噪音） | **PASS** |
+| 内存 | 稳 | MemFree 1.27GB / memavail 1.33GB 全程平稳 | **PASS** |
+
+全链首战数据（/proc/dpclamp + fixstack.log + ring 台账）：
+- **rc.extend v2.8 自载链 PASS**：fixstack.log "04:01 autoload: dpquar=1 dpclamp=1"，
+  panic 守卫无误跳（pstore 无修复栈背景帧）。
+- **warm-up（T-c）PASS**：boot deep 95ms/54 块头（ring 首条），burst esca 升级后空轮早停。
+- **NE 探针（T-b）生产首证**：2 次 neprobe 触发被接受（episodes=2, suppressed=0，
+  冷却未误拦），deep 分别 19ms/75ms，均触发升级 burst——受害者→探针→排空的
+  反应链在无人值守下闭环。
+- 累计：sweeps=213 clamped=393 held=393/8192（6.75h），lockus_max=139µs，
+  whits=0（写入者整夜安静=无剧集，滴漏为存量/低频残余，与机制模型一致）。
+- 台账注记：ne_events 存在 18 条 v1.1 修复前的历史坏行（多行 args 碎片），
+  数值过滤时会被字符串比较误纳——普查一律用 (\$1+0) 数值过滤（本教训随
+  core_meta v1.1 已根治新行）。
+
+首夜结论：**四项指标全 PASS**；反应式架构（触发→deep→burst）在真实环境
+无人值守闭环。继续 7 天滚动观察至口径期满。
+
 ## 9. 证据/产物索引
 
 - 本地（不入仓）：`tmpfiles/`（core×3、libc/logread 反汇编正本、p0x/kern

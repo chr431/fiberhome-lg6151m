@@ -258,3 +258,7 @@ outage 从结构性不可见变为必记账。
   ⑥atcid 映射 ⑦api.log/dmesg.log 两个新游标。
 - 探针命令全部先在设备实测（curl 200@LAN ✓ / nslookup@LAN 应答 ✓ /
   双路 ICMP ✓ / authd_state 单行 up|down ✓ / USB_ENABLED 键 ✓）再入代码。
+- **首夜实弹（10-25 04:00–10:45）**：假状态演练（led_mgr 被杀 38s 自愈——
+  采样时键已回绿=历史假绿典型场景——窗口捕获仍记 deg+restart 事件）；生产
+  首夜真实捕获 feat.ntp 两次守护重启（down→op→deg→op 全迁移链）与
+  qual.coverage 维护窗退出（mai→op）；hourly 落盘 168 行（7h×24 组件）。

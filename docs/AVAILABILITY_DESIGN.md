@@ -12,11 +12,11 @@
 | `/tmp/watchdog_state` | ~30 个 `key=0/1` 键值 | **0=正常 1=故障**（set_state rc 惯例）；只在**迁移时**改写=最近判决快照 | 当前状态横幅的原始源 |
 | `/tmp/watchdog.log` FAIL/OK 行 | `MM-DD HH:MM:SS FAIL/OK <label>` | 每次判决迁移一行（boot 即失） | 细粒度事件因果 |
 | `syslog.log`（watchdog tag） | WARN/EVT 行持久镜像 | EVT restart / NE +1 census / channel drift | 事件持久层 |
-| `SVC_TABLE`（svc_lib v1.2） | 12 个脚本守护：名字\|进程模式\|重启 recipe\|心跳文件\|心跳上限 | 单实例锁+心跳+2-of-3 确认+重启预算 3/h | 守护级判据 |
-| `ne_events.tsv` | ts/pid/comm/sig/exe/args（core_meta 链） | NE 台账；args 含脚本名可归属、pcomm 在 meta 文件 | 组件降级信号 |
+| `SVC_TABLE`（svc_lib v1.3） | 11 个脚本守护：名字\|进程模式\|重启 recipe\|心跳文件\|心跳上限 | 单实例锁+心跳+2-of-3 确认+重启预算 3/h；v1.3 起 core_trap 已停用并移出本表（12→11） | 守护级判据 |
+| `ne_events.tsv` | ts/pid/comm/sig/exe/args/**origin**（core_meta 链） | NE 台账；args 含脚本名可归属、pcomm 在 meta 文件；第 7 列 origin（core_meta v1.2 起）=our-tree/vendor-tree/unknown，判定沿 ppid 上溯最多 3 层比各层 comm/cmdline（静态农场下 exe 全同、不可判） | 组件降级信号 |
 | `boot 台账`（boot_gate）/ reboots.log | boot.healthy / 定时重启行 | 启动链判决 + 计划内重启标记 | 维护窗口标记 |
 | `stability_metrics.tsv` | 5min：logc/crash/repairs/load/memavail/+fix-stack 列 | 长期指标同表 | 交叉验证 |
-| `/proc/dpclamp` v2 | deep/burst/trig/whits/环形台账 | 修复栈健康（v1.3） | 内核组件判据 |
+| `/proc/dpclamp` v2 | deep/burst/trig/whits/环形台账 | 修复栈健康（v1.3）；**SIGSEGV Phase 1 起 dpclamp 默认不加载，该节点仅在 FIXSTACK_ENABLE=1 时存在**（`/proc/dpquar` 同理） | 内核组件判据 |
 | `netcfg_repairs.tsv` | REPAIR 台账 | 规则被外力蒸发的修复率 | NAT/路由降级信号 |
 | pstore / aee db_history | KE/致命记录 | 内核级故障 | 内核组件判据 |
 | dial_keeper / wan_agg TICK | has_ip/cell_alive/wan_alive/探活原文 | 结果面判据（拨号/上行真实可用） | 数据面判据 |
@@ -55,7 +55,7 @@
 | 组件 | 判据键/来源 | 降级信号 |
 |---|---|---|
 | 启动链 | bootgate + boot 台账 healthy | babysit 介入记录 |
-| 内核/修复栈 | pstore 零 KE + `/proc/dpquar` patched=1 + `/proc/dpclamp` 在位 | fixstack.log SKIP 行、NE 滴漏率（全局） |
+| 内核/修复栈 | **Phase 1 起默认停用**：`/tmp/fixstack.disabled` 在位 → 判 `off`（不出事件）；`FIXSTACK_ENABLE=1` 时才走 pstore 零 KE + `/proc/dpquar` patched=1 + `/proc/dpclamp` 在位 | fixstack.log SKIP 行、NE 滴漏率（全局） |
 | 监督层自身 | watchdog_state 文件龄 <3×CYCLE + watchdog 心跳 (补:supervisor=) | EVT 日志停写 |
 | 日志管线 | log_keeper(SVC) + logc frames 前进 | logc_rc≠0 |
 | 网关 GUI | port80 + bootgate GUI 判据 | api.log 5xx 模式 |
@@ -103,7 +103,9 @@
 
 ### NE 归属策略（诚实性边界）
 
-ne_events 的 comm 是短命工具（ip/grep/awk…），TSV 无父进程。归属规则：
+ne_events 的 comm 是短命工具（ip/grep/awk…）。core_meta v1.2 起 TSV 尾部增第 7 列
+`origin`（our-tree/vendor-tree/unknown，沿 ppid 上溯最多 3 层比各层 comm/cmdline 派生），
+但该列只回答"崩在谁的子树"，不含具体父进程名，故下列归属规则仍然适用：
 1. args 含 `/data/gw/<daemon>.sh` → 直接归属该守护（led_mgr/dial_keeper 等）；
 2. exe==守护本体（hostapd/dnsmasq）→ 归属；
 3. 其余（纯工具族）**不归属**，计入全局"系统噪声"指标（修复栈组件的降级信号），

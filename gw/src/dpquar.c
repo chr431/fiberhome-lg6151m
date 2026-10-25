@@ -37,7 +37,8 @@
 //   8 dpmaif_alloc_med_rx_buf+0x1bc   page_frag_free(vaddr)
 //   9 dpmaif_alloc_med_rx_frag+0x1b0   put_page(page)   (error path)
 //
-// usage: insmod dpquar.ko [qmask=0x3fc] [hold_s=86400] [cap=16384] [watch=1]
+// usage: insmod dpquar.ko [qmask=0x3f0] [hold_s=86400] [cap=16384] [watch=1]
+//        (所列即 v1.4 起的模块默认值, 见下方 tunables; 不带参数加载即安全值)
 //        cat /proc/dpquar ; echo reset > /proc/dpquar
 #include <linux/module.h>
 #include <linux/kernel.h>

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """selftest.py -- assertion-based functional test suite for the LG6151M gateway.
+v2.66 (2026-10-26 SIGSEGV Phase 1): 修复栈默认停用 -- t_fixstack 改为
+  marker 分支(停用时断言未加载/节点不存在/SKIP 台账/采样器判 off; 启用时仍走
+  原在位契约); t_avail_ne_drill 只数 op->deg, 不再把开机 mai->op 启动迁移算成假红。
 v2.65 (2026-10-26 SIGSEGV Phase 0): t_core_trap 判据反转 -- core_trap
   每日文件模式窗口停用(窗口内 core_pattern 降级为文件模式, RLIMIT_CORE=0
   生效致厂商子树失明, fs/coredump.c:716), 改断言"无实例在跑 + pattern 恒为
@@ -2275,11 +2278,26 @@ def t_p2_batch3():
            % (sl, nl, dlock, wl, flock, rows, led, fz[-80:]))
 
 
-@test("fixstack: dpquar/dpclamp 在位且 v1.4 遥测面活着 (§8.10.2/§8.11)")
+@test("fixstack: 默认停用 (Phase 1) / 启用时校验在位契约")
 def t_fixstack():
-    # SIGSEGV 修复栈部署契约: 双模块装载, dpquar 补丁生效, dpclamp v1.4 的
-    # /proc v2 遥测(deep/burst/trig/seed 段 + pfns 导出)可读 —— 自载/热换后
-    # 的常驻断言。sched 计数前进性由 avail_sampler 的 SW_STUCK 通道覆盖。
+    # v2.66 (SIGSEGV Phase 1): 修复栈默认停用, 判据随之反转。
+    #   停用(marker 在) → 双模块不得加载 + /proc 节点不得存在 + fixstack.log
+    #     必须有 SKIP 台账行; 采样器须判 off 而非 down(否则制造永久假降级)。
+    #   启用(marker 不在, 即 FIXSTACK_ENABLE=1 且未被 panic guard 跳过) →
+    #     仍按原部署契约断言: 双模块装载 + dpquar patched=1 + dpclamp v1.4
+    #     /proc v2 遥测(deep/burst/trig/seed + pfns 导出)可读。
+    marker = dev("test -f /tmp/fixstack.disabled && echo y").strip()
+    if marker == "y":
+        loaded = dev("lsmod 2>/dev/null | grep -cE '^(dpquar|dpclamp) '").strip()
+        nodes = dev("ls -1 /proc/dpquar /proc/dpclamp 2>/dev/null | wc -l").strip()
+        skip = dev("grep -c 'SKIP dpquar/dpclamp autoload' "
+                   "/data/gw/logs/fixstack.log 2>/dev/null").strip()
+        lv = dev("grep '^sys.kernel|' /tmp/avail_last 2>/dev/null | cut -d'|' -f4").strip()
+        ok = (loaded == "0" and nodes == "0" and int(skip or 0) >= 1
+              and lv in ("off", "mai", ""))
+        record(t_fixstack._test_name, "system", ok,
+               "disabled loaded=%s nodes=%s skip=%s avail=%s" % (loaded, nodes, skip, lv))
+        return
     dq = dev("head -1 /proc/dpquar 2>/dev/null").strip()
     dc = dev("head -1 /proc/dpclamp 2>/dev/null").strip()
     d2 = dev("grep -c '^deep deeps=' /proc/dpclamp 2>/dev/null").strip()
@@ -2334,8 +2352,11 @@ def t_avail_ne_drill():
         "\targs=sh /data/gw/watchdog.sh\n' >> /data/gw/logs/ne_events.tsv")
     dev("sed -i \"4s/.*/%s/\" /tmp/avail_sess" % pre)
     dev("sh /data/gw/avail_sampler.sh >/dev/null 2>&1; echo ran", timeout=45)
+    # v2.66: 只数 op->deg —— 本演练的判据就是"不得因伪 NE 产生降级"(见上注)。
+    #   裸 grep 'sys.supervisor' 会把开机期 mai->op maint 启动迁移也算进来,
+    #   导致用例在每次重启后假红。
     sup = dev("tail -n +%d /data/gw/logs/avail_transitions.tsv 2>/dev/null | "
-              "grep -c 'sys.supervisor'" % (int(pretr) + 1)).strip()
+              "grep -c 'sys.supervisor.*op->deg'" % (int(pretr) + 1)).strip()
     lv = dev("grep '^sys.supervisor|' /tmp/avail_last 2>/dev/null | "
              "cut -d'|' -f4").strip()
     # cleanup: 伪行删除 + 游标钉回真实行数(防下一窗重扫全史)

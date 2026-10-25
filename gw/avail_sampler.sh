@@ -150,7 +150,7 @@ rst_attr() {
         log_keeper) echo sys.logging ;; healthdog) echo sys.kernel ;;
         reboot_sched) echo feat.reboot ;; usb_mgr) echo feat.usb ;;
         traffic_logger) echo sys.logging ;; wifi_guard) echo lan.wifi2g ;;
-        core_trap) echo sys.kernel ;; boot_gate) echo sys.boot ;;
+        boot_gate) echo sys.boot ;;
         atcid) echo feat.cellctl ;;
         *) echo "" ;;
     esac
@@ -249,6 +249,9 @@ KEYS_OF() {
 level_of() { # $1=判据串 → 级别 (op/deg/down/nodata/off)
     case "$1" in
     s:kernel)
+        # v1.6 (SIGSEGV Phase 1): 修复栈默认停用, 按设计未加载时判 off(不冒充绿、
+        #   也不产生降级事件); 标记缺失 = 本该加载却没在, 仍判 down 以便发现真故障。
+        [ -f /tmp/fixstack.disabled ] && { echo off; return; }
         lsmod 2>/dev/null | grep -q '^dpquar ' || { echo down; return; }
         lsmod 2>/dev/null | grep -q '^dpclamp ' || { echo down; return; }
         head -1 /proc/dpquar 2>/dev/null | grep -q 'patched=1' || { echo down; return; }

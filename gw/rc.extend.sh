@@ -19,8 +19,11 @@
 #   /data/gw/sbin (busybox applets + static iproute2), PATH is prefixed so every
 #   daemon launched below runs the static shell/tools; TZ is exported from the
 #   self-managed config (static musl reads TZ, vendor musl reads /etc/TZ);
-#   RLIMIT_CORE is raised to unlimited so the daily core_trap window can
-#   capture family cores.
+#   RLIMIT_CORE is raised to unlimited as a FALLBACK only: core_pattern is a
+#   pipe and the kernel forces cprm.limit=RLIM_INFINITY for pipes
+#   (fs/coredump.c:675), so RLIMIT_CORE never gates that path. It matters only
+#   if something downgrades the pattern to a file form -- which is exactly what
+#   the retired core_trap window used to do (v1.3 deprecated).
 # v2.1(P3): shadow.override 合法性校验+.bak回退自愈(坏文件不再锁死登录)
 # v2.0: +clear /tmp/gui_tokens/* at boot (P2/L-7 stale token survival)
 # v1.9: /etc/shadow bind 覆盖钩子(审计P0-5 凭据轮换前置; 见文件内注释)
@@ -68,8 +71,9 @@ export PATH
 # Bring lo up unconditionally; it is idempotent and costs nothing.
 ip link set lo up 2>/dev/null
 logger -t rc.extend "lo: $(ip link show lo 2>/dev/null | head -1)" 2>/dev/null
-# core_trap (P3) needs unlimited RLIMIT_CORE on the daemons it watches; hard
-# limit is unlimited on this image, soft limit is 0 by default.
+# Fallback only: the core_pattern pipe ignores RLIMIT_CORE (fs/coredump.c:675).
+# Kept so a file-mode pattern would still capture. Hard limit is unlimited on
+# this image, soft limit is 0 by default.
 ulimit -c unlimited 2>/dev/null
 logger -t rc.extend "static toolchain: PATH=$PATH TZ=${TZ:-unset} core=$(ulimit -c 2>/dev/null)" 2>/dev/null
 
@@ -164,12 +168,26 @@ case "$slot" in
      # Idempotent (lsmod guard), failure logs and boot continues unprotected --
      # same posture as any pre-v2.7 boot, never a boot blocker.
      # v2.8: panic guard + fixstack.log 台账(见文件头)。
-     if grep -qsE '(dc_main|run_deep|grab_cand|process_block|dpclampd|quarantine_page)\+0x|task:dpclampd' \
+     # v3.0 (SIGSEGV Phase 1): 默认停用。Phase 0 修好观测后复核确认: 该栈在
+     #   稳态下扣留 0 页(qmask 只覆盖 teardown, 而稳态只走 tx1/rx1), 两条新增
+     #   通路(seed/T1)空转, 且自身造成三次内核级故障(20:45 RCU stall / 21:33
+     #   Oops / 00:48 25min 冻结)。Phase 2 两臂判决前不加载; 临时恢复用
+     #   FIXSTACK_ENABLE=1。文件/MANIFEST/注册表一律保留, 判决后再定去留。
+     if [ "${FIXSTACK_ENABLE:-0}" != "1" ]; then
+         logger -t rc.extend "FIXSTACK SKIP: disabled (FIXSTACK_ENABLE=${FIXSTACK_ENABLE:-0})"
+         echo "$(date -u +%FT%TZ) SKIP dpquar/dpclamp autoload: disabled by FIXSTACK_ENABLE" \
+             >> /data/gw/logs/fixstack.log 2>/dev/null
+         # 标记"按设计未加载": avail_sampler 见到它把 sys.kernel 判 off(不冒充绿,
+         # 也不产生降级事件)。真加载失败时此标记不存在 → 仍判 down。
+         : > /tmp/fixstack.disabled 2>/dev/null
+     elif grep -qsE '(dc_main|run_deep|grab_cand|process_block|dpclampd|quarantine_page)\+0x|task:dpclampd' \
              /sys/fs/pstore/console-ramoops* 2>/dev/null; then
          logger -t rc.extend "FIXSTACK SKIP: last panic backtrace names fix-stack"
          echo "$(date -u +%FT%TZ) SKIP dpquar/dpclamp autoload: last pstore names fix-stack in backtrace" \
              >> /data/gw/logs/fixstack.log 2>/dev/null
+         : > /tmp/fixstack.disabled 2>/dev/null
      else
+         rm -f /tmp/fixstack.disabled 2>/dev/null
          lsmod | grep -q '^dpquar ' || { insmod /data/gw/dpquar.ko 2>/dev/null \
              && logger -t rc.extend "dpquar auto-loaded (qmask=0x3f0)" \
              || logger -t rc.extend "dpquar insmod FAILED (kernel mismatch?)"; }
@@ -204,8 +222,10 @@ case "$slot" in
      _fore=0; [ -e /data/gw/healthdog.forensic ] && _fore=1
      insmod /data/gw/healthdog.ko forensic=$_fore armed=0 2>/dev/null
      nohup sh /data/gw/rc19.sh >/tmp/rc19.log 2>&1 &
-     # healthdog stack + RCU-stall panic
-     echo 1 > /proc/sys/kernel/panic_on_rcu_stall 2>/dev/null
+     # v3.0 (SIGSEGV Phase 1): 改回内核默认 0。该设置原本只为"锁内深遍历 +
+     #   修复栈"组合兜底, 叠加源已随栈停用消失; 保留 1 会把任何真实 RCU 停顿
+     #   升级成重启, 既丢现场又会打断刚修好的 NE 台账。
+     echo 0 > /proc/sys/kernel/panic_on_rcu_stall 2>/dev/null
      [ -e /proc/healthdog ] || insmod /data/gw/healthdog.ko 2>/dev/null
      pgrep -f healthdog.sh >/dev/null || nohup /data/gw/healthdog.sh >/dev/null 2>&1 &
      ;;

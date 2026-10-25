@@ -1,5 +1,26 @@
 #!/bin/sh
-# core_trap.sh v1.2 -- daily user-space core capture window (SIGSEGV P3).
+# core_trap.sh v1.3 -- DEPRECATED / 默认停用 (SIGSEGV Phase 0, 2026-10-25).
+#
+# 停用理由(三条实测结论, 见 docs/SIGSEGV_ANALYSIS.md):
+#   1) 从未抓到家族 core: 窗口开过的 600s 里, 族成员(grep/awk/sh/ip/...)的崩溃
+#      一次也没落进 /tmp/core.%p; 唯一捕获到的 core 是模拟演练自造的;
+#   2) 每日制造 600s 元数据盲窗: 窗口内 core_pattern 被改成文件模式
+#      /tmp/core.%p(本文件 :168 set_pattern), core_meta.sh 整条链(元数据落盘 + aee
+#      记账 + dpclamp 探测)被完全绕过 —— 台账归零不等于修好, 恰是"看不见了";
+#   3) 使厂商子树失明: 文件模式下内核强制 cprm.limit=RLIMIT_CORE
+#      (fs/coredump.c:716), 而本脚本的 ulimit 只覆盖自身(rc.extend.sh:73 同理
+#      只覆盖其后代), 由 procd 拉起的厂商守护 RLIMIT_CORE 仍可能是 0 → 窗口内
+#      它们崩溃连 core 文件都不落; 管道模式相反, 内核强制 RLIM_INFINITY
+#      (fs/coredump.c:675), 不看 RLIMIT_CORE。两相比较文件窗口是纯亏损。
+#
+# 处置: 文件与代码保留(取证/复现用), 调度点已全部摘除 ——
+#   gw/v3_rc10.extend.sh(部署为 /data/gw/rc19.sh) 不再拉起本脚本;
+#   gw/svc_lib.sh 的 SVC_TABLE 不再登记(否则 watchdog 会把它拉回来)。
+# 手动复现窗口: CORETRAP_ENABLE=1 sh /data/gw/core_trap.sh
+# 停用后 core_pattern 由 rc.extend.sh:85 常驻管道 |/data/gw/core_meta.sh ...
+#
+# 历史设计(v1.2 及以前, 现默认停用):
+# v1.2 -- daily user-space core capture window (SIGSEGV P3).
 # v1.1 (2026-10-20 stability P1-5): restore target is now the core_meta.sh
 #   wrapper (which execs aee, so behaviour is unchanged); a start-up check
 #   warns when core_pattern was not wrapped by rc.extend.  Heartbeat for the
@@ -157,6 +178,17 @@ if [ -f "$ACTIVE" ]; then
 	rm -f "$ACTIVE" "$AEE0"
 	say "stale window recovered; core_pattern restored"
 fi
+
+# ---- v1.3: 默认停用(理由见文件头) -----------------------------------------
+# 位置有讲究: 必须排在上面 stale-window 恢复之后 —— 若上次窗口没关就停了调度,
+# core_pattern 会永久停在 /tmp/core.%p(文件模式), 元数据链就永远断着。
+case "${CORETRAP_ENABLE:-0}" in
+1|yes|on) ;;
+*)
+	say "DEPRECATED: disabled (CORETRAP_ENABLE=${CORETRAP_ENABLE:-0}); core_pattern untouched"
+	exit 0
+	;;
+esac
 
 # v1.1: core_pattern must be the core_meta wrapper (which execs aee); if some
 # vendor script rewrote it, say so loudly — attribution would be lost.

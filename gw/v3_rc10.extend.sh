@@ -1,5 +1,8 @@
 #!/bin/sh
-# rc19.sh v2 (=local v3_rc10.extend.sh) v2.35 -- Frankenstein v3.1: br-lan world + WiFi.
+# rc19.sh v2 (=local v3_rc10.extend.sh) v2.36 -- Frankenstein v3.1: br-lan world + WiFi.
+# v2.36 (SIGSEGV Phase 0): 停用 core_trap 每日文件模式窗口(窗口内 core_meta 元
+#        数据链整条被绕过 = 观测盲窗, 且从未抓到家族 core); 调度点摘除, 脚本
+#        保留。core_pattern 保持 rc.extend v2.6 的管道形态 |/data/gw/core_meta.sh。
 # v2.35 (2026-10-24 USB 轮): +usb_mgr 守护(USB-C 设备模式服务补完: rndis0 桥入
 #        br-lan=PC 即 LAN 客户端; 总开关 USB_ENABLED/USB_ADB/USB_CONSOLE 走
 #        defaults+settings, GUI 可改; OFF=停厂商 keepalive+解绑 UDC, 口全灭)。
@@ -184,9 +187,10 @@ pgrep -f watchdog.sh >/dev/null || nohup sh /data/gw/watchdog.sh >/dev/null 2>&1
 # v2.28: 日志持久化守护(专项轮: /tmp 重启即失 + logread/dmesg 环被刷爆 →
 #   syslog/dmesg 增量镜像落 /data/gw/logs + /tmp 快照 + 开机诊断包)
 pgrep -f log_keeper.sh >/dev/null || nohup sh /data/gw/log_keeper.sh >/dev/null 2>&1 &
-# v2.31 (SIGSEGV P3): daily core-capture window (aee core_pattern owner).
-#   watchdog restarts it if killed; it self-heals a stale window at start.
-pgrep -f core_trap.sh >/dev/null || nohup sh /data/gw/core_trap.sh >/dev/null 2>&1 &
+# v2.36 (SIGSEGV Phase 0): core_trap 每日 core 窗口停用 —— 它把 core_pattern 降级
+#   成文件模式 /tmp/core.%p 600s, 窗口内 core_meta 元数据链整条被绕过(观测盲窗),
+#   且从未抓到家族 core。调度点摘除(脚本保留, 见 gw/core_trap.sh 文件头);
+#   core_pattern 由 rc.extend v2.6 常驻管道 |/data/gw/core_meta.sh。
 
 # --- v2.35: USB-C 设备模式服务管理(厂商遗留 g1 gadget 链在位, 此处只补服务层;
 #     rndis0 桥入 br-lan + 总开关; watch 由 SVC_TABLE 兜底)

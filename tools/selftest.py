@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 """selftest.py -- assertion-based functional test suite for the LG6151M gateway.
+v2.65 (2026-10-26 SIGSEGV Phase 0): t_core_trap 判据反转 -- core_trap
+  每日文件模式窗口停用(窗口内 core_pattern 降级为文件模式, RLIMIT_CORE=0
+  生效致厂商子树失明, fs/coredump.c:716), 改断言"无实例在跑 + pattern 恒为
+  管道 + rc19 不再拉起"; 同时 core_meta v1.2 起 ne_events 增 origin 尾列。
 v2.59 (2026-10-24 USB 轮): +t_usb_service/t_usb_dataplane(USB-C 设备模式:
   守护/UDC 绑定/SVC_TABLE + rndis0 桥接不变量, 按 USB_ENABLED 分档断言);
   t_usb_service 的 all() 误传单布尔已改直接 and 链。
@@ -1961,27 +1965,27 @@ def t_logc():
               ("bad_frames=0" in live and "resyncs=0" in live)))
 
 
-@test("core 捕获窗口守护在位 (SIGSEGV P3)")
+@test("core_trap 已停用且 core_pattern 恒为管道 (SIGSEGV Phase 0)")
 def t_core_trap():
-    # v2.44: core_trap 必须常驻(watchdog 自愈)、持锁、RLIMIT_CORE=unlimited;
-    #   core_pattern 在窗口外必须是 aee 管道(窗口内允许 /tmp/core.%p)。
+    # v2.65 (SIGSEGV Phase 0): core_trap 每日窗口停用, 本用例判据整体反转。
+    #   旧窗口把 core_pattern 换成文件模式 /tmp/core.%p; 文件模式下内核按
+    #   cprm.limit(=rlimit(RLIMIT_CORE)) 判弃(fs/coredump.c:716), 厂商 procd
+    #   子树软限为 0 故窗口内失明, 且 core_meta 整链被绕过; 而管道路径强制
+    #   cprm.limit=RLIM_INFINITY(:675), 不受 RLIMIT_CORE 约束。窗口本身即
+    #   观测缺陷, 已停用(gw/core_trap.sh v1.3, CORETRAP_ENABLE=1 才恢复)。
+    #   现判据: 不得有实例在跑 + pattern 必须是管道 + rc19 不得再拉起它。
     run = dev("pgrep -f 'core_trap[.]sh' | head -1").strip()
-    lock = dev("cat /tmp/core_trap.lock 2>/dev/null").strip()
-    alive = dev("kill -0 %s 2>/dev/null && echo y" % lock).strip() if lock else ""
     pat = dev("cat /proc/sys/kernel/core_pattern 2>/dev/null").strip()
-    lim = dev("grep -i 'Max core file size' /proc/%s/limits 2>/dev/null | awk '{print $6}'" % run).strip() if run else ""
-    rc19 = dev("grep -c 'core_trap.sh' /data/gw/rc19.sh 2>/dev/null").strip()
-    wd = dev("grep -c 'core_trap' /data/gw/watchdog.sh 2>/dev/null").strip()
-    # v2.51: normal operation now goes through core_meta.sh, which records the
-    # crash metadata and then execs aee_core_forwarder (same behaviour).
-    pat_ok = ("aee_core_forwarder" in pat or "core_meta.sh" in pat) or (
-        "/tmp/core.%p" in pat
-        and dev("test -f /tmp/core_trap.active && echo y").strip() == "y")
-    ok = (bool(run) and bool(lock) and alive == "y" and lim == "unlimited"
-          and pat_ok and int(rc19 or 0) > 0 and int(wd or 0) > 0)
+    # 只数非注释行: v2.36 的 rc19 里仍有一行注释提到 core_trap.sh(说明为何摘除),
+    # 若按裸 grep -c 计会把注释误判成"仍在拉起"。
+    rc19 = dev("grep -v '^[[:space:]]*#' /data/gw/rc19.sh 2>/dev/null"
+               " | grep -c 'core_trap.sh'").strip()
+    present = dev("test -f /data/gw/core_trap.sh && echo y").strip()
+    pat_ok = pat.startswith("|") and ("core_meta.sh" in pat
+                                      or "aee_core_forwarder" in pat)
+    ok = (not run) and pat_ok and int(rc19 or 0) == 0 and present == "y"
     record(t_core_trap._test_name, "system", ok,
-           "pid=%s lock=%s alive=%s lim=%s pat=%s rc19=%s wd=%s"
-           % (run, lock, alive, lim, pat, rc19, wd))
+           "run=[%s] pat=%s rc19=%s file=%s" % (run, pat, rc19, present))
 
 
 @test("watchdog aee 台账增量判据 (SIGSEGV P4)")
@@ -1991,7 +1995,8 @@ def t_watchdog_aee():
     code = dev("grep -c 'watchdog_aeecount' /data/gw/watchdog.sh 2>/dev/null").strip()
     cnt = dev("cat /tmp/watchdog_aeecount 2>/dev/null").strip()
     hist = dev("wc -l < /data/log/aee_exp/db_history 2>/dev/null").strip()
-    st = dev("grep -cE '^core_?trap=' /tmp/watchdog_state 2>/dev/null").strip()
+    # v2.65: core_trap 已停用并移出 SVC_TABLE(不再产生 state 行), 改查仍在表的 log_keeper
+    st = dev("grep -cE '^log_keeper=' /tmp/watchdog_state 2>/dev/null").strip()
     ver = dev("grep -c 'watchdog v1.34 start' /tmp/watchdog.log 2>/dev/null").strip()
     # v2.62: /tmp/watchdog.log 会被 TICK 轮转(约 8h 挤掉横幅) — 持久 syslog 兜底
     vers = dev("grep 'watchdog v1' /data/gw/logs/syslog.log 2>/dev/null | tail -1 | grep -c 'v1.34 start'").strip()
@@ -2015,16 +2020,16 @@ def t_p0_watchdog():
     code = [int(x) for x in code if x.strip().isdigit()]
     hbs = dev("for f in /tmp/led_mgr.hb /tmp/fan_mgr.hb /tmp/wan_eth.hb "
               "/tmp/log_keeper.hb /tmp/ntp_keeper.hb /tmp/wifi_guard.hb "
-              "/tmp/traffic_logger.hb /tmp/reboot_sched.hb /tmp/core_trap.hb "
+              "/tmp/traffic_logger.hb /tmp/reboot_sched.hb "
               "/tmp/healthdog.hb /tmp/dial_keeper.hb; do [ -s \"$f\" ] && echo y; done | wc -l").strip()
     st = dev("grep -cE '^(dnsmasq|dropbear|v3httpd|authd|ntp_keeper|traffic_logger|"
-             "wifi_guard|reboot_sched|led_mgr|fan_mgr|wan_eth|log_keeper|core_trap|"
+             "wifi_guard|reboot_sched|led_mgr|fan_mgr|wan_eth|log_keeper|"
              "healthdog|dial_keeper)=' /tmp/watchdog_state 2>/dev/null").strip()
     beat = dev("cat /tmp/watchdog.beat 2>/dev/null").strip()
     up = dev("cut -d. -f1 /proc/uptime").strip()
     fresh = beat.isdigit() and up.isdigit() and (int(up) - int(beat)) < 180
     ok = (len(code) == 10 and all(c > 0 for c in code)
-          and int(hbs or 0) >= 11 and int(st or 0) >= 15 and fresh)
+          and int(hbs or 0) >= 10 and int(st or 0) >= 14 and fresh)
     record(t_p0_watchdog._test_name, "system", ok,
            "code=%s hb=%s states=%s beat=%s fresh=%s" % (code, hbs, st, beat, fresh))
 
@@ -2052,7 +2057,7 @@ def t_p0_boot_gate():
 def t_p1_singletons():
     pats = ["watchdog", "led_mgr", "fan_mgr", "dial_keeper", "log_keeper",
             "wan_agg", "wan_eth", "wifi_guard", "ntp_keeper", "traffic_logger",
-            "reboot_sched", "core_trap", "healthdog", "boot_gate"]
+            "reboot_sched", "healthdog", "boot_gate"]
     out = dev("for p in %s; do echo -n \"$p=\"; pgrep -f \"/data/gw/${p}[.]sh\" 2>/dev/null | wc -l; done"
               % " ".join(pats)).strip()
     bad = []
@@ -2084,7 +2089,7 @@ def t_p1_forensics():
     cen = dev("grep -c 'ne_census' /data/gw/log_keeper.sh /data/gw/watchdog.sh 2>/dev/null").split()
     met = dev("ls /data/gw/logs/cores/meta 2>/dev/null | wc -l").strip()
     ok = (pat.startswith("|/data/gw/core_meta.sh") and ex == "y" and fwd == "y"
-          and lv == "logc 1.4" and noc == "0"
+          and lv == "logc 1.5" and noc == "0"
           and "rc=0" in st and "PASS" in fz and "rc=0" in fz
           and len(cen) == 2 and all(int(x) > 0 for x in cen if x.isdigit()))
     record(t_p1_forensics._test_name, "system", ok,

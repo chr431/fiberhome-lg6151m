@@ -600,6 +600,50 @@ v2.8 panic 守卫 + warm-up 全链上机。
 首夜结论：**四项指标全 PASS**；反应式架构（触发→deep→burst）在真实环境
 无人值守闭环。继续 7 天滚动观察至口径期满。
 
+### 8.11 T1 定时排空 + T3 跨启动集持久化（2026-10-25 下午部署, dpclamp v1.4）
+
+> 背景：10-25 白天实测残差 0.66/h（04:00–11:37, 5 起自然 NE = 4 个反应剧集,
+> 反应链每次闭环但总慢一拍）。机理定位（§8.10 模型细化）：NE = MD 写**已分配**
+> 页；空闲 buddy 里的签名页是"上膛的枪"——sweep 只见 pcp（1024 页/次）, 只有
+> deep 全量走能拆除, 而 v1.3 的 deep 只在剧集后跑 = 每把枪都要等下一个受害者
+> 触发。决策（操作者批准三件套）：守护面加固 + T1 + T3 探查。守护面加固见
+> AVAILABILITY_DESIGN §8.1.1（NE 假红修正）与 healthdog v1.6。
+
+**T1 定时 deep（deep_every_s=60, 0=off）**：kthread 定时全量 buddy 遍历,
+把签名页在"空闲可见期"内拆除, 暴露窗压缩到 ~1 分钟。成本实测 95–101ms/次
+≈ 0.3% CPU, zone 锁窗 ≤288µs（10 次定时 deep 实测, sched 计数按 60s 前进）。
+预期: 剧集簇（同窗 2–3 连发）→ 单发; 残差率进入"只有首写即分配类"的地板。
+
+**T3 PFN 种子（确定性清零路径的探针+工程本体）**：
+- `/proc/dpclamp_seed`：流式 hex PFN 喂入（跨 write() 分块安全）, 每页 O(1)
+  buddy 夺取（PageBuddy 头判定 + list_del + rmqueue 同款会计 + split + 持有
+  目标页/释放兄弟页）, **无签名要求**——成员资格由既往 boot 的签名背书。
+- `/proc/dpclamp_pfns` 导出持有集; log_keeper v2.10 每 5min 收割：union 文件
+  `/data/gw/dpclamp_pfns.txt`（喂下次开机）+ 每 boot 快照
+  `logs/dpclamp_pfn/<boot_id>.txt`（跨启动集合 diff 证据, held 数变化才重写）。
+- rc.extend v2.9：dpclamp insmod 后立即喂 union（守护动物园拉起前）。
+- **假设**：MD 陈旧集跨启动稳定（旁证：两次 Boot warm-up deep 同为 95ms/百余
+  页量级）。若成立 → 开机预抢 = 集合成员永远到不了受害者手里 = 确定性近零,
+  无"每 boot 首发税"; 若不成立 → 围堵维持（定时 deep 兜底）。
+- **判读法（每个 04:00 boot, fixstack.log `seed:` 行）**：`fed=N ok=K dup=D
+  miss_nb=M`——ok/(fed-dup) 比例高 = 集稳定; miss_nb（分配中/块尾; 新 ctab
+  上 dup≈0）高 = 集漂移。结合当日 NE 率终判。
+- 首次实弹（13:2x 手动喂本 boot union 307 PFN）：fed=307 **dup=307** 零副作用
+  ——解析器/查重链验证 ✓。注：miss_nb 计数把 dup 也算入（返回值同路）; 开机
+  时 ctab 为空故 dup≈0, 判读语义不受影响。
+- 已知偏差：seed 会计用 MIGRATE_MOVABLE（分配侧同款语义; 页块级
+  get_pfnblock_flags_mask 未导出）。唯一漂移是顾问计数 NR_FREE_CMA_PAGES
+  （若种子页恰在 CMA 页块）; free_pcppages_bulk 会按真实页块 mt 归位释放页。
+
+**热换事故记录（13:0x, 已修）**：首版 v1.4 .ko 链接未导出符号
+（get_pageblock_migratetype → get_pfnblock_flags_mask）, insmod 失败; 且热换
+命令是 `rmmod && insmod && ...` 单链——失败点被 && 短路, 只看到 /proc 空输出,
+**dpclamp 缺位约 6 分钟裸窗口**。修复后 warmup 即时抓回 77 页。教训：模块热换
+必须分步执行并显式回显 rc（&& 链掩盖失败点）。
+
+**部署后基线（判后续用）**：13:1x–13:3x, held 77→412（重建中）, sched deeps
+10+/10min; NE 观察窗从 13:00 起算; 次日 04:00 reboot 后首个 seed 判读 = T3 终判。
+
 ## 9. 证据/产物索引
 
 - 本地（不入仓）：`tmpfiles/`（core×3、libc/logread 反汇编正本、p0x/kern

@@ -108,7 +108,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/wifi_up.sh` | **v1.29** | manifest | `/data/gw/wifi_up.sh` | mt7992 AP 工厂配方(v1.29 架构轮: MAC 派生拆出 wifi_macplan.sh + 自动选道拆出 wifi_autoch.sh, 主文件收敛为拉起配方本体, 变量/契约零变化; v1.28: 候选收敛安全集深部{1,6}; 历史见git) |
 | `gw/www/api.sh` | **v2.79** | manifest | `/data/gw/www/api.sh` | API 核心路由器+helpers; v2.79(可用性轮): +avail 域(api_avail.sh); v2.78: +usb/usb_set 域; v2.76: +请求级日志; v2.75: 域模块懒加载; 历史见git |
 | `gw/www/api_agg.sh` | **v1.1** | manifest | `/data/gw/www/api_agg.sh` | API 聚合+上行域模块; v1.1(日志加密轮): 权重/模式/钉死/上行档案变更写 api.log(凭证脱敏) |
-| `gw/www/api_avail.sh` | **v1.1** | manifest | `/data/gw/www/api_avail.sh` | API 可用性域模块(avail): v1.1: 今日条并入当前小时累计(/tmp/avail_hist, 首小时边界前不再灰条); 只读聚合 avail_daily+hourly(今日实时)+transitions → 90 天日条(degraded 半权/维护窗排除/无数据不进分母)+事件倒序 30 条+24h 覆盖率+总体(上行组最差优先); ash 纪律=循环重定向式读文件(无管道子壳回传问题) |
+| `gw/www/api_avail.sh` | **v1.2** | manifest | `/data/gw/www/api_avail.sh` | API 可用性域模块(avail): v1.1: 今日条并入当前小时累计(/tmp/avail_hist, 首小时边界前不再灰条); 只读聚合 avail_daily+hourly(今日实时)+transitions → 90 天日条(degraded 半权/维护窗排除/无数据不进分母)+事件倒序 30 条+24h 覆盖率+总体(上行组最差优先); ash 纪律=循环重定向式读文件(无管道子壳回传问题); v1.2(SIGSEGV Phase 1): 数值聚合(今日实时+24h覆盖率)改纯 shell 单遍累加, 不再用 awk printf 路径(GUI 每次轮询都跑, 崩一次即污染 ne_events 基线); 仅留两处不带 printf 的 awk 过滤/计数 |
 | `gw/www/api_cell.sh` | **v1.1** | manifest | `/data/gw/www/api_cell.sh` | API 蜂窝域模块; v1.1(日志加密轮): cells 成败/耗时、锁频/锁小区/制式/飞行/扫描/PIN 动作写 api.log(PIN 值脱敏) |
 | `gw/www/api_lan.sh` | **v1.0** | manifest | `/data/gw/www/api_lan.sh` | API LAN 服务域模块(v2.75 拆出: dhcp/dhcp_static/fw 族; fw_apply.sh 改域内懒加载 — 原对全部请求无条件 source) |
 | `gw/www/api_sms.sh` | **v1.2** | manifest | `/data/gw/www/api_sms.sh` | API 短信域模块; v1.2(日志加密轮): 发送成败/长度/模组原始响应写 api.log(号码仅末4位, 内容不落盘); v1.1: AT+EMGS 路线 |

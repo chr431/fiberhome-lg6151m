@@ -1,5 +1,9 @@
 #!/bin/sh
-# api_avail.sh v1.1 -- API 可用性域模块 (AVAILABILITY_DESIGN §4.1)
+# api_avail.sh v1.2 -- API 可用性域模块 (AVAILABILITY_DESIGN §4.1)
+# v1.2 (SIGSEGV Phase 1): 数值聚合(今日实时 + 24h 覆盖率)改纯 shell 单遍累加,
+#   不再使用 awk 的 printf 路径 —— 该聚合每次 GUI 轮询都跑, 崩一次就往
+#   ne_events.tsv 记一笔(origin=our-tree), 直接污染可用性基线; 2026-10-25 台账
+#   最后一行即此段 awk 崩溃。仅保留两处不带 printf 的 awk 过滤/计数。
 # GET avail: 组件名单/当前态/90 天日条/事件表 — 只读聚合, 无写路径。
 # 数据源: /tmp/avail_last(名单+now, sampler 写) + avail_daily.tsv(历史日)
 #        + avail_hourly.tsv(今日实时) + avail_transitions.tsv(事件)
@@ -47,13 +51,33 @@ get_avail() {
     done < "$LAST"
 
     # 近 24h 覆盖率 (nodata 占比反向; v1.1: 并入当前小时在累计的 avail_hist)
-    _c1=$(awk -v t="$TODAY" -v y="$YDAY" -F'|' \
-        'substr($1,1,8)==t || substr($1,1,8)==y {ok+=$3; dg+=$4; dn+=$5; nd+=$6}
-         END {printf "%d %d %d %d", ok, dg, dn, nd}' "$HIST" 2>/dev/null)
-    _c2=$(awk -F'|' '{ok+=$2; dg+=$3; dn+=$4; nd+=$5}
-         END {printf "%d %d %d %d", ok, dg, dn, nd}' /tmp/avail_hist 2>/dev/null)
-    COV=$(echo "$_c1 $_c2" | awk '{ok=$1+$5; dg=$2+$6; dn=$3+$7; nd=$4+$8; tot=ok+dg+dn+nd;
-         if (tot>0) printf "%.1f", (tot-nd)*100/tot; else print "0"}')
+    # v1.2 (SIGSEGV Phase 1): 同样改纯 shell, 覆盖率用整数运算出一位小数
+    #   (四舍五入), 不再借 awk 的 printf —— 与下面组件聚合同一个理由。
+    _ok=0; _dg=0; _dn=0; _nd=0
+    while IFS='|' read -r _d _c _a _b _e _f _g; do
+        case "$_d" in "$TODAY"*|"$YDAY"*) ;; *) continue ;; esac
+        case "$_a" in ''|*[!0-9]*) _a=0 ;; esac
+        case "$_b" in ''|*[!0-9]*) _b=0 ;; esac
+        case "$_e" in ''|*[!0-9]*) _e=0 ;; esac
+        case "$_f" in ''|*[!0-9]*) _f=0 ;; esac
+        _ok=$((_ok + _a)); _dg=$((_dg + _b)); _dn=$((_dn + _e)); _nd=$((_nd + _f))
+    done < "$HIST"
+    if [ -r /tmp/avail_hist ]; then
+        while IFS='|' read -r _c _a _b _e _f _g; do
+            case "$_a" in ''|*[!0-9]*) _a=0 ;; esac
+            case "$_b" in ''|*[!0-9]*) _b=0 ;; esac
+            case "$_e" in ''|*[!0-9]*) _e=0 ;; esac
+            case "$_f" in ''|*[!0-9]*) _f=0 ;; esac
+            _ok=$((_ok + _a)); _dg=$((_dg + _b)); _dn=$((_dn + _e)); _nd=$((_nd + _f))
+        done < /tmp/avail_hist
+    fi
+    _tot=$((_ok + _dg + _dn + _nd))
+    if [ "$_tot" -gt 0 ]; then
+        _x=$(( ((_tot - _nd) * 1000 + _tot / 2) / _tot ))
+        COV="$((_x / 10)).$((_x % 10))"
+    else
+        COV=0
+    fi
 
     printf '{"ok":true,"overall":"%s","overall_cn":"%s","coverage":%s,"components":[' \
         "$OV" "$(lvl_cn "$OV")" "${COV:-0}"
@@ -74,13 +98,38 @@ get_avail() {
         done < "$T.rows2"
         # 今日实时 = 已落盘小时行 + 当前小时在累计的 /tmp/avail_hist (v1.1:
         # 首个小时边界前页面也有真实今日条, 而非灰条等到整点)
-        set -- $(awk -v t="$TODAY" -v c="$id" -F'|' \
-            'substr($1,1,8)==t && $2==c {ok+=$3; dg+=$4; dn+=$5; nd+=$6; mi+=$7}
-             END {printf "%d %d %d %d %d", ok, dg, dn, nd, mi}' "$HIST" 2>/dev/null)
-        _h=$(awk -v c="$id" -F'|' \
-            '$1==c {ok+=$2; dg+=$3; dn+=$4; nd+=$5; mi+=$6}
-             END {printf "%d %d %d %d %d", ok, dg, dn, nd, mi}' /tmp/avail_hist 2>/dev/null)
-        [ -n "$_h" ] && set -- $(echo "$_h $@" | awk '{printf "%d %d %d %d %d", $1+$6, $2+$7, $3+$8, $4+$9, $5+$10}')
+        # v1.2 (SIGSEGV Phase 1): 数值聚合改纯 shell 单遍累加, 不再用 awk 的
+        #   printf 路径。awk 是本设备 SIGSEGV 家族的头号受害者(审计: awk 27 起
+        #   居首), 而这段聚合每次 GUI 轮询都跑一遍、每个组件一次 —— 崩一次就往
+        #   ne_events.tsv 记一笔(origin=our-tree), 直接污染可用性基线。2026-10-25
+        #   的台账最后一行就是这段 awk 崩的。
+        #   注: 本文件另有两处 awk 只做过滤/计数(日条过滤 $1!=t、事件计数
+        #   $2==c|wc -l), 不走 printf, 风险面不同, 本轮不动。
+        _ok=0; _dg=0; _dn=0; _nd=0; _mi=0
+        while IFS='|' read -r _hd _hc _h1 _h2 _h3 _h4 _h5; do
+            case "$_hd" in "$TODAY"*) ;; *) continue ;; esac
+            [ "$_hc" = "$id" ] || continue
+            case "$_h1" in ''|*[!0-9]*) _h1=0 ;; esac
+            case "$_h2" in ''|*[!0-9]*) _h2=0 ;; esac
+            case "$_h3" in ''|*[!0-9]*) _h3=0 ;; esac
+            case "$_h4" in ''|*[!0-9]*) _h4=0 ;; esac
+            case "$_h5" in ''|*[!0-9]*) _h5=0 ;; esac
+            _ok=$((_ok + _h1)); _dg=$((_dg + _h2)); _dn=$((_dn + _h3))
+            _nd=$((_nd + _h4)); _mi=$((_mi + _h5))
+        done < "$HIST"
+        if [ -r /tmp/avail_hist ]; then
+            while IFS='|' read -r _hc _h1 _h2 _h3 _h4 _h5; do
+                [ "$_hc" = "$id" ] || continue
+                case "$_h1" in ''|*[!0-9]*) _h1=0 ;; esac
+                case "$_h2" in ''|*[!0-9]*) _h2=0 ;; esac
+                case "$_h3" in ''|*[!0-9]*) _h3=0 ;; esac
+                case "$_h4" in ''|*[!0-9]*) _h4=0 ;; esac
+                case "$_h5" in ''|*[!0-9]*) _h5=0 ;; esac
+                _ok=$((_ok + _h1)); _dg=$((_dg + _h2)); _dn=$((_dn + _h3))
+                _nd=$((_nd + _h4)); _mi=$((_mi + _h5))
+            done < /tmp/avail_hist
+        fi
+        set -- "$_ok" "$_dg" "$_dn" "$_nd" "$_mi"
         _p=$(day_pct "$@"); _pct=${_p% *}; _cls=${_p#* }
         printf '{"d":"%s","pct":%s,"cls":"%s"}' "$TODAY" "$_pct" "$_cls" >> "$T.days"
         # 近 90 天事件计数

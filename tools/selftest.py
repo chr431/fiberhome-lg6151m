@@ -1982,7 +1982,11 @@ def t_watchdog_aee():
     cnt = dev("cat /tmp/watchdog_aeecount 2>/dev/null").strip()
     hist = dev("wc -l < /data/log/aee_exp/db_history 2>/dev/null").strip()
     st = dev("grep -cE '^core_?trap=' /tmp/watchdog_state 2>/dev/null").strip()
-    ver = dev("grep -c 'watchdog v1.33 start' /tmp/watchdog.log 2>/dev/null").strip()
+    ver = dev("grep -c 'watchdog v1.34 start' /tmp/watchdog.log 2>/dev/null").strip()
+    # v2.62: /tmp/watchdog.log 会被 TICK 轮转(约 8h 挤掉横幅) — 持久 syslog 兜底
+    vers = dev("grep 'watchdog v1' /data/gw/logs/syslog.log 2>/dev/null | tail -1 | grep -c 'v1.34 start'").strip()
+    if ver == "0" and vers == "1":
+        ver = "1"
     ok = False
     if code not in ("", "0") and cnt.isdigit() and hist.isdigit():
         ok = abs(int(cnt) - int(hist)) <= 2 and int(st or 0) > 0 and int(ver or 0) > 0

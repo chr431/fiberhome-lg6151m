@@ -99,7 +99,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/wan_agg.sh` | **v3.5** | manifest | `/data/gw/wan_agg.sh` | 双上行聚合主管; v3.2(日志加密轮): TICK(30s)汇总+探活逐目标+硬截止/authd/W2_READY 边沿+主路写失败留痕; v3.1: 探活实证选承载口(僵尸口); 历史见git; v3.3(日志加密轮补): 日志行补 epoch 时间基准(跨日志关联); v3.5(batch3): 自持单实例锁(手动重启不再双写) + main/transition netcfg 串行化 |
 | `gw/wan_agg_lib.sh` | **v1.3** | manifest | `/data/gw/wan_agg_lib.sh` | 聚合引擎落地层+conf 管理库; v1.2(日志加密轮): ensure_rules 每次补装记 REPAIR+rc(规则被外力蒸发不再静默); v1.1: +cell_iface_pick(探活实证选承载口); v1.3(batch3): netcfg 串行化 + REPAIR 台账 |
 | `gw/wan_eth.sh` | **v1.5** | manifest | `/data/gw/wan_eth.sh` | 有线 WAN(eth0) 接口管理守护; v1.4(P1-1): 单实例锁; v1.3(batch1): 心跳供 watchdog 判卡死; 历史见git; v1.5(batch3): svc_lib + netcfg 串行化/REPAIR 台账 |
-| `gw/watchdog.sh` | **v1.33** | manifest | `/data/gw/watchdog.sh` | 持续不变量看门狗; v1.33(防假绿轮): +http200/dnssvc/dp5g/dpeth 结果探针键(监听≠在服务/IP在≠数据面通 — 历史四次全绿谎言的判据级根治, AVAILABILITY_DESIGN §8; 实测本机 127 不可达须打 LAN 地址); v1.32: radvd 无 ULA pass; v1.31: avail 键+cycle; 历史见git |
+| `gw/watchdog.sh` | **v1.34** | manifest | `/data/gw/watchdog.sh` | 持续不变量看门狗; v1.34(防假绿修正): dp5g 探针改'任一带 IP 的 ccmni 可通'(irat 承载切换实弹: 10-25 09:46 ccmni2→ccmni3, 探针锚死旧口=假红; 绝对路径去 PATH 变量); v1.33: +http200/dnssvc/dp5g/dpeth 结果探针键; v1.32: radvd 无 ULA pass; 历史见git |
 | `gw/webs_revive.sh` | **v1.3** | manifest | `/data/gw/webs_revive.sh` | 原厂GUI复活器(自足nginx conf; 手动拉起) |
 | `gw/wedge_watch.sh` | **v1.0** | manifest | `/data/gw/wedge_watch.sh` | 串口wedged值守望器(补登记) |
 | `gw/wifi_autoch.sh` | **v1.1** | manifest | `/data/gw/wifi_autoch.sh` | WiFi 自动选道器; v1.1(日志加密轮): 输出 # 注释行记录扫描规模/候选/评分(源码时无害) — 选道依据可复盘; IDC 安全掩码+候选{1,6} |
@@ -164,7 +164,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/rescue_shadow.py` | **v1.0** | tool | `-` | shadow.override未bind网络救援(getpass旧口令→只读探针: 文件md5/grep行为单测/部署钩子sh -x跟踪→从.bak恢复+重bind; 依赖rc.extend v2.1) |
 | `tools/rotate_toor.py` | **v1.4** | tool | `-` | toor口令轮换器; v1.4: 轮换前存档.bak(rc.extend v2.1回退源); 历史见git |
 | `tools/run_serial_server.sh` | **v1.0** | tool | `-` | 串口控制台守护拉起器 |
-| `tools/selftest.py` | **v2.61** | tool | `-` | 设备自检; v2.61(防假绿轮): t_avail 键断言扩至 8(加 http200/dnssvc/dp5g/dpeth 结果探针)+watchdog v1.33 锚; v2.60: +t_avail; 历史见git |
+| `tools/selftest.py` | **v2.62** | tool | `-` | 设备自检; v2.62: watchdog 横幅断言加持久 syslog 兜底(/tmp 日志 TICK 轮转约 8h 挤掉横幅=断言脆弱性实弹)+v1.34 锚; v2.61: t_avail 键断言扩 8; 历史见git |
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |
 | `tools/serial_server.py` | **v1.7** | tool | `-` | 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets) |
 | `tools/upgrade_slot.py` | **v1.0** | tool | `-` | SSH整槽升级器(P3第一档: vercheck/槽位/空间预检→md5门禁→dd备份旧p26→写新镜像→挂载sanity断言(toor/rcS/#v3:/procd)→失败自动整槽还原不重启→清TRY_A→reboot; PC侧轮询日志+回连终检; --dry-run) |

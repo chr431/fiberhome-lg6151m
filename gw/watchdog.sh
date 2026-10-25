@@ -1,5 +1,7 @@
 #!/bin/sh
-# watchdog.sh v1.33 -- on-device continuous invariant monitor.
+# watchdog.sh v1.34 -- on-device continuous invariant monitor.
+# v1.34 (防假绿修正): dp5g 探针改"任一带 IP 的 ccmni 可通"(irat 承载切换实弹:
+#   09:46 ccmni2→ccmni3, 探针锚死旧口=假红; 绝对路径去 PATH 变量)。
 # v1.33 (防假绿轮): +http200/dnssvc/dp5g/dpeth 结果探针键(监听≠在服务/IP 在≠
 #   数据面通 — 四次历史全绿谎言的判据级根治, 见 AVAILABILITY_DESIGN §8)。
 # v1.32 (同轮修正): radvd 键无 ULA(未部署 v6)时 pass — 键=1 只表示已部署而
@@ -322,7 +324,9 @@ run_cycle() {
     # avail_sampler 的 FAIL-detail 游标捕获兜底。
     check http200 "export LD_LIBRARY_PATH=/fhrom/lib:/fhrom/usr/lib; [ \"\$(/fhrom/bin/curl -s -o /dev/null -w '%{http_code}' -m 4 http://192.168.9.1/)\" = 200 ]" "GUI serving HTTP 200 (not just listening)"
     check dnssvc "nslookup localhost 192.168.9.1 >/dev/null 2>&1" "DNS answering on LAN"
-    check dp5g   "ping -4 -I ccmni2 -c1 -W3 -s1 223.5.5.5 >/dev/null 2>&1" "5G data plane (ICMP via ccmni2)"
+    # v1.34: 承载会 irat 切换(10-25 09:46 实弹 ccmni2→ccmni3, dial_keeper 跟随而
+    # 探针锚死旧口=假红/假绿) — 改为"任一带 IP 的 ccmni 可通"=真 L3 语义; 绝对路径
+    check dp5g   "_ok=1; for _c in ccmni0 ccmni1 ccmni2 ccmni3; do /data/gw/bin/ip -4 addr show \$_c 2>/dev/null | grep -q 'inet ' || continue; /data/gw/bin/busybox ping -4 -I \$_c -c1 -W3 -s1 223.5.5.5 >/dev/null 2>&1 && exit 0; done; exit 1" "5G data plane (any bearer with IP passes ICMP)"
     check dpeth  "ping -4 -I eth0 -c1 -W3 -s1 223.5.5.5 >/dev/null 2>&1" "eth data plane (ICMP via eth0)"
     check_port port80 80 "GUI :80 reachable"
     check_port port22 22 "SSH :22 reachable"
@@ -805,7 +809,7 @@ EOF
 
 # ---- main ----
 case "${1:-}" in
---version) echo "watchdog v1.33"; exit 0 ;;
+--version) echo "watchdog v1.34"; exit 0 ;;
 esac
 touch $LOG $STATE
 # v1.20: 看门狗单实例 — 双实例会重复自愈/告警(现场曾出现 2 个).
@@ -815,8 +819,8 @@ if [ "$_rc" != 0 ]; then
     echo "watchdog: another live instance owns the lock (rc=$_rc)" >&2
     exit 0
 fi
-log "===== watchdog v1.33 start (svc_lib primitives + minimal parsers + batch3 metrics; avail keys + outcome probes; alert LED 5G orange) ====="
-logger -t watchdog "watchdog v1.33 start"
+log "===== watchdog v1.34 start (svc_lib primitives + minimal parsers + batch3 metrics; avail keys + outcome probes + bearer-follow dp; alert LED 5G orange) ====="
+logger -t watchdog "watchdog v1.34 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

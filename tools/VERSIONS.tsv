@@ -98,8 +98,8 @@ gw/defaults.conf	1.9	manifest	/data/gw/defaults.conf	统一配置只读出厂基
 tools/leak_check.py	2.2	tool	-	敏感词零命中门禁; v2.2: --history 全量扫提交正文(%B, 原仅扫标题%s可漏检消息体); v2.1: 修复 PAT_PARTS NameError; 历史见git
 docs/ARCHITECTURE.md	1.2	doc	-	架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针); v1.2: batch3 版本表刷新
 docs/GUI_TERMINOLOGY.md	1.2	doc	-	GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git
-gw/watchdog.sh	1.33	manifest	/data/gw/watchdog.sh	持续不变量看门狗; v1.33(防假绿轮): +http200/dnssvc/dp5g/dpeth 结果探针键(监听≠在服务/IP在≠数据面通 — 历史四次全绿谎言的判据级根治, AVAILABILITY_DESIGN §8; 实测本机 127 不可达须打 LAN 地址); v1.32: radvd 无 ULA pass; v1.31: avail 键+cycle; 历史见git
-tools/selftest.py	2.61	tool	-	设备自检; v2.61(防假绿轮): t_avail 键断言扩至 8(加 http200/dnssvc/dp5g/dpeth 结果探针)+watchdog v1.33 锚; v2.60: +t_avail; 历史见git
+gw/watchdog.sh	1.34	manifest	/data/gw/watchdog.sh	持续不变量看门狗; v1.34(防假绿修正): dp5g 探针改'任一带 IP 的 ccmni 可通'(irat 承载切换实弹: 10-25 09:46 ccmni2→ccmni3, 探针锚死旧口=假红; 绝对路径去 PATH 变量); v1.33: +http200/dnssvc/dp5g/dpeth 结果探针键; v1.32: radvd 无 ULA pass; 历史见git
+tools/selftest.py	2.62	tool	-	设备自检; v2.62: watchdog 横幅断言加持久 syslog 兜底(/tmp 日志 TICK 轮转约 8h 挤掉横幅=断言脆弱性实弹)+v1.34 锚; v2.61: t_avail 键断言扩 8; 历史见git
 tools/doc_audit.py	1.2	tool	-	台账↔文档内联标记双向审计; v1.2: 子进程显式 UTF-8(gbk 环境不再中断 deploy 文档门禁); 历史见git
 gw/src/mipc_cellular.c	0.17	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源码; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘
 gw/bin/mipc_cellular	0.17	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘

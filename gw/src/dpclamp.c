@@ -542,7 +542,13 @@ static int seed_take(unsigned long pfn)
 		return 0;
 	}
 	o = page_private(pg);
-	mt = get_pageblock_migratetype(pg);
+	/* alloc-side parity: rmqueue() decrements with the REQUESTED migratetype,
+	 * not the pageblock one (get_pfnblock_flags_mask is unexported anyway).
+	 * Siblings freed via __free_page are re-sorted onto the right list by
+	 * free_pcppages_bulk, which reads the real pageblock mt in-kernel; the
+	 * only drift is NR_FREE_CMA_PAGES if a seeded page ever sits in a CMA
+	 * pageblock (advisory counter, no functional CMA impact). */
+	mt = MIGRATE_MOVABLE;
 	list_del(&pg->lru);
 	set_page_private(pg, 0);
 	__ClearPageBuddy(pg);

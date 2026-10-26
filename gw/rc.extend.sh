@@ -1,18 +1,13 @@
 #!/bin/sh
-# rc.extend.sh v2.9 -- slot-aware dispatcher (shared /data between v2/v3)
-# v2.9 (SIGSEGV §8.11 T3): dpclamp 装载后立即喂跨启动陈旧集种子
-#   (cat dpclamp_pfns.txt > /proc/dpclamp_seed, 在守护动物园搅动内存之前);
-#   union 文件由 log_keeper v2.10 从 /proc/dpclamp_pfns 维护。
-# v2.8 (SIGSEGV §8.10.2): panic-aware autoload guard -- 上次 pstore 背景帧含
-#   修复栈函数名即跳载(dpclamp v1.3 引入 deep 遍历, KE 复发时受保护启动交
-#   操作者裁决); 自载结果写 fixstack.log(syslog 丢早期窗的补丁, M2)。
-#   背景帧匹配只认 backtrace 形态 "func+0x"/"task:dpclampd", 不匹配模块
-#   自身的常规 pr_info 日志(防误跳)。
-# v2.7 (SIGSEGV §8.4): DMA 注入修复栈开机自载 — dpquar(断新漏)+dpclamp(排存量)
-#   在 modem 环境/守护动物园拉起之前同步 insmod(仅 slot-a; dpquar init 逐点
-#   校验内核原文, 内核不匹配即 REFUSE+回滚+insmod 失败, 官方内核上零风险);
-#   动机: reboot_sched 每日 04:00 定时重启后修复栈缺席成裸窗口(10-23 00:51 NE
-#   与 3h 裸窗口实证), 7d 两臂验收经操作者决定取消(2026-10-23), 自载提前转正。
+# rc.extend.sh v3.1 -- slot-aware dispatcher (shared /data between v2/v3)
+# v3.1 (SIGSEGV §8.13): 旧内核修复栈整体退役。slot-a 内的全部自载逻辑删除 ——
+#   FIXSTACK_ENABLE 门控、pstore panic guard、两次 insmod、跨启动种子喂入、
+#   fixstack.log 自载台账; 改为一处占位注释, 当前不留任何自动加载动作。
+#   源码/产物/构建脚本同批删除(可经 git 历史取回), MANIFEST 同步减两条。
+#   理由: 无实测收益(稳态扣留 0 页、两条新增通路空转) + 自身三次内核级故障
+#   (10-22 20:45 RCU stall / 21:33 Oops / 10-23 00:48 25min 冻结)。
+# v3.0 (SIGSEGV Phase 1, v3.1 已取代): 旧栈默认停用(FIXSTACK_ENABLE=0), 曾计划
+#   留作两臂判决备选; 判决前操作者决定直接退役, 故 v3.1 删除而非保留。
 # v2.5: TZ 取自自管配置(settings>defaults)而非早期 /etc/TZ(厂商 boot 会先写 UTC)。
 # v2.4: TZ 解析提前到 toolchain_init 之前(静态工具链自举日志也走镜像时区)。
 # v2.2 (SIGSEGV P2/P3): static userland bootstrap — toolchain_init.sh builds
@@ -22,8 +17,7 @@
 #   RLIMIT_CORE is raised to unlimited as a FALLBACK only: core_pattern is a
 #   pipe and the kernel forces cprm.limit=RLIM_INFINITY for pipes
 #   (fs/coredump.c:675), so RLIMIT_CORE never gates that path. It matters only
-#   if something downgrades the pattern to a file form -- which is exactly what
-#   the retired core_trap window used to do (v1.3 deprecated).
+#   if something downgrades the pattern to a file form.
 # v2.1(P3): shadow.override 合法性校验+.bak回退自愈(坏文件不再锁死登录)
 # v2.0: +clear /tmp/gui_tokens/* at boot (P2/L-7 stale token survival)
 # v1.9: /etc/shadow bind 覆盖钩子(审计P0-5 凭据轮换前置; 见文件内注释)
@@ -163,51 +157,11 @@ case "$slot" in
      ;;
   *) # v3: full stack (forensics, flight rc19, TTL/hnat are v3 duties)
      logger -t rc.extend "slot=$slot: v3 rc19.sh"
-     # --- v2.7 (SIGSEGV §8.4): fix stack auto-load, BEFORE modem env/daemons --
-     # dpquar first (stop new leak at source), then dpclamp (drain the backlog).
-     # Idempotent (lsmod guard), failure logs and boot continues unprotected --
-     # same posture as any pre-v2.7 boot, never a boot blocker.
-     # v2.8: panic guard + fixstack.log 台账(见文件头)。
-     # v3.0 (SIGSEGV Phase 1): 默认停用。Phase 0 修好观测后复核确认: 该栈在
-     #   稳态下扣留 0 页(qmask 只覆盖 teardown, 而稳态只走 tx1/rx1), 两条新增
-     #   通路(seed/T1)空转, 且自身造成三次内核级故障(20:45 RCU stall / 21:33
-     #   Oops / 00:48 25min 冻结)。Phase 2 两臂判决前不加载; 临时恢复用
-     #   FIXSTACK_ENABLE=1。文件/MANIFEST/注册表一律保留, 判决后再定去留。
-     if [ "${FIXSTACK_ENABLE:-0}" != "1" ]; then
-         logger -t rc.extend "FIXSTACK SKIP: disabled (FIXSTACK_ENABLE=${FIXSTACK_ENABLE:-0})"
-         echo "$(date -u +%FT%TZ) SKIP dpquar/dpclamp autoload: disabled by FIXSTACK_ENABLE" \
-             >> /data/gw/logs/fixstack.log 2>/dev/null
-         # 标记"按设计未加载": avail_sampler 见到它把 sys.kernel 判 off(不冒充绿,
-         # 也不产生降级事件)。真加载失败时此标记不存在 → 仍判 down。
-         : > /tmp/fixstack.disabled 2>/dev/null
-     elif grep -qsE '(dc_main|run_deep|grab_cand|process_block|dpclampd|quarantine_page)\+0x|task:dpclampd' \
-             /sys/fs/pstore/console-ramoops* 2>/dev/null; then
-         logger -t rc.extend "FIXSTACK SKIP: last panic backtrace names fix-stack"
-         echo "$(date -u +%FT%TZ) SKIP dpquar/dpclamp autoload: last pstore names fix-stack in backtrace" \
-             >> /data/gw/logs/fixstack.log 2>/dev/null
-         : > /tmp/fixstack.disabled 2>/dev/null
-     else
-         rm -f /tmp/fixstack.disabled 2>/dev/null
-         lsmod | grep -q '^dpquar ' || { insmod /data/gw/dpquar.ko 2>/dev/null \
-             && logger -t rc.extend "dpquar auto-loaded (qmask=0x3f0)" \
-             || logger -t rc.extend "dpquar insmod FAILED (kernel mismatch?)"; }
-         lsmod | grep -q '^dpclamp ' || { insmod /data/gw/dpclamp.ko 2>/dev/null \
-             && logger -t rc.extend "dpclamp auto-loaded (v1.4 sched-deep+seed)" \
-             || logger -t rc.extend "dpclamp insmod FAILED"; }
-         # v2.9 (SIGSEGV §8.11 T3): feed the cross-boot stale-PFN union right
-         # after insmod, before the daemon zoo churns those pages -- a stable
-         # MD stale set then never reaches a victim (no first-NE tax per
-         # boot). Seed stats land in fixstack.log for the T3 verdict.
-         if lsmod | grep -q '^dpclamp ' && [ -s /data/gw/dpclamp_pfns.txt ]; then
-             cat /data/gw/dpclamp_pfns.txt > /proc/dpclamp_seed 2>/dev/null \
-                 && logger -t rc.extend "dpclamp seed fed" \
-                 || logger -t rc.extend "dpclamp seed feed FAILED"
-             echo "$(date -u +%FT%TZ) seed: $(cat /proc/dpclamp_seed 2>/dev/null)" \
-                 >> /data/gw/logs/fixstack.log 2>/dev/null
-         fi
-         echo "$(date -u +%FT%TZ) autoload: dpquar=$(lsmod | grep -c '^dpquar ') dpclamp=$(lsmod | grep -c '^dpclamp ')" \
-             >> /data/gw/logs/fixstack.log 2>/dev/null
-     fi
+     # v3.1 (SIGSEGV §8.13): 旧内核修复栈已整体退役, 此处不再做任何自动加载。
+     #   退役理由一句话: 稳态扣留 0 页 + 两条新增通路空转(无实测收益), 且自身
+     #   造成三次内核级故障(RCU stall / Oops / 25min 冻结)。
+     #   新方案接入点预留在此处: 落地时在此写它的自加载与守卫逻辑, 并同步
+     #   MANIFEST 与注册表; 当前版本不执行任何 insmod/门控/台账动作。
      # v1.6: route A -- FH modem-stack environment parallel to our layer
      # (dial: mobilenetwork 过渡期 + dial_keeper 兜底; rc19 skips rmmod+dial_5g via MODE.fh gate)
      # v1.7 (D2 开箱审查): MODE.fh 首刷自建 — kit 从不创建该标志, 纯原厂直刷时
@@ -223,7 +177,7 @@ case "$slot" in
      insmod /data/gw/healthdog.ko forensic=$_fore armed=0 2>/dev/null
      nohup sh /data/gw/rc19.sh >/tmp/rc19.log 2>&1 &
      # v3.0 (SIGSEGV Phase 1): 改回内核默认 0。该设置原本只为"锁内深遍历 +
-     #   修复栈"组合兜底, 叠加源已随栈停用消失; 保留 1 会把任何真实 RCU 停顿
+     #   旧栈"组合兜底, 叠加源已随旧栈退役消失(§8.13); 保留 1 会把任何真实 RCU 停顿
      #   升级成重启, 既丢现场又会打断刚修好的 NE 台账。
      echo 0 > /proc/sys/kernel/panic_on_rcu_stall 2>/dev/null
      [ -e /proc/healthdog ] || insmod /data/gw/healthdog.ko 2>/dev/null

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """selftest.py -- assertion-based functional test suite for the LG6151M gateway.
+v2.67 (2026-10-26 SIGSEGV §8.13): 旧内核修复栈整体退役 -- t_fixstack 改为退役
+  断言(lsmod / /proc 节点 / /data .ko / rc19 非注释引用 四处零残留), 并删除
+  marker 分支与 SKIP 台账断言(该台账不再产生)。
 v2.66 (2026-10-26 SIGSEGV Phase 1): 修复栈默认停用 -- t_fixstack 改为
   marker 分支(停用时断言未加载/节点不存在/SKIP 台账/采样器判 off; 启用时仍走
   原在位契约); t_avail_ne_drill 只数 op->deg, 不再把开机 mai->op 启动迁移算成假红。
@@ -2278,41 +2281,24 @@ def t_p2_batch3():
            % (sl, nl, dlock, wl, flock, rows, led, fz[-80:]))
 
 
-@test("fixstack: 默认停用 (Phase 1) / 启用时校验在位契约")
+@test("fixstack: 旧内核修复栈已退役 (§8.13) —— 模块/节点/文件/引用零残留")
 def t_fixstack():
-    # v2.66 (SIGSEGV Phase 1): 修复栈默认停用, 判据随之反转。
-    #   停用(marker 在) → 双模块不得加载 + /proc 节点不得存在 + fixstack.log
-    #     必须有 SKIP 台账行; 采样器须判 off 而非 down(否则制造永久假降级)。
-    #   启用(marker 不在, 即 FIXSTACK_ENABLE=1 且未被 panic guard 跳过) →
-    #     仍按原部署契约断言: 双模块装载 + dpquar patched=1 + dpclamp v1.4
-    #     /proc v2 遥测(deep/burst/trig/seed + pfns 导出)可读。
-    marker = dev("test -f /tmp/fixstack.disabled && echo y").strip()
-    if marker == "y":
-        loaded = dev("lsmod 2>/dev/null | grep -cE '^(dpquar|dpclamp) '").strip()
-        nodes = dev("ls -1 /proc/dpquar /proc/dpclamp 2>/dev/null | wc -l").strip()
-        skip = dev("grep -c 'SKIP dpquar/dpclamp autoload' "
-                   "/data/gw/logs/fixstack.log 2>/dev/null").strip()
-        lv = dev("grep '^sys.kernel|' /tmp/avail_last 2>/dev/null | cut -d'|' -f4").strip()
-        ok = (loaded == "0" and nodes == "0" and int(skip or 0) >= 1
-              and lv in ("off", "mai", ""))
-        record(t_fixstack._test_name, "system", ok,
-               "disabled loaded=%s nodes=%s skip=%s avail=%s" % (loaded, nodes, skip, lv))
-        return
-    dq = dev("head -1 /proc/dpquar 2>/dev/null").strip()
-    dc = dev("head -1 /proc/dpclamp 2>/dev/null").strip()
-    d2 = dev("grep -c '^deep deeps=' /proc/dpclamp 2>/dev/null").strip()
-    b2 = dev("grep -c '^burst bursts=' /proc/dpclamp 2>/dev/null").strip()
-    t2 = dev("grep -c '^trig episodes=' /proc/dpclamp 2>/dev/null").strip()
-    ring = dev("grep -c '^ring$' /proc/dpclamp 2>/dev/null").strip()
-    sd = dev("grep -c '^seed fed=' /proc/dpclamp 2>/dev/null").strip()
-    pf = dev("test -r /proc/dpclamp_pfns; echo $?").strip()
-    ok = (dq.startswith("dpquar patched=1")
-          and dc.startswith("dpclamp") and "clamped=" in dc
-          and d2 == "1" and b2 == "1" and t2 == "1" and ring == "1"
-          and sd == "1" and pf == "0")
+    # v2.67 (SIGSEGV §8.13): 旧内核修复栈整体退役, 判据改为"退役断言"。
+    #   栈已从仓内删除, 设备侧任何一处残留都是回归; 四条同时为真才算通过:
+    #     ① lsmod 不得有 dpquar/dpclamp;
+    #     ② /proc/dpquar、/proc/dpclamp 节点不得存在;
+    #     ③ /data/gw/dpquar.ko、/data/gw/dpclamp.ko 不得存在;
+    #     ④ /data/rc19.sh 非注释行不得引用 dpquar/dpclamp(启动链不得再拉它)。
+    #   旧版 marker 分支与 SKIP 台账断言一并删除 —— 该台账不再产生。
+    loaded = dev("lsmod 2>/dev/null | grep -cE '^(dpquar|dpclamp) '").strip()
+    nodes = dev("ls -1 /proc/dpquar /proc/dpclamp 2>/dev/null | wc -l").strip()
+    kos = dev("ls -1 /data/gw/dpquar.ko /data/gw/dpclamp.ko 2>/dev/null | wc -l").strip()
+    refs = dev("grep -v '^[[:space:]]*#' /data/rc19.sh 2>/dev/null "
+               "| grep -cE 'dpquar|dpclamp' || true").strip()
+    ok = (loaded == "0" and nodes == "0" and kos == "0" and refs == "0")
     record(t_fixstack._test_name, "system", ok,
-           "dpquar=[%s] dpclamp=[%s] deep=%s burst=%s trig=%s ring=%s seed=%s pfns_rc=%s"
-           % (dq[:44], dc[:64], d2, b2, t2, ring, sd, pf))
+           "retired loaded=%s nodes=%s kos=%s rc19_refs=%s"
+           % (loaded, nodes, kos, refs))
 
 
 

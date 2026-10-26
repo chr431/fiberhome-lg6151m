@@ -55,7 +55,7 @@
 | 组件 | 判据键/来源 | 降级信号 |
 |---|---|---|
 | 启动链 | bootgate + boot 台账 healthy | babysit 介入记录 |
-| 内核/修复栈 | **Phase 1 起默认停用**：`/tmp/fixstack.disabled` 在位 → 判 `off`（不出事件）；`FIXSTACK_ENABLE=1` 时才走 pstore 零 KE + `/proc/dpquar` patched=1 + `/proc/dpclamp` 在位 | fixstack.log SKIP 行、NE 滴漏率（全局） |
+| 内核/修复栈 | **旧栈已退役（Phase 2）**：判据固定 `off`（不出事件）——模块与 `/proc` 节点均不存在。新方案接入后需重定义本行 | NE 滴漏率（全局） |
 | 监督层自身 | watchdog_state 文件龄 <3×CYCLE + watchdog 心跳 (补:supervisor=) | EVT 日志停写 |
 | 日志管线 | log_keeper(SVC) + logc frames 前进 | logc_rc≠0 |
 | 网关 GUI | port80 + bootgate GUI 判据 | api.log 5xx 模式 |

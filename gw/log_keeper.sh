@@ -1,12 +1,12 @@
 #!/bin/sh
-# log_keeper.sh v2.10 -- 日志持久化守护（日志改善专项轮）
-#   v2.10 (SIGSEGV §8.11 T3): dpclamp 持有集收割 — 每 5min 读 /proc/dpclamp_pfns
-#   维护 union(/data/gw/dpclamp_pfns.txt, 喂下次开机种子) + 每 boot 快照
-#   (logs/dpclamp_pfn/<boot_id>.txt, held 数变化才重写; 跨启动 diff 探针)。
+# log_keeper.sh v2.11 -- 日志持久化守护（日志改善专项轮）
+#   v2.11 (SIGSEGV §8.13): 旧内核修复栈退役 —— 删除其持有集收割段(union 种子
+#   文件 + 每 boot 快照) 与 stability_metrics 的 fix-stack 四列(clamp/dheld/
+#   deeps/episodes: 模块不存在时恒为 -1 的死列, 不再产生)。
 #   v2.9 (可用性轮 P1): 驱动 avail_sampler.sh (10min 节拍 CYC%20 + CYC=1 首采;
 #   单遍有界, 崩溃只留 NE 一行, 覆盖率指标自会体现 — AVAILABILITY_DESIGN §3)。
 #   v2.8 (SIGSEGV §8.10.2): stability_metrics.tsv +fix-stack 列
-#   (clamp/dheld/deeps/episodes, 绝对计数, -1=模块缺席) —— NE 计数同表可判相关性。
+#   (clamp/dheld/deeps/episodes); v2.11 随旧内核修复栈退役删除该四列。
 #   v2.7 (2026-10-21 SIGSEGV 家族轮 2): delta() 改调自建静态 logcut —— busybox
 #   awk 只要在运行期存在数组(B 收集锚点后的行), 退出清理就约 1% SIGSEGV;
 #   实测"锚点在文件中段(数组被填充)" 300 次 2 崩, 仅去掉 split 不够。
@@ -312,27 +312,6 @@ while :; do
         if [ $((CYC % 20)) -eq 0 ] || [ "$CYC" = 1 ]; then
             sh /data/gw/avail_sampler.sh >/dev/null 2>&1 || true
         fi
-        # v2.10 (SIGSEGV §8.11 T3): dpclamp 持有集台账 — union 文件喂下次
-        # 开机的种子(rc.extend v2.9), 每 boot 快照(held 数变化才重写)是
-        # 跨启动集合 diff 的探针证据。busybox sort 标量管道, 无 awk 数组。
-        if [ -r /proc/dpclamp_pfns ]; then
-            cat /proc/dpclamp_pfns > /tmp/dpfn.$$ 2>/dev/null
-            if [ -s /tmp/dpfn.$$ ]; then
-                _bid2=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
-                _sf=$DIR/dpclamp_pfn/$_bid2.txt
-                _n1=$(wc -l < /tmp/dpfn.$$ 2>/dev/null)
-                _n2=$(wc -l < "$_sf" 2>/dev/null)
-                case "$_n2" in ''|*[!0-9]*) _n2=-1 ;; esac
-                if [ "$_n1" != "$_n2" ]; then
-                    mkdir -p $DIR/dpclamp_pfn 2>/dev/null
-                    mv /tmp/dpfn.$$ "$_sf" 2>/dev/null
-                fi
-                cat /data/gw/dpclamp_pfns.txt "$_sf" 2>/dev/null | sort -u \
-                    > /data/gw/dpclamp_pfns.txt.tmp 2>/dev/null \
-                    && mv /data/gw/dpclamp_pfns.txt.tmp /data/gw/dpclamp_pfns.txt
-                rm -f /tmp/dpfn.$$ 2>/dev/null
-            fi
-        fi
         _nf=$(ls $DIR/tmp/*.log 2>/dev/null | wc -l)
         _nb=$(cat $DIR/tmp/*.log 2>/dev/null | wc -c)
         _ds=$((DROP_S - DROP_S0)); _dd=$((DROP_D - DROP_D0))
@@ -350,15 +329,8 @@ while :; do
         _rep=$(svc_repairs_1h)
         _load=$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null | tr ' ' '_')
         _ma=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo 2>/dev/null)
-        # v2.8 (SIGSEGV §8.10.2): fix-stack telemetry -- absolute counters
-        # (daily 04:00 reboot resets them; deltas computed offline). -1 marks
-        # "module absent" so it never reads as a healthy zero.
-        _dcl=$(sed -n 's/^dpclamp .* clamped=\([0-9]*\).*/\1/p' /proc/dpclamp 2>/dev/null)
-        _dch=$(sed -n 's/^dpclamp .* held=\([0-9]*\)\//\1/p' /proc/dpclamp 2>/dev/null)
-        _dcd=$(sed -n 's/^deep deeps=\([0-9]*\).*/\1/p' /proc/dpclamp 2>/dev/null)
-        _dce=$(sed -n 's/^trig episodes=\([0-9]*\).*/\1/p' /proc/dpclamp 2>/dev/null)
         _mfile=$DIR/stability_metrics.tsv
-        echo "$(date +%s) up=$U logc_rc=${_lc:-?} frames=${_lcf:-0} bad=${_lcb:-0} resync=${_lcr:-0} dropped=${_lcd:-0} io=${_lcio:-0} crash=${_lcc:-0} repairs_1h=${_rep:-0} load=$_load memavail=${_ma:-?}KB clamp=${_dcl:--1} dheld=${_dch:--1} deeps=${_dcd:--1} episodes=${_dce:--1}" >> "$_mfile"
+        echo "$(date +%s) up=$U logc_rc=${_lc:-?} frames=${_lcf:-0} bad=${_lcb:-0} resync=${_lcr:-0} dropped=${_lcd:-0} io=${_lcio:-0} crash=${_lcc:-0} repairs_1h=${_rep:-0} load=$_load memavail=${_ma:-?}KB" >> "$_mfile"
         _mn=$(wc -l < "$_mfile" 2>/dev/null || echo 0)
         if [ "${_mn:-0}" -gt 5000 ]; then
             tail -n 2500 "$_mfile" > "$_mfile.tmp" 2>/dev/null && mv "$_mfile.tmp" "$_mfile"

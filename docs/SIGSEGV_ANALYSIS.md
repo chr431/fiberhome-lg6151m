@@ -727,6 +727,30 @@ unknown）**只作诊断分组，不参与主判** —— 「ip 命令崩了」�
 按上述 6 条排除规则对 `/data/gw/logs/ne_events.tsv` 逐行复算；本机存有复算
 脚本 `tmpfiles/sigsegv_audit/verify_rate4.py`（仓外，按 oneoff 纪律不入仓），
 任何人都可据本节规则重写一遍并对照。
+### 8.13 旧修复栈退役（2026-10-26）
+
+**结论**：`dpquar` + `dpclamp` 这一栈整体退役，源码、产物与构建脚本同批从仓内删除，
+可经 git 历史取回（`gw/src/dpquar.c`、`gw/src/dpclamp.c`、`gw/bin/dpquar.ko`、
+`gw/bin/dpclamp.ko`、`tools/build_dpquar.sh`、`tools/build_dpclamp.sh`）。§8.12 的
+Phase 2 两臂判决协议随之不再执行 —— 没有栈可判。
+
+三条理由：
+
+1. **无实测收益**：Phase 0 修好观测后复核确认，稳态下该栈扣留 0 页（qmask 只覆盖
+   teardown 站点，而稳态流量只走 tx1/rx1）；§8.11 新增的两条通路（定时 deep、跨启动
+   PFN 种子）也空转，残余率上找不到可归因于它的台阶下降。
+2. **三次自伤**：该栈自身造成三次内核级故障 —— 2026-10-22 20:45 teardown 锁内二次方
+   去重致 RCU stall、2026-10-22 21:33 `alloc_pages_bulk_array` 自用崩溃致 Oops、
+   2026-10-23 00:48 固定周期 MOVABLE 批量分配致 25min 渐进冻结。
+3. **快速筛查不显著且偏差偏向栈**：A/B 快速筛查统计量 t=1.10，远未达显著；且该口径的
+   已知偏差方向有利于栈。据此不存在支持「有收益」的统计证据，按 §8.12 第 1 条（默认
+   判无收益）直接退役。
+
+**设备侧同步处置**：`rc.extend.sh` 删除整段自载逻辑（新方案接入点原位预留，当前不留
+任何自动加载动作；`panic_on_rcu_stall=0` 保留，属 Phase 1 的独立决定）、`log_keeper.sh`
+删除持有集收割与 fix-stack 遥测四列、`core_meta.sh` 删除 NE 探针、`avail_sampler.sh`
+的 `s:kernel` 改判 off、`selftest.py` 的 `t_fixstack` 改为「退役断言」（模块/节点/文件/
+引用四处零残留）。
 
 
 ## 9. 证据/产物索引

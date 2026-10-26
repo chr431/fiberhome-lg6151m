@@ -1,11 +1,11 @@
 #!/bin/sh
-# core_meta.sh v1.2 -- core_pattern metadata wrapper (stability P1-2/P1-5).
+# core_meta.sh v1.3 -- core_pattern metadata wrapper (stability P1-2/P1-5).
+# v1.3 (SIGSEGV §8.13): 旧内核修复栈退役 —— 删除 v1.1 加的 NE 探针(崩溃时向旧栈
+#   /proc 节点写 deep 的那一行)。本脚本此后只做元数据落盘, 不再触碰任何模块。
 # v1.2 (SIGSEGV Phase 0): ne_events.tsv 行尾增 origin 列
 #   (our-tree/vendor-tree/unknown) —— 台账"归零"时区分"修好了"与"看不见了";
 #   判定只看祖先链 comm/cmdline(静态农场 exe 全同, 不可判), 见 _origin()。
-# v1.1 (SIGSEGV 8.10.2): NE-as-probe -- poke /proc/dpclamp "deep" before
-#   handing the core to aee (episode-reactive drain; module-side cooldown).
-#   Census hygiene: argv newlines/tabs are squashed (multi-line args broke
+# v1.1: Census hygiene: argv newlines/tabs are squashed (multi-line args broke
 #   TSV rows) and pre-NTP-sync epochs get an unsync=1 marker column.
 #
 # aee owns /proc/sys/kernel/core_pattern as
@@ -132,10 +132,6 @@ _n=$(ls "$DIR" 2>/dev/null | wc -l)
 if [ "${_n:-0}" -gt 120 ]; then
     ls -t "$DIR" 2>/dev/null | tail -n +121 | while read -r _f; do rm -f "$DIR/$_f"; done
 fi
-
-# v1.1: NE probe -- tell dpclamp a crash just happened (best effort, fast
-# fail when the module is absent; rate limiting lives inside the module)
-echo deep > /proc/dpclamp 2>/dev/null
 
 # --- hand the core to aee exactly as before (stdin untouched) -------------
 if [ -x /sbin/aee_core_forwarder ]; then

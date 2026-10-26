@@ -1,5 +1,9 @@
 #!/bin/sh
-# avail_sampler.sh v1.5 -- 组件可用性采样器 (AVAILABILITY_DESIGN §3, 防假绿轮)
+# avail_sampler.sh v1.7 -- 组件可用性采样器 (AVAILABILITY_DESIGN §3, 防假绿轮)
+# v1.7 (SIGSEGV §8.13): 旧内核修复栈退役 —— s:kernel 判据去掉模块依赖(lsmod/
+#   /proc 探针)改为固定 off(该组件已无加载体, 判 off 既不冒充绿也不制造假降级);
+#   删除 sweeps 计数前进判据(SW_STUCK, 模块不存在时是必然不动的死判据)。
+#   新方案落地时在此重建内核侧活性判据。
 #
 # 由 log_keeper v2.9 每 10min 调用 (CYC%20 + CYC=1 首采); 单遍有界、无循环、
 # 无守护 —— 崩溃只留一行 NE 台账, 下一窗自愈, 覆盖率指标如实扣分。
@@ -22,8 +26,7 @@
 #   ② 结果探针组合: dp5g/dpeth(IP 在但不通=v3.44 型谎言→deg, 双路皆死→
 #      wan.agg 记 down)、http200/dnssvc(监听≠在服务; 实测 127 探测不可达,
 #      必须打 LAN 地址 192.168.9.1)、authd_state 会话态(进程在≠会话活);
-#   ③ 管线/内核活性: dpclamp sweeps 计数不前进→kernel deg、stability_metrics
-#      停更>16min→logging deg (进程在≠管线在);
+#   ③ 管线活性: stability_metrics 停更>16min→logging deg (进程在≠管线在);
 #   ④ WiFi 结果信号: wifi_guard 告警窗 / dmesg reason=3 风暴(L28"连上即断")
 #      → 双频组件 deg; usb 未启用记 off(不冒充绿)。
 #
@@ -75,7 +78,7 @@ NL=$(lc "$DIR/ne_events.tsv"); RL=$(lc "$DIR/netcfg_repairs.tsv")
 AL=$(lc /tmp/api.log); DL=$(lc "$DIR/dmesg.log")
 oWL=$(sed -n '2p' "$SESS" 2>/dev/null); oSL=$(sed -n '3p' "$SESS" 2>/dev/null)
 oNL=$(sed -n '4p' "$SESS" 2>/dev/null); oRL=$(sed -n '5p' "$SESS" 2>/dev/null)
-oTS=$(sed -n '6p' "$SESS" 2>/dev/null); oSW=$(sed -n '8p' "$SESS" 2>/dev/null)
+oTS=$(sed -n '6p' "$SESS" 2>/dev/null)
 oAL=$(sed -n '9p' "$SESS" 2>/dev/null); oDL=$(sed -n '10p' "$SESS" 2>/dev/null)
 [ -n "$oWL" ] || { oWL=$WL; oSL=$SL; oNL=$NL; oRL=$RL; oAL=$AL; oDL=$DL; }
 
@@ -169,11 +172,7 @@ GUEST_ON=0; [ "${GUEST:-0}" = 1 ] && GUEST_ON=1
 AUTH_ON=0; [ -f /data/gw/uplink.conf ] && AUTH_ON=1
 USB_ON=0;  [ "${USB_ENABLED:-0}" = 1 ] && USB_ON=1
 
-# ---- ③ 管线/内核活性 ----
-# dpclamp sweep 计数前进 (修复栈 kthread 活着且在巡检; 计数不动=卡死)
-SW=$(sed -n 's/^dpclamp v1.[0-9]* sweeps=\([0-9]*\).*/\1/p' /proc/dpclamp 2>/dev/null)
-SW_STUCK=0
-if [ -n "$SW" ] && [ -n "$oSW" ] && [ "$SW" = "$oSW" ]; then SW_STUCK=1; fi
+# ---- ③ 管线活性 (内核侧判据随旧栈退役, 见 §8.13) ----
 # 日志管线结果: stability_metrics 停更 (5min 节拍, >16min 视为断流)
 # v1.3: 活性时刻读台账末行首列 epoch —— busybox date -r 是 RFC2822 输出语义
 #       非文件 mtime(演练轮实测 bad number), 设备又无 stat; 台账自带 epoch。
@@ -249,13 +248,9 @@ KEYS_OF() {
 level_of() { # $1=判据串 → 级别 (op/deg/down/nodata/off)
     case "$1" in
     s:kernel)
-        # v1.6 (SIGSEGV Phase 1): 修复栈默认停用, 按设计未加载时判 off(不冒充绿、
-        #   也不产生降级事件); 标记缺失 = 本该加载却没在, 仍判 down 以便发现真故障。
-        [ -f /tmp/fixstack.disabled ] && { echo off; return; }
-        lsmod 2>/dev/null | grep -q '^dpquar ' || { echo down; return; }
-        lsmod 2>/dev/null | grep -q '^dpclamp ' || { echo down; return; }
-        head -1 /proc/dpquar 2>/dev/null | grep -q 'patched=1' || { echo down; return; }
-        if [ "$SW_STUCK" = 1 ] || [ "${NE_N:-0}" -ge 4 ]; then echo deg; else echo op; fi
+        # v1.7 (SIGSEGV §8.13): 旧内核修复栈已整体退役 —— 该组件已无可判的加载
+        #   体, 固定判 off(不冒充绿, 也不产生降级事件)。新方案落地时在此重建判据。
+        echo off
         ;;
     s:supervisor)
         [ "$FRESH" = 1 ] && echo op || echo down
@@ -404,11 +399,11 @@ echo "$TABLE" | while IFS='|' read -r id name grp src; do
     fi
 done
 
-# ---- 会话态原子更新 (10 行: hour/wl/sl/ne/rl/last_ts/day/sweeps/apiCur/dmesgCur) ----
+# ---- 会话态原子更新 (10 行: hour/wl/sl/ne/rl/last_ts/day/(保留位)apiCur/dmesgCur) ----
 S=/tmp/avail_sess.$$
 oDAY=$(sed -n '7p' "$SESS" 2>/dev/null)
 { echo "$HOUR"; echo "$WL"; echo "$SL"; echo "$NL"; echo "$RL"
-  echo "$NOW"; echo "$TODAY"; echo "${SW:-0}"; echo "$AL"; echo "$DL"; } > "$S"
+  echo "$NOW"; echo "$TODAY"; echo "0"; echo "$AL"; echo "$DL"; } > "$S"
 mv "$S" "$SESS"
 
 # ---- 跨日归并: 用更新前会话日, 从 HF 归并该日 → DF ----

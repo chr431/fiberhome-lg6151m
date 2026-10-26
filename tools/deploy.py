@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""deploy.py v2.30 -- single source of truth for PC<->CPE deployment + drift guard.
+"""deploy.py v2.31 -- single source of truth for PC<->CPE deployment + drift guard.
 
+v2.31 (SIGSEGV §8.13): MANIFEST -gw/bin/dpquar.ko -gw/bin/dpclamp.ko —— 旧内核
+     修复栈整体退役(源码/产物/构建脚本同批删除, 可经 git 历史取回)。
 v2.30 (avail round): MANIFEST +gw/avail_sampler.sh +gw/www/api_avail.sh
      (component availability system P1; AVAILABILITY_DESIGN).
 v2.29 (USB round): MANIFEST +gw/usb_mgr.sh +gw/www/api_usb.sh (USB-C
@@ -135,8 +137,6 @@ MANIFEST = [
     ("gw/bin/healthdog.ko", "/data/gw/healthdog.ko"),
     ("gw/bin/v3_fix.ko", "/data/gw/v3_fix.ko"),
     ("gw/bin/v3_steth.ko", "/data/gw/v3_steth.ko"),
-    ("gw/bin/dpquar.ko", "/data/gw/dpquar.ko"),           # dpmaif released-page quarantine (SIGSEGV root fix)
-    ("gw/bin/dpclamp.ko", "/data/gw/dpclamp.ko"),           # MD stale-list drain (SIGSEGV root fix, part 2)
     ("gw/udhcpc_eth1.script", "/data/gw/udhcpc_eth1.script"),
     ("gw/defaults.conf", "/data/gw/defaults.conf"),
     ("gw/watchdog.sh", "/data/gw/watchdog.sh"),  # L13: continuous invariant monitor

@@ -103,7 +103,7 @@ AP 驱动重映射（E5）、DRAM 单元坏（256MB×3 遍 memtest 0 翻转 + �
 | A3 | `sleep`（无 printf）也崩、静态件同样崩（static busybox 61 次/35h）、回放崩溃输入 10/10 不复现 | ne_events + soak |
 | A4 | 2 秒最小复现器（`snprintf("%ld")` 2e8 循环）在剧集期秒崩、平静期通过——是**剧集探测器**，不是缺陷证明 | `tools/oneoff/printf_repro/` |
 | A5 | 受害页 PA 曾出现在 live 环条目 `{info=0x10000021(PLEN0=4096,DONE=0), ptr=受害PA}`（PA 级匹配，非字段模型） | 2026-10-22 下午扫描 |
-| A6 | 环机制静态侧：dpmaif stop 路径**先归还 RX 页、后等 medmcu ack（msleep 无上限）**，且不清 PIT/BAT 基址寄存器；RX 数据缓冲=伙伴系统普通页 dma_map 后交 MD | ktext 反汇编（kern_an.py） |
+| A6 | 环机制静态侧：~~dpmaif stop 路径先归还 RX 页、后等 medmcu ack（msleep 无上限）~~ ⟦**已证伪（2026-10-27 反汇编，见 §8.34）**：实际顺序是 disable_irq(`dpmaif_stop+0xd8`) → stop_hw(+0xe4，DL idle/ack 等待) → stop_tx_sw(+0xec) → stop_rx_sw(+0xf4，还页+清表)，即**先等 ack 再还页**，与原文相反⟧。不清 PIT/BAT 基址寄存器一条**仍成立**（stop_rx_sw+0x1c0/+0x1d4 清零 PIT/BAT 缓冲内容但不碰基址寄存器）；RX 数据缓冲=伙伴系统普通页 dma_map 后交 MD | ktext 反汇编（kern_an.py） |
 | A7 | 受害生态 = 新页获取率：30s 守护舰队高频 spawn 的短命工具全中招；固定地址长命探针 0 命中；官方固件曝光≈0（无常驻 logread、无 churn；`/data/debuglog/` 从未被写） | 普查 + 官方对比 |
 | A8 | 污染与蜂窝 PDP 流量无因果（ccmni 近零时仍命中；写环记录与数据流量无关）——**流量相关性不是判据** | 2026-10-22 ABAB |
 
@@ -2049,6 +2049,71 @@ slot_changed_oldvalue_buddy   = 66       （旧值已死，正常，作对照）
    以及有没有"释放后仍被引用"的路径。kallsyms 与反汇编工具在库（`kern_an.py`），**纯主机侧、零成本**。
 3. 剧集触发条件的调查，若还要继续，只剩 MD 侧，而 MD 侧的三条通路（共享内存 / AT / 固件逆向）目前都被堵死。
 
+### 8.34 静态反汇编：BAT 发布/归还路径与危险窗口（2026-10-27，纯主机侧）
+
+工具 `tmpfiles/p0x/kern/kern_an.py`（capstone + kallsyms 注解，BASE_VA=0xffffffc008110000），反汇编约 2800 条指令。**本轮未访问设备。**
+
+**一、结构定位（纠正一个此前的心智模型）**
+
+qctx = base + qid*0x81c0；描述符上下文在 qctx+0x488：
+
+| 偏移 | 含义 |
+|---|---|
+| +0x490 | PIT VA（16 B 项 × 0x2000 = 0x20000） |
+| +0x4a4 / +0x4a6 | PIT ridx / hw-wridx |
+| +0x4b0 / +0x4b8 | BAT VA / BAT PA（8 B 项 × 0x4000 = 0x20000） |
+| +0x4d0 | BAT 影子 VA（{skb@0, dma@8, len@0x10}，步距 0x18） |
+| +0x4500 / +0x4520 | 同构 FRG 表 / 影子（步距 0x20） |
+
+⟦**PIT 项里放的是 BAT 槽号，不是 PA**（word0 bit0=有效，bits3..15 与 word1 bits40..42 合成 16-bit 槽号）。PA 只在 BAT / FRG 表里（低 32 位 + 字节 4 = PA>>32）。**此前把 PIT 当「PA 表」的所有推理须按此重读。**⟧
+
+**二、发布点**
+
+| 函数+偏移 | 指令 | 目标 |
+|---|---|---|
+| `alloc_med_rx_buf+0x2b0` | `str w0,[x28,x23]` | BAT 槽低 32 位 = dma_addr（x23=idx*8，x28=[qctx+0x4b0]） |
+| `alloc_med_rx_buf+0x2a8` | `strb w1,[x2,#4]` | 槽字节 4 = PA>>32 |
+| `alloc_med_rx_frag+0xf4/+0xf0` | str / strb | FRG 表槽 |
+| `bat_init+0x60/+0x64` | dma_alloc_attrs | **只建空表，不填任何 PA** |
+
+提交门铃 `med_bat_recycle_cmd+0x6c`：命令字 0x90000000|qid<<27|count<<16|wridx，成功后才推进 wridx。
+
+**三、归还点（没有一个同步撤销 MD 可见结构）**
+
+| 函数+偏移 | 动作 | 撤销 BAT[idx]？ |
+|---|---|---|
+| `collect+0xd68` | __dev_kfree_skb_any | **否** |
+| `collect+0xa48/+0xfb8` | dma_unmap_page_attrs | **否** |
+| `stop_rx_sw+0x228/+0x274` 两个循环 | unmap + 归还页 | **否（当轮不清表）** |
+| `stop_rx_sw+0x1c0/+0x1d4` | memset(pit_va) / memset(bat_va) | **是**（先释放后清零；不清基址寄存器） |
+
+**四、危险窗口**
+
+| # | 路径 | 需要 stop？ | 能否解释稳态注入 |
+|---|---|---|---|
+| A | refill 失败：free 与影子清零无条件，覆盖只在 dma_map 成功后 ⇒ BAT[idx] 永久持已释放 PA。但失败分支**不响门铃** ⇒ MD 消费指针停在 idx ⇒ **RX 停摆**而非注入 | 否 | 否（症状不符） |
+| B | 每包 free→publish 间隙内 BAT[idx] 持已释放 PA | 否 | 否（无门铃 MD 不能越过 idx，推断） |
+| **C** | **tasklet 与 work 都调用 collect，而 collect 内无并发保护**（+0xf40 只护 log-history；tasklet 设的 [qctx+0x85c4]=1 无人检查）。若二者同解一条 PIT 项：同一 skb 被 kfree 两次 + 连发两次 recycle_cmd ⇒ MD 消费指针 +2，表里只有后写者 ⇒ **idx+1 槽被当有效** | **否** | **是（唯一候选）** |
+| D | stop/start 窗口 | 是 | 否（与 §8.28–§8.33 阴性一致） |
+
+⟦窗口 C 目前是**推断，未证明 tasklet 与 workqueue 真能并发进入 collect**。证伪方法见 §8.34 五节。⟧
+
+**五、窗口 C 的证伪路径（任一即可）**
+
+1. 在反汇编里找到 collect 的真正互斥点（in_collect 计数/原子、tasklet_disable、cancel_work_sync 之类），并证明两上下文不会同时进入；
+2. 在 collect 入口/出口记录 CPU id + ktime，实测两上下文是否重叠。
+
+若确认无重叠，则只剩 A/B（只造成 RX 停摆），**稳态注入在 AP 侧无法成立**，须转向 MD 侧或「PIT 槽号被篡改」。
+
+**六、连带更正：§4-A6 方向写反了**
+
+原文「stop 路径先归还 RX 页、后等 medmcu ack」。实测顺序是 disable_irq(+0xd8) → **stop_hw(+0xe4，DL idle/ack 等待)** → stop_tx_sw(+0xec) → **stop_rx_sw(+0xf4，还页+清表)**，即**先等 ack 再还页**。
+
+⟦这使「stop 路径留下 MD 可见陈旧 PA」的假设从「很可能」降为「不成立」，与 D1 六轮的阴性互相印证。⟧
+
+**七、本轮未覆盖**
+
+谁把 [qctx+0x4b8] 的表 PA 写进 MD 寄存器 0x1022d180/0x184（dpmaif_set_addr_and_size_from_medmcu / dpmaif_start / drv_dpmaif_dl_* 未通读）。
 ## 9. 证据/产物索引
 
 - 本地（不入仓）：`tmpfiles/`（core×3、libc/logread 反汇编正本、p0x/kern

@@ -2343,6 +2343,52 @@ size_lo 是 **0x04210000 = 66 MB**，不是 0x42100。**少看了两位十六进
 
 纯读模块扫这两块：对每个`像 PA 的字`查页状态，统计 buddy/anon 命中。
 判据只有一个：**MD 共享内存里有没有指向已释放页的 PA**——若有，那就是「陈旧 PA 列表」本身。
+### 8.40 事故：dpscan8 触发 SEA 导致设备重启（2026-10-27 19:56）
+
+**一、现象**
+
+执行严格版 insmod 时 SSH 中断。恢复后发现设备**已自动重启**（19:56，`up 6 min`），
+而 `reboots.log` 里**没有 19:56 的条目**（只有每日 04:00 的定时项）⇒ **非计划重启**。
+
+**二、根因（pstore 实证，非推断）**
+
+`/sys/fs/pstore/console-ramoops-0` 尾部的调用栈：
+
+```
+insmod:  do_sea+0x44/0x54
+insmod:  do_mem_abort+0x44/0xac
+insmod:  el1_abort+0x40/0x60
+insmod:  copy_from_kernel_nofault+0xa4/0x108
+insmod:  init_module+0xcc/0x240 [dpscan8]
+insmod:  do_init_module+0x4c/0x1b8
+```
+
+⟦**`copy_from_kernel_nofault` 不能捕获 Synchronous External Abort。**
+它的 "nofault" 只覆盖可通过 extable 修复的**普通缺页**；SEA 是异步中止，直接走 `do_sea → die`。⟧
+
+**三、触发点：ccci_tag_mem 的驱动 vmap**
+
+v8 的 bug（`cur_off` 双重自增）使 `tag` 区**在 148 轮里从未被真正读过**（0 字节）。
+严格版修好了那个 bug —— **于是 tag 第一次被读，第一次就炸了**。
+
+对照证据（两侧都成立）：
+- 同一个 vmap 读 **mdc / mdnc 共 148 轮、10.4 GB 无任何异常**；
+- 而 **tag 区本身就是 System RAM**（`/proc/iomem: bfd60000-bfd6ffff : System RAM`），
+  §8.29 的 v2 用**线性映射**读过它，`read=ok`。
+
+⇒ 危险的不是 tag 这块内存，而是**用驱动的 vmap 去读它**。
+
+**四、处置**
+
+1. **tag 区一律走线性映射**（它是 System RAM），**禁止**经驱动 vmap 读；或直接放弃该区（只有 64 KiB，且 v2 已读到 `pa_words=0`）。
+2. **模块 init 里不许读未经证实的 vmap 区域**：只读已验证可读的那部分，其余留到 work 里分块探。
+3. 已确认设备恢复后 `dpscan8` **无残留**、`/data` 完好、`healthdog.sh` 在跑。
+
+**五、教训（并入 §7 仪器读数可信边界）**
+
+⟦`copy_from_kernel_nofault` 不是万能护栏。读**陌生映射**（尤其驱动 vmap 的保留内存）时，
+普通缺页会被修复，但 **SEA 会让内核直接死**。判断依据必须是"这块映射是否已被证实可读"，
+而不是"我用了 nofault 函数"。⟧
 ## 9. 证据/产物索引
 
 - 本地（不入仓）：`tmpfiles/`（core×3、libc/logread 反汇编正本、p0x/kern

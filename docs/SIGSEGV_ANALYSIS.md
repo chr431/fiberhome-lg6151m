@@ -642,8 +642,85 @@ ccmni3 有真实流量（≈17 pkt/s），**同窗 anon 监视 175 M 页·秒零
 19. **`mmdump` 的 `mode=0`（`__va`）只对 RAM 有效**。对 SCP SRAM（`0x15d12500`）用 mode=0 会取到
     野指针，读一次即 SEA → 整机重启（本轮实际发生一次，设备自行恢复）。MMIO/SRAM 必须 `mode=1`（ioremap）。
 
-2. 为何当前静默：可能与 SCP/引擎在热重启后重新初始化有关（region 表已按新 boot 的
-   0x8db7d040 等新地址重填）。**可复现的触发条件仍未知**。
-3. 「写者只打 free 页」假说：buddy 口径有陈旧显现代替，anon 口径 0 命中，
-   现有仪器无法区分"静默"与"只打 free 页"。
+
+---
+
+## 18. 让写入不打死进程：va_list 闸门 v2（2026-10-28 晚）
+
+> 目标从"止写"改为"止死"。做法：把 va_list 健康判据从 v1（§13.3 的 5 行 guard）升级到
+> **符合 AAPCS64 语义的 v2**，并用**设备上的真实静态二进制**做 A/B。
+> 产物：`tools/oneoff/printf_repro/layerchk/{h_vfprintf_v2.c,pfpoison.c,pffp.c}`；
+> 设备侧 `/data/repro/{pfpoison_c,pfpoison_g,pffp_g}`。
+
+### 18.1 受害者人口（`/data/gw/logs/ne_events.tsv`，746 条）
+
+剔除自测仪器（`/tmp/pf_*`、`/data/repro/*`、`probe*`）后 **299 条真实 NE**：
+
+| 可执行文件 | 次数 | 占比 |
+|---|---|---|
+| `/data/gw/bin/busybox` + `/bin/busybox` | 145 | 48% |
+| `/data/gw/bin/ip`（自建） | 82 | 27% |
+| `/sbin/logread` | 15 | 5% |
+| `/usr/bin/mipc_wan_cli` | 10 | 3% |
+| wpad / thermal_core / logd / xtables-legacy-multi / gdb … | 47 | 16% |
+
+Top2 = **76%**；按日速率 11–42 次/天。这些命令行走的都是"格式化输出很多"的路径，
+与 §4 的"printf 是最高频污染解引用路径"一致（相关性，非逐 core 归因）。
+
+### 18.2 判据量化（模拟：8 种实测载荷 × 32 个落点对齐）
+
+| 判据 | 拦截率 |
+|---|---|
+| v1（三指针 `>=0x1000` + `offs<0`） | **5–24 / 32**（16%–75%，随载荷形态变） |
+| v2（39 位地址 + 8B 对齐 + `offs∈[-64,0]`/`[-128,0]` + **落在本线程栈 1 MB 窗内**） | **32 / 32 = 100%** |
+
+v2 在 64 个模拟帧深上**零误判**。关键洞察：注入值永远是物理地址（0x8f..）/小整数/字节图案，
+**不可能落在当前栈指针 ±1 MB 内**——栈窗判据一次覆盖三类形态，而 v1 只挡得住"被清零/乱填"那一类。
+
+### 18.3 设备 A/B（真实静态二进制）
+
+| 程序 | 结果 |
+|---|---|
+| `pfpoison_c`（原版 musl vfprintf） | **rc=139 SIGSEGV**（第一个毒化 va_list 即死） |
+| `pfpoison_g`（v2 闸门） | **rc=0**，8 种形态全部打印 `0 0 0` |
+| `pffp_g`（健康 12 参数 × 200k 次 = 2.4 M 次 `pop_arg`） | **hits=0**，输出正确 |
+
+⇒「写入不再打死进程」在 **printf 解引用路径**上已有端到端证据，且无误伤。
+
+### 18.4 v2 判据（可复制）
+
+```c
+static inline int p1_sane_vals(unsigned long sp, unsigned long a, unsigned long b,
+                               unsigned long c, int go, int vo)
+{
+        unsigned long p[3] = { a, b, c };
+        for (int i = 0; i < 3; i++) {
+                if (p[i] < 0x10000UL || p[i] >= (1UL << 39)) return 0;  /* 用户空间 */
+                if (p[i] & 7UL) return 0;                               /* 对齐 */
+                if (p[i] < sp || p[i] >= sp + 0x100000UL) return 0;     /* 必须在本线程栈上 */
+        }
+        if (go > 0 || go < -64) return 0;    /* 0 = 通用寄存器已用尽，合法 */
+        if (vo > 0 || vo < -128) return 0;
+        return 1;
+}
+```
+
+**两个实测踩中的坑**：①`__gr_offs/__vr_offs` 到 **0 是合法的**（8 个通用寄存器用完），
+写成 `< 0` 会把健康调用全部误杀（12 参数格式实测 7 hits/次）；②`__builtin_frame_address(0)`
+在 -O2 下不可靠，栈基准要用 `&ap`。
+
+### 18.5 覆盖边界与补层
+
+| 层 | 覆盖 | 状态 |
+|---|---|---|
+| **L1 va_list 闸门** | printf 家族解引用（人口主力） | **已验证**（18.3） |
+| **L2 页尾屏蔽** | `.bss/.data` 全局：链接脚本在每页尾 `0xfc0..0xfff` 留 64 B 空洞，使全局量不跨该区 | 未实现（设计成立：写入恒落页尾） |
+| **L3 崩溃快速重启** | 兜底：非 printf 类（栈/堆/NULL）仍会死，靠 respawn 保服务 | 已有（watchdog/procd） |
+
+### 18.6 集成路径
+
+`h_vfprintf_v2.o` 显式链在 `libc.a` 之前即可覆盖同名符号（`tools/oneoff/printf_repro/README.md`
+已有该机制）。落地顺序：`gw/src/*` 自建件 → `busybox`（`tmpfiles/busybox-1.36.1` 可重建）
+→ 其余静态守护。**注意**：闸门只保证"不因这条路径死"，不保证"数据没被改坏"——受害结构被改写后
+的**语义后果**（如打印出错误内容）依然存在。
 

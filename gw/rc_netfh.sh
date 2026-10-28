@@ -1,5 +1,5 @@
 #!/bin/sh
-# rc_netfh.sh v3.12 -- route A: FH modem-stack environment (minimal army).
+# rc_netfh.sh v3.13 -- route A: FH modem-stack environment (minimal army).
 # v3.10 (2026-10-17 日志加密轮): 全程相位计时(t+Ns)+每阶段 pid/rc 快照; settle
 #   watch 每轮记录 ccmni 清单(不再只记最终结果); fw_apply rc、route/NAT 真实补装
 #   均留痕。24h 分析可区分"开机没起来"与"起来后又被拆"。
@@ -40,12 +40,13 @@ ph() { glog "PHASE $* (t+$(( $(cut -d. -f1 /proc/uptime 2>/dev/null) - ${T_BOOT:
 # v1.1: FH binaries+libs live outside the default PATH/loader path
 export PATH=$PATH:/fhrom/bin:/fhrom/fhshell
 export LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib
+# v3.13 (LAN v6 修复): v6 相位迁入 v6_reconcile.sh(判据=任一上行有全局 v6, 可重入).
 # v3.12 (batch3): serialize boot-time route/NAT writes with wan_agg/wan_eth.
 if [ -r /data/gw/netlock.sh ]; then . /data/gw/netlock.sh; else
     netcfg_lock() { return 0; }; netcfg_unlock() { :; }; netcfg_repair() { :; }
 fi
 log_rot
-glog "===== rc_netfh v3.12 start (epoch=$(date +%s) boot=$(cut -d. -f1 /proc/uptime)s slot=$(tr ' ' '\n' < /proc/cmdline | sed -n 's/^bootslot=//p') cci=$(cat /sys/kernel/ccci/boot 2>/dev/null)) ====="
+glog "===== rc_netfh v3.13 start (epoch=$(date +%s) boot=$(cut -d. -f1 /proc/uptime)s slot=$(tr ' ' '\n' < /proc/cmdline | sed -n 's/^bootslot=//p') cci=$(cat /sys/kernel/ccci/boot 2>/dev/null)) ====="
 
 # 1. config base — v3.1 (P3 终章): cfg_tool/shmsnap/树整体退役。
 #   蜂窝全功能(锁/制式/飞行/PIN/短信/扫描/拨号)已由 mipc_cellular+dial_keeper+
@@ -188,34 +189,11 @@ if [ -n "$IF" ]; then
     ip6tables -t nat -C POSTROUTING -s fd42:9ac1:7e50::/64 -o eth0 -j MASQUERADE 2>/dev/null ||         ip6tables -t nat -A POSTROUTING -s fd42:9ac1:7e50::/64 -o eth0 -j MASQUERADE
     ip6tables -C FORWARD -i br-lan -o eth0 -j ACCEPT 2>/dev/null ||         ip6tables -I FORWARD -i br-lan -o eth0 -j ACCEPT
     ip6tables -C FORWARD -i eth0 -o br-lan -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null ||         ip6tables -I FORWARD -i eth0 -o br-lan -m state --state ESTABLISHED,RELATED -j ACCEPT
-    if ip -6 addr show $IF 2>/dev/null | grep -q 'scope global'; then
-        # rc19 builds br-lan at ~t+50s; settle-watch usually outlasts it, but
-        # guard the race anyway (bounded poll, no blind sleep)
-        [ -d /sys/class/net/br-lan ] || { j=0; while [ $j -lt 12 ] && [ ! -d /sys/class/net/br-lan ]; do sleep 5; j=$((j+1)); done; }
-        ip -6 addr add fd42:9ac1:7e50::1/64 dev br-lan 2>/dev/null
-        # netagent RA-learns the v6 default route, but re-assert idempotently
-        ip -6 route show default | grep -q "dev $IF" || {
-            ip -6 route add default dev $IF
-            glog "REPAIR v6 default dev $IF (missing -> added rc=$?)"; }
-        ip6tables -t nat -C POSTROUTING -s fd42:9ac1:7e50::/64 -o $IF -j MASQUERADE 2>/dev/null || {
-            ip6tables -t nat -A POSTROUTING -s fd42:9ac1:7e50::/64 -o $IF -j MASQUERADE
-            glog "REPAIR v6 nat66 -o $IF (missing -> added rc=$?)"; }
-        ip6tables -C FORWARD -i br-lan -o $IF -j ACCEPT 2>/dev/null || {
-            ip6tables -I FORWARD -i br-lan -o $IF -j ACCEPT
-            glog "REPAIR v6 FORWARD br-lan->$IF (missing -> added rc=$?)"; }
-        ip6tables -C FORWARD -i $IF -o br-lan -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || {
-            ip6tables -I FORWARD -i $IF -o br-lan -m state --state ESTABLISHED,RELATED -j ACCEPT
-            glog "REPAIR v6 FORWARD $IF->br-lan established (missing -> added rc=$?)"; }
-        # Release before spawning radvd: a long-lived child must not inherit
-        # the netcfg lock fd (it would hold the lock forever).
-        [ "$_nl" = 1 ] && { netcfg_unlock; _nl=0; }
-        pidof radvd >/dev/null || /fhrom/bin/radvd -C /data/gw/radvd.conf -p /tmp/radvd.pid -m logfile -l /tmp/radvd.log
-        glog "v6: ula+nat66+radvd=$(pidof radvd) on $IF"
-        ph "v6 phase done (radvd=$(pidof radvd))"
-    else
-        glog "v6: no global v6 on $IF (bearer v4-only?) -- LAN v6 skipped"
-        ph "v6 phase skipped (no global v6 on $IF)"
-    fi
+    # v3.13: LAN v6 (ULA/NAT66/radvd) 相位移入 v6_reconcile.sh —— 判据不再是
+    #   "蜂窝承载口此刻有全局 v6"。实弹 2026-10-28: 开机承载 ccmni2 只有 v4 →
+    #   整块跳过(ULA/NAT66/radvd 全没做), 2min 后承载切到有全局 v6 的 ccmni3,
+    #   没有任何东西重跑 → LAN v6 整个 boot 缺失。新判据 = 任一上行(eth0/ccmni*)
+    #   有全局 v6, 且可重入(ccmni_up 拨号落地 + watchdog 兜底都会再调)。
 
     [ "$_nl" = 1 ] && netcfg_unlock
   else
@@ -239,6 +217,10 @@ if [ -n "$IF" ]; then
         glog "post-ladder rx=$R3"
     fi
 fi
+# v3.13: LAN v6 收敛(幂等; 判据/状态语义见 v6_reconcile.sh 头注)
+_v6o=$(sh /data/gw/v6_reconcile.sh apply 2>&1)
+glog "v6: $_v6o"
+ph "v6 phase done ($_v6o)"
 sh /data/gw/fw_apply.sh apply 2>/dev/null; FWRC=$?
 [ $FWRC -eq 0 ] && glog "fw_apply ok" || glog "WARN fw_apply rc=$FWRC"
-glog "===== rc_netfh v3.12 done (total=$(( $(cut -d. -f1 /proc/uptime) - ${T_BOOT:-0} ))s) ====="
+glog "===== rc_netfh v3.13 done (total=$(( $(cut -d. -f1 /proc/uptime) - ${T_BOOT:-0} ))s) ====="

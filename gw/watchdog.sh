@@ -1,5 +1,10 @@
 #!/bin/sh
-# watchdog.sh v1.34 -- on-device continuous invariant monitor.
+# watchdog.sh v1.35 -- on-device continuous invariant monitor.
+# v1.35 (2026-10-28 探针误判修正): dp5g 改 3 包探针(-c3 -W1, 任一回即通) ——
+#   实测蜂窝 SINR -11dB/5% 随机丢包, 单包探针每小时误判 ~10 次, 配合采样器的
+#   '窗口内任一次 FAIL 即整窗 deg' 把 5% 丢包放大成 ~80% 时间降级; 3 包后随机
+#   丢包误判率 5%->0.0125%, 真中断(连丢 3)仍判得出。radvd 键改由
+#   v6_reconcile.sh check 判定(区分'配置关闭'与'该在没在'), 并每 4 轮兜底收敛。
 # v1.34 (防假绿修正): dp5g 探针改"任一带 IP 的 ccmni 可通"(irat 承载切换实弹:
 #   09:46 ccmni2→ccmni3, 探针锚死旧口=假红; 绝对路径去 PATH 变量)。
 # v1.33 (防假绿轮): +http200/dnssvc/dp5g/dpeth 结果探针键(监听≠在服务/IP 在≠
@@ -314,9 +319,10 @@ run_cycle() {
     check_lib bss2g  "svc_sock_live /var/run/hostapd/ra0  && svc_link_up ra0"  "WiFi 2.4G BSS live"
     check_lib bss5g  "svc_sock_live /var/run/hostapd/rai0 && svc_link_up rai0" "WiFi 5G BSS live"
     check_lib bss_guest ". /data/gw/defaults.conf 2>/dev/null; . /data/gw/settings.conf 2>/dev/null; [ \"\${GUEST:-0}\" = 1 ] || exit 0; _g=0; svc_sock_live /var/run/hostapd/ra1  && svc_link_up ra1  && _g=1; svc_sock_live /var/run/hostapd/rai1 && svc_link_up rai1 && _g=1; [ \"\$_g\" = 1 ]" "guest BSS live (when enabled)"
-    # v1.32: 无 ULA = 本 boot 未部署 v6(rc_netfh v6 相位跳过) → 该检查直接
-    # pass(rvd 键=1 只表示"已部署而守护死"); 否则会把 v4-only 上行误报成故障。
-    check_lib radvd  "ip -6 addr show br-lan 2>/dev/null | grep -q 'fd42:9ac1:7e50' || exit 0; pgrep radvd >/dev/null 2>&1" "radvd v6 RA daemon (when deployed)"
+    # v1.35: radvd 判决移交 v6_reconcile.sh check —— 它区分"V6LAN=0 配置关闭"/
+    #   "无 v6 上行(不该开)"/"该开而没开"(唯一失败态)。v1.32 的"无 ULA 即 pass"
+    #   把 2026-10-28 的部署失败(承载口 v4-only 导致整块跳过)完全藏住了。
+    check radvd  "sh /data/gw/v6_reconcile.sh check" "LAN v6 (ULA+radvd) when enabled"
     # v1.33 (防假绿轮): 结果探针 — 存在性键(端口监听/IP 在)历史上多次全绿撒谎
     # (L28 WiFi 死 5.7h / v3.44 数据面死载波在 / hostapd 信标停发)。
     # 实测注记: 本机 127.0.0.1 探测不可达(v3httpd 只绑 LAN IP/dnsmasq 不听
@@ -326,7 +332,9 @@ run_cycle() {
     check dnssvc "nslookup localhost 192.168.9.1 >/dev/null 2>&1" "DNS answering on LAN"
     # v1.34: 承载会 irat 切换(10-25 09:46 实弹 ccmni2→ccmni3, dial_keeper 跟随而
     # 探针锚死旧口=假红/假绿) — 改为"任一带 IP 的 ccmni 可通"=真 L3 语义; 绝对路径
-    check dp5g   "_ok=1; for _c in ccmni0 ccmni1 ccmni2 ccmni3; do /data/gw/bin/ip -4 addr show \$_c 2>/dev/null | grep -q 'inet ' || continue; /data/gw/bin/busybox ping -4 -I \$_c -c1 -W3 -s1 223.5.5.5 >/dev/null 2>&1 && exit 0; done; exit 1" "5G data plane (any bearer with IP passes ICMP)"
+    # v1.35: 3 包探针(任一回即通) —— 单包在 5% 随机丢包链路上每小时误判 ~10 次;
+    #   3 包把随机丢包误判压到 0.0125%, 而连丢 3 包(真中断/切换)仍判失败。
+    check dp5g   "_ok=1; for _c in ccmni0 ccmni1 ccmni2 ccmni3; do /data/gw/bin/ip -4 addr show \$_c 2>/dev/null | grep -q 'inet ' || continue; /data/gw/bin/busybox ping -4 -I \$_c -c3 -W1 223.5.5.5 >/dev/null 2>&1 && exit 0; done; exit 1" "5G data plane (any bearer with IP passes ICMP)"
     check dpeth  "ping -4 -I eth0 -c1 -W3 -s1 223.5.5.5 >/dev/null 2>&1" "eth data plane (ICMP via eth0)"
     check_port port80 80 "GUI :80 reachable"
     check_port port22 22 "SSH :22 reachable"
@@ -761,6 +769,18 @@ EOF
             log "WARN  cell query path dead (rc=$_crc len=${#_co} out=$(printf '%s' "$_co" | tr '\n' ' ' | head -c 100)) — 直连 MIPC 查询失败(数据面可能正常); 恢复见 docs/FINDINGS §27/§29"
     fi
 
+    # ---- v1.35: LAN v6 兜底收敛 (家宽/蜂窝 v6 后到、radvd 意外死亡; 2min 一次) ----
+    V6_TICK=$(( ${V6_TICK:-0} + 1 ))
+    if [ $((V6_TICK % 4)) -eq 1 ]; then
+        _v6=$(tmo 20 "sh /data/gw/v6_reconcile.sh apply" 2>/dev/null)
+        _v6m=$(printf '%s' "$_v6" | sed -n 's/.*mode=\([a-z]*\).*/\1/p')
+        _v6p=$(cat /tmp/watchdog_v6mode 2>/dev/null)
+        if [ -n "$_v6m" ] && [ "$_v6m" != "$_v6p" ]; then
+            log "EVT v6 mode ${_v6p:-none}->${_v6m} ($_v6)"
+            echo "$_v6m" > /tmp/watchdog_v6mode
+        fi
+    fi
+
     # ---- v1.15: periodic summaries (24h 分析主干) ----
     CYC_TICK=$((CYC_TICK + 1))
     if [ $((CYC_TICK % 2)) -eq 0 ] || [ "$FAILS" -gt 0 ]; then
@@ -809,7 +829,7 @@ EOF
 
 # ---- main ----
 case "${1:-}" in
---version) echo "watchdog v1.34"; exit 0 ;;
+--version) echo "watchdog v1.35"; exit 0 ;;
 esac
 touch $LOG $STATE
 # v1.20: 看门狗单实例 — 双实例会重复自愈/告警(现场曾出现 2 个).
@@ -819,8 +839,8 @@ if [ "$_rc" != 0 ]; then
     echo "watchdog: another live instance owns the lock (rc=$_rc)" >&2
     exit 0
 fi
-log "===== watchdog v1.34 start (svc_lib primitives + minimal parsers + batch3 metrics; avail keys + outcome probes + bearer-follow dp; alert LED 5G orange) ====="
-logger -t watchdog "watchdog v1.34 start"
+log "===== watchdog v1.35 start (svc_lib primitives + minimal parsers + batch3 metrics; avail keys + outcome probes + bearer-follow dp; alert LED 5G orange) ====="
+logger -t watchdog "watchdog v1.35 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

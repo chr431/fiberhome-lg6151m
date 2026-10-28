@@ -1,4 +1,6 @@
-/* app.js v3.53 (可用性页 P1: 组件 90 天状态条+事件表+覆盖率 — api avail, avail_sampler.sh v1.0; AVAILABILITY_DESIGN §4.2) -- app.js v3.52 (系统页 USB-C 接口卡片: 总开关/ADB/控制台三设置 + 实况(主机连接/桥接/载波/门位) — api usb/usb_set, usb_mgr.sh v1.0) -- app.js v3.51 (移除宵断卡片 — 用户裁定判定不做先验, wan_agg v2.29 同步移除) -- v3.50 (聚合页有线宵断卡片: 启用/起止时间/窗口内状态 — wan_agg v2.28 同源) -- v3.49 (诊断卡片时间取自包尾行(尾部必含); v3.48 系统页诊断日志卡片: 生成按钮+诊断包尾部展示 — 日志改善专项轮) -- v3.47 (WiFi 卡片增 MLO 实况行: 双链路/单链路降级/未建立 — api 直读 mwctl dump ap_mld) -- v3.46 (定时重启卡片: 系统页开关+时间设置, 默认每日 04:00; 下次执行按设备侧 now/today/last 推导) -- v3.45 字体统一: 线路状态值去 mono(中文文案误用等宽, 与有线卡不一致) + mono 输入框 placeholder 全 ASCII 化) -- v3.44 状态页线路状态改数据面实测: 有线/蜂窝各增"线路状态"行+标签按 dp 而非 carrier — 21:30 实弹"载波在而断网"全程显示已连接=误导) -- v3 gateway console SPA
+/* app.js v3.54 (LAN v6 轮: 状态页 IPv6 卡片改读 api v6 实况 — 原为硬编码
+   "ULA fd42:9ac1:7e50::/64 / 自动分配 + NAT 兼容", v6 全挂时照样报绿; 系统页
+   +IPv6 局域网开关(api v6_set)) -- app.js v3.53 (可用性页 P1: 组件 90 天状态条+事件表+覆盖率 — api avail, avail_sampler.sh v1.0; AVAILABILITY_DESIGN §4.2) -- app.js v3.52 (系统页 USB-C 接口卡片: 总开关/ADB/控制台三设置 + 实况(主机连接/桥接/载波/门位) — api usb/usb_set, usb_mgr.sh v1.0) -- app.js v3.51 (移除宵断卡片 — 用户裁定判定不做先验, wan_agg v2.29 同步移除) -- v3.50 (聚合页有线宵断卡片: 启用/起止时间/窗口内状态 — wan_agg v2.28 同源) -- v3.49 (诊断卡片时间取自包尾行(尾部必含); v3.48 系统页诊断日志卡片: 生成按钮+诊断包尾部展示 — 日志改善专项轮) -- v3.47 (WiFi 卡片增 MLO 实况行: 双链路/单链路降级/未建立 — api 直读 mwctl dump ap_mld) -- v3.46 (定时重启卡片: 系统页开关+时间设置, 默认每日 04:00; 下次执行按设备侧 now/today/last 推导) -- v3.45 字体统一: 线路状态值去 mono(中文文案误用等宽, 与有线卡不一致) + mono 输入框 placeholder 全 ASCII 化) -- v3.44 状态页线路状态改数据面实测: 有线/蜂窝各增"线路状态"行+标签按 dp 而非 carrier — 21:30 实弹"载波在而断网"全程显示已连接=误导) -- v3 gateway console SPA
  * v3.39 (WiFi 分析仪 4 视图改进: 信道图邻居SSID标注+避让+文字光晕; 评级修复不可见信道号/徽标重叠+经典道同口径+本机标记+干扰计数; 列表可排序/色标/带宽/信号条; 时间图图例+数据点+历史本地持久)
  * v3.32(P2): WPA3虚假选项移除(hostapd仅WPA2-PSK); plmnScan XSS修复(textContent); v3.31: sse带token
  * v3.28: 聚合五模式选择; v3.27: SSE 实时信号; v3.26: 聚合滑块应用后回读同步
@@ -145,7 +147,7 @@ PAGES.status = {
       ${card("WiFi " + tag("tg-wifi", "正常", "异常"),
         kv("2.4GHz", "wf-2g") + kv("5GHz", "wf-5g") + kv("MLO", "wf-mlo") + kv("无线服务", "wf-hap"))}
       ${card("温度", '<div id="tp-body"></div>')}
-      ${card("IPv6 LAN", kv("ULA", "v6-ula", 1) + kv("方式", "v6-mode"))}
+      ${card("IPv6 LAN", kv("状态", "v6-st") + kv("ULA 前缀", "v6-ula", 1) + kv("上行", "v6-up") + kv("RA 守护", "v6-ra"))}
     </div>`,
     async tick() {
         const j = await api("status");
@@ -194,7 +196,14 @@ PAGES.status = {
         T("wf-mlo", mll >= 2 ? `双链路正常（${mll} 条）` : (mll === 1 ? "单链路（降级）" : "未建立"));
         T("wf-hap", `${w.hostapd2g > 0 ? "2.4GHz 正常" : "2.4GHz 异常"} · ${w.hostapd5g > 0 ? "5GHz 正常" : "5GHz 异常"}`);
         H("tp-body", Object.entries(j.temps || {}).map(([k, v]) => `<div class="kv"><span>${k}</span><b>${(v / 1000).toFixed(1)} °C</b></div>`).join(""));
-        T("v6-ula", "fd42:9ac1:7e50::/64"); T("v6-mode", "自动分配 + NAT 兼容");
+        /* v3.54: IPv6 LAN 实况(api v6) — 原为硬编码, v6 全挂时也报"已部署" */
+        const v6 = await api("v6").catch(() => null);
+        if (v6) {
+            T("v6-st", v6.text);
+            T("v6-ula", v6.ula === "1" ? v6.prefix : "未下发");
+            T("v6-up", v6.up === "-" ? "--" : v6.up);
+            T("v6-ra", v6.radvd === "-" ? "未运行" : `运行中 (pid ${v6.radvd})`);
+        }
         document.getElementById("hdr-sub").textContent = !j.agg.m5 ? "蜂窝 + 有线宽带聚合" : (inWeight ? `蜂窝 ${j.agg.w1pct}% / 有线宽带 ${100 - j.agg.w1pct}%` : aggModeTxt(j.agg.m5));   // v3.29: 非 weight 模式显模式名; G-07/G-37
         lastCounters = j.counters; lastTs = j.ts;
     }
@@ -1146,6 +1155,12 @@ PAGES.sys = {
         </div>
         <button class="ghost" onclick="usbSave()">应用</button>
         <span class="hint">USB-C 为设备模式：启用后 PC 经 USB 网卡接入 LAN（与网口客户同权）；关闭 = 端口对外全灭。ADB/控制台为额外 root 通道，默认停用</span>`)}
+      ${card("IPv6 局域网", kv("状态", "v6s-st") + kv("ULA 前缀", "v6s-pfx") + kv("上行", "v6s-up") + `
+        <div class="row3" style="margin-top:8px">
+          <div class="frm"><label>开关</label><select id="v6-en-sel"><option value="1">启用</option><option value="0">关闭</option></select></div>
+        </div>
+        <button class="ghost" onclick="v6Save()">应用</button>
+        <span class="hint">启用后 LAN 客户端经 SLAAC 获得 ULA 地址、由 NAT66 出网；当前没有 IPv6 上行时自动暂停广播（不发死前缀），有上行后自动恢复。关闭 = 撤下 ULA 并停 RA</span>`)}
       ${card("时间同步（NTP）", kv("当前时间", "ntp-date") + kv("时区", "ntp-tz") + kv("NTP 服务器", "ntp-srv") + `
         <div class="row3" style="margin-top:8px">
           <div class="frm"><label>时区</label><select id="nt-tz"><option value="CST-8">北京时间（UTC+8）</option><option value="UTC">UTC</option></select></div>
@@ -1204,6 +1219,14 @@ PAGES.sys = {
             const ua = $("usb-adb-sel"); if (ua) ua.value = ub.adb === "1" ? "1" : "0";
             const uc = $("usb-con-sel"); if (uc) uc.value = ub.console === "1" ? "1" : "0";
         }
+        /* v3.54: IPv6 局域网卡片(数据源 v6_reconcile.sh status 单一事实源) */
+        const v6s = await api("v6").catch(() => null);
+        if (v6s) {
+            T("v6s-st", v6s.text);
+            T("v6s-pfx", v6s.ula === "1" ? v6s.prefix : "未下发");
+            T("v6s-up", v6s.up === "-" ? "--" : v6s.up);
+            const ve = $("v6-en-sel"); if (ve) ve.value = v6s.enabled === "0" ? "0" : "1";
+        }
         const ntp = await api("ntp");
         T("ntp-date", ntp.date); T("ntp-tz", TZ_TXT[ntp.tz] || ntp.tz || "--"); T("ntp-srv", ntp.ntp_server);
         F("nt-srv", ntp.ntp_server);
@@ -1253,6 +1276,10 @@ window.ledTgl = async () => {
 window.usbSave = async () => {
     const j = await api("usb_set", `enabled=${$("usb-en-sel").value}&adb=${$("usb-adb-sel").value}&console=${$("usb-con-sel").value}`).catch(e => ({ error: e.message }));
     if (j.ok) { toast("已应用（关闭/重开时主机侧数秒内重新枚举）"); PAGES.sys.tick(); } else toast(eMsg(j.error), 1);
+};
+window.v6Save = async () => {
+    const j = await api("v6_set", `enabled=${$("v6-en-sel").value}`).catch(e => ({ error: e.message }));
+    if (j.ok) { toast("已应用"); PAGES.sys.tick(); } else toast(eMsg(j.error), 1);
 };
 window.ntSync = async () => {
     const j = await api("ntp_set", `tz=${$("nt-tz").value}&server=${encodeURIComponent($("nt-srv").value)}`).catch(e => ({ error: e.message }));

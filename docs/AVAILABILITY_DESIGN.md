@@ -68,13 +68,13 @@
 | LAN 桥/DHCP/DNS | dnsmasq + lan_ip + lo_up | dnsmasq EVT restart |
 | WiFi AP（2.4G/5G 分列） | bss + hostapd（svc_lib 活套接字判据）分频键 (补:bss2g=/bss5g=) | hostapd NE、channel drift WARN、客户端驱逐 |
 | 访客网络 | 访客 BSS 键 (补:bss_guest=)，未启用时显示为 off（灰，非绿） | — |
-| IPv6 通告 | radvd 进程键 (补:radvd=) | — |
+| IPv6 通告 | `v6_reconcile.sh check` + `/tmp/v6_state`（四态：`V6LAN=0`→off / 无 v6 上行→deg / 该在没在→down / 就位→op） | ULA 缺失、radvd 死亡、上行 v6 消失 |
 
 ### C. 上行/WAN
 
 | 组件 | 判据 | 降级信号 |
 |---|---|---|
-| 5G 蜂窝 | ccmni_up + dial_keeper(SVC) + TICK has_ip | 拨号退避、mipc_tool=1 |
+| 5G 蜂窝 | ccmni_up + dial_keeper(SVC) + TICK has_ip + dp5g 3 包探针（任一回即通，2026-10-28 起） | 拨号退避、mipc_tool=1、连丢 3 包 |
 | 以太 WAN | wan_eth(SVC) + carrier | — |
 | 聚合引擎 | wan_agg + agg_rules + fwmark | 模式切换失败、承载口僵尸 |
 | 上行认证 | authd 键（中性插座键，插件未装则 off） | 认证静默 WARN |

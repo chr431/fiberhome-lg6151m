@@ -110,6 +110,7 @@ MANIFEST = [
     ("gw/capture_ubus.sh", "/data/gw/capture_ubus.sh"),   # one-shot stock-dial ubus monitor capture
     ("gw/rc_netfh.sh", "/data/gw/rc_netfh.sh"),       # route A: FH modem-stack env (minimal army)
     ("gw/radvd.conf", "/data/gw/radvd.conf"),        # IPv6 SLAAC+RDNSS advert (FH radvd 1.6)
+    ("gw/v6_reconcile.sh", "/data/gw/v6_reconcile.sh"),  # LAN v6 reconcile (ULA/NAT66/radvd; idempotent, any uplink with global v6)
     ("gw/led_mgr.sh", "/data/gw/led_mgr.sh"),        # stock-style LED state supervisor (visual-mapped GPIOs)
     ("gw/bin/v3httpd", "/data/gw/v3httpd"),           # gateway GUI http server (:80)
     ("gw/www/api_sys.sh", "/data/gw/www/api_sys.sh"),   # API system-domain module (lazy-loaded; v2.75 split)
@@ -120,6 +121,7 @@ MANIFEST = [
     ("gw/www/api_sms.sh", "/data/gw/www/api_sms.sh"),   # API sms-domain module (lazy-loaded; v2.75 split)
     ("gw/www/api_usb.sh", "/data/gw/www/api_usb.sh"),   # API usb-domain module (USB-C device-mode switches; USB round)
     ("gw/www/api_avail.sh", "/data/gw/www/api_avail.sh"), # API avail-domain module (90d bars/incidents/coverage; avail round)
+    ("gw/www/api_v6.sh", "/data/gw/www/api_v6.sh"),   # API IPv6 LAN module (v6 status/v6_set; LAN v6 round)
     ("gw/www/api.sh", "/data/gw/www/api.sh"),        # JSON endpoints (core router; sources domain modules)
     ("gw/www/index.html", "/data/gw/www/index.html"),    # console page
     ("gw/www/style.css", "/data/gw/www/style.css"),     # theme

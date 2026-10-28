@@ -1,5 +1,5 @@
 #!/bin/sh
-# ccmni_up.sh v1.2 — MIPC 数据呼叫 + ccmni 接口落地 (netagent-lite, 自研替代)
+# ccmni_up.sh v1.3 — MIPC 数据呼叫 + ccmni 接口落地 (netagent-lite, 自研替代)
 # v1.1 (2026-10-17 日志加密轮): 全程阶段留痕 — 入口/旧地址清单、deact rc+耗时、
 #   act rc+耗时+关键响应、flush 清单、逐条 add/up rc、最终 exit code。拨号失败时
 #   不再只有一行 "dial FAIL", 而是能定位到 deact/act/解析/落地哪一段。
@@ -18,6 +18,7 @@
 #   独占(按聚合模式推导), 探活路由(metric 250)由其每周期维持; NAT/FORWARD 由
 #   rc_netfh(开机幂等)/wan_agg(漂移块)装。单写方纪律不因 netagent 退役而破。
 # 退出码: 0=落地成功(打印 ifname); 2=拨号失败/超时; 3=响应解析失败; 4=落地失败
+# v1.3: 落地后调 v6_reconcile.sh 收敛 LAN v6(承载切换可能带来/带走全局 v6).
 # v1.2 (batch3): address landing is serialized with route/firewall writers.
 if [ -r /data/gw/netlock.sh ]; then . /data/gw/netlock.sh; else
     netcfg_lock() { return 0; }; netcfg_unlock() { :; }; netcfg_repair() { :; }
@@ -84,5 +85,9 @@ log "EVT land $IF add_v4_rc=$R4 add_v6_rc=$R6 link_up_rc=$RUP"
 [ "$_nl" = 1 ] && netcfg_unlock
 ip -o -4 addr show $IF 2>/dev/null | grep -q inet || { log "land FAIL: no v4 on $IF after add"; exit 4; }
 log "EVT up $IF v4=$V4/${M4:-32} v6=${V6:-none} mtu=${MU:-1400} total=$(( $(date +%s) - T_ALL ))s"
+# v1.3: 承载变更后收敛 LAN v6 —— 新承载可能带全局 v6(也可能没有), 开/拆由
+#   v6_reconcile.sh 的判据决定(任一上行有全局 v6); 本脚本不持 v6 状态机。
+_v6o=$(sh /data/gw/v6_reconcile.sh apply 2>&1)
+log "EVT v6 $_v6o"
 echo "$IF"
 exit 0

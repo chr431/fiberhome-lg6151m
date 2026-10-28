@@ -1,5 +1,7 @@
 #!/bin/sh
-# avail_sampler.sh v1.7 -- 组件可用性采样器 (AVAILABILITY_DESIGN §3, 防假绿轮)
+# avail_sampler.sh v1.8 -- 组件可用性采样器 (AVAILABILITY_DESIGN §3, 防假绿轮)
+# v1.8 (2026-10-28 LAN v6): s:radvd6 四态化 —— off 只表示 V6LAN=0; 无 v6 上行记 deg;
+#   该在没在(有上行却缺 ULA/radvd)记 down。判据单一事实源 = /tmp/v6_state。
 # v1.7 (SIGSEGV §8.13): 旧内核修复栈退役 —— s:kernel 判据去掉模块依赖(lsmod/
 #   /proc 探针)改为固定 off(该组件已无加载体, 判 off 既不冒充绿也不制造假降级);
 #   删除 sweeps 计数前进判据(SW_STUCK, 模块不存在时是必然不动的死判据)。
@@ -276,7 +278,21 @@ level_of() { # $1=判据串 → 级别 (op/deg/down/nodata/off)
         lk authd
         ;;
     s:radvd6)
-        ip -6 addr show br-lan 2>/dev/null | grep -q 'fd42:9ac1:7e50' || { echo off; return; }
+        # v1.8 (2026-10-28 LAN v6 修复): 四态 —— 配置停用=off; 启用但当前无 v6 上行
+        #   =deg(不冒充绿也不报死); 有上行才看 ULA+radvd(缺=down)。v1.7 及以前
+        #   "无 ULA 即 off" 把部署失败显示成"停用", 与用户主动关闭不可区分(实弹:
+        #   承载口 ccmni2 v4-only 导致 rc_netfh 整块跳过, 页面显示停用)。
+        #   判据单一事实源 = v6_reconcile.sh 写的 /tmp/v6_state。
+        _vm=""
+        [ -r /tmp/v6_state ] && _vm=$(sed -n 's/^mode=\([a-z]*\).*/\1/p' /tmp/v6_state 2>/dev/null | head -1)
+        [ -n "$_vm" ] || _vm=$(sh /data/gw/v6_reconcile.sh status 2>/dev/null | sed -n 's/.*mode=\([a-z]*\).*/\1/p')
+        case "$_vm" in
+            disabled)  echo off; return ;;
+            noup|wait) echo deg; return ;;
+            nobr)      echo nodata; return ;;
+        esac
+        [ "${V6LAN:-1}" = 1 ] || { echo off; return; }
+        ip -6 addr show br-lan 2>/dev/null | grep -q 'fd42:9ac1:7e50' || { echo down; return; }
         lk radvd
         ;;
     s:usb)

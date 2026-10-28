@@ -265,3 +265,32 @@ bat_va/count 全程不变（GEN=0），表页从未释放（RETIRE/STALE=0），
 - 未试候选（留档）：ccci sysfs MD reset 节点、dpwr 写引擎/MD 复位寄存器、
   LK 期阻止 MD 镜像装载。
 - 写入绕过 MMU，**内核侧不可拦截**；长期解决在 MD 固件（平台 vendor 域，超出本仓能力）。
+
+## 12. 原厂固件对照：现象是平台级的，不是本固件引入（2026-10-28）
+
+方法：misc 翻 B-first → LK `init=/bin/sh` 在**原厂 rootfs** 上 17 s 早期装载全套仪器
+（dpscan9/buddyscan4m/pfnprobe + injwatch4 256 MB + pfcanary 循环 + core_pattern）→
+`exec /sbin/init` 让原厂用户态完整运行（WAN 附着、NTP 对时、真实流量）→ 50 min 观察窗。
+台账：设备 `/data/repro/bw11_S1_*`；驱动 `tmpfiles/repro/bw11*.py/.sh`；
+manifest：`tmpfiles/repro/bw10_manifest.txt`（bw11 节）。
+
+**判决（预注册规则见 manifest）**：
+
+1. **注入在原厂同样发生且同构**：injwatch 14 命中/65536 页/~50 min，
+   每条 word504 = {lo32: 当 boot 原厂 BAT 基址 0xa7580000（== 原厂 r180，uptime 124 s 实测），
+   hi32: 单调递增指针 0xa75c0110→0xa75cf630，落在原厂 r094 观测区间内}——
+   与 §11 的 {r180, r094} 活值对**同一现象、同一语义**。
+2. **引擎状态机同构**：exec 后 ~12 s 表编程（r180 非 0）、r094 随流量前进；
+   签名曲线同形——建表爆发（+300/min×2.5 min）→ 低速稳态（+5.9/min，
+   窗内流量低于自研固件满载，稳态速率相应更低，方向一致）。
+3. **原厂并非无害**：pfcanary 在原厂满载窗内 SIGSEGV 1 次（rc=139；另一次完整干净跑完
+   出现在无表静默相，与 §11 A2 一致）。样本量弱（有效 2 次）但方向明确：
+   **同一写入行为在原厂上同样能打死进程**。「原厂无规避代码 ⇒ 原厂不发生或无害」的
+   假设**否证**——原厂只是流量低、无诊断仪器，看不见而已。
+4. 不可用证据（记录防误引）：dmesg segfault census 因环形轮转为 0（≠零发生）；
+   core 文件 0 个（core_pattern 生效性存疑）；原厂守护会把时钟步进 +8 h（TZ 错误），
+   长窗 epoch 不可信、判读一律以 `/proc/uptime` 为时间轴。
+
+**操作层新事实**（细节见 manifest 教训 16-18）：原厂 GUI 重启
+（`tools/stock_gui.py reboot`，do_cmd_web REBOOT_WEB）是优雅复位，**该路径 LK 不启动
+console 线程**，0x03 弹幕无法抓捕——翻槽必须配断电重上电/sysrq-b 级冷复位。

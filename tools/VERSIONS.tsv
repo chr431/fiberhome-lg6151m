@@ -127,3 +127,4 @@ tools/build_logc.sh	1.2	tool	-	logc 静态构建(zig cc aarch64-linux-musl; v1.1
 tools/fuzz_logc.py	1.1	tool	-	logc 帧解析器在设备侧的结构化 fuzz(合法帧+截断+伪长度+类型污染+噪声; 崩溃留面包屑并保存语料); v1.1(batch3): --inproc 设备内 fuzz
 tools/fetch_static_busybox.sh	1.0	tool	-	Alpine busybox-static 1.36.1-r31 拉取+SHA256 钉死(解包到 gw/bin/busybox)
 tools/build_static_ip.sh	1.0	tool	-	iproute2 6.3.0 静态构建(zig cc aarch64-linux-musl, 与厂商同版本)
+tools/stock_gui.py	1.0	tool	-	原厂固件 web GUI 客户端(fh_api RSA→AES 握手; reboot=do_cmd_web REBOOT_WEB; 凭证经 device_local, RSA 私钥经 _local/secrets/stock_web_rsa.pem; 注意: GUI 重启是优雅复位, LK console 线程不启动, 不可用于弹幕抓捕)

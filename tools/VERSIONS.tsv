@@ -128,3 +128,4 @@ tools/fuzz_logc.py	1.1	tool	-	logc 帧解析器在设备侧的结构化 fuzz(合
 tools/fetch_static_busybox.sh	1.0	tool	-	Alpine busybox-static 1.36.1-r31 拉取+SHA256 钉死(解包到 gw/bin/busybox)
 tools/build_static_ip.sh	1.0	tool	-	iproute2 6.3.0 静态构建(zig cc aarch64-linux-musl, 与厂商同版本)
 tools/stock_gui.py	1.0	tool	-	原厂固件 web GUI 客户端(fh_api RSA→AES 握手; reboot=do_cmd_web REBOOT_WEB; 凭证经 device_local, RSA 私钥经 _local/secrets/stock_web_rsa.pem; 注意: GUI 重启是优雅复位, LK console 线程不启动, 不可用于弹幕抓捕)
+tools/raw_pull.py	1.0	tool	-	设备侧二进制安全拉取(dropbear 无 SFTP; lgssh 文本解码有损; paramiko 原始通道读; 存档用)

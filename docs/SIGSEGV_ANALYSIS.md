@@ -722,5 +722,49 @@ static inline int p1_sane_vals(unsigned long sp, unsigned long a, unsigned long 
 `h_vfprintf_v2.o` 显式链在 `libc.a` 之前即可覆盖同名符号（`tools/oneoff/printf_repro/README.md`
 已有该机制）。落地顺序：`gw/src/*` 自建件 → `busybox`（`tmpfiles/busybox-1.36.1` 可重建）
 → 其余静态守护。**注意**：闸门只保证"不因这条路径死"，不保证"数据没被改坏"——受害结构被改写后
+
+---
+
+## 19. v2 闸门落地状态与 24 h 统计口径（2026-10-28 晚）
+
+### 19.1 已落地
+
+| 项 | 状态 |
+|---|---|
+| `tools/vaguard/vfprintf_guard.c` | 产品化（musl vfprintf + v2 判据 + 命中上报），v1.0 |
+| `tools/build_vaguard.sh` | 编出可链接对象 `_local/build/vaguard.o`（必须**在 libc 之前**链接） |
+| `gw/bin/v3httpd` v2.7 | **已部署**（`/data/gw/v3httpd`，md5 双向校验，已重启生效） |
+| `gw/bin/mipc_cellular` v0.18 | **已部署** |
+| 统计文件 | `/data/gw/logs/vaguard.tsv`（首命中 1 行 + 每 256 次 1 行；字段 `epoch pid comm hits`） |
+| 窗口起点 | `/data/gw/logs/vaguard.start` = 1793179680 |
+
+上报实现只用 `openat/read/write/clock_gettime/getpid` 裸系统调用，不引入 stdio，不会自递归。
+
+### 19.2 未落地（本机限制，非设计问题）
+
+| 目标 | 阻塞点 |
+|---|---|
+| **busybox**（NE 人口 48%） | kbuild 要先用 HOSTCC 编 `scripts/basic/fixdep`；本机无 gcc，zig 作 hostcc 时 **mingw 无 `sys/mman.h`**（fixdep 真的用 mmap）→ 无法生成 `.config` |
+| **ip**（NE 人口 27%） | iproute2 的 make 调 zig 时必报 `AppDataDirUnavailable`（同一 zig 从 bash 直接调用正常）→ 需 Linux 构建机 |
+
+两者合计 **75% 的崩溃人口暂未覆盖**。可行路径（按代价排序）：
+1. 在 Linux 主机（或装 WSL 的机器）上跑 `tools/build_vaguard.sh` + `tools/build_static_ip.sh`（后者已预留 `$GUARD` 链接位与 `CC` 覆盖）与 busybox 源码构建；
+2. 给 fixdep 提供 `sys/mman.h` 的 Windows 垫片（只影响宿主工具，不影响目标码）。
+
+### 19.3 24 h 统计怎么读
+
+```sh
+# 1) 闸门拦截（只覆盖已链接闸门的二进制）
+awk -F'\t' '{c[$3]+=$4} END {for (k in c) print c[k], k}' /data/gw/logs/vaguard.tsv | sort -rn
+# 2) 真实崩溃人口（全量二进制，权威）
+tail -n +2 /data/gw/logs/ne_events.tsv | awk -F'\t' '$1 > '"$(cat /data/gw/logs/vaguard.start)"' {print $3}' | sort | uniq -c | sort -rn
+# 3) 两者对照：同一时段"拦截数 vs 崩溃数"
+```
+
+判读纪律（沿用 §7）：
+- `vaguard.tsv` **为空 ≠ 没有注入**，只说明"已链接闸门的进程没被打到 va_list"；
+- 真正的人口信号仍是 `ne_events.tsv`（它覆盖 busybox/ip 这些未装闸门的二进制）；
+- 只有出现 `hits > 0` 才证明"这一轮写入确实打中了 va_list 且被拦下"。
+
 的**语义后果**（如打印出错误内容）依然存在。
 

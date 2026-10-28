@@ -45,7 +45,7 @@ README.md	1.1	doc	-	仓库总览与快速上手
 gw/bin/multiwan_ctl	1.1	manifest	/data/gw/multiwan_ctl	原厂multiwan引擎ioctl控制器(zig动态链libfhdrv_net_api,36B结构体)
 gw/bin/fhstub.so	1.0	manifest	/data/gw/fhstub.so	FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径)
 gw/led_mgr.sh	3.0	manifest	/data/gw/led_mgr.sh	原厂风格LED守护; v3.0(WiFi 事故): WiFi 灯=AP 服务在服务(svc_bss_count 活套接字+链路), 不再是 netdev 存在; 历史见git
-gw/bin/v3httpd	2.6	manifest	/data/gw/v3httpd	网关GUI HTTP服务; v2.6(P2): 静态面拒*.sh(免认证源码泄露)+Host头校验(根治DNS rebinding)
+gw/bin/v3httpd	2.7	manifest	/data/gw/v3httpd	网关GUI HTTP服务; v2.6(P2): 静态面拒*.sh(免认证源码泄露)+Host头校验(根治DNS rebinding); v2.7(SIGSEGV §18): 链接 vfprintf va_list 闸门 v2(写入不再打死进程)
 gw/www/api_sys.sh	1.3	manifest	/data/gw/www/api_sys.sh	API 系统/状态域模块; v1.3(日志加密轮): traffic 选口回退/qdisc 缺失留痕; v1.2: /api/traffic 增 if 字段; v1.1: 探活实证选口
 gw/www/api_wifi.sh	1.1	manifest	/data/gw/www/api_wifi.sh	API WiFi 域模块; v1.1(WiFi 事故): hostapd2g/5g 改活控制套接字判据(iw type AP 在 hostapd 死后仍为真 → GUI 谎报正常); 历史见git
 gw/www/api_lan.sh	1.0	manifest	/data/gw/www/api_lan.sh	API LAN 服务域模块(v2.75 拆出: dhcp/dhcp_static/fw 族; fw_apply.sh 改域内懒加载 — 原对全部请求无条件 source)
@@ -91,7 +91,7 @@ tools/build_v3fix.sh	1.1	tool	-	v3_fix.ko构建; v1.1: 路径修正当前布局 
 tools/gen_kernel_inc.py	1.0	tool	-	kernel头生成(构建辅助)
 gw/src/multiwan_ctl.c	1.1	src	gw/bin/multiwan_ctl	multiwan控制器源码(随产物1.1)
 gw/src/shmsnap.c	1.0	src	gw/bin/shmsnap	cfgmgr快照源码
-gw/src/v3httpd.c	2.6	src	gw/bin/v3httpd	GUI HTTP服务源码; v2.6: 同产物
+gw/src/v3httpd.c	2.7	src	gw/bin/v3httpd	GUI HTTP服务源码; v2.6: 同产物
 gw/src/wpapmk.c	1.0	src	gw/bin/wpapmk	WPA PMK转换源码(纯C PBKDF2)
 gw/src/fhstub.c	1.0	src	gw/bin/fhstub.so	FH符号桩库源码
 gw/defaults.conf	1.9	manifest	/data/gw/defaults.conf	统一配置只读出厂基线(444); v1.9(USB 轮): +USB_ENABLED/USB_ADB/USB_CONSOLE(USB-C 设备模式三开关); 消费方source叠加settings.conf稀疏覆盖
@@ -101,13 +101,13 @@ docs/GUI_TERMINOLOGY.md	1.2	doc	-	GUI文案基准; v1.2: bad_cmd文案更新+sse
 gw/watchdog.sh	1.34	manifest	/data/gw/watchdog.sh	持续不变量看门狗; v1.34(防假绿修正): dp5g 探针改'任一带 IP 的 ccmni 可通'(irat 承载切换实弹: 10-25 09:46 ccmni2→ccmni3, 探针锚死旧口=假红; 绝对路径去 PATH 变量); v1.33: +http200/dnssvc/dp5g/dpeth 结果探针键; v1.32: radvd 无 ULA pass; 历史见git
 tools/selftest.py	2.67	tool	-	设备自检; v2.63: p0 防抖(wan_agg 模式切换瞬时拆装规则, 40s 复采); v2.62: watchdog 横幅断言持久 syslog 兜底(TICK 轮转挤横幅)+p0 排除瞬态结果探针键(监督键须干净/探针键归可用性窗口判定, irat 切换实弹)+v1.34 锚; v2.61: t_avail 键断言扩 8; 历史见git; v2.65(SIGSEGV Phase 0): t_core_trap 判据反转(停用+pattern 恒管道+rc19 不拉起); v2.66(SIGSEGV Phase 1): t_fixstack 反转(marker 分支); t_avail_ne_drill 只数 op->deg; v2.67(SIGSEGV Phase 2 退役): t_fixstack 改为断言旧栈已彻底缺席(lsmod//proc/*.ko/rc19 非注释引用四查)
 tools/doc_audit.py	1.2	tool	-	台账↔文档内联标记双向审计; v1.2: 子进程显式 UTF-8(gbk 环境不再中断 deploy 文档门禁); 历史见git
-gw/src/mipc_cellular.c	0.17	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源码; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘
-gw/bin/mipc_cellular	0.17	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘
-tools/build_mipc_cellular.sh	1.1	tool	-	mipc_cellular构建(zig cc aarch64-musl 静态); v1.1: 移除 libqlril 链接(v0.12+ 零 RIL 依赖)
+gw/src/mipc_cellular.c	0.18	src	gw/bin/mipc_cellular	蜂窝MIPC直连CLI源码; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘
+gw/bin/mipc_cellular	0.18	manifest	/data/gw/mipc_cellular	蜂窝MIPC直连CLI; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘; v0.18(SIGSEGV §18): 链接 vfprintf va_list 闸门 v2
+tools/build_mipc_cellular.sh	1.2	tool	-	mipc_cellular构建(zig cc aarch64-musl 静态); v1.1: 移除 libqlril 链接(v0.12+ 零 RIL 依赖); v1.2(SIGSEGV §18): 链接 vaguard.o
 gw/dial_keeper.sh	1.9	manifest	/data/gw/dial_keeper.sh	v1.8: 锁排除自身 pid(spawn 预写锁); v1.7: 单实例锁判据收紧(绝对路径+非僵尸); 拨号自持守护; v1.5(日志加密轮): 60s TICK(has_ip/cell_alive/wan_alive 原文+年龄/down/backoff/APN/cci)+僵尸IP边沿+modem未就绪原因+飞行切换+ccmni_up rc/输出/耗时; v1.4: ccmni_up 一体+数据面触发+飞行守卫; v1.6(日志加密轮补): 日志行补 epoch 时间基准(跨日志关联); v1.9(batch3): svc_lib 锁/心跳(纳入 SVC_TABLE)
 gw/guest_fw.sh	1.7	manifest	/data/gw/guest_fw.sh	访客隔离防火墙v1.6(审计P0: GUEST_ISOLATE开关删除=强制隔离; 兼容需求改由主WiFi终端频段锁定承接; 历史版本见git); v1.7(batch3): sync netcfg 串行化
 install/run.sh	1.1	tool	-	raw shell自驱脚本(v1.1: 分区次设备号从/proc/partitions动态解析成布局门禁, RP102/RP103通用; v1.0硬编码259:7等)
-tools/build_v3httpd.sh	1.0	tool	-	v3httpd构建(zig cc aarch64-linux-musl全静态, 同mipc_cellular链)
+tools/build_v3httpd.sh	1.1	tool	-	v3httpd构建(zig cc aarch64-linux-musl全静态, 同mipc_cellular链); v1.1(SIGSEGV §18): 链接 vaguard.o(va_list 闸门)
 tools/upgrade_slot.py	1.0	tool	-	SSH整槽升级器(P3第一档: vercheck/槽位/空间预检→md5门禁→dd备份旧p26→写新镜像→挂载sanity断言(toor/rcS/#v3:/procd)→失败自动整槽还原不重启→清TRY_A→reboot; PC侧轮询日志+回连终检; --dry-run)
 tools/rescue_shadow.py	1.0	tool	-	shadow.override未bind网络救援(getpass旧口令→只读探针: 文件md5/grep行为单测/部署钩子sh -x跟踪→从.bak恢复+重bind; 依赖rc.extend v2.1)
 gw/toolchain_init.sh	1.1	manifest	/data/gw/toolchain_init.sh	静态工具链自举: /data/gw/sbin 符号链接农场(busybox 305 applet + 静态 iproute2 ip), 原子换入/失败回退 vendor; rc.extend 开机调用; v1.1: 农场覆盖 pidof/pgrep -> procmatch(缺失回退 busybox)；⟦收口 §22⟧ 农场是工具链载体，不是崩溃修复(冻结；退役暂缓)
@@ -126,6 +126,8 @@ gw/core_trap.sh	1.3	manifest	/data/gw/core_trap.sh	每日 core 捕获窗口(P3);
 tools/build_logc.sh	1.2	tool	-	logc 静态构建(zig cc aarch64-linux-musl; v1.1: -fstack-protector-all); v1.2(batch3): --asan 主机 ASAN/UBSAN 构建
 tools/fuzz_logc.py	1.1	tool	-	logc 帧解析器在设备侧的结构化 fuzz(合法帧+截断+伪长度+类型污染+噪声; 崩溃留面包屑并保存语料); v1.1(batch3): --inproc 设备内 fuzz
 tools/fetch_static_busybox.sh	1.0	tool	-	Alpine busybox-static 1.36.1-r31 拉取+SHA256 钉死(解包到 gw/bin/busybox)
-tools/build_static_ip.sh	1.0	tool	-	iproute2 6.3.0 静态构建(zig cc aarch64-linux-musl, 与厂商同版本)
+tools/build_static_ip.sh	1.1	tool	-	iproute2 6.3.0 静态构建(zig cc aarch64-linux-musl, 与厂商同版本); v1.1(SIGSEGV §18): 预留 vaguard.o 链接位 + 下载路径/CC 可覆盖(本机 Windows 上 zig-under-make 受限, 产物待 Linux 主机重建)
 tools/stock_gui.py	1.0	tool	-	原厂固件 web GUI 客户端(fh_api RSA→AES 握手; reboot=do_cmd_web REBOOT_WEB; 凭证经 device_local, RSA 私钥经 _local/secrets/stock_web_rsa.pem; 注意: GUI 重启是优雅复位, LK console 线程不启动, 不可用于弹幕抓捕)
 tools/raw_pull.py	1.0	tool	-	设备侧二进制安全拉取(dropbear 无 SFTP; lgssh 文本解码有损; paramiko 原始通道读; 存档用)
+tools/vaguard/vfprintf_guard.c	1.0	tool	-	musl vfprintf + va_list 闸门 v2(写入不再打死进程; §18); 命中写 /data/gw/logs/vaguard.tsv
+tools/build_vaguard.sh	1.0	tool	-	编译 gw/src/vfprintf_guard.c 为可链接对象(须在 libc 之前链接)

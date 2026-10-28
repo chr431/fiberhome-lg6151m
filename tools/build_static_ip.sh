@@ -20,6 +20,7 @@ SHA=dfb2a98db96e7a653cffc6693335a1a466e29a34b6ac528be48f35e1d2766732
 WORK=${IPROUTE2_BUILD_DIR:-$D/../_local/build}
 SRC=$WORK/iproute2-$VER
 OUT=$D/gw/bin/ip
+GUARD=${GUARD:-$D/../_local/build/vaguard.o}
 
 if [ -n "${OS:-}" ] && [ "$OS" = "Windows_NT" ]; then
     PATH=/c/msys64/usr/bin:$PATH
@@ -30,10 +31,11 @@ command -v "$MAKE" >/dev/null 2>&1 || MAKE=/c/msys64/usr/bin/make
 
 mkdir -p "$WORK"
 if [ ! -d "$SRC" ]; then
-    TMP=$(mktemp -d)
+    TMP=$WORK/dl
+mkdir -p "$TMP"
     trap 'rm -rf "$TMP"' EXIT INT TERM
     curl -fsSL -o "$TMP/iproute2.tar.xz" "$URL"
-    python - "$TMP/iproute2.tar.xz" "$SHA" <<'EOF'
+    python - "$(cygpath -w "$TMP/iproute2.tar.xz" 2>/dev/null || echo "$TMP/iproute2.tar.xz")" "$SHA" <<'EOF'
 import hashlib, sys
 p, want = sys.argv[1], sys.argv[2]
 got = hashlib.sha256(open(p, "rb").read()).hexdigest()
@@ -44,7 +46,7 @@ EOF
     tar xJf "$TMP/iproute2.tar.xz" -C "$WORK"
 fi
 
-CC="$Z cc -target aarch64-linux-musl"
+CC=${CC:-"$Z cc -target aarch64-linux-musl"}   # env override: zig wrapper for Windows
 AR="$Z ar"
 CF='-O2 -include libgen.h -I../include -I../include/uapi -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -D_LARGEFILE64_SOURCE -DRESOLVE_HOSTNAMES -DCONFDIR=\"/etc/iproute2\" -DNETNS_RUN_DIR=\"/var/run/netns\" -DNETNS_ETC_DIR=\"/etc/netns\" -DHAVE_SETNS -DHAVE_HANDLE_AT'
 ADDLIB='ax25_ntop.o rose_ntop.o mpls_ntop.o mpls_pton.o netrom_ntop.o'
@@ -83,7 +85,7 @@ run_make() {
 run_make -C lib -j4 libnetlink.a libutil.a \
     CC="$CC" AR="$AR" "CFLAGS=$CF" "ADDLIB=$ADDLIB"
 run_make -C ip -j4 ip \
-    CC="$CC" AR="$AR" "CFLAGS=$CF" "LDFLAGS=-static -s" \
+    CC="$CC" AR="$AR" "CFLAGS=$CF" "LDFLAGS=-static -s $GUARD" \
     "LIBNETLINK=$LIBS"
 
 cp ip/ip "$OUT"

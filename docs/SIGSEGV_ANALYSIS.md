@@ -766,5 +766,56 @@ tail -n +2 /data/gw/logs/ne_events.tsv | awk -F'\t' '$1 > '"$(cat /data/gw/logs/
 - 真正的人口信号仍是 `ne_events.tsv`（它覆盖 busybox/ip 这些未装闸门的二进制）；
 - 只有出现 `hits > 0` 才证明"这一轮写入确实打中了 va_list 且被拦下"。
 
-的**语义后果**（如打印出错误内容）依然存在。
+---
+
+## 20. busybox 补全 + 页尾屏蔽（2026-10-28 夜）
+
+### 20.1 busybox 重建成功（WSL2 + musl-cross，已部署）
+
+**用 zig 编 busybox 是错的路子**（本轮踩实）：kbuild 的 host 工具、`scripts/trylink` 里的
+gcc 专有链接参数（`-Wl,-Map`/`--verbose`/`--warn-common`）、`strip`、applet 表会各自炸一遍；
+即使链接成功，applet 分派与 `awk` 也不正常。**正确路径 = 真 GNU musl 交叉工具链**：
+
+```
+WSL2 + Ubuntu 24.04
+  musl.cc aarch64-linux-musl-cross (gcc 11.2.1)
+  make defconfig; CONFIG_STATIC=y
+  make -j CROSS_COMPILE=aarch64-linux-musl- SKIP_STRIP=y LDFLAGS="-static -no-pie"
+```
+
+两处构建补丁（只影响构建，不改产品语义）：
+1. `scripts/trylink`：去掉 `-Wl,--warn-common -Wl,-Map,$EXE.map -Wl,--verbose`，
+   并在主链接处插入 `/root/vaguard_musl.o`（闸门对象）；
+2. `SKIP_STRIP=y`（宿主 `strip` 是 x86，会报 "Unable to recognise the format"）。
+
+产物：**1,609,800 B / aarch64 / 静态 / 含闸门**，402 个 applet；
+`echo/ls/cat/grep/sed/awk/date/wc` 全部 rc=0（`awk 'BEGIN{print 1+1}'` → 2）。
+**已部署 `/data/gw/bin/busybox`**，旧版留 `/data/gw/bin/busybox.pre-vfguard`；
+applet 农场 `/data/gw/sbin/awk → busybox` 验证通过（输出 42）。
+
+> 踩过的坑（防复现）：①二进制必须叫 `busybox`，否则 argv[0] 被当 applet 名 → "applet not found"；
+> ②本会话 MSYS shell 不向子进程传环境变量 → zig 拿不到 `LOCALAPPDATA`（见 `tools/zigcc.py`）；
+> ③手工拼对象表链接会破坏 applet 表——**必须让 busybox 自己链**。
+
+### 20.2 页尾屏蔽：可交付形态是"逐对象页对齐"
+
+写入恒落页内 `0xfc0..0xfff`（§11.2），于是有一条结构性免疫规则：
+
+> 任何全局对象，只要**起始于页边界**且**大小 ≤ 4032 B**，其字段永远不可能落进该窗口。
+
+- 原语：`tools/oneoff/tailsafe.h` —— `TAILSAFE`（`__attribute__((aligned(4096)))`）
+  + `TAILSAFE_ASSERT(type)`（编译期断言 `sizeof ≤ 4032`）。
+- 审计：`tools/tail_audit.py <elf>` —— 解析 `.symtab`，列出**落在页尾 64 B 的全局对象**与重叠字节数
+  （需未 strip 的 ELF；生产件是 stripped，需配 map 或保留调试副本）。
+- 演示：`tools/oneoff/tailsafe_demo.c`（同尺寸 `g_plain` / `g_shielded`，后者 `pageoff=0x000`）。
+
+**为什么不做"整段 .bss 每页留 64 B 空洞"**：链接器无法对任意输出段做"每 4 KB 插入填充"，
+逐符号布局只能手写 section，代价远大于收益。逐对象页对齐是同一目标的**可实现子集**，
+精确覆盖"关键状态结构"这一类受害面；栈/堆仍不可控，靠 L1 闸门与 L3 兜底。
+
+### 20.3 上线后的实测（窗口起点 1793179680）
+
+`/data/gw/logs/vaguard.tsv` 已记录 **3 次真实拦截**（全部来自 `ip`）：
+`1793183044 / 1793186099 / 1793187527`；同期 NE 里 `logread` 崩 2 次、`ip` 崩 1 次
+（非 va_list 受害类，闸门管不到——与 §18.5 的边界一致）。
 

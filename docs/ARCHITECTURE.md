@@ -44,7 +44,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `docs/GUI_TERMINOLOGY.md` | **v1.2** | doc | `-` | GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git |
 | `gw/agg_pins.default` | **v1.0** | manifest | `/data/gw/agg_pins.default` | MAC钉死表出厂缺省基线(只读, 不含任何MAC; 设备侧活文件 agg_pins.conf 由 wan_agg 缺省才写地播种, 个人MAC不入库) |
 | `gw/avail_sampler.sh` | **v1.7** | manifest | `/data/gw/avail_sampler.sh` | 组件可用性采样器; v1.5(假红实弹): NE 死者退出置态条件只做 cause 注记(11:03 残留 watchdog 实例被 NE 收走, 主实例全程健康却记 10min 退化; 真实死亡由 FAIL 键/重启事件窗口兜住, 覆盖无缺口; 证伪演练=selftest t_avail_ne_drill); v1.4: grep -c case 守卫; v1.3: metrics 活性读台账 epoch; v1.2(防假绿): 窗口迁移+结果组合+活性+WiFi 信号+usb off; 判据分级审计见 AVAILABILITY_DESIGN §8; v1.6(SIGSEGV Phase 1): s:kernel 见 /tmp/fixstack.disabled 判 off(不出事件), 修复栈停用不再假降级; 移除 core_trap 死映射; v1.7(SIGSEGV Phase 2 退役): 移除旧修复栈依赖(dpquar/dpclamp lsmod 与 /proc 判据、sweeps/SW_STUCK), s:kernel 固定 off |
-| `gw/bin/busybox` | **v1.0** | manifest | `/data/gw/bin/busybox` | 静态 aarch64 busybox 1.36.1(Alpine busybox-static 1.36.1-r31, 与厂商同版本); P2 崩溃家族工具链静态化；⟦收口 §22⟧ 工具链自主权载体，对崩溃零改善(§16.7/§22.1) |
+| `gw/bin/busybox` | **v1.1** | manifest | `/data/gw/bin/busybox` | 静态 aarch64 busybox 1.36.1(Alpine busybox-static 1.36.1-r31, 与厂商同版本); P2 崩溃家族工具链静态化；⟦收口 §22⟧ 工具链自主权载体，对崩溃零改善(§16.7/§22.1); v1.1(SIGSEGV §18): 用 musl-cross 在 WSL 重建并链接 va_list 闸门 v2(build: make CROSS_COMPILE=aarch64-linux-musl- + trylink 补丁; 备份 busybox.pre-vfguard) |
 | `gw/bin/fhstub.so` | **v1.0** | manifest | `/data/gw/fhstub.so` | FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径) |
 | `gw/bin/healthdog.ko` | **v1.0** | manifest | `/data/gw/healthdog.ko` | 取证看门狗内核模块(forensic=1) |
 | `gw/bin/ip` | **v1.1** | manifest | `/data/gw/bin/ip` | 静态 aarch64 iproute2 6.3.0(与厂商 ip -V 同版本, zig cc musl 重建); 输出与厂商逐字节一致, 保留 link add type bridge; v1.1(SIGSEGV §18): 链接 vfprintf va_list 闸门 v2(输出与旧版逐字节一致) |
@@ -164,6 +164,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/serial_cmd.py` | **v1.3** | tool | `-` | 串口命令瘦客户端(marker输出捕获; v1.3示例路径更新) |
 | `tools/serial_server.py` | **v1.7** | tool | `-` | 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets) |
 | `tools/stock_gui.py` | **v1.0** | tool | `-` | 原厂固件 web GUI 客户端(fh_api RSA→AES 握手; reboot=do_cmd_web REBOOT_WEB; 凭证经 device_local, RSA 私钥经 _local/secrets/stock_web_rsa.pem; 注意: GUI 重启是优雅复位, LK console 线程不启动, 不可用于弹幕抓捕) |
+| `tools/tail_audit.py` | **v1.0** | tool | `-` | 页尾暴露审计: 列出落在页内 0xfc0..0xfff 的全局对象(配合 TAILSAFE 规则) |
 | `tools/upgrade_slot.py` | **v1.0** | tool | `-` | SSH整槽升级器(P3第一档: vercheck/槽位/空间预检→md5门禁→dd备份旧p26→写新镜像→挂载sanity断言(toor/rcS/#v3:/procd)→失败自动整槽还原不重启→清TRY_A→reboot; PC侧轮询日志+回连终检; --dry-run) |
 | `tools/vaguard/vfprintf_guard.c` | **v1.0** | tool | `-` | musl vfprintf + va_list 闸门 v2(写入不再打死进程; §18); 命中写 /data/gw/logs/vaguard.tsv |
 | `tools/vercheck.py` | **v1.5** | tool | `-` | 版本注册表校验/渲染/设备比对(v1.3: device()随deploy基座迁/data/gw; v1.2性质分区双向强制+全跟踪文件可归类; v1.1 image类md5钉死) |

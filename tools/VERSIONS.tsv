@@ -113,7 +113,7 @@ tools/rescue_shadow.py	1.0	tool	-	shadow.override未bind网络救援(getpass旧�
 gw/toolchain_init.sh	1.1	manifest	/data/gw/toolchain_init.sh	静态工具链自举: /data/gw/sbin 符号链接农场(busybox 305 applet + 静态 iproute2 ip), 原子换入/失败回退 vendor; rc.extend 开机调用; v1.1: 农场覆盖 pidof/pgrep -> procmatch(缺失回退 busybox)；⟦收口 §22⟧ 农场是工具链载体，不是崩溃修复(冻结；退役暂缓)
 gw/svc_lib.sh	1.3	manifest	/data/gw/svc_lib.sh	共享监督/锁/心跳/最小解析器库; v1.2(USB 轮): SVC_TABLE +usb_mgr; v1.1(WiFi 事故): hostapd 判据改活控制套接字; 历史见git; v1.3(SIGSEGV Phase 0): SVC_TABLE -core_trap(已停用, 防 watchdog 拉回)
 gw/netlock.sh	1.0	manifest	/data/gw/netlock.sh	路由/防火墙/地址写方串行化(batch3): flock(静态 busybox)+可重入+REPAIR 台账/小时速率
-gw/bin/busybox	1.0	manifest	/data/gw/bin/busybox	静态 aarch64 busybox 1.36.1(Alpine busybox-static 1.36.1-r31, 与厂商同版本); P2 崩溃家族工具链静态化；⟦收口 §22⟧ 工具链自主权载体，对崩溃零改善(§16.7/§22.1)
+gw/bin/busybox	1.1	manifest	/data/gw/bin/busybox	静态 aarch64 busybox 1.36.1(Alpine busybox-static 1.36.1-r31, 与厂商同版本); P2 崩溃家族工具链静态化；⟦收口 §22⟧ 工具链自主权载体，对崩溃零改善(§16.7/§22.1); v1.1(SIGSEGV §18): 用 musl-cross 在 WSL 重建并链接 va_list 闸门 v2(build: make CROSS_COMPILE=aarch64-linux-musl- + trylink 补丁; 备份 busybox.pre-vfguard)
 gw/bin/ip	1.1	manifest	/data/gw/bin/ip	静态 aarch64 iproute2 6.3.0(与厂商 ip -V 同版本, zig cc musl 重建); 输出与厂商逐字节一致, 保留 link add type bridge; v1.1(SIGSEGV §18): 链接 vfprintf va_list 闸门 v2(输出与旧版逐字节一致)
 gw/bin/logc	1.5	manifest	/data/gw/bin/logc	静态日志采集器; v1.2(P1-2): 信号面包屑(/tmp/logc.crash: 帧偏移/长度)+--dump-raw 原始流+--selftest+ubus 缓冲移出栈+stack-protector; v1.1(batch1): socket/oneshot 超时; 历史见git; v1.3(batch3): --fuzz 确定性变异 + ASAN 构建入口; v1.4(SIGSEGV 轮, ⟦收口 §22⟧ 非家族根因: 摘除最高频污染解引用点): 记录路径彻底去 printf/strftime — 手写 ctime 格式(表+有界整数)与整行拼装, 静态不再链入 strftime/`%0*lld`(在 musl vfprintf 内崩溃); 超长消息跳过而非中止整轮(原 rc=1 截断); v1.5(SIGSEGV Phase 0): on_crash 面包屑后解屏蔽+SIG_DFL+raise 重新触发, 经 core_pattern 管道进 ne_events
 gw/src/logc.c	1.5	src	gw/bin/logc	logc 源码(同产物; 面包屑/dump-raw/selftest/防栈溢出); v1.3: --fuzz; v1.4: printf-free 记录路径; v1.5(SIGSEGV Phase 0): 崩溃改回默认动作可记账(同上产物)
@@ -132,3 +132,4 @@ tools/raw_pull.py	1.0	tool	-	设备侧二进制安全拉取(dropbear 无 SFTP; l
 tools/vaguard/vfprintf_guard.c	1.0	tool	-	musl vfprintf + va_list 闸门 v2(写入不再打死进程; §18); 命中写 /data/gw/logs/vaguard.tsv
 tools/build_vaguard.sh	1.0	tool	-	编译 gw/src/vfprintf_guard.c 为可链接对象(须在 libc 之前链接)
 tools/zigcc.py	1.0	tool	-	以完整 Windows profile 环境启动 zig(修 make 场景 AppDataDirUnavailable); 顺带屏蔽 kbuild 的 -Wp,-MMD 依赖参数
+tools/tail_audit.py	1.0	tool	-	页尾暴露审计: 列出落在页内 0xfc0..0xfff 的全局对象(配合 TAILSAFE 规则)

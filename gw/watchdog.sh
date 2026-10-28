@@ -1,5 +1,8 @@
 #!/bin/sh
-# watchdog.sh v1.35 -- on-device continuous invariant monitor.
+# watchdog.sh v1.36 -- on-device continuous invariant monitor.
+# v1.36 (2026-10-29 断网轮): +netlock 判决键 —— netcfg 写锁连续 3 轮(90s)被占即判
+#   泄漏(正常写方最长 <1s), 记 FAIL detail + 轮转锁文件自救(每小时最多 3 次);
+#   实弹: radvd 在锁内被 spawn 继承 flock fd 持锁 2h, 家宽断链时 failover 全超时。
 # v1.35 (2026-10-28 探针误判修正): dp5g 改 3 包探针(-c3 -W1, 任一回即通) ——
 #   实测蜂窝 SINR -11dB/5% 随机丢包, 单包探针每小时误判 ~10 次, 配合采样器的
 #   '窗口内任一次 FAIL 即整窗 deg' 把 5% 丢包放大成 ~80% 时间降级; 3 包后随机
@@ -74,6 +77,8 @@ if [ -r /data/gw/svc_lib.sh ]; then . /data/gw/svc_lib.sh; else
     exit 1
 fi
 STATE=/tmp/watchdog_state
+# v1.36: netlock 原语(busy/holders/break)在 netlock.sh
+[ -r /data/gw/netlock.sh ] && . /data/gw/netlock.sh 2>/dev/null
 ALED=/sys/class/gpio/gpio473/value
 CYCLE=30
 MAX_LOG=800
@@ -306,6 +311,27 @@ run_cycle() {
     check ccmni_up  "[ -x /data/gw/ccmni_up.sh ]"    "ccmni landing tool"
     check bootgate  "[ -x /data/gw/boot_gate.sh ]"   "boot health gate tool"
     check coremeta  "[ -x /data/gw/core_meta.sh ]"   "core metadata wrapper"
+
+    # ---- v1.36: netcfg 写锁长持检测 + 自愈 ----
+    #   正常写方(wan_agg/wan_eth/fw_apply/ccmni_up)持锁 <1s; 连续 3 轮(90s)仍被占
+    #   只能是泄漏(长驻子进程继承了 flock fd)。发现即轮转锁文件: 泄漏者留在旧
+    #   inode, 新写方用新 inode, 不需要杀任何进程。
+    if netcfg_busy; then
+        NETLOCK_BUSY=$(( ${NETLOCK_BUSY:-0} + 1 ))
+        if [ "$NETLOCK_BUSY" -ge 3 ]; then
+            _nlh=$(netcfg_holders)
+            set_state netlock 1 "netcfg write lock"
+            FAILS=$((FAILS+1))
+            log "FAIL detail netlock busy=${NETLOCK_BUSY}x holders=[${_nlh:-?}]"
+            if [ "${NETLOCK_BREAKS:-0}" -lt 3 ] && netcfg_break; then
+                NETLOCK_BREAKS=$(( ${NETLOCK_BREAKS:-0} + 1 ))
+                log "EVT netlock broken (rotation ${NETLOCK_BREAKS}/3)"
+            fi
+        fi
+    else
+        NETLOCK_BUSY=0
+        set_state netlock 0 "netcfg write lock"
+    fi
 
     # ---- data plane invariants ----
     check agg_rules "iptables -t mangle -S WANAGG 2>/dev/null | grep -q MARK" "split rules installed"
@@ -829,7 +855,7 @@ EOF
 
 # ---- main ----
 case "${1:-}" in
---version) echo "watchdog v1.35"; exit 0 ;;
+--version) echo "watchdog v1.36"; exit 0 ;;
 esac
 touch $LOG $STATE
 # v1.20: 看门狗单实例 — 双实例会重复自愈/告警(现场曾出现 2 个).
@@ -839,8 +865,8 @@ if [ "$_rc" != 0 ]; then
     echo "watchdog: another live instance owns the lock (rc=$_rc)" >&2
     exit 0
 fi
-log "===== watchdog v1.35 start (svc_lib primitives + minimal parsers + batch3 metrics; avail keys + outcome probes + bearer-follow dp; alert LED 5G orange) ====="
-logger -t watchdog "watchdog v1.35 start"
+log "===== watchdog v1.36 start (svc_lib primitives + minimal parsers + batch3 metrics; avail keys + outcome probes + bearer-follow dp; alert LED 5G orange) ====="
+logger -t watchdog "watchdog v1.36 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

@@ -1,5 +1,5 @@
 #!/bin/sh
-# wan_agg.sh v3.5 — 双上行聚合主管: 探活 + 故障转移 FSM + 未打标主路策略 + CLI
+# wan_agg.sh v3.6 — 双上行聚合主管: 探活 + 故障转移 FSM + 未打标主路策略 + CLI
 # v3.2 (2026-10-17 日志加密轮): 每 ~30s TICK 汇总(存活/计数/authd/承载口/候选),
 #   探活逐目标结果、硬截止触发、ccmni 清单变化、authd/W2_READY 边沿、主路写失败
 #   全部留痕; 本文件日志自轮转(400 行) — 24h 分析不再依赖偶然的状态迁移行。
@@ -89,7 +89,28 @@ prim_want() {   # $1=ns1(蜂窝真实存活 0/1) $2=ns2(家宽真实存活 0/1)
 #   BB_GW 自读(原由 ensure_lease 设置, wan_eth 拆出后本函数是唯一读者)。
 main_primary_apply() {   # $1=w1|w2 (空=状态未知, 仅维持探活路由)
     # v3.4 (batch3): serialize main-table writes with wan_eth/rc_netfh.
-    netcfg_lock 3 || { log "WARN netcfg lock timeout: main_primary_apply"; return 0; }
+    # v3.6 (2026-10-29 断网): 锁被占**不得让 failover 停摆**。旧行为直接 return,
+    #   实弹: radvd 泄漏持锁 2h -> 家宽断链时本函数每轮超时 -> 整机断网 9 分钟。
+    #   新增单笔紧急切换: 仅当"目标主路 != 已生效主路"(确有待切换)时, 用一条原子
+    #   ip route replace 完成 v4 切换(单条 netlink 写是原子的, 竞态最坏 last-wins,
+    #   远好于死守已失效主路); 多步序列(规则/表/防火墙/v6 下一跳)仍只在锁内做。
+    if ! netcfg_lock 3; then
+        if [ -n "$1" ] && [ "$1" != "$P_LAST" ]; then
+            if [ "$1" = w2 ]; then
+                _ebg=$(head -1 $GW_FILE 2>/dev/null)
+                [ -n "$_ebg" ] && ip route replace default via $_ebg dev $W2_IF 2>/dev/null && \
+                    log "EVT main-primary emergency w2 (netlock busy; single-op dev=$W2_IF gw=$_ebg)"
+            else
+                ip route replace default dev $W1_IF 2>/dev/null && \
+                    log "EVT main-primary emergency w1 (netlock busy; single-op dev=$W1_IF)"
+                ip -6 route replace default dev $W1_IF metric $V6_PRI_METRIC 2>/dev/null
+            fi
+            P_LAST=$1
+        else
+            log "WARN netcfg lock timeout: main_primary_apply"
+        fi
+        return 0
+    fi
     ip route show default | grep -q "dev $W1_IF metric $W1_PRB_METRIC" || \
         ip route add default dev $W1_IF metric $W1_PRB_METRIC 2>/dev/null
     ip route del default dev $W1_IF metric 50 2>/dev/null   # 清历史遗留(旧写方)

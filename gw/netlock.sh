@@ -1,5 +1,8 @@
 #!/bin/sh
-# netlock.sh v1.1 -- serialize route/firewall/address writers + REPAIR ledger.
+# netlock.sh v1.2 -- serialize route/firewall/address writers + REPAIR ledger.
+# v1.2 (2026-10-29 断网轮): +netcfg_busy/netcfg_holders/netcfg_break —— 锁被长驻
+#   子进程继承(flock fd 泄漏)时看门狗要能发现并轮转锁文件自救; 泄漏实弹:
+#   radvd 在锁内被 spawn, 持锁 2h, 家宽断链时所有写方超时 -> 无法 failover。
 # v1.1 (2026-10-28 时钟轮): 台账行尾加 pre=1 标记 —— 设备无 RTC, 开机到 NTP 首
 #   同步之间 date +%s 是构建日, 那一段的 epoch 不可信(实弹: 118 行 2026-09-09)。
 #   标记依据 = /tmp/ntp_synced(ntp_keeper 写) 缺失, 兼 epoch<2025-01-01 兜底。
@@ -90,6 +93,28 @@ netcfg_unlock() {
     else
         rm -rf "$NETCFG_LOCK.d"
     fi
+}
+
+netcfg_busy() { # 0=被占 1=空闲/无 busybox (返回码与函数名同向)
+    [ -n "$BB" ] || return 1
+    "$BB" flock -n "$NETCFG_LOCK" true 2>/dev/null && return 1
+    return 0
+}
+
+netcfg_holders() { # stdout: 持锁进程的 cmdline(最多 3 条, 分号分隔; 仅诊断用)
+    for _hp in /proc/[0-9]*; do
+        ls -l "$_hp/fd" 2>/dev/null | grep -q "$NETCFG_LOCK" && \
+            tr '\0' ' ' < "$_hp/cmdline" 2>/dev/null | head -c 60
+    done 2>/dev/null | head -3 | tr '\n' ';'
+}
+
+netcfg_break() { # 轮转锁文件: 泄漏者留在旧 inode(它不释放也不影响新写方); 新写方用新 inode
+    [ -e "$NETCFG_LOCK" ] || return 1
+    _nb="$NETCFG_LOCK.leak.$(date +%s)"
+    mv "$NETCFG_LOCK" "$_nb" 2>/dev/null || return 1
+    : > "$NETCFG_LOCK"
+    netcfg_log "EVT netlock break: rotated to $_nb (holders=$(netcfg_holders))"
+    return 0
 }
 
 with_netlock() { # $@=command/function to run under the lock

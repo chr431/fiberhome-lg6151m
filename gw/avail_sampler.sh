@@ -1,5 +1,8 @@
 #!/bin/sh
-# avail_sampler.sh v1.9 -- 组件可用性采样器 (AVAILABILITY_DESIGN §3, 防假绿轮)
+# avail_sampler.sh v1.10 -- 组件可用性采样器 (AVAILABILITY_DESIGN §3, 防假绿轮)
+# v1.10 (2026-10-29 断网轮): +sys.netlock(网络写锁) —— netcfg 锁被长持时所有写方
+#   (wan_agg/wan_eth/fw_apply/ccmni_up)超时降级, 记 deg 而非 down(failover 有单笔
+#   紧急通道 + 看门狗轮转自救兜底); 判据键 = watchdog 的 netlock。
 # v1.9 (2026-10-28 时钟轮): pre-sync 保护 —— 设备无 RTC, 开机时钟=固件构建日, NTP
 #   首同步前写下的任何带日期的行都会永久错(实弹: avail_hourly 24 行 2026090910)。
 #   /tmp/ntp_synced 缺失时仍刷新 /tmp/avail_last(组件实况, 无日期), 但不写小时
@@ -204,6 +207,7 @@ TABLE='
 sys.boot|启动链|系统|K:bootgate+boot
 sys.kernel|内核/修复栈|系统|s:kernel
 sys.supervisor|监督层|系统|s:supervisor
+sys.netlock|网络写锁|系统|s:netlock
 sys.logging|日志管线|系统|s:logging
 sys.gui|网关 GUI|系统|s:gui
 sys.ssh|SSH 管理|系统|k:port22
@@ -233,6 +237,7 @@ KEYS_OF() {
     sys.boot)       echo "bootgate boot" ;;
     sys.kernel)     echo "" ;;
     sys.supervisor) echo "" ;;
+    sys.netlock)    echo "netlock" ;;
     sys.logging)    echo "log_keeper" ;;
     sys.gui)        echo "port80 http200" ;;
     sys.ssh)        echo "port22" ;;
@@ -266,6 +271,12 @@ level_of() { # $1=判据串 → 级别 (op/deg/down/nodata/off)
         ;;
     s:supervisor)
         [ "$FRESH" = 1 ] && echo op || echo down
+        ;;
+    s:netlock)
+        # v1.10: 锁被长持 = 写方全部超时(降级), 但主路切换仍有单笔紧急通道 +
+        #   看门狗 90s 内轮转锁文件自救 -> 记 deg, 不记 down(不冒充全断)。
+        [ "$(lk netlock)" = down ] && { echo deg; return; }
+        lk netlock
         ;;
     s:logging)
         _v=$(lk log_keeper)

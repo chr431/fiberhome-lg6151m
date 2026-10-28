@@ -294,3 +294,79 @@ manifest：`tmpfiles/repro/bw10_manifest.txt`（bw11 节）。
 **操作层新事实**（细节见 manifest 教训 16-18）：原厂 GUI 重启
 （`tools/stock_gui.py reboot`，do_cmd_web REBOOT_WEB）是优雅复位，**该路径 LK 不启动
 console 线程**，0x03 弹幕无法抓捕——翻槽必须配断电重上电/sysrq-b 级冷复位。
+
+---
+
+## 13. 写入机制收口：SCP/MEDMCU 的陈旧 PIT 页（2026-10-28 中午，现场轮）
+
+> 本节把 §11 的“MD modem 侧”从**排除法结论**推进到**格式级 + 直接页观测**：
+> 写入者不是 AP 内核/驱动，也不是 MD 应用 CPU，而是 **MEDMCU/SCP（RISC-V RV33）
+> 的 PIT transfer 路径**；写入记录就是 **16B 的 PIT 表项**，落在旧 PIT 页的
+> 最后一个表项偏移 `0xfc0`。证据硬度：**已证实**（格式/页写）/ **强推断**（任务级身份）。
+
+### 13.1 SCP 身份与代码面（已证实）
+
+- `/dev/block/medmcu_a`：容器 `0x58881688` + `tinysys-medmcu-RV33_A`；
+  载荷为 **RISC-V RV32 + RVC**（`0x15d03b56` 处 `wfi`）。
+- 设备树：`scp_sramSize=0x20000`（128KB SRAM @ `0x15d00000`）；
+  `lk_medmcu_reserved=0xAFF00000+0x40000`；
+  `lk_medmcu_reserved_desc=0x9FCB0000+0x340000`。
+- SCP 固件/运行日志含 `med_dl_pit_transfer`、`med_dl_pit_transfer_task`、
+  `med_dl_pit_cfg_hw`、`med_dl_pit_trigger`、`med_dl_pit_release_flow`、
+  `drv_mdma_dl_set_tx_desc_ctx_idx`；`/dev/medmcu` 每 60s 打印
+  `pit(med_w/r, dpmaif_w/r)`、`bat(...)`、`tx_desc(...)`。
+- SCP SRAM 内的 AP 环表（`0x15b1c`）含 `PIT 0x9ff3edc0(0x80f80)` 等
+  (AP 地址, size) 对，说明 SCP 直接管理 PIT/BAT/DRX 环。
+
+### 13.2 直接观测：旧 PIT 页在热重启后仍被写（已证实，本轮最关键）
+
+- PIT base 每 boot 重新分配：冷启动 `0x8fa20000` → 热重启1 `0x8ff40000`
+  → 热重启2 `0x8fb20000`。
+- 热重启2 后，`pitwatch` 在**更早 boot 的旧 PIT 表**（`0x8fa20000`）内
+  `0x8fa49000/0xfc0` 直接抓到 16B 写入：
+  `{0,0x5e}`、`{2,0xffffffff}`；写后读回该页为全零（free 页被写后又被清零/回收）。
+- 同一时刻当前 PIT 页 `0x8fb20000/0xfc0` 是正常表项 `{0x92cf2600,0}`、
+  `{0x92cf1e80,0}`。
+- **判定**：SCP/PIT 引擎在 AP 重新分配 PIT 表后，仍按**更早 boot 的旧 PIT base**
+  往旧 PIT 页写 16B 表项；旧页已释放，写入落在页尾 `0xfc0`。这就是注入的直接来源。
+
+### 13.3 记录格式 = PIT 表项（强推断，格式级已证实）
+
+- live PIT 表项 16B：`{u64 PA, u64 0}`；4KB 页 256 项，最后一项在 `0xfc0`。
+- 历史注入块：16B `{small,0}` / `{0x9xxxxxxx,0}` 是单个 PIT 表项；
+  32B `{small,0, 0x????????_0000_06xx,0}` 是两个连续 PIT 表项；
+  `{BAT base, producer}` 对应 PIT 表项的 `{PA, flags}` 语义。
+- BAT 表项是 8B `{PA,0}`，与注入的 16B 节距不同；PIT 是唯一同构的 16B 表。
+  故 §11 的“任意 free/anon 页页尾 0xfc0”应改为
+  **“陈旧 PIT 页的第 256 个表项”**——页尾不是随机选择，而是 PIT 节距的必然结果。
+
+### 13.4 控制点与启停（已证实）
+
+| 操作 | 结果 |
+|---|---|
+| AP dpmaif 驱动 unbind（U1） | 注入照写、r094 继续 → AP 驱动不是开关 |
+| `dpmaif_stop(0)`（模块） | `CCCI_DPMAIF_EVENT_STOP` → `scp_sys_full_reset` → AP 重启 |
+| `medmcu` platform driver unbind | AP 重启 → SCP 是关键路径 |
+| `AT+EPOF`（D2） | 注入全停（12min×256MB 零命中）→ MD/SCP 电源域是总开关 |
+| `init=/bin/sh` 不建表（A2） | 71 轮×65536 页零命中 → 表未编程时写入者关闭 |
+| `scp_A_db_test=666` | SCP AED dump，AP 不重启；`scp_A_reg_status` 可读 PC/LR/SP |
+
+**热/冷启动差异**：冷启动（sysrq-b/LK）后 pfcanary 0/4 崩溃；热重启
+（`reboot -f`，跳过 LK）后 1/12s；更早的正常运行 boot 4/4 在 8s 内。
+热重启保留 SCP/引擎状态，冷启动/EPOF 清除——与“陈旧 PIT base 跨启动保留”一致。
+
+### 13.5 修正 §11 与剩余未决
+
+- §11 的“写入者 = MD modem 侧（固件或受其指挥的 dpmaif 引擎 DMA）”方向正确，
+  但粒度太粗。当前分层：
+  1. **MEDMCU/SCP RISC-V 固件（`med_dl_pit_transfer_task`）**：最强嫌疑；
+  2. **dpmaif PIT 引擎硬件**：消费者/可能的写代理；
+  3. **MD 应用 CPU**：无直接证据，降为次要。
+- 未决：SCP 内部保存旧 PIT base 的**具体变量/寄存器**（PIT base 影子 / 页链表
+  next / 页池游标）尚未定位；物理写代理是 SCP CPU store 还是 SCP MDMA/FDMA
+  描述符写也未区分。两者都在 SCP/MD 域、同受 EPOF/冷启动控制，对“止写”等价。
+- 收口实验：多 boot 记录 PIT base 并监控旧 PIT 页；用 `scp_A_db_test`/
+  `scp_do_tbufdump` 在 pfcanary 崩溃瞬间抓 SCP PC/LR；修法验证 =
+  重新分配 PIT 表前先 `dpmaif_stop`/SCP reset，或在 SCP 启动时清零 PIT 页指针。
+
+**现场记录**：`tmpfiles/sigsegv_scp_20261028.md`（本轮完整读数与产物索引）。

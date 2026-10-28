@@ -135,5 +135,5 @@ tools/zigcc.py	1.0	tool	-	以完整 Windows profile 环境启动 zig(修 make �
 tools/tail_audit.py	1.0	tool	-	页尾暴露审计: 列出落在页内 0xfc0..0xfff 的全局对象(配合 TAILSAFE 规则)
 tools/build_busybox_wsl.sh	1.0	tool	-	WSL2/Linux 下用 musl.cc 交叉工具链重建 busybox 1.36.1(静态+va_list 闸门); 自动拉工具链/busybox/musl 源码, 打 trylink 补丁, 产物 1.6MB 402 applet
 
-gw/v6_reconcile.sh	1.1	manifest	/data/gw/v6_reconcile.sh	LAN IPv6 收敛器(ULA+NAT66+radvd, 幂等可重入): 判据=任一上行(eth0/ccmni*)有全局 v6; 调用点 rc_netfh 开机/ccmni_up 拨号落地/watchdog 每 2min; v1.1: 稳态无锁快路径 + 取不到锁跳过本轮(不破坏单写方纪律); mode=on/disabled/noup/wait/nobr 写 /tmp/v6_state 供采样器与 GUI 共用(修 2026-10-28 LAN v6 整 boot 缺失)
+gw/v6_reconcile.sh	1.2	manifest	/data/gw/v6_reconcile.sh	LAN IPv6 收敛器(ULA+NAT66+radvd, 幂等可重入): 判据=任一上行(eth0/ccmni*)有全局 v6; 调用点 rc_netfh 开机/ccmni_up 拨号落地/watchdog 每 2min; v1.1: 稳态无锁快路径 + 取不到锁跳过本轮(不破坏单写方纪律); mode=on/disabled/noup/wait/nobr 写 /tmp/v6_state 供采样器与 GUI 共用(修 2026-10-28 LAN v6 整 boot 缺失); v1.2(2026-10-29 断网实弹): radvd 改为解锁后拉起 — 锁内 spawn 会让长驻子进程继承 flock fd, 锁永不释放(radvd 持锁 2h -> wan_agg failover 全超时 -> 家宽断链即整机断网)
 gw/www/api_v6.sh	1.0	manifest	/data/gw/www/api_v6.sh	API IPv6 LAN 域模块(v6 状态/v6_set 开关); 单一事实源=v6_reconcile.sh status, 页面不自算状态

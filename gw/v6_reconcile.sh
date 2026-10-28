@@ -1,5 +1,5 @@
 #!/bin/sh
-# v6_reconcile.sh v1.1 -- LAN IPv6 (ULA + NAT66 + radvd) 幂等收敛器
+# v6_reconcile.sh v1.2 -- LAN IPv6 (ULA + NAT66 + radvd) 幂等收敛器
 #
 # 为什么需要它 (2026-10-28 实弹):
 #   rc_netfh v1.4 把"LAN 要不要开 v6"绑在"**蜂窝承载口此刻**有全局 v6"上, 且只在
@@ -26,6 +26,9 @@
 #   wait      br-lan 还没建好(开机竞态)      -> 可用性 deg
 #   nobr      本机没有 br-lan                -> 可用性 nodata
 #
+# v1.2 (2026-10-29 断网实弹): radvd 改为**解锁后**拉起 —— 锁内 spawn 长驻子进程会让
+#   它继承 flock fd, 锁永不释放(radvd 持锁 -> wan_agg failover 全部 8s 超时 -> 家宽
+#   断链时整机断网)。另: 起 radvd 前显式 exec 9>&- 兜底。
 # v1.1: 稳态走无锁快路径(已就位且 NAT66 规则在 -> 不取锁不写), 需要写时取锁 8s,
 #   取不到就跳过本轮(原 v1.0 "best-effort 直接写" 会破坏单写方纪律, 且实测 5s
 #   超时会把 netlock_to 抬高)。teardown 也进锁。
@@ -129,7 +132,12 @@ apply() {
     # 默认路由: 只在"一条 v6 默认都没有"时补(主默认归 wan_agg, 不抢)
     $IP -6 route show default 2>/dev/null | grep -q . || \
         { $IP -6 route add default dev $UP 2>/dev/null && log "add v6 default dev $UP"; }
-    # radvd
+    netcfg_unlock
+    # radvd 必须在**锁外**拉起: flock 的 fd 9 会被长驻子进程继承, 继承即等于锁永不
+    #   释放(rc_netfh 早有同款注释)。实弹 2026-10-29 00:11: 本脚本在锁内起 radvd ->
+    #   radvd 持 /tmp/netcfg.lock -> wan_agg 的 main_primary_apply 连续 8s 超时 ->
+    #   家宽断链时无法 failover 到蜂窝 -> 整机断网。顺序改为: 写完规则/地址 -> 解锁
+    #   -> 再起 radvd。
     if [ -z "$(radvd_pid)" ]; then
         if [ -x /fhrom/bin/radvd ]; then
             LD_LIBRARY_PATH=/fhrom/lib:/fhrom/usr/lib /fhrom/bin/radvd \
@@ -139,7 +147,6 @@ apply() {
             log "WARN /fhrom/bin/radvd missing"
         fi
     fi
-    netcfg_unlock
     state_write on "$UP"
     return 0
 }

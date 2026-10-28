@@ -1,5 +1,5 @@
 #!/bin/sh
-# v6_reconcile.sh v1.0 -- LAN IPv6 (ULA + NAT66 + radvd) 幂等收敛器
+# v6_reconcile.sh v1.1 -- LAN IPv6 (ULA + NAT66 + radvd) 幂等收敛器
 #
 # 为什么需要它 (2026-10-28 实弹):
 #   rc_netfh v1.4 把"LAN 要不要开 v6"绑在"**蜂窝承载口此刻**有全局 v6"上, 且只在
@@ -26,6 +26,10 @@
 #   wait      br-lan 还没建好(开机竞态)      -> 可用性 deg
 #   nobr      本机没有 br-lan                -> 可用性 nodata
 #
+# v1.1: 稳态走无锁快路径(已就位且 NAT66 规则在 -> 不取锁不写), 需要写时取锁 8s,
+#   取不到就跳过本轮(原 v1.0 "best-effort 直接写" 会破坏单写方纪律, 且实测 5s
+#   超时会把 netlock_to 抬高)。teardown 也进锁。
+#
 # 纪律: 只写 ULA/NAT66/radvd 三件(路由默认只在"完全没有 v6 默认"时补一条);
 #       main 表主默认归 wan_agg 独占, 本脚本不抢。
 
@@ -37,8 +41,6 @@ STATE=/tmp/v6_state
 LOG=/tmp/v6_reconcile.log
 IP=/data/gw/bin/ip
 [ -x "$IP" ] || IP=ip
-BB=/data/gw/bin/busybox
-[ -x "$BB" ] || BB=
 
 log() { echo "$(date '+%m-%d %H:%M:%S') $*" >> $LOG; }
 [ -s $LOG ] && [ "$(wc -l < $LOG 2>/dev/null || echo 0)" -gt 400 ] && \
@@ -51,6 +53,7 @@ V6LAN=${V6LAN:-1}
 
 have_ula() { $IP -6 addr show dev $BR 2>/dev/null | grep -q "$ULA_PFX"; }
 radvd_pid() { pidof radvd 2>/dev/null | awk '{print $1}'; }
+state_get() { [ -r $STATE ] && tr ' ' '\n' < $STATE | sed -n "s/^$1=//p" | head -1; }
 
 uplink() { # 找一个有全局 v6 的上行口; 找不到返回 1
     for i in eth0 ccmni0 ccmni1 ccmni2 ccmni3; do
@@ -67,11 +70,23 @@ state_write() { # $1=mode $2=up
         "$1" "${2:--}" "$_u" "${_r:--}" "$(date +%s)" > $STATE
 }
 
-teardown() { # $1=mode(disabled|noup|nobr)
-    _p=$(radvd_pid)
-    [ -n "$_p" ] && { kill "$_p" 2>/dev/null; log "stop radvd ($1)"; }
-    have_ula && { $IP -6 addr del $ULA_ADDR dev $BR 2>/dev/null; log "del ULA ($1)"; }
-    state_write "$1" ""
+lock_take() { # 取 netcfg 锁(8s); 成功返回 0 且 _nl=1
+    _nl=0
+    . $DIR/netlock.sh 2>/dev/null
+    netcfg_lock 8 2>/dev/null && _nl=1
+    [ "$_nl" = 1 ]
+}
+
+teardown() { # $1=mode(disabled|noup)
+    if lock_take; then
+        _p=$(radvd_pid)
+        [ -n "$_p" ] && { kill "$_p" 2>/dev/null; log "stop radvd ($1)"; }
+        have_ula && { $IP -6 addr del $ULA_ADDR dev $BR 2>/dev/null; log "del ULA ($1)"; }
+        netcfg_unlock
+        state_write "$1" ""
+    else
+        log "netcfg busy: teardown($1) skipped (next tick retries)"
+    fi
 }
 
 apply() {
@@ -85,10 +100,19 @@ apply() {
     if [ "$V6LAN" != 1 ]; then teardown disabled; return 0; fi
     UP=$(uplink) || { teardown noup; return 0; }
 
-    _nl=0
-    . $DIR/netlock.sh 2>/dev/null
-    netcfg_lock 5 2>/dev/null && _nl=1
-    [ "$_nl" = 1 ] || log "WARN netcfg lock timeout: v6 reconcile (proceeding best-effort)"
+    # 快路径(稳态): 已就位 + 规则在 -> 不取锁、不写任何东西。看门狗每 2min 一次,
+    #   全部走慢路径会和 wan_agg/wan_eth 抢 netcfg 锁(实测 5s 超时)。
+    if [ "$(state_get mode)" = on ] && [ "$(state_get up)" = "$UP" ] && have_ula \
+       && [ -n "$(radvd_pid)" ] \
+       && ip6tables -t nat -C POSTROUTING -s $ULA_PFX::/64 -o $UP -j MASQUERADE 2>/dev/null; then
+        state_write on "$UP"
+        return 0
+    fi
+
+    if ! lock_take; then
+        log "netcfg busy: v6 reconcile skipped this round (next tick retries)"
+        return 0
+    fi
 
     have_ula || { $IP -6 addr add $ULA_ADDR dev $BR 2>/dev/null && log "add ULA on $BR"; }
     [ "$(cat /proc/sys/net/ipv6/conf/all/forwarding 2>/dev/null)" = 1 ] || \
@@ -115,19 +139,18 @@ apply() {
             log "WARN /fhrom/bin/radvd missing"
         fi
     fi
-    [ "$_nl" = 1 ] && netcfg_unlock
+    netcfg_unlock
     state_write on "$UP"
     return 0
 }
 
 status() {
-    _m=unknown
-    [ -r $STATE ] && _m=$(sed -n 's/^mode=\([a-z]*\).*/\1/p' $STATE 2>/dev/null | head -1)
+    _m=$(state_get mode); [ -n "$_m" ] || _m=unknown
     _u=$(uplink) || _u=""
     _r=$(radvd_pid)
     _a=0; have_ula && _a=1
     printf 'mode=%s up=%s ula=%s radvd=%s v6lan=%s\n' \
-        "${_m:-unknown}" "${_u:--}" "$_a" "${_r:--}" "$V6LAN"
+        "$_m" "${_u:--}" "$_a" "${_r:--}" "$V6LAN"
 }
 
 check() {
@@ -139,7 +162,7 @@ check() {
 }
 
 case "${1:-apply}" in
-    apply)  O=$(apply); RC=$?; status; exit $RC ;;
+    apply)  _o=$(apply); RC=$?; status; exit $RC ;;
     status) status ;;
     check)  check ;;
     *)      echo "usage: v6_reconcile.sh [apply|status|check]" >&2; exit 1 ;;

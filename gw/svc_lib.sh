@@ -1,5 +1,10 @@
 #!/bin/sh
-# svc_lib.sh v1.1 -- shared supervision, lock, heartbeat and minimal-parser library.
+# svc_lib.sh v1.3 -- shared supervision, lock, heartbeat and minimal-parser library.
+# v1.3 (SIGSEGV Phase 0): SVC_TABLE -core_trap(每日文件模式窗口停用)。该登记项
+#   必须同时摘掉: 留着它 watchdog 就会把已停用的守护重新拉起, 并再次改写
+#   core_pattern 为文件模式(观测盲窗)。
+# v1.2 (2026-10-24 USB 轮): SVC_TABLE +usb_mgr(USB-C 设备模式服务管理; 心跳
+#   周期 15s, max-hb-age=180; recipe 带 daemon 参数)。
 # v1.1 (2026-10-21 WiFi incident): hostapd liveness by LIVE control socket
 #   (/proc/net/unix) + our own config path; stale socket files and the vendor
 #   global hostapd no longer count as "our AP is up".
@@ -231,6 +236,8 @@ svc_repairs_1h() {
 # Columns: name|pgrep-pattern|lock-token|recipe|heartbeat|max-hb-age|env
 # env is optional and is passed to "env" before the shell (dial_keeper needs
 # the FH library/PATH environment when restarted by the supervisor).
+# v1.3: 表内不得出现注释行(会被当成守护名传给 svc_supervise) —— 停用项的说明
+#   写在这里, 不写进表内。core_trap 已停用并移出本表(见 gw/core_trap.sh 头部)。
 SVC_TABLE='
 ntp_keeper|ntp_keeper[.]sh|ntp_keeper.sh|sh /data/gw/ntp_keeper.sh|/tmp/ntp_keeper.hb|4200|
 traffic_logger|traffic_logger[.]sh|traffic_logger.sh|sh /data/gw/traffic_logger.sh|/tmp/traffic_logger.hb|900|
@@ -240,7 +247,7 @@ led_mgr|led_mgr[.]sh|led_mgr.sh|sh /data/gw/led_mgr.sh|/tmp/led_mgr.hb|60|
 fan_mgr|fan_mgr[.]sh|fan_mgr.sh|sh /data/gw/fan_mgr.sh|/tmp/fan_mgr.hb|60|
 wan_eth|wan_eth[.]sh|wan_eth.sh|sh /data/gw/wan_eth.sh|/tmp/wan_eth.hb|150|
 log_keeper|log_keeper[.]sh|log_keeper.sh|sh /data/gw/log_keeper.sh|/tmp/log_keeper.hb|180|
-core_trap|core_trap[.]sh|core_trap.sh|sh /data/gw/core_trap.sh|/tmp/core_trap.hb|600|
 healthdog|healthdog[.]sh|healthdog.sh|sh /data/gw/healthdog.sh|/tmp/healthdog.hb|60|
 dial_keeper|dial_keeper[.]sh|dial_keeper.sh|sh /data/gw/dial_keeper.sh|/tmp/dial_keeper.hb|90|LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib PATH=/data/gw/sbin:/data/gw/bin:/usr/sbin:/usr/bin:/sbin:/bin:/fhrom/bin:/fhrom/fhshell
+usb_mgr|usb_mgr[.]sh|usb_mgr.sh|sh /data/gw/usb_mgr.sh daemon|/tmp/usb_mgr.hb|180|
 '

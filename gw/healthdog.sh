@@ -1,5 +1,10 @@
 #!/bin/sh
-# healthdog.sh v1.5 -- userspace half of healthdog + second-level supervisor.
+# healthdog.sh v1.6 -- userspace half of healthdog + second-level supervisor.
+# v1.6 (2026-10-25 守护面加固): ① beacon 监视不再依赖 ARMED —— 未武装窗口
+#   (arm 被防环拒绝/稳定窗前)里 watchdog 死亡原先无人复活, 现在与武装路径
+#   同款判据(仅修"锁 pid 确证死亡", 不碰活而慢的实例), 300s 限频;
+#   ② 宽恕重启 1→2 次 —— 连续两次 NE 打死新拉起的 watchdog 不再直接升级为
+#   90s 内核复位(D-storm 场景 lo 死仍走 WBAD 立即复位, 楔死保护不削弱)。
 # v1.4: 内核 armed 标志跨守护重启保持 — 新实例必须先恢复心跳再谈 arm 判定
 #   (现场实测: 重启 healthdog 后 90s 内内核会复位；temp heartbeat loop 应急)。
 #
@@ -54,7 +59,7 @@ if [ "$_rc" != 0 ]; then
 fi
 # v1.3: loopback is required by the heartbeat predicate (and was DOWN)
 ip link set lo up 2>/dev/null
-hd "start v1.5 pid=$$ boot_id=$(bid) up=$(up)s lo=$(ip link show lo 2>/dev/null | head -1)"
+hd "start v1.6 pid=$$ boot_id=$(bid) up=$(up)s lo=$(ip link show lo 2>/dev/null | head -1)"
 
 # ---- pstore: rescue the previous boot's console log (P1-5) ---------------
 collect_pstore() {
@@ -142,9 +147,12 @@ while :; do
             echo hb > /proc/healthdog 2>/dev/null
             [ $(( $(now) % 300 )) -lt 10 ] && hd "armed heartbeat ok up=${u}s wd_age=${_wage}s ext=$ext"
             WBAD=0; WATCHDOG_TRIES=0
-        elif [ "$lo" = 1 ] && [ "$_wage" -gt "$_limit" ] && [ "$WATCHDOG_TRIES" -lt 1 ]; then
-            # one grace restart: keep heartbeating while the primary recovers
-            WATCHDOG_TRIES=1
+        elif [ "$lo" = 1 ] && [ "$_wage" -gt "$_limit" ] && [ "$WATCHDOG_TRIES" -lt 2 ]; then
+            # grace restarts (v1.6: 1 -> 2): a freshly restarted watchdog hit by
+            # a second NE used to fall straight into the withhold path = 90s
+            # kernel reset. Two graces absorb the random-crash case; a real
+            # D-storm wedge still trips lo=0 -> WBAD -> immediate reset.
+            WATCHDOG_TRIES=$((WATCHDOG_TRIES + 1))
             hd "armed: watchdog stale ${_wage}s — restarting once (heartbeat kept)"
             _wp=$(cat /tmp/watchdog.lock 2>/dev/null)
             if [ -n "$_wp" ] && kill -0 "$_wp" 2>/dev/null && \
@@ -169,6 +177,28 @@ while :; do
     # not armed: arm once the boot has been healthy and stable for the window,
     # then keep supervising from the armed branch above.  Arming proactively is
     # the point: a wedged userspace cannot arm itself later.
+    # v1.6: beacon supervision independent of ARMED — while the module is
+    # unarmed (arm refused / pre-stable window) a definitively dead watchdog
+    # previously had no revival path at all. Same liveness predicate as the
+    # armed branch; only act when the lock pid is verifiably gone (a
+    # live-but-slow watchdog is none of our business here), 300s rate limit.
+    if [ "$u" -gt 180 ]; then
+        _ba=$(cat "$BEAT" 2>/dev/null)
+        case "$_ba" in ''|*[!0-9]*) _wage=999999 ;; *) _wage=$((u - _ba)) ;; esac
+        if [ "$_wage" -gt 120 ] && [ $(( $(now) - LAST_RESTART )) -ge 300 ]; then
+            _wp=$(cat /tmp/watchdog.lock 2>/dev/null)
+            _dead=1
+            if [ -n "$_wp" ] && kill -0 "$_wp" 2>/dev/null && \
+               grep -qa '/data/gw/watchdog.sh' /proc/$_wp/cmdline 2>/dev/null; then
+                _dead=0
+            fi
+            if [ "$_dead" = 1 ]; then
+                LAST_RESTART=$(now)
+                hd "unarmed: watchdog stale ${_wage}s and not running -- restarting"
+                nohup sh /data/gw/watchdog.sh >/dev/null 2>&1 </dev/null &
+            fi
+        fi
+    fi
     if [ "$u" -lt 600 ]; then
         sleep 10
         continue

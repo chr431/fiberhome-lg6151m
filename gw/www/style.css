@@ -1,3 +1,4 @@
+/* style.css v2.2 (可用性页: 横幅/90 天条/事件表) */
 :root{
   --bg:#0f1923; --card:#17293b; --line:#24405c; --tx:#dbe9f6; --dim:#7fa3c4;
   --ok:#2ecc8f; --bad:#e06060; --acc:#3aa0e8; --fh:#0e6bb8; --input:#0c1c2c;
@@ -72,3 +73,29 @@ pre.log{background:#0a1622;border:1px solid var(--line);border-radius:8px;paddin
 footer{text-align:center;color:var(--dim);font-size:11.5px;margin:18px 0 10px}
 /* v3.8: 未保存修改的字段微高亮(配合脏标记机制) */
 input.dirty, select.dirty { border-color: var(--acc); }
+
+/* ---- v2.2: 可用性页 ---- */
+.av-banner { font-size: 1.05rem; padding: .5rem .25rem; }
+.av-banner.av-ok b { color: var(--ok); }
+.av-banner.av-deg b { color: #f1c40f; }
+.av-banner.av-down b { color: var(--bad); }
+.av-banner.av-nod b { color: var(--dim); }
+.av-banner.av-warm { color: var(--dim); }
+.av-grp { color: var(--dim); font-size: .78rem; margin: .9rem 0 .25rem; border-bottom: 1px solid var(--line); padding-bottom: .2rem; }
+.av-row { display: flex; align-items: center; gap: .5rem; padding: .22rem 0; }
+.av-dot { width: 1.1rem; text-align: center; font-style: normal; }
+.av-dot.ok { color: var(--ok); } .av-dot.dg { color: #f1c40f; }
+.av-dot.dn { color: var(--bad); } .av-dot.nod { color: var(--dim); }
+.av-dot.mai, .av-dot.off { color: var(--dim); }
+.av-name { width: 8.5rem; }
+.av-now { width: 4rem; color: var(--dim); font-size: .8rem; }
+.av-bar { flex: 1; display: flex; align-items: center; overflow: hidden; }
+.av-c { display: inline-block; width: 7px; height: 15px; margin-right: 1px; border-radius: 1px; background: #d5dbdb; }
+.av-c.ok { background: #2ecc8f; } .av-c.dg { background: #f1c40f; }
+.av-c.dn { background: #e06060; } .av-c.mai { background: #95a5a6; }
+.av-c.nod { background: #d5dbdb; }
+.av-none { color: var(--dim); font-size: .78rem; }
+.av-pct { width: 3.2rem; text-align: right; font-size: .8rem; }
+.av-inc { width: 2rem; color: #f1c40f; font-size: .8rem; }
+.av-iev { padding: .18rem 0; font-size: .85rem; }
+.av-foot { color: var(--dim); font-size: .74rem; padding: .8rem .2rem .2rem; line-height: 1.6; }

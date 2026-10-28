@@ -1,5 +1,8 @@
 #!/bin/sh
-# api.sh v2.77 (v2.76, 2026-10-17 日志加密轮: +请求级日志 /tmp/api.log — 写端点
+# api.sh v2.79 (v2.78, 可用性轮 P1: +avail 域(api_avail.sh, 组件可用性
+#   90 天日条/事件表/覆盖率 — AVAILABILITY_DESIGN §4.1); v2.78, 2026-10-24 USB 轮: +usb/usb_set 域模块(api_usb.sh, USB-C
+#   设备模式三开关: 总开关/ADB/控制台, 状态含 UDC/桥接/载波/门位); v2.76, 2026-10-17
+#   日志加密轮: +请求级日志 /tmp/api.log — 写端点
 #   全记、读端点仅慢请求/错误, 只含端点/方法/耗时/错误码, 不记 body/token/口令;
 #   v2.75, 2026-10-17 架构轮: 模块化拆分 — 本文件收敛为 核心(helpers/
 #   认证/配置助手) + 路由表, 六个域模块按端点懒加载($APID/api_{sys,wifi,lan,agg,
@@ -204,6 +207,11 @@ case "$EP" in
     traffic_limit) need_tok; . $APID/api_sys.sh; apply_traffic_limit ;;
     sys_reboot) need_tok; ok_json; (sleep 1; reboot) & ;;
     diag_gen)   need_tok; (sh /data/gw/diag_dump.sh > /data/gw/logs/diag_last.txt 2>&1) & ok_json ;;
+    # usb 域 (USB-C 设备模式; v2.78)
+    usb)        need_tok; . $APID/api_usb.sh; get_usb ;;
+    usb_set)    need_tok; . $APID/api_usb.sh; apply_usb ;;
+    # avail 域 (可用性评定; v2.79)
+    avail)      need_tok; . $APID/api_avail.sh; get_avail ;;
     # wifi 域
     wifi)       need_tok; . $APID/api_wifi.sh; get_wifi ;;
     wifi_set)   need_tok; . $APID/api_wifi.sh; apply_wifi ;;

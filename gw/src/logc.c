@@ -38,6 +38,25 @@
  *               run under an ASAN build (tools/build_logc.sh --asan)
  *   -V          version
  *
+ * v1.5 -- 观测层修复 (Phase 0)：让自身崩溃重新可记账。v1.2~v1.4 的
+ *   on_crash() 写完面包屑后直接 _exit(128 + sig) —— 进程不是被信号杀死，
+ *   内核根本不走 do_coredump()，于是 core_pattern 管道
+ *   (|/data/gw/core_meta.sh %p %s %u %g) 整条链被绕过：logc 每崩一次，
+ *   ne_events.tsv 里都不留痕（观测盲区 ≠ 没发生）。现在改为：
+ *   (1) 面包屑照旧先落盘，字段一个不改 —— 它是 core 被跳过时唯一的线索；
+ *   (2) 解除该信号的屏蔽后恢复默认动作并重新触发同一信号，由内核按默认
+ *       动作终止并 dump core。core_pattern 为管道模式时内核强制
+ *       cprm.limit = RLIM_INFINITY（fs/coredump.c:675），进程侧
+ *       RLIMIT_CORE=0 拦不住管道（文件模式才拦，fs/coredump.c:716），
+ *       所以恢复默认动作即可进台账；内核另给 helper 设 RLIMIT_CORE=1
+ *       作递归保护（fs/coredump.c:576），helper 自身再崩不会递归；
+ *   (3) 重新触发若意外返回，仍以 _exit(128 + sig) 收尾，绝不卡在 handler。
+ *   （同日 core_trap 每日窗口已停用，见 gw/core_trap.sh 文件头；停用后
+ *   core_pattern 恒为管道，不再有文件模式窗口。面包屑仍保留作兜底：
+ *   __get_dumpable() 为 0 的进程、或 helper 侧异常时，它是唯一线索。）
+ *   handler 内新增调用只有 sigemptyset/sigaddset/sigprocmask/signal/raise，
+ *   全部在 POSIX async-signal-safe 清单内（无 malloc/printf/strerror）。
+ *
  * v1.3 -- stability batch3: --fuzz in-process mutation harness (valid frames,
  *   truncations, bogus lengths, type swaps, oversized/NUL messages, noise);
  *   pairs with the ASAN build target so the next real crash can be replayed.
@@ -91,7 +110,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define LOGC_VERSION "1.4"
+#define LOGC_VERSION "1.5"
 
 /* ---- ubus wire protocol (only what we need) ---------------------------- */
 
@@ -251,6 +270,25 @@ static void on_crash(int sig)
 		(void)r;
 		close(fd);
 	}
+
+	/* v1.5: 面包屑已落盘，接着让内核按默认动作终止本进程并 dump core，
+	 * 使这次崩溃经 core_pattern 管道被 core_meta.sh 记入 ne_events.tsv。
+	 * 进入 handler 时触发信号默认处于屏蔽态（sa_flags 没有 SA_NODEFER），
+	 * 若不解屏蔽，raise() 只会把它挂起，紧随其后的 _exit 会抹掉这次 core。 */
+	{
+		sigset_t s;
+
+		sigemptyset(&s);
+		sigaddset(&s, sig);
+		sigprocmask(SIG_UNBLOCK, &s, NULL);
+	}
+	/* SA_RESETHAND 已在进入 handler 时把处置复位为 SIG_DFL，这里显式再设
+	 * 一次不改变语义，只为不依赖 libc 对 SA_RESETHAND 的实现细节。 */
+	signal(sig, SIG_DFL);
+	raise(sig);
+
+	/* 重新触发失败（理论上不会发生）时的兜底：保证进程一定会终止，
+	 * 不会从 handler 返回到崩溃现场继续跑。 */
 	_exit(128 + sig);
 }
 

@@ -1,5 +1,15 @@
 #!/bin/sh
-# watchdog.sh v1.30 -- on-device continuous invariant monitor.
+# watchdog.sh v1.34 -- on-device continuous invariant monitor.
+# v1.34 (防假绿修正): dp5g 探针改"任一带 IP 的 ccmni 可通"(irat 承载切换实弹:
+#   09:46 ccmni2→ccmni3, 探针锚死旧口=假红; 绝对路径去 PATH 变量)。
+# v1.33 (防假绿轮): +http200/dnssvc/dp5g/dpeth 结果探针键(监听≠在服务/IP 在≠
+#   数据面通 — 四次历史全绿谎言的判据级根治, 见 AVAILABILITY_DESIGN §8)。
+# v1.32 (同轮修正): radvd 键无 ULA(未部署 v6)时 pass — 键=1 只表示已部署而
+#   守护死(v4-only 上行不再误报)。
+# v1.31 (2026-10-25 可用性轮): +bss2g/bss5g/bss_guest/radvd 判决键(纯 set_state
+#   行, 供 avail_sampler 分频组件; 旧 bss 键保留)+每轮 cycle=<epoch> 新鲜度键
+#   (set_state 迁移式写入使全绿时段文件不动, 采样器以此判监督层活着);
+#   顺带修正 v1.30 轮遗漏的 --version/启动横幅版本串(仍写 v1.29)。
 # v1.30 (2026-10-21 WiFi incident): hostapd liveness by LIVE control sockets
 #   (/proc/net/unix) + our own config path; recovery removes stale sockets and
 #   no longer refuses when none exist.
@@ -266,6 +276,11 @@ run_cycle() {
     FAILS=0
     TOOLFAILS=0
     UP=$(cut -d. -f1 /proc/uptime)
+    # v1.31 (可用性轮): 每轮刷新 cycle 新鲜度键 — set_state 是迁移式写入,
+    # 无此键则全绿时段 state 文件 mtime/内容不动, 采样器无法判监督层活着。
+    grep -v '^cycle=' $STATE 2>/dev/null > $STATE.tmp
+    echo "cycle=$(date +%s)" >> $STATE.tmp
+    mv $STATE.tmp $STATE
     # v1.15: 时钟跳变检测 — NTP 校时/回拨会让本地时间戳不可跨段比较; epoch 与
     #   uptime 增量不一致即留痕(设备无 RTC, 开机曾出现 8h 跳变)。
     _NOW=$(date +%s)
@@ -294,6 +309,25 @@ run_cycle() {
     # v1.29: BSS liveness from hostapd control sockets + sysfs link flags
     # (the old iw probe counted AP-mode netdevs even when hostapd was dead).
     check_lib bss   "[ \$(svc_bss_count) -ge 2 ]"  "2+ BSS active"
+    # v1.31 (可用性轮): 分频/访客/radvd 判决键 — 纯 set_state 行, 零决策逻辑;
+    # bss2g/bss5g 供 avail_sampler 分频组件, 旧 bss 键保留(boot_gate 等消费者不变)
+    check_lib bss2g  "svc_sock_live /var/run/hostapd/ra0  && svc_link_up ra0"  "WiFi 2.4G BSS live"
+    check_lib bss5g  "svc_sock_live /var/run/hostapd/rai0 && svc_link_up rai0" "WiFi 5G BSS live"
+    check_lib bss_guest ". /data/gw/defaults.conf 2>/dev/null; . /data/gw/settings.conf 2>/dev/null; [ \"\${GUEST:-0}\" = 1 ] || exit 0; _g=0; svc_sock_live /var/run/hostapd/ra1  && svc_link_up ra1  && _g=1; svc_sock_live /var/run/hostapd/rai1 && svc_link_up rai1 && _g=1; [ \"\$_g\" = 1 ]" "guest BSS live (when enabled)"
+    # v1.32: 无 ULA = 本 boot 未部署 v6(rc_netfh v6 相位跳过) → 该检查直接
+    # pass(rvd 键=1 只表示"已部署而守护死"); 否则会把 v4-only 上行误报成故障。
+    check_lib radvd  "ip -6 addr show br-lan 2>/dev/null | grep -q 'fd42:9ac1:7e50' || exit 0; pgrep radvd >/dev/null 2>&1" "radvd v6 RA daemon (when deployed)"
+    # v1.33 (防假绿轮): 结果探针 — 存在性键(端口监听/IP 在)历史上多次全绿撒谎
+    # (L28 WiFi 死 5.7h / v3.44 数据面死载波在 / hostapd 信标停发)。
+    # 实测注记: 本机 127.0.0.1 探测不可达(v3httpd 只绑 LAN IP/dnsmasq 不听
+    # lo) — 探针必须打 192.168.9.1; 探针失败是"最后已知态", 窗口记账由
+    # avail_sampler 的 FAIL-detail 游标捕获兜底。
+    check http200 "export LD_LIBRARY_PATH=/fhrom/lib:/fhrom/usr/lib; [ \"\$(/fhrom/bin/curl -s -o /dev/null -w '%{http_code}' -m 4 http://192.168.9.1/)\" = 200 ]" "GUI serving HTTP 200 (not just listening)"
+    check dnssvc "nslookup localhost 192.168.9.1 >/dev/null 2>&1" "DNS answering on LAN"
+    # v1.34: 承载会 irat 切换(10-25 09:46 实弹 ccmni2→ccmni3, dial_keeper 跟随而
+    # 探针锚死旧口=假红/假绿) — 改为"任一带 IP 的 ccmni 可通"=真 L3 语义; 绝对路径
+    check dp5g   "_ok=1; for _c in ccmni0 ccmni1 ccmni2 ccmni3; do /data/gw/bin/ip -4 addr show \$_c 2>/dev/null | grep -q 'inet ' || continue; /data/gw/bin/busybox ping -4 -I \$_c -c1 -W3 -s1 223.5.5.5 >/dev/null 2>&1 && exit 0; done; exit 1" "5G data plane (any bearer with IP passes ICMP)"
+    check dpeth  "ping -4 -I eth0 -c1 -W3 -s1 223.5.5.5 >/dev/null 2>&1" "eth data plane (ICMP via eth0)"
     check_port port80 80 "GUI :80 reachable"
     check_port port22 22 "SSH :22 reachable"
     if [ -f /tmp/boot.done ]; then
@@ -775,7 +809,7 @@ EOF
 
 # ---- main ----
 case "${1:-}" in
---version) echo "watchdog v1.29"; exit 0 ;;
+--version) echo "watchdog v1.34"; exit 0 ;;
 esac
 touch $LOG $STATE
 # v1.20: 看门狗单实例 — 双实例会重复自愈/告警(现场曾出现 2 个).
@@ -785,8 +819,8 @@ if [ "$_rc" != 0 ]; then
     echo "watchdog: another live instance owns the lock (rc=$_rc)" >&2
     exit 0
 fi
-log "===== watchdog v1.29 start (svc_lib primitives + minimal parsers + batch3 metrics; alert LED 5G orange) ====="
-logger -t watchdog "watchdog v1.29 start"
+log "===== watchdog v1.34 start (svc_lib primitives + minimal parsers + batch3 metrics; avail keys + outcome probes + bearer-follow dp; alert LED 5G orange) ====="
+logger -t watchdog "watchdog v1.34 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

@@ -1,4 +1,4 @@
-/* app.js v3.51 (移除宵断卡片 — 用户裁定判定不做先验, wan_agg v2.29 同步移除) -- v3.50 (聚合页有线宵断卡片: 启用/起止时间/窗口内状态 — wan_agg v2.28 同源) -- v3.49 (诊断卡片时间取自包尾行(尾部必含); v3.48 系统页诊断日志卡片: 生成按钮+诊断包尾部展示 — 日志改善专项轮) -- v3.47 (WiFi 卡片增 MLO 实况行: 双链路/单链路降级/未建立 — api 直读 mwctl dump ap_mld) -- v3.46 (定时重启卡片: 系统页开关+时间设置, 默认每日 04:00; 下次执行按设备侧 now/today/last 推导) -- v3.45 字体统一: 线路状态值去 mono(中文文案误用等宽, 与有线卡不一致) + mono 输入框 placeholder 全 ASCII 化) -- v3.44 状态页线路状态改数据面实测: 有线/蜂窝各增"线路状态"行+标签按 dp 而非 carrier — 21:30 实弹"载波在而断网"全程显示已连接=误导) -- v3 gateway console SPA
+/* app.js v3.53 (可用性页 P1: 组件 90 天状态条+事件表+覆盖率 — api avail, avail_sampler.sh v1.0; AVAILABILITY_DESIGN §4.2) -- app.js v3.52 (系统页 USB-C 接口卡片: 总开关/ADB/控制台三设置 + 实况(主机连接/桥接/载波/门位) — api usb/usb_set, usb_mgr.sh v1.0) -- app.js v3.51 (移除宵断卡片 — 用户裁定判定不做先验, wan_agg v2.29 同步移除) -- v3.50 (聚合页有线宵断卡片: 启用/起止时间/窗口内状态 — wan_agg v2.28 同源) -- v3.49 (诊断卡片时间取自包尾行(尾部必含); v3.48 系统页诊断日志卡片: 生成按钮+诊断包尾部展示 — 日志改善专项轮) -- v3.47 (WiFi 卡片增 MLO 实况行: 双链路/单链路降级/未建立 — api 直读 mwctl dump ap_mld) -- v3.46 (定时重启卡片: 系统页开关+时间设置, 默认每日 04:00; 下次执行按设备侧 now/today/last 推导) -- v3.45 字体统一: 线路状态值去 mono(中文文案误用等宽, 与有线卡不一致) + mono 输入框 placeholder 全 ASCII 化) -- v3.44 状态页线路状态改数据面实测: 有线/蜂窝各增"线路状态"行+标签按 dp 而非 carrier — 21:30 实弹"载波在而断网"全程显示已连接=误导) -- v3 gateway console SPA
  * v3.39 (WiFi 分析仪 4 视图改进: 信道图邻居SSID标注+避让+文字光晕; 评级修复不可见信道号/徽标重叠+经典道同口径+本机标记+干扰计数; 列表可排序/色标/带宽/信号条; 时间图图例+数据点+历史本地持久)
  * v3.32(P2): WPA3虚假选项移除(hostapd仅WPA2-PSK); plmnScan XSS修复(textContent); v3.31: sse带token
  * v3.28: 聚合五模式选择; v3.27: SSE 实时信号; v3.26: 聚合滑块应用后回读同步
@@ -1138,6 +1138,14 @@ PAGES.sys = {
       ${card("指示灯", kv("夜间模式", "led-night") +
         `<button class="ghost" id="led-btn" onclick="ledTgl()">切换</button>
          <span class="hint">夜间模式 = 除电源外全部熄灭</span>`)}
+      ${card("USB-C 接口", kv("服务状态", "usb-en") + kv("主机连接", "usb-link") + kv("PC 接入", "usb-net") + kv("ADB", "usb-adb") + kv("串口控制台", "usb-con") + `
+        <div class="row3" style="margin-top:8px">
+          <div class="frm"><label>总开关</label><select id="usb-en-sel"><option value="1">启用</option><option value="0">关闭</option></select></div>
+          <div class="frm"><label>ADB 调试</label><select id="usb-adb-sel"><option value="0">停用</option><option value="1">启用</option></select></div>
+          <div class="frm"><label>串口控制台</label><select id="usb-con-sel"><option value="0">停用</option><option value="1">启用</option></select></div>
+        </div>
+        <button class="ghost" onclick="usbSave()">应用</button>
+        <span class="hint">USB-C 为设备模式：启用后 PC 经 USB 网卡接入 LAN（与网口客户同权）；关闭 = 端口对外全灭。ADB/控制台为额外 root 通道，默认停用</span>`)}
       ${card("时间同步（NTP）", kv("当前时间", "ntp-date") + kv("时区", "ntp-tz") + kv("NTP 服务器", "ntp-srv") + `
         <div class="row3" style="margin-top:8px">
           <div class="frm"><label>时区</label><select id="nt-tz"><option value="CST-8">北京时间（UTC+8）</option><option value="UTC">UTC</option></select></div>
@@ -1183,6 +1191,19 @@ PAGES.sys = {
         const led = await api("led");
         T("led-night", led.night === "1" ? "已开启" : "已关闭");
         T("led-btn", led.night === "1" ? "恢复正常指示" : "进入夜间模式");
+        /* v3.52: USB-C 接口卡片(设备模式; 数据源 usb_mgr.sh status 单一事实源) */
+        const ub = await api("usb").catch(() => null);
+        if (ub) {
+            const uon = ub.enabled === "1";
+            T("usb-en", uon ? "已启用" : "已关闭");
+            T("usb-link", ub.state === "configured" ? "已连接" : (ub.state === "attached" ? "已插入" : "未连接"));
+            T("usb-net", uon ? (ub.bridge === "1" ? (ub.carrier === "1" ? "已接入 LAN" : "等待主机接入") : "异常：未桥接") : "--");
+            T("usb-adb", ub.adb === "1" && ub.gate === "1" ? "已启用" : (ub.adbd === "1" ? "已停用（门控）" : "已停用"));
+            T("usb-con", ub.getty === "1" ? "已启用（ttyGS0）" : "已停用");
+            const ue = $("usb-en-sel"); if (ue) ue.value = uon ? "1" : "0";
+            const ua = $("usb-adb-sel"); if (ua) ua.value = ub.adb === "1" ? "1" : "0";
+            const uc = $("usb-con-sel"); if (uc) uc.value = ub.console === "1" ? "1" : "0";
+        }
         const ntp = await api("ntp");
         T("ntp-date", ntp.date); T("ntp-tz", TZ_TXT[ntp.tz] || ntp.tz || "--"); T("ntp-srv", ntp.ntp_server);
         F("nt-srv", ntp.ntp_server);
@@ -1229,6 +1250,10 @@ window.ledTgl = async () => {
     const j = await api("led_set", `night=${l.night === "1" ? 0 : 1}`).catch(e => ({ error: e.message }));
     if (j.ok) { toast("已应用（10s 内生效）"); PAGES.sys.tick(); } else toast(eMsg(j.error), 1);
 };
+window.usbSave = async () => {
+    const j = await api("usb_set", `enabled=${$("usb-en-sel").value}&adb=${$("usb-adb-sel").value}&console=${$("usb-con-sel").value}`).catch(e => ({ error: e.message }));
+    if (j.ok) { toast("已应用（关闭/重开时主机侧数秒内重新枚举）"); PAGES.sys.tick(); } else toast(eMsg(j.error), 1);
+};
 window.ntSync = async () => {
     const j = await api("ntp_set", `tz=${$("nt-tz").value}&server=${encodeURIComponent($("nt-srv").value)}`).catch(e => ({ error: e.message }));
     if (j.ok) {
@@ -1260,6 +1285,59 @@ window.syRebootGo = async () => {
     modalClose();
     await api("sys_reboot").catch(() => {});
     toast("重启中…约 3 分钟");
+};
+
+
+/* v3.53: 可用性页 (P1) — 判据/口径见 docs/AVAILABILITY_DESIGN.md;
+   90 天条从左(旧)到右(今), 今日条实时; warming=采样器首采未到。 */
+PAGES.avail = {
+  html: `<div class="card">
+      <div id="av-banner" class="av-banner">加载中…</div>
+    </div>
+    <div class="card"><div id="av-list">…</div></div>
+    <div class="card"><h3>事件（最近 30 条）</h3><div id="av-inc">…</div></div>
+    <div class="av-foot">口径：采样 10 分钟 · 降级按半权计 · 计划维护窗（04:00 重启）排除并标灰 · 观测覆盖率单列 · 未归属的进程崩溃计入全局噪声不摊派到组件 · 设备自观测（断电窗记"无数据"，非绿）</div>`,
+  async tick() {
+    const j = await api("avail");
+    if (!j || !j.ok) return;
+    const b = document.getElementById("av-banner");
+    if (j.warming) {
+      b.innerHTML = "可用性数据采集中（首个采样窗内）…"; b.className = "av-banner av-warm";
+      document.getElementById("av-list").innerHTML = "";
+      document.getElementById("av-inc").innerHTML = "";
+      return;
+    }
+    const ovCls = { op: "ok", deg: "deg", down: "down", nodata: "nod" }[j.overall] || "nod";
+    b.className = "av-banner av-" + ovCls;
+    b.innerHTML = `<b>${j.overall_cn}</b>　观测覆盖 ${j.coverage}%（近 24h）`;
+    const dotCls = { op: "ok", deg: "dg", down: "dn", nodata: "nod", mai: "mai", off: "off" };
+    const dotTxt = { op: "●", deg: "▲", down: "✕", nodata: "○", mai: "◷", off: "—" };
+    let html = "", lastGrp = "";
+    for (const c of j.components) {
+      if (c.group !== lastGrp) { html += `<div class="av-grp">${c.group}</div>`; lastGrp = c.group; }
+      const cells = (c.days || []).map(d =>
+        `<i class="av-c ${dotCls[d.cls] || "nod"}" title="${d.d} ${d.pct}%"></i>`).join("");
+      const pct = c.days && c.days.length ? c.days[c.days.length - 1].pct : "--";
+      html += `<div class="av-row">
+        <span class="av-dot ${dotCls[c.now] || "nod"}">${dotTxt[c.now] || "○"}</span>
+        <span class="av-name">${c.name}</span>
+        <span class="av-now">${c.now_cn}</span>
+        <div class="av-bar">${cells || "<span class=\"av-none\">采集中</span>"}</div>
+        <span class="av-pct">${pct}%</span>
+        <span class="av-inc">${c.inc > 0 ? "⚠" + c.inc : ""}</span>
+      </div>`;
+    }
+    document.getElementById("av-list").innerHTML = html;
+    const inc = document.getElementById("av-inc");
+    if (!j.incidents || !j.incidents.length) { inc.innerHTML = "（尚无事件记录）"; }
+    else {
+      inc.innerHTML = j.incidents.map(i => {
+        const d = new Date(+i.ts * 1000);
+        const t = `${d.getMonth() + 1}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+        return `<div class="av-iev"><span class="mono">${t}</span>　${i.comp} ${i.chg} <span class="dim">(${i.cause})</span></div>`;
+      }).join("");
+    }
+  }
 };
 
 /* ---------- router (骨架一次成型, 轮询仅 tick 更新槽位) ---------- */

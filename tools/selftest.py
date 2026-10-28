@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
 """selftest.py -- assertion-based functional test suite for the LG6151M gateway.
+v2.67 (2026-10-26 SIGSEGV §8.13): 旧内核修复栈整体退役 -- t_fixstack 改为退役
+  断言(lsmod / /proc 节点 / /data .ko / rc19 非注释引用 四处零残留), 并删除
+  marker 分支与 SKIP 台账断言(该台账不再产生)。
+v2.66 (2026-10-26 SIGSEGV Phase 1): 修复栈默认停用 -- t_fixstack 改为
+  marker 分支(停用时断言未加载/节点不存在/SKIP 台账/采样器判 off; 启用时仍走
+  原在位契约); t_avail_ne_drill 只数 op->deg, 不再把开机 mai->op 启动迁移算成假红。
+v2.65 (2026-10-26 SIGSEGV Phase 0): t_core_trap 判据反转 -- core_trap
+  每日文件模式窗口停用(窗口内 core_pattern 降级为文件模式, RLIMIT_CORE=0
+  生效致厂商子树失明, fs/coredump.c:716), 改断言"无实例在跑 + pattern 恒为
+  管道 + rc19 不再拉起"; 同时 core_meta v1.2 起 ne_events 增 origin 尾列。
+v2.59 (2026-10-24 USB 轮): +t_usb_service/t_usb_dataplane(USB-C 设备模式:
+  守护/UDC 绑定/SVC_TABLE + rndis0 桥接不变量, 按 USB_ENABLED 分档断言);
+  t_usb_service 的 all() 误传单布尔已改直接 and 链。
 
 Design principle: L13 (2026-10-05) -- "feature silently broken until manual
 inspection" happened three times because we only checked control plane
@@ -1403,8 +1416,18 @@ def t_sys_kernel():
 def t_sys_wd2():
     # watchdog.sh (L13) 必须在跑, 且 /tmp/watchdog_state 无 key=1 残留
     alive = dev("pgrep -f watchdog.sh | head -1").strip()
-    state = dev("grep '=1$' /tmp/watchdog_state 2>/dev/null")
-    ok = bool(alive) and not state.strip()
+    # v2.62: 排除结果探针键(dp5g/dpeth/http200/dnssvc) — 它们天然瞬态(irat 承载
+    # 切换/上游抖动), 语义归可用性系统做窗口降级判定; p0 的"未恢复故障"只约束
+    # 监督面键(守护/端口/规则/判决)。存在性键必须干净, 探针键只要求存在。
+    state = dev("grep '=1$' /tmp/watchdog_state 2>/dev/null | grep -vE '^(dp5g|dpeth|http200|dnssvc)='")
+    probes = dev("grep -cE '^(dp5g|dpeth|http200|dnssvc)=' /tmp/watchdog_state 2>/dev/null").strip()
+    if state.strip():
+        # v2.63: 防抖 — wan_agg 模式切换会瞬时拆装 agg_rules/fwmark(状态是迁移式
+        # 快照, 单点采样会误报); 40s 后复采, 仍红才算"未恢复"
+        import time as _t
+        _t.sleep(40)
+        state = dev("grep '=1$' /tmp/watchdog_state 2>/dev/null | grep -vE '^(dp5g|dpeth|http200|dnssvc)='")
+    ok = bool(alive) and not state.strip() and probes == "4"
     det = f"pid={alive}" + (f" FAILing={state.strip().splitlines()[0]}" if state.strip() else "")
     record(t_sys_wd2._test_name, "system", ok, det)
 
@@ -1948,27 +1971,27 @@ def t_logc():
               ("bad_frames=0" in live and "resyncs=0" in live)))
 
 
-@test("core 捕获窗口守护在位 (SIGSEGV P3)")
+@test("core_trap 已停用且 core_pattern 恒为管道 (SIGSEGV Phase 0)")
 def t_core_trap():
-    # v2.44: core_trap 必须常驻(watchdog 自愈)、持锁、RLIMIT_CORE=unlimited;
-    #   core_pattern 在窗口外必须是 aee 管道(窗口内允许 /tmp/core.%p)。
+    # v2.65 (SIGSEGV Phase 0): core_trap 每日窗口停用, 本用例判据整体反转。
+    #   旧窗口把 core_pattern 换成文件模式 /tmp/core.%p; 文件模式下内核按
+    #   cprm.limit(=rlimit(RLIMIT_CORE)) 判弃(fs/coredump.c:716), 厂商 procd
+    #   子树软限为 0 故窗口内失明, 且 core_meta 整链被绕过; 而管道路径强制
+    #   cprm.limit=RLIM_INFINITY(:675), 不受 RLIMIT_CORE 约束。窗口本身即
+    #   观测缺陷, 已停用(gw/core_trap.sh v1.3, CORETRAP_ENABLE=1 才恢复)。
+    #   现判据: 不得有实例在跑 + pattern 必须是管道 + rc19 不得再拉起它。
     run = dev("pgrep -f 'core_trap[.]sh' | head -1").strip()
-    lock = dev("cat /tmp/core_trap.lock 2>/dev/null").strip()
-    alive = dev("kill -0 %s 2>/dev/null && echo y" % lock).strip() if lock else ""
     pat = dev("cat /proc/sys/kernel/core_pattern 2>/dev/null").strip()
-    lim = dev("grep -i 'Max core file size' /proc/%s/limits 2>/dev/null | awk '{print $6}'" % run).strip() if run else ""
-    rc19 = dev("grep -c 'core_trap.sh' /data/gw/rc19.sh 2>/dev/null").strip()
-    wd = dev("grep -c 'core_trap' /data/gw/watchdog.sh 2>/dev/null").strip()
-    # v2.51: normal operation now goes through core_meta.sh, which records the
-    # crash metadata and then execs aee_core_forwarder (same behaviour).
-    pat_ok = ("aee_core_forwarder" in pat or "core_meta.sh" in pat) or (
-        "/tmp/core.%p" in pat
-        and dev("test -f /tmp/core_trap.active && echo y").strip() == "y")
-    ok = (bool(run) and bool(lock) and alive == "y" and lim == "unlimited"
-          and pat_ok and int(rc19 or 0) > 0 and int(wd or 0) > 0)
+    # 只数非注释行: v2.36 的 rc19 里仍有一行注释提到 core_trap.sh(说明为何摘除),
+    # 若按裸 grep -c 计会把注释误判成"仍在拉起"。
+    rc19 = dev("grep -v '^[[:space:]]*#' /data/gw/rc19.sh 2>/dev/null"
+               " | grep -c 'core_trap.sh'").strip()
+    present = dev("test -f /data/gw/core_trap.sh && echo y").strip()
+    pat_ok = pat.startswith("|") and ("core_meta.sh" in pat
+                                      or "aee_core_forwarder" in pat)
+    ok = (not run) and pat_ok and int(rc19 or 0) == 0 and present == "y"
     record(t_core_trap._test_name, "system", ok,
-           "pid=%s lock=%s alive=%s lim=%s pat=%s rc19=%s wd=%s"
-           % (run, lock, alive, lim, pat, rc19, wd))
+           "run=[%s] pat=%s rc19=%s file=%s" % (run, pat, rc19, present))
 
 
 @test("watchdog aee 台账增量判据 (SIGSEGV P4)")
@@ -1978,8 +2001,13 @@ def t_watchdog_aee():
     code = dev("grep -c 'watchdog_aeecount' /data/gw/watchdog.sh 2>/dev/null").strip()
     cnt = dev("cat /tmp/watchdog_aeecount 2>/dev/null").strip()
     hist = dev("wc -l < /data/log/aee_exp/db_history 2>/dev/null").strip()
-    st = dev("grep -cE '^core_?trap=' /tmp/watchdog_state 2>/dev/null").strip()
-    ver = dev("grep -c 'watchdog v1.29 start' /tmp/watchdog.log 2>/dev/null").strip()
+    # v2.65: core_trap 已停用并移出 SVC_TABLE(不再产生 state 行), 改查仍在表的 log_keeper
+    st = dev("grep -cE '^log_keeper=' /tmp/watchdog_state 2>/dev/null").strip()
+    ver = dev("grep -c 'watchdog v1.34 start' /tmp/watchdog.log 2>/dev/null").strip()
+    # v2.62: /tmp/watchdog.log 会被 TICK 轮转(约 8h 挤掉横幅) — 持久 syslog 兜底
+    vers = dev("grep 'watchdog v1' /data/gw/logs/syslog.log 2>/dev/null | tail -1 | grep -c 'v1.34 start'").strip()
+    if ver == "0" and vers == "1":
+        ver = "1"
     ok = False
     if code not in ("", "0") and cnt.isdigit() and hist.isdigit():
         ok = abs(int(cnt) - int(hist)) <= 2 and int(st or 0) > 0 and int(ver or 0) > 0
@@ -1998,16 +2026,16 @@ def t_p0_watchdog():
     code = [int(x) for x in code if x.strip().isdigit()]
     hbs = dev("for f in /tmp/led_mgr.hb /tmp/fan_mgr.hb /tmp/wan_eth.hb "
               "/tmp/log_keeper.hb /tmp/ntp_keeper.hb /tmp/wifi_guard.hb "
-              "/tmp/traffic_logger.hb /tmp/reboot_sched.hb /tmp/core_trap.hb "
+              "/tmp/traffic_logger.hb /tmp/reboot_sched.hb "
               "/tmp/healthdog.hb /tmp/dial_keeper.hb; do [ -s \"$f\" ] && echo y; done | wc -l").strip()
     st = dev("grep -cE '^(dnsmasq|dropbear|v3httpd|authd|ntp_keeper|traffic_logger|"
-             "wifi_guard|reboot_sched|led_mgr|fan_mgr|wan_eth|log_keeper|core_trap|"
+             "wifi_guard|reboot_sched|led_mgr|fan_mgr|wan_eth|log_keeper|"
              "healthdog|dial_keeper)=' /tmp/watchdog_state 2>/dev/null").strip()
     beat = dev("cat /tmp/watchdog.beat 2>/dev/null").strip()
     up = dev("cut -d. -f1 /proc/uptime").strip()
     fresh = beat.isdigit() and up.isdigit() and (int(up) - int(beat)) < 180
     ok = (len(code) == 10 and all(c > 0 for c in code)
-          and int(hbs or 0) >= 11 and int(st or 0) >= 15 and fresh)
+          and int(hbs or 0) >= 10 and int(st or 0) >= 14 and fresh)
     record(t_p0_watchdog._test_name, "system", ok,
            "code=%s hb=%s states=%s beat=%s fresh=%s" % (code, hbs, st, beat, fresh))
 
@@ -2035,7 +2063,7 @@ def t_p0_boot_gate():
 def t_p1_singletons():
     pats = ["watchdog", "led_mgr", "fan_mgr", "dial_keeper", "log_keeper",
             "wan_agg", "wan_eth", "wifi_guard", "ntp_keeper", "traffic_logger",
-            "reboot_sched", "core_trap", "healthdog", "boot_gate"]
+            "reboot_sched", "healthdog", "boot_gate"]
     out = dev("for p in %s; do echo -n \"$p=\"; pgrep -f \"/data/gw/${p}[.]sh\" 2>/dev/null | wc -l; done"
               % " ".join(pats)).strip()
     bad = []
@@ -2067,7 +2095,7 @@ def t_p1_forensics():
     cen = dev("grep -c 'ne_census' /data/gw/log_keeper.sh /data/gw/watchdog.sh 2>/dev/null").split()
     met = dev("ls /data/gw/logs/cores/meta 2>/dev/null | wc -l").strip()
     ok = (pat.startswith("|/data/gw/core_meta.sh") and ex == "y" and fwd == "y"
-          and lv == "logc 1.4" and noc == "0"
+          and lv == "logc 1.5" and noc == "0"
           and "rc=0" in st and "PASS" in fz and "rc=0" in fz
           and len(cen) == 2 and all(int(x) > 0 for x in cen if x.isdigit()))
     record(t_p1_forensics._test_name, "system", ok,
@@ -2079,12 +2107,12 @@ def t_p1_forensics():
 def t_p1_healthdog():
     hd = dev("cat /proc/healthdog 2>/dev/null").strip()
     st = dev("grep -c 'ARM REFUSED' /tmp/healthdog.log 2>/dev/null").strip()
-    start = dev("grep -c 'start v1.5' /tmp/healthdog.log 2>/dev/null").strip()
+    start = dev("grep -c 'start v1.6' /tmp/healthdog.log 2>/dev/null").strip()
     hb = dev("cat /tmp/healthdog.hb 2>/dev/null").strip()
     up = dev("cut -d. -f1 /proc/uptime").strip()
     fresh = hb.isdigit() and up.isdigit() and (int(up) - int(hb)) < 90
     # armed=1 is legitimate only after a stable window; the heartbeat file and
-    # the v1.2 start line are mandatory either way.
+    # the v1.6 start line are mandatory either way.
     ok = (int(start or 0) >= 1 and fresh and "armed=" in hd)
     record(t_p1_healthdog._test_name, "system", ok,
            "hd=[%s] start=%s hb=%s fresh=%s refused=%s" % (hd, start, hb, fresh, st))
@@ -2158,6 +2186,48 @@ def t_batch4_awk_arrays():
            % (hits, dl, ak, lv, ls[-80:]))
 
 
+@test("usb: 设备模式服务面 (usb_mgr 守护/gadget绑定/键位)")
+def t_usb_service():
+    # USB 轮 (2026-10-24): 厂商遗留 g1 gadget 链 + usb_mgr 服务补完.
+    #   控制面: 守护活 + UDC 绑定 + SVC_TABLE 行; 状态面: status 输出形状.
+    # 按当前 USB_ENABLED 分档断言(1=在役契约; 0=全灭契约).
+    en = dev("sh /data/gw/usb_mgr.sh status 2>/dev/null | head -1").strip()
+    dpid = dev("pgrep -f 'usb_mgr[.]sh daemon' 2>/dev/null").strip()
+    udc = dev("cat /config/usb_gadget/g1/UDC 2>/dev/null").strip()
+    row = dev("grep -c 'usb_mgr' /data/gw/svc_lib.sh 2>/dev/null").strip()
+    st = dev("sh /data/gw/usb_mgr.sh status 2>/dev/null").strip()
+    keys = (("enabled=" in st) and ("udc=" in st) and ("bridge=" in st)
+            and ("adbd=" in st) and ("gate=" in st) and ("getty=" in st))
+    if "enabled=1" in en:
+        ok = (dpid != "" and udc == "11201000.usb" and row != "0" and keys)
+        note = "on daemon=%s udc=%s" % (dpid or "MISSING", udc)
+    elif "enabled=0" in en:
+        ok = (udc != "11201000.usb" and keys)
+        note = "off udc=[%s] (unbound expected)" % udc
+    else:
+        ok, note = False, "status unreadable"
+    record(t_usb_service._test_name, "system", ok, note)
+
+
+@test("usb: RNDIS 数据面不变量 (rndis0 桥入 br-lan)")
+def t_usb_dataplane():
+    # 数据面: enabled=1 时 rndis0 必须是 br-lan 成员且 UP — "PC 即 LAN 客户端"
+    # 的充要条件; enabled=0 时必须不在桥中(隔离不变量).
+    en = dev("sh /data/gw/usb_mgr.sh status 2>/dev/null | head -1").strip()
+    br = dev("brctl show br-lan 2>/dev/null | grep -cw rndis0").strip()
+    fl = dev("cat /sys/class/net/rndis0/flags 2>/dev/null").strip()
+    iup = "1" if fl.startswith("0x") and (int(fl, 16) & 1) else "0"
+    if "enabled=1" in en:
+        ok = (br == "1" and iup == "1")
+        note = "bridge=%s ifup=%s" % (br, iup)
+    elif "enabled=0" in en:
+        ok = (br == "0")
+        note = "bridge=%s (detached expected)" % br
+    else:
+        ok, note = False, "status unreadable"
+    record(t_usb_dataplane._test_name, "system", ok, note)
+
+
 @test("census batch: pidof/pgrep 自研替代在位 (procmatch)")
 def t_batch4_procmatch():
     # busybox pidof is ~2.7 crashes/day (logs/ne_events.tsv) and pgrep -x is
@@ -2209,6 +2279,78 @@ def t_p2_batch3():
     record(t_p2_batch3._test_name, "system", ok,
            "svc=%s netlock=%s daemons=%s writers=%s flock=%s rows=%s ledger=%s fuzz=[%s]"
            % (sl, nl, dlock, wl, flock, rows, led, fz[-80:]))
+
+
+@test("fixstack: 旧内核修复栈已退役 (§8.13) —— 模块/节点/文件/引用零残留")
+def t_fixstack():
+    # v2.67 (SIGSEGV §8.13): 旧内核修复栈整体退役, 判据改为"退役断言"。
+    #   栈已从仓内删除, 设备侧任何一处残留都是回归; 四条同时为真才算通过:
+    #     ① lsmod 不得有 dpquar/dpclamp;
+    #     ② /proc/dpquar、/proc/dpclamp 节点不得存在;
+    #     ③ /data/gw/dpquar.ko、/data/gw/dpclamp.ko 不得存在;
+    #     ④ /data/rc19.sh 非注释行不得引用 dpquar/dpclamp(启动链不得再拉它)。
+    #   旧版 marker 分支与 SKIP 台账断言一并删除 —— 该台账不再产生。
+    loaded = dev("lsmod 2>/dev/null | grep -cE '^(dpquar|dpclamp) '").strip()
+    nodes = dev("ls -1 /proc/dpquar /proc/dpclamp 2>/dev/null | wc -l").strip()
+    kos = dev("ls -1 /data/gw/dpquar.ko /data/gw/dpclamp.ko 2>/dev/null | wc -l").strip()
+    refs = dev("grep -v '^[[:space:]]*#' /data/rc19.sh 2>/dev/null "
+               "| grep -cE 'dpquar|dpclamp' || true").strip()
+    ok = (loaded == "0" and nodes == "0" and kos == "0" and refs == "0")
+    record(t_fixstack._test_name, "system", ok,
+           "retired loaded=%s nodes=%s kos=%s rc19_refs=%s"
+           % (loaded, nodes, kos, refs))
+
+
+
+@test("avail: 可用性采样器/数据文件/API 域在位 (P1)")
+def t_avail():
+    # AVAILABILITY_DESIGN P1: sampler 由 log_keeper v2.9 10min 驱动(CYC=1 首采),
+    # watchdog v1.31 提供 cycle 新鲜度键与分频/访客/radvd 判决键。
+    gap = dev("up=$(cut -d. -f1 /proc/uptime); hb=$(cat /tmp/avail_sampler.hb 2>/dev/null); "
+              "[ -n \"$hb\" ] && echo $((up - hb)) || echo -1").strip()
+    roster = dev("wc -l < /tmp/avail_last 2>/dev/null").strip()
+    keys = dev("for k in bss2g bss5g radvd cycle http200 dnssvc dp5g dpeth; do "
+               "grep -c \"^$k=\" /tmp/watchdog_state 2>/dev/null; done").split()
+    hf = dev("test -f /data/gw/logs/avail_hourly.tsv; echo $?").strip()
+    tf = dev("test -f /data/gw/logs/avail_transitions.tsv; echo $?").strip()
+    syn = dev("sh -n /data/gw/avail_sampler.sh 2>&1 && sh -n /data/gw/www/api_avail.sh 2>&1; echo $?").strip()
+    rte = dev("grep -c '^    avail)' /data/gw/www/api.sh 2>/dev/null").strip()
+    ok = (gap.lstrip("-").isdigit() and 0 <= int(gap) <= 1500
+          and roster.isdigit() and int(roster) >= 24
+          and len(keys) == 8 and all(x == "1" for x in keys)
+          and hf == "0" and tf == "0" and syn == "0" and rte == "1")
+    record(t_avail._test_name, "system", ok,
+           "hb_gap=%s roster=%s keys=%s hf=%s tf=%s syntax=%s route=%s"
+           % (gap, roster, keys, hf, tf, syn, rte))
+
+@test("avail: NE 假归因演练 (v1.5: 死者≠活实例不得置 deg)")
+def t_avail_ne_drill():
+    # 2026-10-25 假红实弹的证伪演练 (判据变更必须带演练): 注入一条
+    # cmdline=watchdog.sh 的伪 NE 行 + 回退 ne 游标 + 手动跑一轮采样器,
+    # 断言 sys.supervisor 不产生 op->deg (主实例全程健康, 11:03 事故里
+    # 死者是部署残留实例)。结束后删伪行并把游标钉回真实行数, 不留污染。
+    pre = dev("wc -l < /data/gw/logs/ne_events.tsv").strip()
+    pretr = dev("wc -l < /data/gw/logs/avail_transitions.tsv").strip()
+    if not (pre.isdigit() and pretr.isdigit()):
+        record(t_avail_ne_drill._test_name, "system", False, "ledger unreadable")
+        return
+    dev("printf '%s\t99999\tsh\tsig=11\texe=/data/gw/bin/busybox"
+        "\targs=sh /data/gw/watchdog.sh\n' >> /data/gw/logs/ne_events.tsv")
+    dev("sed -i \"4s/.*/%s/\" /tmp/avail_sess" % pre)
+    dev("sh /data/gw/avail_sampler.sh >/dev/null 2>&1; echo ran", timeout=45)
+    # v2.66: 只数 op->deg —— 本演练的判据就是"不得因伪 NE 产生降级"(见上注)。
+    #   裸 grep 'sys.supervisor' 会把开机期 mai->op maint 启动迁移也算进来,
+    #   导致用例在每次重启后假红。
+    sup = dev("tail -n +%d /data/gw/logs/avail_transitions.tsv 2>/dev/null | "
+              "grep -c 'sys.supervisor.*op->deg'" % (int(pretr) + 1)).strip()
+    lv = dev("grep '^sys.supervisor|' /tmp/avail_last 2>/dev/null | "
+             "cut -d'|' -f4").strip()
+    # cleanup: 伪行删除 + 游标钉回真实行数(防下一窗重扫全史)
+    dev("sed -i '$d' /data/gw/logs/ne_events.tsv; "
+        "_n=$(wc -l < /data/gw/logs/ne_events.tsv); sed -i \"4s/.*/$_n\" /tmp/avail_sess")
+    ok = (sup == "0" and lv == "op")
+    record(t_avail_ne_drill._test_name, "system", ok,
+           "supervisor_transitions_in_window=%s level=%s" % (sup, lv))
 
 
 def main():

@@ -1,5 +1,12 @@
 #!/bin/sh
-# log_keeper.sh v2.7 -- 日志持久化守护（日志改善专项轮）
+# log_keeper.sh v2.11 -- 日志持久化守护（日志改善专项轮）
+#   v2.11 (SIGSEGV §8.13): 旧内核修复栈退役 —— 删除其持有集收割段(union 种子
+#   文件 + 每 boot 快照) 与 stability_metrics 的 fix-stack 四列(clamp/dheld/
+#   deeps/episodes: 模块不存在时恒为 -1 的死列, 不再产生)。
+#   v2.9 (可用性轮 P1): 驱动 avail_sampler.sh (10min 节拍 CYC%20 + CYC=1 首采;
+#   单遍有界, 崩溃只留 NE 一行, 覆盖率指标自会体现 — AVAILABILITY_DESIGN §3)。
+#   v2.8 (SIGSEGV §8.10.2): stability_metrics.tsv +fix-stack 列
+#   (clamp/dheld/deeps/episodes); v2.11 随旧内核修复栈退役删除该四列。
 #   v2.7 (2026-10-21 SIGSEGV 家族轮 2): delta() 改调自建静态 logcut —— busybox
 #   awk 只要在运行期存在数组(B 收集锚点后的行), 退出清理就约 1% SIGSEGV;
 #   实测"锚点在文件中段(数组被填充)" 300 次 2 崩, 仅去掉 split 不够。
@@ -301,6 +308,10 @@ while :; do
     # -- 每 10 轮(5min)落一行汇总: 持久化规模 + 降噪丢弃量可观测(不静默) --
     CYC=$(( ${CYC:-0} + 1 ))
     if [ $((CYC % 10)) -eq 0 ] || [ "$CYC" = 1 ]; then
+        # v2.9: 可用性采样器 (10min 节拍; 首采即时) — 无新守护的设计前提
+        if [ $((CYC % 20)) -eq 0 ] || [ "$CYC" = 1 ]; then
+            sh /data/gw/avail_sampler.sh >/dev/null 2>&1 || true
+        fi
         _nf=$(ls $DIR/tmp/*.log 2>/dev/null | wc -l)
         _nb=$(cat $DIR/tmp/*.log 2>/dev/null | wc -c)
         _ds=$((DROP_S - DROP_S0)); _dd=$((DROP_D - DROP_D0))

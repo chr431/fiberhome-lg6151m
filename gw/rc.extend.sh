@@ -1,13 +1,23 @@
 #!/bin/sh
-# rc.extend.sh v2.6 -- slot-aware dispatcher (shared /data between v2/v3)
+# rc.extend.sh v3.1 -- slot-aware dispatcher (shared /data between v2/v3)
+# v3.1 (SIGSEGV §8.13): 旧内核修复栈整体退役。slot-a 内的全部自载逻辑删除 ——
+#   FIXSTACK_ENABLE 门控、pstore panic guard、两次 insmod、跨启动种子喂入、
+#   fixstack.log 自载台账; 改为一处占位注释, 当前不留任何自动加载动作。
+#   源码/产物/构建脚本同批删除(可经 git 历史取回), MANIFEST 同步减两条。
+#   理由: 无实测收益(稳态扣留 0 页、两条新增通路空转) + 自身三次内核级故障
+#   (10-22 20:45 RCU stall / 21:33 Oops / 10-23 00:48 25min 冻结)。
+# v3.0 (SIGSEGV Phase 1, v3.1 已取代): 旧栈默认停用(FIXSTACK_ENABLE=0), 曾计划
+#   留作两臂判决备选; 判决前操作者决定直接退役, 故 v3.1 删除而非保留。
 # v2.5: TZ 取自自管配置(settings>defaults)而非早期 /etc/TZ(厂商 boot 会先写 UTC)。
 # v2.4: TZ 解析提前到 toolchain_init 之前(静态工具链自举日志也走镜像时区)。
 # v2.2 (SIGSEGV P2/P3): static userland bootstrap — toolchain_init.sh builds
 #   /data/gw/sbin (busybox applets + static iproute2), PATH is prefixed so every
 #   daemon launched below runs the static shell/tools; TZ is exported from the
 #   self-managed config (static musl reads TZ, vendor musl reads /etc/TZ);
-#   RLIMIT_CORE is raised to unlimited so the daily core_trap window can
-#   capture family cores.
+#   RLIMIT_CORE is raised to unlimited as a FALLBACK only: core_pattern is a
+#   pipe and the kernel forces cprm.limit=RLIM_INFINITY for pipes
+#   (fs/coredump.c:675), so RLIMIT_CORE never gates that path. It matters only
+#   if something downgrades the pattern to a file form.
 # v2.1(P3): shadow.override 合法性校验+.bak回退自愈(坏文件不再锁死登录)
 # v2.0: +clear /tmp/gui_tokens/* at boot (P2/L-7 stale token survival)
 # v1.9: /etc/shadow bind 覆盖钩子(审计P0-5 凭据轮换前置; 见文件内注释)
@@ -55,8 +65,9 @@ export PATH
 # Bring lo up unconditionally; it is idempotent and costs nothing.
 ip link set lo up 2>/dev/null
 logger -t rc.extend "lo: $(ip link show lo 2>/dev/null | head -1)" 2>/dev/null
-# core_trap (P3) needs unlimited RLIMIT_CORE on the daemons it watches; hard
-# limit is unlimited on this image, soft limit is 0 by default.
+# Fallback only: the core_pattern pipe ignores RLIMIT_CORE (fs/coredump.c:675).
+# Kept so a file-mode pattern would still capture. Hard limit is unlimited on
+# this image, soft limit is 0 by default.
 ulimit -c unlimited 2>/dev/null
 logger -t rc.extend "static toolchain: PATH=$PATH TZ=${TZ:-unset} core=$(ulimit -c 2>/dev/null)" 2>/dev/null
 
@@ -146,6 +157,11 @@ case "$slot" in
      ;;
   *) # v3: full stack (forensics, flight rc19, TTL/hnat are v3 duties)
      logger -t rc.extend "slot=$slot: v3 rc19.sh"
+     # v3.1 (SIGSEGV §8.13): 旧内核修复栈已整体退役, 此处不再做任何自动加载。
+     #   退役理由一句话: 稳态扣留 0 页 + 两条新增通路空转(无实测收益), 且自身
+     #   造成三次内核级故障(RCU stall / Oops / 25min 冻结)。
+     #   新方案接入点预留在此处: 落地时在此写它的自加载与守卫逻辑, 并同步
+     #   MANIFEST 与注册表; 当前版本不执行任何 insmod/门控/台账动作。
      # v1.6: route A -- FH modem-stack environment parallel to our layer
      # (dial: mobilenetwork 过渡期 + dial_keeper 兜底; rc19 skips rmmod+dial_5g via MODE.fh gate)
      # v1.7 (D2 开箱审查): MODE.fh 首刷自建 — kit 从不创建该标志, 纯原厂直刷时
@@ -160,8 +176,10 @@ case "$slot" in
      _fore=0; [ -e /data/gw/healthdog.forensic ] && _fore=1
      insmod /data/gw/healthdog.ko forensic=$_fore armed=0 2>/dev/null
      nohup sh /data/gw/rc19.sh >/tmp/rc19.log 2>&1 &
-     # healthdog stack + RCU-stall panic
-     echo 1 > /proc/sys/kernel/panic_on_rcu_stall 2>/dev/null
+     # v3.0 (SIGSEGV Phase 1): 改回内核默认 0。该设置原本只为"锁内深遍历 +
+     #   旧栈"组合兜底, 叠加源已随旧栈退役消失(§8.13); 保留 1 会把任何真实 RCU 停顿
+     #   升级成重启, 既丢现场又会打断刚修好的 NE 台账。
+     echo 0 > /proc/sys/kernel/panic_on_rcu_stall 2>/dev/null
      [ -e /proc/healthdog ] || insmod /data/gw/healthdog.ko 2>/dev/null
      pgrep -f healthdog.sh >/dev/null || nohup /data/gw/healthdog.sh >/dev/null 2>&1 &
      ;;

@@ -1,5 +1,8 @@
 #!/bin/sh
-# netlock.sh v1.0 -- serialize route/firewall/address writers + REPAIR ledger.
+# netlock.sh v1.1 -- serialize route/firewall/address writers + REPAIR ledger.
+# v1.1 (2026-10-28 时钟轮): 台账行尾加 pre=1 标记 —— 设备无 RTC, 开机到 NTP 首
+#   同步之间 date +%s 是构建日, 那一段的 epoch 不可信(实弹: 118 行 2026-09-09)。
+#   标记依据 = /tmp/ntp_synced(ntp_keeper 写) 缺失, 兼 epoch<2025-01-01 兜底。
 #
 # Batch 3 (stability P2-4 structural): several daemons legitimately write the
 # same kernel objects (rc_netfh at boot, wan_agg every cycle, wan_eth every 5s,
@@ -104,7 +107,9 @@ with_netlock() { # $@=command/function to run under the lock
 netcfg_repair() {
     _f=/data/gw/logs/netcfg_repairs.tsv
     [ -d /data/gw/logs ] || _f=/tmp/netcfg_repairs.tsv
-    echo "$(date +%s) $1 rc=${2:-0} verified=${3:-?}" >> "$_f" 2>/dev/null
+    _ts=$(date +%s); _pre=""
+    { [ ! -s /tmp/ntp_synced ] || [ "$_ts" -lt 1735689600 ]; } 2>/dev/null && _pre=" pre=1"
+    echo "$_ts $1 rc=${2:-0} verified=${3:-?}$_pre" >> "$_f" 2>/dev/null
     _n=$(wc -l < "$_f" 2>/dev/null || echo 0)
     if [ "${_n:-0}" -gt 4000 ]; then
         tail -n 2000 "$_f" > "$_f.tmp" 2>/dev/null && mv "$_f.tmp" "$_f"

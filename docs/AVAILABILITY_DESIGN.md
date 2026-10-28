@@ -132,6 +132,11 @@ GUI（app.js PAGES.avail）
 - 日粒度由 API 从 24 条小时行现算，不落第三份文件。
 - 事件因果 enrichment：transitions 的 cause_hint 从 syslog（watchdog tag）
   FAIL/OK/EVT/WARN 行按窗内匹配。
+- **时钟前提（v1.9, 2026-10-28）**：设备无 RTC，开机时钟 = 固件构建日（实测 2026-09-09），
+  `ntp_keeper` 首次对时成功后才写 `/tmp/ntp_synced`。该文件缺失时 sampler 只刷新组件
+  实况快照（`/tmp/avail_last`），**不写**小时直方图/日条/事件表——否则 pre-sync 行会
+  永久钉在错误日期（实弹：24 行 `2026090910`）。同一判据用于 NE 台账（`core_meta`
+  行尾 `unsync=1`）与修复台账（`netcfg_repair` 行尾 `pre=1`）。
 
 ## 4. API 与 GUI
 

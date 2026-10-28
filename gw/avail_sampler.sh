@@ -1,5 +1,9 @@
 #!/bin/sh
-# avail_sampler.sh v1.8 -- 组件可用性采样器 (AVAILABILITY_DESIGN §3, 防假绿轮)
+# avail_sampler.sh v1.9 -- 组件可用性采样器 (AVAILABILITY_DESIGN §3, 防假绿轮)
+# v1.9 (2026-10-28 时钟轮): pre-sync 保护 —— 设备无 RTC, 开机时钟=固件构建日, NTP
+#   首同步前写下的任何带日期的行都会永久错(实弹: avail_hourly 24 行 2026090910)。
+#   /tmp/ntp_synced 缺失时仍刷新 /tmp/avail_last(组件实况, 无日期), 但不写小时
+#   直方图/日条/事件表; 判定依据 = ntp_keeper v1.6 写的 /tmp/ntp_synced。
 # v1.8 (2026-10-28 LAN v6): s:radvd6 四态化 —— off 只表示 V6LAN=0; 无 v6 上行记 deg;
 #   该在没在(有上行却缺 ULA/radvd)记 down。判据单一事实源 = /tmp/v6_state。
 # v1.7 (SIGSEGV §8.13): 旧内核修复栈退役 —— s:kernel 判据去掉模块依赖(lsmod/
@@ -47,6 +51,12 @@ TF=$DIR/avail_transitions.tsv
 NOW=$(date +%s)
 HOUR=$(date +%Y%m%d%H)
 TODAY=$(date +%Y%m%d)
+# v1.9: pre-sync 判定(时钟未对时 -> 只出实况快照, 不写任何带日期的行)
+PRESYNC=0
+[ -s /tmp/ntp_synced ] || PRESYNC=1
+if [ "$PRESYNC" = 1 ]; then
+    echo "$NOW pre-sync: live snapshot only (no ntp_synced)" >> /tmp/avail_presync.log
+fi
 touch "$HF" "$DF" "$TF" 2>/dev/null   # 首采即存在 (内容仍只在小时/跨日边界写入)
 
 cut -d. -f1 /proc/uptime > "$HB" 2>/dev/null
@@ -397,11 +407,11 @@ echo "$TABLE" | while IFS='|' read -r id name grp src; do
         fi
     fi
     if [ "$MAI_WIN" = 1 ] && [ "$lv" != down ]; then lv=mai; fi
-    bump "$id" "$lv"
+    [ "$PRESYNC" = 1 ] || bump "$id" "$lv"
     echo "$id|$name|$grp|$lv" >> "$LASTF"
     # 迁移检测 (跳过首采/无前值; off 不出事件)
     pv=$(grep "^$id|" "$PREV" 2>/dev/null | head -1 | cut -d'|' -f4)
-    if [ -n "$pv" ] && [ "$pv" != "$lv" ] && [ "$lv" != off ] && [ "$pv" != off ]; then
+    if [ -n "$pv" ] && [ "$pv" != "$lv" ] && [ "$lv" != off ] && [ "$pv" != off ] && [ "$PRESYNC" != 1 ]; then
         cause="-"
         ne_attr "$id" && cause="NE"
         printf '%s\n' "$RST_COMPS" | grep -qx "$id" && cause="restart"

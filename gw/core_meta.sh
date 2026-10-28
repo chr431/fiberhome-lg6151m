@@ -1,5 +1,8 @@
 #!/bin/sh
-# core_meta.sh v1.3 -- core_pattern metadata wrapper (stability P1-2/P1-5).
+# core_meta.sh v1.4 -- core_pattern metadata wrapper (stability P1-2/P1-5).
+# v1.4 (2026-10-28 时钟轮): unsync 判据改为 /tmp/ntp_synced 缺失(权威) + 原年份
+#   阈值兜底。原判据 epoch<2025-01-01 在构建日 2026-09-09 下永远不成立, 开机窗
+#   口的 NE 行因此全部没有标记(实测 9 行 17889xxxxxx 无 unsync)。
 # v1.3 (SIGSEGV §8.13): 旧内核修复栈退役 —— 删除 v1.1 加的 NE 探针(崩溃时向旧栈
 #   /proc 节点写 deep 的那一行)。本脚本此后只做元数据落盘, 不再触碰任何模块。
 # v1.2 (SIGSEGV Phase 0): ne_events.tsv 行尾增 origin 列
@@ -122,7 +125,7 @@ _origin() { # $1=崩溃 pid; 输出 our-tree|vendor-tree|unknown
 # v1.1: unsync marker when the clock is obviously pre-NTP (epoch < 2025-01-01)
 # so boot-window NE rows can be told apart instead of landing in 1970 buckets
 _us=""
-[ -z "${_ts:-}" ] || [ "$_ts" -lt 1735689600 ] 2>/dev/null && _us="	unsync=1"
+{ [ ! -s /tmp/ntp_synced ] || [ "${_ts:-0}" -lt 1735689600 ]; } 2>/dev/null && _us="	unsync=1"
 _or=$(_origin "$PID")
 case "$_or" in our-tree|vendor-tree) ;; *) _or=unknown ;; esac
 [ -s "$F" ] && echo "$_ts	$PID	${COMM:-?}	sig=$SIG	exe=${EXE:-?}	args=${ARGS:-?}$_us	origin=$_or" >> "$TSV" 2>/dev/null

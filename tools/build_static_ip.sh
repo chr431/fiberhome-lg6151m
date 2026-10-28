@@ -46,7 +46,15 @@ EOF
     tar xJf "$TMP/iproute2.tar.xz" -C "$WORK"
 fi
 
-CC=${CC:-"$Z cc -target aarch64-linux-musl"}   # env override: zig wrapper for Windows
+# On MSYS the shell does not propagate exported vars to child processes, so a
+# bare zig under make has no LOCALAPPDATA and dies with AppDataDirUnavailable.
+# tools/zigcc.py is a native launcher that establishes the profile env.
+LAUNCH=""
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*) [ -f "$D/tools/zigcc.py" ] && LAUNCH="python $D/tools/zigcc.py" ;;
+esac
+if [ -n "$LAUNCH" ]; then DEFAULT_CC="$LAUNCH cc -target aarch64-linux-musl"; else DEFAULT_CC="$Z cc -target aarch64-linux-musl"; fi
+CC=${CC:-$DEFAULT_CC}
 AR="$Z ar"
 CF='-O2 -include libgen.h -I../include -I../include/uapi -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -D_LARGEFILE64_SOURCE -DRESOLVE_HOSTNAMES -DCONFDIR=\"/etc/iproute2\" -DNETNS_RUN_DIR=\"/var/run/netns\" -DNETNS_ETC_DIR=\"/etc/netns\" -DHAVE_SETNS -DHAVE_HANDLE_AT'
 ADDLIB='ax25_ntop.o rose_ntop.o mpls_ntop.o mpls_pton.o netrom_ntop.o'

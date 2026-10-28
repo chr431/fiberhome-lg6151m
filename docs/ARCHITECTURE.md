@@ -47,7 +47,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/bin/busybox` | **v1.0** | manifest | `/data/gw/bin/busybox` | 静态 aarch64 busybox 1.36.1(Alpine busybox-static 1.36.1-r31, 与厂商同版本); P2 崩溃家族工具链静态化；⟦收口 §22⟧ 工具链自主权载体，对崩溃零改善(§16.7/§22.1) |
 | `gw/bin/fhstub.so` | **v1.0** | manifest | `/data/gw/fhstub.so` | FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径) |
 | `gw/bin/healthdog.ko` | **v1.0** | manifest | `/data/gw/healthdog.ko` | 取证看门狗内核模块(forensic=1) |
-| `gw/bin/ip` | **v1.0** | manifest | `/data/gw/bin/ip` | 静态 aarch64 iproute2 6.3.0(与厂商 ip -V 同版本, zig cc musl 重建); 输出与厂商逐字节一致, 保留 link add type bridge |
+| `gw/bin/ip` | **v1.1** | manifest | `/data/gw/bin/ip` | 静态 aarch64 iproute2 6.3.0(与厂商 ip -V 同版本, zig cc musl 重建); 输出与厂商逐字节一致, 保留 link add type bridge; v1.1(SIGSEGV §18): 链接 vfprintf va_list 闸门 v2(输出与旧版逐字节一致) |
 | `gw/bin/logc` | **v1.5** | manifest | `/data/gw/bin/logc` | 静态日志采集器; v1.2(P1-2): 信号面包屑(/tmp/logc.crash: 帧偏移/长度)+--dump-raw 原始流+--selftest+ubus 缓冲移出栈+stack-protector; v1.1(batch1): socket/oneshot 超时; 历史见git; v1.3(batch3): --fuzz 确定性变异 + ASAN 构建入口; v1.4(SIGSEGV 轮, ⟦收口 §22⟧ 非家族根因: 摘除最高频污染解引用点): 记录路径彻底去 printf/strftime — 手写 ctime 格式(表+有界整数)与整行拼装, 静态不再链入 strftime/`%0*lld`(在 musl vfprintf 内崩溃); 超长消息跳过而非中止整轮(原 rc=1 截断); v1.5(SIGSEGV Phase 0): on_crash 面包屑后解屏蔽+SIG_DFL+raise 重新触发, 经 core_pattern 管道进 ne_events |
 | `gw/bin/logcut` | **v1.0** | manifest | `/data/gw/bin/logcut` | 静态锚点截取器: 输出文件中最后一次精确匹配锚行之后的全部内容; 单遍扫描+单行缓冲, 无数组/无printf/无locale; 取代 log_keeper delta() 的 busybox awk(其运行期数组退出清理约 1% SIGSEGV)；⟦收口 §22⟧ awk 缺陷说未证实且不再必要(§16.3)；保留理由=少 spawn/无数组 |
 | `gw/bin/mipc_cellular` | **v0.18** | manifest | `/data/gw/mipc_cellular` | 蜂窝MIPC直连CLI; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘; v0.18(SIGSEGV §18): 链接 vfprintf va_list 闸门 v2 |
@@ -135,7 +135,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/build_logc.sh` | **v1.2** | tool | `-` | logc 静态构建(zig cc aarch64-linux-musl; v1.1: -fstack-protector-all); v1.2(batch3): --asan 主机 ASAN/UBSAN 构建 |
 | `tools/build_mipc_cellular.sh` | **v1.2** | tool | `-` | mipc_cellular构建(zig cc aarch64-musl 静态); v1.1: 移除 libqlril 链接(v0.12+ 零 RIL 依赖); v1.2(SIGSEGV §18): 链接 vaguard.o |
 | `tools/build_procmatch.sh` | **v1.0** | tool | `-` | procmatch 静态构建(zig cc aarch64-linux-musl) |
-| `tools/build_static_ip.sh` | **v1.1** | tool | `-` | iproute2 6.3.0 静态构建(zig cc aarch64-linux-musl, 与厂商同版本); v1.1(SIGSEGV §18): 预留 vaguard.o 链接位 + 下载路径/CC 可覆盖(本机 Windows 上 zig-under-make 受限, 产物待 Linux 主机重建) |
+| `tools/build_static_ip.sh` | **v1.2** | tool | `-` | iproute2 6.3.0 静态构建(zig cc aarch64-linux-musl, 与厂商同版本); v1.1(SIGSEGV §18): 预留 vaguard.o 链接位 + 下载路径/CC 可覆盖(本机 Windows 上 zig-under-make 受限, 产物待 Linux 主机重建); v1.2: MSYS 下改用 tools/zigcc.py 启动 zig(修 AppDataDirUnavailable) |
 | `tools/build_steth.sh` | **v1.0** | tool | `-` | v3_steth.ko构建 |
 | `tools/build_v3fix.sh` | **v1.1** | tool | `-` | v3_fix.ko构建; v1.1: 路径修正当前布局 + uapi/asm junction 失效改就地复制 + 记录产物错位事故 |
 | `tools/build_v3httpd.sh` | **v1.1** | tool | `-` | v3httpd构建(zig cc aarch64-linux-musl全静态, 同mipc_cellular链); v1.1(SIGSEGV §18): 链接 vaguard.o(va_list 闸门) |
@@ -170,6 +170,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/verify_v4.py` | **v1.0** | tool | `-` | v4刷后落地验证器(串口toor登录; 身份/钩子/数据/网络/进程巡检; 口令走argv不落盘) |
 | `tools/verify_v4_services.py` | **v1.0** | tool | `-` | v4服务巡检器(监听端口/GUI/WiFi双频/5G WAN实网ping) |
 | `tools/wait_ready.py` | **v1.1** | tool | `-` | 轮询等待器(tcp/串口marker, 代替长sleep) |
+| `tools/zigcc.py` | **v1.0** | tool | `-` | 以完整 Windows profile 环境启动 zig(修 make 场景 AppDataDirUnavailable); 顺带屏蔽 kbuild 的 -Wp,-MMD 依赖参数 |
 <!--VERCHECK:END-->
 
 ## 结论台账 (审计生成, 勿手改)

@@ -107,7 +107,11 @@ get_cellular() {
     # 服务小区 = 数组首个; CA 列表计数
     SB=${BANDS%%,*}; SA=${ARFCN%%,*}; SP=${PCI%%,*}
     SR=${RSRP%%,*}; SS=${SINR%%,*}
-    NC=$(printf '%s' "$BANDS" | awk -F, '{print NF}')
+    # v2.82: 逗号计数改 shell(原 awk -F, NF)
+    case "$BANDS" in
+        '') NC="" ;;
+        *)  NC=$(( $(printf '%s' "$BANDS" | tr -cd ',' | wc -c) + 1 )) ;;
+    esac
     CSQ=$(mipc_wan_cli --at_cmd "AT+CSQ" 2>/dev/null | grep -oE "[0-9]+, ?99" | cut -d, -f1)
     RSSI=""; case "$CSQ" in ''|0) RSSI="未知";; *) RSSI="$(( -113 + CSQ * 2 )) dBm";; esac
     # v2.24 (P3): mipc/AT 直读优先, 树值为回退 -- RSRP 实时化 + PLMN/RAT 直查。
@@ -118,8 +122,9 @@ get_cellular() {
 ]*')
     CNUM=$(printf '%s' "$COPSR" | grep -oE '"[0-9]{5,6}"' | tr -d '"')
     [ -n "$CNUM" ] && PLMN="$CNUM"
-    ACT=$(printf '%s' "$COPSR" | awk -F, '{gsub(/
-/,"");n=NF; gsub(/[^0-9]/,"",$n); print $n}')
+    # v2.82: 取 +COPS 末字段(acT)里的数字(原 awk)
+    _act=${COPSR##*,}
+    ACT=$(printf '%s' "$_act" | tr -cd '0-9')
     case "$ACT" in
         0|1|3) RAT="GSM" ;;
         2|4|5|6) RAT="3G" ;;
@@ -309,7 +314,13 @@ cell_persist() {
     done
     # 树快照(16MB→~127KB): 开机 cfg_tool 建出厂树后整体恢复, 锁定跨重启
     # v2.60: shm 不在(树退役态)时跳过 — 原静默失败留误导性假快照链
-    [ -n "$(awk 'NR>1 && $4==16777216' /proc/sysvipc/shm 2>/dev/null)" ] && \
+    # v2.82: 找 key 为 0x1000000(16MB) 的 shm 段(原 awk NR>1 && $4==16777216)
+    _shm=0
+    while read -r _sk _sid _sperm _ssz _srest; do
+        case "$_ssz" in ''|*[!0-9]*) continue ;; esac
+        [ "$_ssz" = 16777216 ] && { _shm=1; break; }
+    done < /proc/sysvipc/shm 2>/dev/null
+    [ "$_shm" = 1 ] && \
     /data/gw/shmsnap save /tmp/cfgtree.snap >/dev/null 2>&1 &&         gzip -c /tmp/cfgtree.snap > /data/gw/cfgtree.snap.gz 2>/dev/null &&         rm -f /tmp/cfgtree.snap
 }
 

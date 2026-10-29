@@ -21,13 +21,13 @@ wifi_state() {
     # "正常".  The WPA layer is real only when hostapd's control socket has a
     # LIVE bound endpoint (/proc/net/unix; a crashed daemon leaves the file).
     hap_live() {
-        awk -v p="/var/run/hostapd/$1" '$NF==p{f=1} END{exit(f?0:1)}' /proc/net/unix 2>/dev/null \
-            && echo 1 || echo 0
+        # v2.82: 直接按"路径是行尾最后一个字段"匹配(原 awk $NF==p)
+        grep -q " /var/run/hostapd/$1\$" /proc/net/unix 2>/dev/null && echo 1 || echo 0
     }
     H2=$(hap_live ra0)   # v1.1: 活控制套接字 = WPA 层在服务
     H5=$(hap_live rai0)
-    S2=$(iw dev ra0 info 2>/dev/null | grep -m1 channel | awk '{print $2}')
-    S5=$(iw dev rai0 info 2>/dev/null | grep -m1 channel | awk '{print $2}')
+    S2=$(iw dev ra0 info 2>/dev/null | grep -m1 channel | sed -n 's/.*channel \([0-9][0-9]*\).*/\1/p')
+    S5=$(iw dev rai0 info 2>/dev/null | grep -m1 channel | sed -n 's/.*channel \([0-9][0-9]*\).*/\1/p')
     if [ "${INONE:-0}" = 1 ]; then D2="${SSID_BASE:-?}"; D5="${SSID_BASE:-?}"
     else D2="${SSID_BASE:-?}-2.4G"; D5="${SSID_BASE:-?}-5G"; fi
     # v2.67: MLO 实况 — mwctl dump ap_mld stdout 直读(RE: dump 段走 MTK vendor
@@ -42,15 +42,24 @@ wifi_state() {
         "${H2:-0}" "${H5:-0}" "${S2:--}" "${S5:--}" "${MLG:-}" "${MLL:-0}"
 }
 wifi_stations() {
+    # v2.82: shell 解析 station dump(原 awk) —— 每块取 mac/signal/rx/tx, 遇 connected time 出条
     for IFX in ra0 rai0; do
-        iw dev $IFX station dump 2>/dev/null | awk -v ifx=$IFX '
-            /^Station / { mac=substr($2,1,17) }
-            /^\s+signal:/ { sig=$2 }
-            /^\s+rx bytes:/ { rx=$3 }
-            /^\s+tx bytes:/ { tx=$3 }
-            /^\s+connected time:/ {
-                printf "{\"if\":\"%s\",\"mac\":\"%s\",\"signal\":\"%s\",\"rx\":\"%s\",\"tx\":\"%s\"},", ifx, mac, sig, rx, tx
-            }'
+        iw dev $IFX station dump 2>/dev/null | while IFS= read -r _l; do
+            set -- $_l
+            case "$_l" in
+                "Station "*) _mac=${2:-} ;;
+                # 先排除 iw 的两条同类行: "signal avg:" 与 "last ack signal:89 dBm"
+                #   (后者紧跟在主 signal 之后, 会把信号值覆盖成 "ack" —— 冒烟测试抓到)
+                *"signal avg:"*) ;;
+                *"last ack signal:"*) ;;
+                *signal:*) _sig=${2:-} ;;
+                *"rx bytes:"*) _rx=${3:-} ;;
+                *"tx bytes:"*) _tx=${3:-} ;;
+                *"connected time:"*)
+                    printf '{"if":"%s","mac":"%s","signal":"%s","rx":"%s","tx":"%s"},' \
+                        "$IFX" "${_mac:-}" "${_sig:-}" "${_rx:-}" "${_tx:-}" ;;
+            esac
+        done
     done
 }
 
@@ -164,8 +173,14 @@ apply_wifi_adv() {
 #    应用(调 wifi_restart), 批量增删只付一次重启代价) --
 get_band_pin() {
     [ -r $GWDATA/band_pins.conf ] || { printf '{"pins":[]}'; return; }
-    PINS=$(grep -v '^#' $GWDATA/band_pins.conf | awk -F'|' '$1!=""&&$2!=""{printf "{\"mac\":\"%s\",\"band\":\"%s\"},",$1,$2}')
-    printf '{"pins":[%s]}' "${PINS%,}"
+    # v2.82: shell 拼 pins JSON(原 awk)
+    PINS=""
+    while IFS='|' read -r _m _b; do
+        case "$_m" in ''|'#'*) continue ;; esac
+        [ -n "$_b" ] || continue
+        PINS="$PINS${PINS:+,}{\"mac\":\"$_m\",\"band\":\"$_b\"}"
+    done < $GWDATA/band_pins.conf
+    printf '{"pins":[%s]}' "$PINS"
 }
 apply_band_pin_add() {
     M=$(form_kv mac | tr 'A-F' 'a-f'); B=$(form_kv band)

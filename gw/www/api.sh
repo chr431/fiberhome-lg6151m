@@ -1,5 +1,5 @@
 #!/bin/sh
-# api.sh v2.80 (v2.80, 2026-10-28 LAN v6 修复: +v6/v6_set 域模块(api_v6.sh, IPv6
+# api.sh v2.81 (v2.80, 2026-10-28 LAN v6 修复: +v6/v6_set 域模块(api_v6.sh, IPv6
 #   LAN 开关+实况; 状态页不再硬编码 ULA); v2.79, 可用性轮 P1: +avail 域(api_avail.sh, 组件可用性
 #   90 天日条/事件表/覆盖率 — AVAILABILITY_DESIGN §4.1); v2.78, 2026-10-24 USB 轮: +usb/usb_set 域模块(api_usb.sh, USB-C
 #   设备模式三开关: 总开关/ADB/控制台, 状态含 UDC/桥接/载波/门位); v2.76, 2026-10-17
@@ -40,26 +40,34 @@ jerr() {
     printf '{"error":"%s"}' "$1"; exit 0
 }
 
-urldec() {  # $1 -> stdout decoded (纯awk, busybox可靠)
-    printf '%s' "$1" | awk '
-    BEGIN { h="0123456789abcdef" }
-    {
-      s=$0; out=""; gsub(/\+/," ",s); n=length(s)
-      for (i=1; i<=n; i++) {
-        c=substr(s,i,1)
-        if (c=="%" && i+2<=n) {
-          hi=index(h,tolower(substr(s,i+1,1)))-1
-          lo=index(h,tolower(substr(s,i+2,1)))-1
-          if (hi>=0 && lo>=0) { out=out sprintf("%c",hi*16+lo); i+=2; continue }
-        }
-        out=out c
-      }
-      print out
-    }'
+urldec() {  # $1 -> stdout decoded (纯 shell; v2.81: awk 退役 —— 这是每个写请求都跑的热路径)
+    _s=$1
+    case "$_s" in *%*|*+*) ;; *) printf '%s' "$_s"; return ;; esac
+    _o=""
+    while [ -n "$_s" ]; do
+        _t=${_s#?}; _c=${_s%"$_t"}; _s=$_t
+        case "$_c" in
+            '+') _o="$_o " ;;
+            '%')
+                if [ ${#_s} -ge 2 ]; then
+                    _t=${_s#??}; _h=${_s%"$_t"}
+                    case "$_h" in
+                        [0-9A-Fa-f][0-9A-Fa-f])
+                            _s=$_t
+                            _o="$_o$(printf "\\$(printf '%03o' $((0x$_h)))")"
+                            continue ;;
+                    esac
+                fi
+                _o="$_o%" ;;
+            *) _o="$_o$_c" ;;
+        esac
+    done
+    printf '%s' "$_o"
 }
 
-# form_kv <key> : 从 $V3_BODY 取值(urldecode 后)
-qkv() {  # GET 场景: 从 $V3_QUERY 取值
+# GET 场景: 从 $V3_QUERY 取值 (v2.81 恢复: 上一步替换 urldec 时误删了本函数 —— 症状是
+#   所有 GET 端点退回 need_login, 而 POST 正常; 端点冒烟测试抓到)
+qkv() {
     [ -n "$V3_QUERY" ] || return 1
     _raw=$(printf '%s' "$V3_QUERY" | tr '&' '\n' | grep -m1 "^$1=" | cut -d= -f2-)
     [ -n "$_raw" ] || return 1

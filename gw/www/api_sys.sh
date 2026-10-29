@@ -25,19 +25,19 @@ get_traffic() {
     # v1.1 (RIL 清零轮): 选**探活实证的**承载口 — 多口并存时"第一个有 IP"常是
     #   旧 PDN 僵尸口(有 IP 无数据), 会导致流量/GUI 显示错口。
     IF=""
-    for _c in $(ip -o -4 addr show 2>/dev/null | grep ccmni | grep inet | awk '{print $2}'); do
+    for _c in $(ip -o -4 addr show 2>/dev/null | grep ccmni | grep inet | sed -n 's/^[0-9]*:[[:space:]]*\([^[:space:]]*\).*/\1/p'); do
         for _t in 180.76.76.76 119.29.29.29 8.8.8.8; do
             ping -4 -I $_c -c1 -W1 -s1 $_t 2>/dev/null | grep -q ttl && { IF=$_c; break 2; }
         done
     done
     if [ -z "$IF" ]; then
-        IF=$(ip -o -4 addr show 2>/dev/null | grep -m1 'ccmni.*inet' | awk '{print $2}')
+        IF=$(ip -o -4 addr show 2>/dev/null | grep -m1 'ccmni.*inet' | sed -n 's/^[0-9]*:[[:space:]]*\([^[:space:]]*\).*/\1/p')
         [ -n "$IF" ] && alog "WARN traffic iface fallback=$IF (no probe-passing ccmni)"
     fi
     RX=0; TX=0; ERX=0; ETX=0
     if [ -n "$IF" ]; then
         RX=$(cat /sys/class/net/$IF/statistics/rx_bytes 2>/dev/null)
-        TX=$(tc -s qdisc show dev $IF 2>/dev/null | awk '/Sent/{print $2; exit}')
+        TX=$(/sbin/tc -s qdisc show dev $IF 2>/dev/null | sed -n 's/^[[:space:]]*Sent \([0-9][0-9]*\) .*/\1/p' | head -1)
         [ -n "$TX" ] || { TX=$(cat /sys/class/net/$IF/statistics/tx_bytes 2>/dev/null); \
             alog "WARN traffic qdisc Sent missing on $IF -> netdev tx"; }
     fi
@@ -64,23 +64,34 @@ get_traffic_hist() {
         printf '{"span":"%s","step":%s,"buckets":[],"today":{"c":0,"e":0}}' "$SPAN" "$STEP"
         return
     fi
-    awk -v step=$STEP -v n=$N -v now=$NOW -v span=$SPAN '
-        { tl = $1; c[tl] = $2; e[tl] = $3
-          if (tl > mx) mx = tl
-          tod0 = int((now + 28800) / 86400) * 86400
-          if (tl >= tod0) { tc += $2; te += $3 } }
-        END {
-          if (mx <= 0) {
-              printf "{\"span\":\"%s\",\"step\":%d,\"buckets\":[],\"today\":{\"c\":0,\"e\":0}}", span, step
-              exit
-          }
-          start = tod0 - (span == "week" ? 6 : 29) * 86400
-          if (start > mx) start = mx - step * (n - 1)
-          printf "{\"span\":\"%s\",\"step\":%d,\"buckets\":[", span, step
-          for (t = start; t <= mx; t += step)
-              printf "%s{\"t\":%d,\"c\":%.6g,\"e\":%.6g}", (t > start ? "," : ""), t - 28800, c[t] + 0, e[t] + 0
-          printf "],\"today\":{\"c\":%.6g,\"e\":%.6g}}", tc + 0, te + 0
-        }' "$F"
+    # v2.82: 纯 shell 两指针(汇总文件按 key 升序), 不再用 awk —— 与 urldec 同批退休
+    MX=$(tail -1 "$F" 2>/dev/null | cut -d' ' -f1)
+    case "$MX" in ''|*[!0-9]*) MX=0 ;; esac
+    if [ "$MX" -le 0 ]; then
+        printf '{"span":"%s","step":%s,"buckets":[],"today":{"c":0,"e":0}}' "$SPAN" "$STEP"
+        return
+    fi
+    TOD0=$(( (NOW + 28800) / 86400 * 86400 ))
+    if [ "$SPAN" = "week" ]; then START=$(( TOD0 - 6 * 86400 )); else START=$(( TOD0 - 29 * 86400 )); fi
+    [ "$START" -gt "$MX" ] && START=$(( MX - (N - 1) * STEP ))
+    exec 3< "$F"
+    _k=""; _c=0; _e=0
+    read -r _k _c _e <&3 2>/dev/null || _k=""
+    printf '{"span":"%s","step":%s,"buckets":[' "$SPAN" "$STEP"
+    _t=$START; _first=1; _tc=0; _te=0
+    while [ "$_t" -le "$MX" ]; do
+        while [ -n "$_k" ] && [ "$_k" -lt "$_t" ]; do
+            read -r _k _c _e <&3 2>/dev/null || { _k=""; _c=0; _e=0; }
+        done
+        if [ "$_k" = "$_t" ]; then _bc=$_c; _be=$_e; else _bc=0; _be=0; fi
+        [ "$_t" -ge "$TOD0" ] && { _tc=$(( _tc + _bc )); _te=$(( _te + _be )); }
+        [ "$_first" = 1 ] || printf ','
+        _first=0
+        printf '{"t":%d,"c":%.6g,"e":%.6g}' "$(( _t - 28800 ))" "$_bc" "$_be"
+        _t=$(( _t + STEP ))
+    done
+    exec 3<&-
+    printf '],"today":{"c":%.6g,"e":%.6g}}' "$_tc" "$_te"
 }
 apply_traffic_limit() {
     D=$(form_kv day); M=$(form_kv month)
@@ -193,18 +204,23 @@ get_status() {
     U=$(cut -d. -f1 /proc/uptime)
     UP_D=$((U/86400)); UP_H=$(( (U%86400)/3600 )); UP_M=$(( (U%3600)/60 ))
     LOAD=$(cut -d" " -f1-3 /proc/loadavg)
-    MEM=$(awk '/MemTotal/{t=$2}/MemAvailable/{a=$2}END{printf "%d %d", t, a}' /proc/meminfo)
+    # v2.82: /proc/meminfo 用 shell 读(原 awk) —— 只关心这两个键
+    _mt=0; _ma=0
+    while read -r _k _v _; do
+        case "$_k" in MemTotal:) _mt=$_v ;; MemAvailable:) _ma=$_v ;; esac
+    done < /proc/meminfo
+    MEM="$_mt $_ma"
     W5G_IF=""
-    for _c in $(ip -o -4 addr show 2>/dev/null | grep ccmni | grep inet | awk '{print $2}'); do
+    for _c in $(ip -o -4 addr show 2>/dev/null | grep ccmni | grep inet | sed -n 's/^[0-9]*:[[:space:]]*\([^[:space:]]*\).*/\1/p'); do
         for _t in 180.76.76.76 119.29.29.29 8.8.8.8; do
             ping -4 -I $_c -c1 -W1 -s1 $_t 2>/dev/null | grep -q ttl && { W5G_IF=$_c; break 2; }
         done
     done
-    [ -n "$W5G_IF" ] || W5G_IF=$(ip -o -4 addr show 2>/dev/null | grep ccmni | grep -m1 inet | awk '{print $2}')
-    W5G_IP=$(ip -o -4 addr show $W5G_IF 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
-    W5G_V6=$(ip -o -6 addr show $W5G_IF 2>/dev/null | grep -m1 global | awk '{print $4}' | cut -d/ -f1)
-    ETH_IP=$(ip -o -4 addr show eth0 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
-    ETH_V6=$(ip -o -6 addr show eth0 2>/dev/null | grep -m1 global | awk '{print $4}' | cut -d/ -f1)
+    [ -n "$W5G_IF" ] || W5G_IF=$(ip -o -4 addr show 2>/dev/null | grep ccmni | grep -m1 inet | sed -n 's/^[0-9]*:[[:space:]]*\([^[:space:]]*\).*/\1/p')
+    W5G_IP=$(ip -o -4 addr show $W5G_IF 2>/dev/null | sed -n 's/.* inet \([^ ]*\).*/\1/p' | cut -d/ -f1)
+    W5G_V6=$(ip -o -6 addr show $W5G_IF 2>/dev/null | grep -m1 global | sed -n 's/.* inet6 \([^ ]*\).*/\1/p' | cut -d/ -f1)
+    ETH_IP=$(ip -o -4 addr show eth0 2>/dev/null | sed -n 's/.* inet \([^ ]*\).*/\1/p' | cut -d/ -f1)
+    ETH_V6=$(ip -o -6 addr show eth0 2>/dev/null | grep -m1 global | sed -n 's/.* inet6 \([^ ]*\).*/\1/p' | cut -d/ -f1)
     ETH_C=$(cat /sys/class/net/eth0/carrier 2>/dev/null); ETH_C=${ETH_C:-0}
     # v2.73(2026-10-16 宵断实弹): 数据面判活改**消费 wan_agg 的结论**(/tmp/wan_alive,
     #   每环循实测并发布, 是唯一权威)。根因: 原先三处(wan_agg/led_mgr/api)各有一套

@@ -114,9 +114,23 @@ get_dhcp() {
 }
 
 get_fw() {
-    F=$(grep -v '^#' $GWDATA/forwards.conf 2>/dev/null | awk -F'|' '{printf "{\"proto\":\"%s\",\"eport\":\"%s\",\"dip\":\"%s\",\"dport\":\"%s\"},",$1,$2,$3,$4}' | sed 's/,$//')
+    # v2.82: JSON 由 shell 拼(原 awk) —— 逐行读配置文件
+    F=""
+    if [ -r $GWDATA/forwards.conf ]; then
+        while IFS='|' read -r _p _e _d _dp; do
+            case "$_p" in ''|'#'*) continue ;; esac
+            F="$F${F:+,}{\"proto\":\"$_p\",\"eport\":\"$_e\",\"dip\":\"$_d\",\"dport\":\"$_dp\"}"
+        done < $GWDATA/forwards.conf
+    fi
     [ -r $GWDATA/dmz.conf ] && . $GWDATA/dmz.conf    # busybox ash: . 缺失文件=致命退出,必须守卫
-    B=$(grep -oE '^[0-9a-f:]{17}$' $GWDATA/block.conf 2>/dev/null | awk '{printf "\"%s\",",$1}' | sed 's/,$//')
+    B=""
+    if [ -r $GWDATA/block.conf ]; then
+        while IFS= read -r _m; do
+            [ ${#_m} -eq 17 ] || continue
+            case "$_m" in *[!0-9a-f:]*) continue ;; esac
+            B="$B${B:+,}\"$_m\""
+        done < $GWDATA/block.conf
+    fi
     printf '{"forwards":[%s],"dmz":{"enabled":"%s","ip":"%s"},"blocked":[%s],"ts":%d}' \
         "${F:-}" "${DMZ_EN:-0}" "${DMZ_IP:-}" "${B:-}" "$(date +%s)"
 }

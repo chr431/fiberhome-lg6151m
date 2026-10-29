@@ -1,5 +1,8 @@
 #!/bin/sh
-# core_meta.sh v1.5 -- core_pattern metadata wrapper (stability P1-2/P1-5).
+# core_meta.sh v1.6 -- core_pattern metadata wrapper (stability P1-2/P1-5).
+# v1.6 (2026-10-29 取证配额): 每次崩溃都另存一份 4KB 的 note 头(.hdr = ELF 头 + PT_NOTE,
+#   含全部寄存器与 siginfo: PC/SP/LR/故障地址)。完整 core 只留最新 6 份(几十 MB 级),
+#   但**每一次**崩溃都能定位 —— 实测 19:03-23:48 有 35 起 NE, 完整 core 只留得下 3 份。
 # v1.5 (2026-10-29 真 core 轮): 把内核递来的 core **同时**落一份原始副本到
 #   /data/gw/logs/cores/raw/(tee 分叉, aee 照旧收到完整流) —— 崩溃归因需要 PC/寄存器/
 #   栈, 而 aee 的 dump 是加密的。超过 64MB 截断: PT_NOTE(寄存器)在文件头, 截断仍可读。
@@ -147,7 +150,10 @@ if [ -x /sbin/aee_core_forwarder ]; then
         _raw="$_rawd/${_bt}-${PID}-${_ts}.core"
         head -c 67108864 | tee "$_raw" | /sbin/aee_core_forwarder /tmp "$PID" "$SIG" "$UID_" "$GID_"
         _crc=$?
-        ls -t "$_rawd" 2>/dev/null | tail -n +4 | while read -r _f; do rm -f "$_rawd/$_f"; done
+        # v1.6: 先留 note 头(4KB), 再按配额裁完整 core
+        head -c 4096 "$_raw" > "${_raw%.core}.hdr" 2>/dev/null
+        ls -t "$_rawd"/*.core 2>/dev/null | tail -n +7 | while read -r _f; do rm -f "$_f"; done
+        ls -t "$_rawd"/*.hdr 2>/dev/null | tail -n +201 | while read -r _f; do rm -f "$_f"; done
         exit $_crc
     fi
     exec /sbin/aee_core_forwarder /tmp "$PID" "$SIG" "$UID_" "$GID_"

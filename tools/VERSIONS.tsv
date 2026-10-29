@@ -45,7 +45,7 @@ README.md	1.1	doc	-	仓库总览与快速上手
 gw/bin/multiwan_ctl	1.1	manifest	/data/gw/multiwan_ctl	原厂multiwan引擎ioctl控制器(zig动态链libfhdrv_net_api,36B结构体)
 gw/bin/fhstub.so	1.0	manifest	/data/gw/fhstub.so	FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径)
 gw/led_mgr.sh	3.0	manifest	/data/gw/led_mgr.sh	原厂风格LED守护; v3.0(WiFi 事故): WiFi 灯=AP 服务在服务(svc_bss_count 活套接字+链路), 不再是 netdev 存在; 历史见git
-gw/bin/v3httpd	2.7	manifest	/data/gw/v3httpd	网关GUI HTTP服务; v2.6(P2): 静态面拒*.sh(免认证源码泄露)+Host头校验(根治DNS rebinding); v2.7(SIGSEGV §18): 链接 vfprintf va_list 闸门 v2(写入不再打死进程)
+gw/bin/v3httpd	2.8	manifest	/data/gw/v3httpd	网关GUI HTTP服务; v2.6(P2): 静态面拒*.sh(免认证源码泄露)+Host头校验(根治DNS rebinding); v2.7(SIGSEGV §18): 链接 vfprintf va_list 闸门 v2(写入不再打死进程); v2.8(闸门覆盖轮): CGI 解释器改自建 busybox 的 sh(装 vfprintf 闸门), 自建件缺失回退 /bin/sh
 gw/www/api_sys.sh	1.3	manifest	/data/gw/www/api_sys.sh	API 系统/状态域模块; v1.3(日志加密轮): traffic 选口回退/qdisc 缺失留痕; v1.2: /api/traffic 增 if 字段; v1.1: 探活实证选口
 gw/www/api_wifi.sh	1.1	manifest	/data/gw/www/api_wifi.sh	API WiFi 域模块; v1.1(WiFi 事故): hostapd2g/5g 改活控制套接字判据(iw type AP 在 hostapd 死后仍为真 → GUI 谎报正常); 历史见git
 gw/www/api_lan.sh	1.0	manifest	/data/gw/www/api_lan.sh	API LAN 服务域模块(v2.75 拆出: dhcp/dhcp_static/fw 族; fw_apply.sh 改域内懒加载 — 原对全部请求无条件 source)
@@ -64,7 +64,7 @@ gw/fw_apply.sh	1.6	manifest	/data/gw/fw_apply.sh	端口映射/DMZ/禁网安装�
 gw/cellular_replay.sh	2.1	manifest	/data/gw/cellular_replay.sh	蜂窝锁定开机重放(频段/小区锁到cfgmgr树, 树每次开机由出厂档案重建)
 gw/bin/shmsnap	1.0	manifest	/data/gw/shmsnap	cfgmgr树共享内存快照工具(save/load 16MB原始字节, gzip后127KB, 开机恢复锁定状态)
 gw/webs_revive.sh	1.3	manifest	/data/gw/webs_revive.sh	原厂GUI复活器(自足nginx conf; 手动拉起)
-gw/ntp_keeper.sh	1.6	manifest	/data/gw/ntp_keeper.sh	每小时NTP守时(多源; 设备无RTC); v1.4(P1-1): 单实例锁; v1.3: 首同步失败 60s 重试+心跳; v1.2: 时区自愈; 历史见git; v1.5(batch3): svc_lib 锁/心跳; v1.6(时钟轮): 每次成功对时刷新 /tmp/ntp_synced(epoch) — "本 boot 时钟已可信"的权威标记, 供 sampler/core_meta/netlock 判断
+gw/ntp_keeper.sh	1.7	manifest	/data/gw/ntp_keeper.sh	每小时NTP守时(多源; 设备无RTC); v1.4(P1-1): 单实例锁; v1.3: 首同步失败 60s 重试+心跳; v1.2: 时区自愈; 历史见git; v1.5(batch3): svc_lib 锁/心跳; v1.6(时钟轮): 每次成功对时刷新 /tmp/ntp_synced(epoch) — "本 boot 时钟已可信"的权威标记, 供 sampler/core_meta/netlock 判断; v1.7(闸门覆盖轮): ntpclient 调用加 8s 硬超时(实弹 04:01 卡死 70min, 60s 重试失效)
 gw/reboot_sched.sh	1.4	manifest	/data/gw/reboot_sched.sh	定时重启守护; v1.3(P1-1): 单实例锁+心跳; v1.2: 触发行先落 /data+sync; 历史见git; v1.4(batch3): svc_lib 锁/心跳
 gw/core_meta.sh	1.4	manifest	/data/gw/core_meta.sh	core_pattern 元数据 wrapper; v1.1(SIGSEGV §8.10.2): NE 即探测器(exec aee 前 echo deep > /proc/dpclamp, 模块侧冷却); args 换行/制表符清洗(修 104 行 TSV 破行)+pre-NTP epoch 加 unsync=1 标记(M1); v1.0: 记录 exe/cmdline/status/maps/父进程/PATH/dmesg 尾后 exec aee forwarder(行为不变, stdin 不碰); v1.2(SIGSEGV Phase 0): ne_events 增 origin 尾列(our-tree/vendor-tree/unknown, 沿 ppid 上溯3层判祖先; 静态农场 exe 不可判); 修 tr 重定向顺序 stderr 泄漏; v1.3(SIGSEGV Phase 2 退役): 删除 NE 探针 echo deep > /proc/dpclamp; v1.4(时钟轮): unsync 判据改 /tmp/ntp_synced 缺失(原 epoch<2025 阈值在构建日 2026-09-09 下永不成立, 实测 9 行漏标)
 gw/boot_gate.sh	1.3	manifest	/data/gw/boot_gate.sh	启动健康门禁(P0-2); v1.2: 不写 watchdog.beat(避免污染数字心跳); v1.1: GUI 判据加 HTTP 200; v1.0: 关键链门禁+boot.healthy+TRY_A 读回+10min 稳定窗; v1.3(batch3): svc_lib 锁 + BSS/lo 最小解析
@@ -91,7 +91,7 @@ tools/build_v3fix.sh	1.1	tool	-	v3_fix.ko构建; v1.1: 路径修正当前布局 
 tools/gen_kernel_inc.py	1.0	tool	-	kernel头生成(构建辅助)
 gw/src/multiwan_ctl.c	1.1	src	gw/bin/multiwan_ctl	multiwan控制器源码(随产物1.1)
 gw/src/shmsnap.c	1.0	src	gw/bin/shmsnap	cfgmgr快照源码
-gw/src/v3httpd.c	2.7	src	gw/bin/v3httpd	GUI HTTP服务源码; v2.6: 同产物
+gw/src/v3httpd.c	2.8	src	gw/bin/v3httpd	GUI HTTP服务源码; v2.6: 同产物
 gw/src/wpapmk.c	1.0	src	gw/bin/wpapmk	WPA PMK转换源码(纯C PBKDF2)
 gw/src/fhstub.c	1.0	src	gw/bin/fhstub.so	FH符号桩库源码
 gw/defaults.conf	1.10	manifest	/data/gw/defaults.conf	统一配置只读出厂基线(444); v1.9(USB 轮): +USB_ENABLED/USB_ADB/USB_CONSOLE(USB-C 设备模式三开关); 消费方source叠加settings.conf稀疏覆盖; v1.10: +V6LAN(1=启用 LAN IPv6; 0=撤 ULA 停 radvd)

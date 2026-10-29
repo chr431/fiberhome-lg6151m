@@ -1,5 +1,5 @@
 #!/bin/sh
-# ntp_keeper.sh v1.6 -- 守时器 (每小时对时; 设备无RTC电池, 冷启动时间漂移大)
+# ntp_keeper.sh v1.7 -- 守时器 (每小时对时; 设备无RTC电池, 冷启动时间漂移大)
 # v1.4 (P1-1): 单实例锁(看门狗监督表会重启) + 心跳沿用 v1.3.
 # 首选源 = 自管配置 NTP_SERVER (defaults.conf 出厂默认叠 settings.conf 用户覆盖, 与 GUI
 # 时间同步卡片同源); 其后硬编码 IP 兜底; 223.5.5.5 兜底 resolv.conf 语义不变。
@@ -8,6 +8,9 @@
 # v1.2: 时区自愈 — /etc/TZ 是指向 /tmp/TZ 的 tmpfs 符号链接, 重启即失(回落 UTC),
 #       而原实现只在 GUI 应用时写运行态 = 每次重启后时钟显示与定时重启窗口全部
 #       偏移。现每轮从自管配置重应用(首轮即开机后数秒内生效)。
+# v1.7 (2026-10-29): ntpclient 调用加 8s 硬超时 —— 实弹: 04:01 首实例卡在单次
+#   ntpclient 里 70 分钟(有路由无回包), 60s 重试形同虚设, pre-sync 窗口被拉长到
+#   70 分钟(时钟守卫把这段采样全跳过了)。用静态 busybox timeout 包一层。
 # v1.6 (2026-10-28 时钟轮): 每次成功对时刷新 /tmp/ntp_synced(epoch) —— 这是
 #       "本 boot 时钟已可信"的唯一权威标记, 供 avail_sampler/core_meta/netlock
 #       判断是否该落带日期的行(原先 core_meta 用 epoch<2025-01-01 的年份阈值,
@@ -16,6 +19,12 @@
 #       未就绪很常见), 成功后才回到 3600s 周期; 每轮写 /tmp/ntp_keeper.hb.
 LOG=/tmp/ntp_keeper.log
 ng() { echo "$(date '+%m-%d %H:%M:%S') $*" >> $LOG; }
+BB=/data/gw/bin/busybox
+[ -x "$BB" ] || BB=
+# v1.7: 有界调用 —— ntpclient 无 -t 上限时会永久阻塞(见头注)
+ntp_bounded() {
+    if [ -n "$BB" ]; then "$BB" timeout -s KILL 8 ntpclient "$@"; else ntpclient "$@"; fi
+}
 [ -s /etc/resolv.conf ] || echo "nameserver 223.5.5.5" > /etc/resolv.conf
 # v1.5 (batch3): shared single-instance lock + heartbeat primitives.
 if [ -r /data/gw/svc_lib.sh ]; then . /data/gw/svc_lib.sh; else echo "ntp_keeper: svc_lib.sh missing" >&2; exit 1; fi
@@ -36,7 +45,8 @@ while :; do
     fi
     OK=0
     for S in "${NTP_SERVER:-ntp.aliyun.com}" 203.107.6.88 119.28.63.197; do
-        ntpclient -h "$S" -c 1 -s >/dev/null 2>&1 && { OK=1; date +%s > /tmp/ntp_synced; ng "sync via $S"; break; }
+        ntp_bounded -h "$S" -c 1 -s >/dev/null 2>&1 && { OK=1; date +%s > /tmp/ntp_synced; ng "sync via $S"; break; }
+        [ $? -eq 137 ] && ng "WARN ntpclient killed by timeout (source $S)"
     done
     if [ $OK -eq 1 ]; then
         SYNCED=1

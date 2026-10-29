@@ -1,4 +1,6 @@
-/* v3httpd.c v2.6 (P2: 静态面拒绝 *.sh 下载(原 GET /api.sh 直出全部服务端逻辑);
+/* v3httpd.c v2.8 (API 域改用自建 busybox 的 sh — 装 vfprintf 闸门; 厂商 /bin/sh
+ *   未装闸门, 2026-10-29 实测 API 链上 sh/awk/grep/sed 的崩溃全落在它上面; 自建件
+ *   缺失时回退 /bin/sh, 不因缺件拒绝服务) -- v2.6 (P2: 静态面拒绝 *.sh 下载(原 GET /api.sh 直出全部服务端逻辑);
  *   Host 头校验 — 非本机 IP 的 Host 一律 400, 根治 DNS rebinding 经受害者
  *   浏览器绕同源策略打 /api/* 的通路; 缺 Host 头的老客户端放行(仅校验存在者))
  * v2.5 (P1: 防慢连+并发上限) -- tiny HTTP server for the v3 gateway GUI (192.168.9.1:80).
@@ -125,6 +127,16 @@ static void send_json(int c, const char *body, int n)
 /* CGI: fork + execv, no shell anywhere in the path.
  * v2.1: CGI 子进程独立进程组 + 45s 看门狗(超时杀组) — 曾被 daemon 型 CGI
  * 的孙进程持有 stdout 管道导致串行循环永久挂死(整个 GUI 无响应)。 */
+/* v2.8: 选 CGI 解释器 —— 优先自建 busybox(带闸门)的 sh, 缺失则回退厂商 /bin/sh。
+ *   argv 形态: {busybox, "sh", api.sh, ep} vs {/bin/sh, api.sh, ep}。 */
+static const char *cgi_shell(void)
+{
+    static const char *sh = 0;
+    if (!sh)
+        sh = (access("/data/gw/bin/busybox", X_OK) == 0) ? "/data/gw/bin/busybox" : "/bin/sh";
+    return sh;
+}
+
 static void run_cgi(int c, const char *ep, const char *method,
                     const char *query, const char *body)
 {
@@ -137,13 +149,21 @@ static void run_cgi(int c, const char *ep, const char *method,
         dup2(pfd[1], 1); close(pfd[1]);
         int devnull = open("/dev/null", O_WRONLY);
         if (devnull >= 0) { dup2(devnull, 2); close(devnull); }
-        char *argv[] = { (char*)"/bin/sh", (char*)WWW_ROOT "/api.sh", (char*)ep, 0 };
+        const char *sh = cgi_shell();
+        char *argv[5];
+        if (strcmp(sh, "/bin/sh") != 0) {
+            argv[0] = (char*)sh; argv[1] = (char*)"sh";
+            argv[2] = (char*)WWW_ROOT "/api.sh"; argv[3] = (char*)ep; argv[4] = 0;
+        } else {
+            argv[0] = (char*)sh; argv[1] = (char*)WWW_ROOT "/api.sh";
+            argv[2] = (char*)ep; argv[3] = 0;
+        }
         char m[16], q[1024];
         char *b = body ? strdup(body) : 0;
         setenv("V3_METHOD", method, 1);
         if (query) { snprintf(q, sizeof q, "%.1000s", query); setenv("V3_QUERY", q, 1); }
         if (b) { setenv("V3_BODY", b, 1); }
-        execv("/bin/sh", argv);
+        execv(sh, argv);
         _exit(127);
     }
     close(pfd[1]);
@@ -185,12 +205,20 @@ static void run_cgi_sse(int c, const char *ep, const char *query)
         dup2(pfd[1], 1); close(pfd[1]);
         int devnull = open("/dev/null", O_WRONLY);
         if (devnull >= 0) { dup2(devnull, 2); close(devnull); }
-        char *argv[] = { (char*)"/bin/sh", (char*)WWW_ROOT "/api.sh", (char*)ep, 0 };
+        const char *sh = cgi_shell();
+        char *argv[5];
+        if (strcmp(sh, "/bin/sh") != 0) {
+            argv[0] = (char*)sh; argv[1] = (char*)"sh";
+            argv[2] = (char*)WWW_ROOT "/api.sh"; argv[3] = (char*)ep; argv[4] = 0;
+        } else {
+            argv[0] = (char*)sh; argv[1] = (char*)WWW_ROOT "/api.sh";
+            argv[2] = (char*)ep; argv[3] = 0;
+        }
         setenv("V3_METHOD", "GET", 1);
         /* v2.5: 补传 V3_QUERY — 原实现漏传(api.sh sse 旧无 token 门从未暴露;
          * need_tok 需从 query 读 token, 缺此即恒 need_login) */
         if (query) { char q[1024]; snprintf(q, sizeof q, "%.1000s", query); setenv("V3_QUERY", q, 1); }
-        execv("/bin/sh", argv);
+        execv(sh, argv);
         _exit(127);
     }
     close(pfd[1]);
@@ -332,7 +360,7 @@ int main(void)
     a.sin_port = htons(PORT);
     if (bind(s, (struct sockaddr *)&a, sizeof a) < 0) { perror("bind"); return 2; }
     if (listen(s, 8) < 0) { perror("listen"); return 3; }
-    logline("===== v3httpd v2.6 start %s:%d root=%s =====", BIND_IP, PORT, WWW_ROOT);
+    logline("===== v3httpd v2.8 start %s:%d root=%s =====", BIND_IP, PORT, WWW_ROOT);
 
     static char req[32768 + BODY_MAX];
     for (;;) {

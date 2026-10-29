@@ -59,6 +59,14 @@ if [ -x "$IP" ] && "$IP" -V >/dev/null 2>&1; then
 else
 	say "WARN static ip missing/not executable at $IP -- busybox ip applet used"
 fi
+# tc: busybox 的 tc 不支持 "-s qdisc show"(直接打 usage) —— 会让 traffic_logger 的
+#   qdisc 口径永远回退 netdev、watchdog 的 cell-stats 对账永远报 "qdisc Sent missing"。
+#   与 ip 同理, 固定指向厂商 tc-tiny(/sbin/tc)。
+if [ -x /sbin/tc ]; then
+	ln -sf /sbin/tc "$TMP/tc"
+else
+	say "WARN /sbin/tc missing -- busybox tc applet used (qdisc 口径不可用)"
+fi
 ln -sf "$BB" "$TMP/sh"
 
 # pidof/pgrep: own static implementation (printf-free /proc scanner)

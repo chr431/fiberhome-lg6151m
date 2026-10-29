@@ -1,5 +1,7 @@
 #!/bin/sh
-# watchdog.sh v1.37 -- on-device continuous invariant monitor.
+# watchdog.sh v1.38 -- on-device continuous invariant monitor.
+# v1.38 (2026-10-29 流量口径轮): qdisc 对账改用绝对路径 /sbin/tc —— PATH 里的
+#   /data/gw/sbin/tc 是 busybox 的, 不支持 "-s qdisc show", 该对账一直报假 "missing"。
 # v1.37 (2026-10-29 feat.usb 轮): 重启配方 "sh /data/gw/<script> <args>" 不再丢参数 ——
 #   原快路径只取脚本路径, usb_mgr 的 "daemon" 被吃掉 -> 每次重启只打 usage 就退出 ->
 #   3 次耗尽预算 -> 服务永久 down(实测 06:26-11:50)。
@@ -776,7 +778,7 @@ EOF
     CIF=$(tmo 5 "ip -o -4 addr show" | grep -m1 'ccmni.*inet' | awk '{print $2}')
     if [ -n "$CIF" ]; then
         CN=$(cat /sys/class/net/$CIF/statistics/tx_bytes 2>/dev/null || echo 0)
-        CQ=$(tmo 5 "tc -s qdisc show dev $CIF" | awk '/Sent/{print $2; exit}')
+        CQ=$(tmo 5 "/sbin/tc -s qdisc show dev $CIF" | awk '/Sent/{print $2; exit}')
         if [ -z "$CQ" ]; then
             CQ=$CN
             [ "$QNODISC" = 1 ] || { log "WARN qdisc Sent missing on $CIF (cold boot/no qdisc) -> netdev fallback"; QNODISC=1; }
@@ -862,7 +864,7 @@ EOF
 
 # ---- main ----
 case "${1:-}" in
---version) echo "watchdog v1.37"; exit 0 ;;
+--version) echo "watchdog v1.38"; exit 0 ;;
 esac
 touch $LOG $STATE
 # v1.20: 看门狗单实例 — 双实例会重复自愈/告警(现场曾出现 2 个).
@@ -872,8 +874,8 @@ if [ "$_rc" != 0 ]; then
     echo "watchdog: another live instance owns the lock (rc=$_rc)" >&2
     exit 0
 fi
-log "===== watchdog v1.37 start (svc_lib primitives + minimal parsers + batch3 metrics; avail keys + outcome probes + bearer-follow dp; alert LED 5G orange) ====="
-logger -t watchdog "watchdog v1.37 start"
+log "===== watchdog v1.38 start (svc_lib primitives + minimal parsers + batch3 metrics; avail keys + outcome probes + bearer-follow dp; alert LED 5G orange) ====="
+logger -t watchdog "watchdog v1.38 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

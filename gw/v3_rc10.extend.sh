@@ -1,5 +1,5 @@
 #!/bin/sh
-# rc19.sh v2 (=local v3_rc10.extend.sh) v2.36 -- Frankenstein v3.1: br-lan world + WiFi.
+# rc19.sh v2 (=local v3_rc10.extend.sh) v2.37 -- Frankenstein v3.1: br-lan world + WiFi.
 # v2.36 (SIGSEGV Phase 0): 停用 core_trap 每日文件模式窗口(窗口内 core_meta 元
 #        数据链整条被绕过 = 观测盲窗, 且从未抓到家族 core); 调度点摘除, 脚本
 #        保留。core_pattern 保持 rc.extend v2.6 的管道形态 |/data/gw/core_meta.sh。
@@ -97,6 +97,10 @@ fi
 # --- our modules
 # v2.34 (P1-5): healthdog FORENSIC D 打印(每 20s 遍历全部任务, 占持久 dmesg
 #   75%)改为按 marker 开启 — 取证用 /data/gw/healthdog.forensic, 平时零噪声。
+# v2.37 (崩溃归因轮): 打开内核用户态异常打印 —— 原值 0, 每次 SEGV 不落任何
+#   "segfault at <addr> ip <pc> ... in <bin>" 行, 无法判定崩在 vfprintf 还是别处。
+#   只影响日志量(仅崩溃时打印), 不影响行为。
+echo 1 > /proc/sys/debug/exception-trace 2>/dev/null
 _fore=0; [ -e /data/gw/healthdog.forensic ] && _fore=1
 insmod /data/gw/healthdog.ko forensic=$_fore armed=0 2>/dev/null
 # v2.30: wan_if 从钉死 ccmni2 改为空(全接口) — 承载口在 ccmni2/3 间漂移

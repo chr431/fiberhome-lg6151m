@@ -1,5 +1,5 @@
 #!/bin/sh
-# usb_mgr.sh v1.1 -- USB-C(设备模式)服务管理: 总开关 + 数据/ADB/控制台三个子功能
+# usb_mgr.sh v1.2 -- USB-C(设备模式)服务管理: 总开关 + 数据/ADB/控制台三个子功能
 # v1.1(OFF 竞态修复): usb_off 重排为"先杀 keepalive 再停服务再解绑" — v1.0 的
 #   gate_set 先杀 adbd, 1s 轮询的 restart_usb.sh 抢先发现 ep1 缺失跑了
 #   usb.init start(重绑 UDC+重生 adbd+再孵化新 keepalive), 后续 pkill/unbind 被
@@ -26,7 +26,10 @@
 #   USB_ADB      ADB 子开关(默认 0, 保持厂商门控姿态)
 #   USB_CONSOLE  ttyGS0 控制台(默认 0)
 #
-# 用法: usb_mgr.sh daemon|apply|status
+# 用法: usb_mgr.sh [daemon|apply|status]  (无参 = daemon)
+# v1.2 (2026-10-29 feat.usb 降级 5h): 无参默认 daemon。看门狗的重启配方走
+#   "sh /data/gw/<script>" 快路径, 早先会把配方里的 "daemon" 参数丢掉, 于是每次
+#   重启都只打印 usage 并 exit 2 -> 3 次耗尽预算 -> 服务永久停在 down。
 . /data/gw/svc_lib.sh 2>/dev/null
 
 G=/config/usb_gadget/g1
@@ -151,7 +154,7 @@ cmd_status() {
     echo "udc=${U:-none} state=${S:-none} bridge=$BRM ifup=$IUP carrier=${CARR:--} adbd=$AD gate=$GT getty=$CG"
 }
 
-case "$1" in
+case "${1:-daemon}" in
 daemon)
     svc_lock usb_mgr /data/gw/usb_mgr.sh || exit 0
     LOG "daemon start"

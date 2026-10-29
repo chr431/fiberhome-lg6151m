@@ -1,5 +1,8 @@
 #!/bin/sh
-# watchdog.sh v1.36 -- on-device continuous invariant monitor.
+# watchdog.sh v1.37 -- on-device continuous invariant monitor.
+# v1.37 (2026-10-29 feat.usb 轮): 重启配方 "sh /data/gw/<script> <args>" 不再丢参数 ——
+#   原快路径只取脚本路径, usb_mgr 的 "daemon" 被吃掉 -> 每次重启只打 usage 就退出 ->
+#   3 次耗尽预算 -> 服务永久 down(实测 06:26-11:50)。
 # v1.36 (2026-10-29 断网轮): +netlock 判决键 —— netcfg 写锁连续 3 轮(90s)被占即判
 #   泄漏(正常写方最长 <1s), 记 FAIL detail + 轮转锁文件自救(每小时最多 3 次);
 #   实弹: radvd 在锁内被 spawn 继承 flock fd 持锁 2h, 家宽断链时 failover 全超时。
@@ -269,10 +272,14 @@ svc_supervise() { # $1=name $2=pattern $3=lock $4=recipe $5=hb $6=maxage $7=env
         # matches the pid the watchdog remembers.  v1.29: optional env prefix.
         case "$_sc" in
         "sh /data/gw/"*)
+            # v1.37: 保留配方里的参数(原实现只取脚本路径, "daemon" 之类会被丢掉)
+            _rest=${_sc#sh /data/gw/}
+            _scr=${_rest%% *}
+            _sargs=${_rest#"$_scr"}
             if [ -n "$_sev" ]; then
-                spawn "$_sn" /tmp/$_sn.out env $_sev sh "/data/gw/$_st"
+                spawn "$_sn" /tmp/$_sn.out env $_sev sh "/data/gw/$_scr" $_sargs
             else
-                spawn "$_sn" /tmp/$_sn.out sh "/data/gw/$_st"
+                spawn "$_sn" /tmp/$_sn.out sh "/data/gw/$_scr" $_sargs
             fi ;;
         *) spawn "$_sn" /tmp/$_sn.out sh -c "$_sc" ;;
         esac
@@ -855,7 +862,7 @@ EOF
 
 # ---- main ----
 case "${1:-}" in
---version) echo "watchdog v1.36"; exit 0 ;;
+--version) echo "watchdog v1.37"; exit 0 ;;
 esac
 touch $LOG $STATE
 # v1.20: 看门狗单实例 — 双实例会重复自愈/告警(现场曾出现 2 个).
@@ -865,8 +872,8 @@ if [ "$_rc" != 0 ]; then
     echo "watchdog: another live instance owns the lock (rc=$_rc)" >&2
     exit 0
 fi
-log "===== watchdog v1.36 start (svc_lib primitives + minimal parsers + batch3 metrics; avail keys + outcome probes + bearer-follow dp; alert LED 5G orange) ====="
-logger -t watchdog "watchdog v1.36 start"
+log "===== watchdog v1.37 start (svc_lib primitives + minimal parsers + batch3 metrics; avail keys + outcome probes + bearer-follow dp; alert LED 5G orange) ====="
+logger -t watchdog "watchdog v1.37 start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

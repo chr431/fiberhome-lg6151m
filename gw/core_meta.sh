@@ -1,5 +1,9 @@
 #!/bin/sh
-# core_meta.sh v1.4 -- core_pattern metadata wrapper (stability P1-2/P1-5).
+# core_meta.sh v1.5 -- core_pattern metadata wrapper (stability P1-2/P1-5).
+# v1.5 (2026-10-29 真 core 轮): 把内核递来的 core **同时**落一份原始副本到
+#   /data/gw/logs/cores/raw/(tee 分叉, aee 照旧收到完整流) —— 崩溃归因需要 PC/寄存器/
+#   栈, 而 aee 的 dump 是加密的。超过 64MB 截断: PT_NOTE(寄存器)在文件头, 截断仍可读。
+#   只留最新 3 份(原始 core 几十 MB, /data 余量 1.7G)。
 # v1.4 (2026-10-28 时钟轮): unsync 判据改为 /tmp/ntp_synced 缺失(权威) + 原年份
 #   阈值兜底。原判据 epoch<2025-01-01 在构建日 2026-09-09 下永远不成立, 开机窗
 #   口的 NE 行因此全部没有标记(实测 9 行 17889xxxxxx 无 unsync)。
@@ -138,6 +142,14 @@ fi
 
 # --- hand the core to aee exactly as before (stdin untouched) -------------
 if [ -x /sbin/aee_core_forwarder ]; then
+    _rawd=/data/gw/logs/cores/raw
+    if mkdir -p "$_rawd" 2>/dev/null; then
+        _raw="$_rawd/${_bt}-${PID}-${_ts}.core"
+        head -c 67108864 | tee "$_raw" | /sbin/aee_core_forwarder /tmp "$PID" "$SIG" "$UID_" "$GID_"
+        _crc=$?
+        ls -t "$_rawd" 2>/dev/null | tail -n +4 | while read -r _f; do rm -f "$_rawd/$_f"; done
+        exit $_crc
+    fi
     exec /sbin/aee_core_forwarder /tmp "$PID" "$SIG" "$UID_" "$GID_"
 fi
 exit 0

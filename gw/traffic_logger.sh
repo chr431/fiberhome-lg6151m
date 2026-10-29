@@ -1,11 +1,14 @@
 #!/bin/sh
-# traffic_logger.sh v1.5 — 蜂窝/以太网流量采样器(5 分钟粒度, /data 持久)
+# traffic_logger.sh v1.6 — 蜂窝/以太网流量采样器(5 分钟粒度, /data 持久)
 # 输出: /data/gw/traffic_hist.tsv  每行: epoch drx_c dtx_c drx_e dtx_e (字节增量)
 # 语义: 增量为"距上次采样"; 计数器回绕/接口重建(ccmni 漂移)/重启(新值<旧值)
 #       按新值计(=计数器自身纪元的累计, 自洽); prev 存 /tmp(重启后首拍即
 #       "自计数器归零以来", 语义连续)
 # v1.5b: tc 用绝对路径 /sbin/tc —— PATH 里的 /data/gw/sbin/tc 是 busybox 的, 不支持
 #   "-s qdisc show", 于是 qdisc 口径一直在静默回退 netdev(见 toolchain_init 同轮修复)。
+# v1.6 (2026-10-29 GUI 聚合轮): 每拍同时维护**小时/日汇总**(traffic_hour.tsv /
+#   traffic_day.tsv)。GUI 的 traffic_hist 原来每次请求都用 awk 扫 6000 行原始采样 ——
+#   那条 awk 是崩溃家族里最常见的一个落点(18h 内 4 次)。汇总后 API 只读 ≤960/≤400 行。
 # v1.5 (2026-10-29 蜂窝少计): 承载口选择改为"**活的** ccmni"(IFF_UP + 有 inet),
 #   原规则 `ip -o -4 addr show | grep -m1 'ccmni.*inet'` 取**第一个**带 IP 的 ccmni ——
 #   实弹: ccmni2 已 DOWN 但仍挂着陈旧 IP(10.48.121.46), 活的承载是 ccmni3;
@@ -25,6 +28,8 @@
 # 接口漂移: ccmni* 每拍动态解析(与 get_traffic 同法); eth0 固定
 # 尺寸守护: 超 40 天(~11520 行)裁剪保留 30 天
 LOG=/data/gw/traffic_hist.tsv
+HOURF=/data/gw/traffic_hour.tsv
+DAYF=/data/gw/traffic_day.tsv
 _TC=/sbin/tc; [ -x "$_TC" ] || _TC=tc
 ST=/tmp/traffic_prev
 # v1.4 (batch3): shared single-instance lock + heartbeat primitives.
@@ -34,6 +39,21 @@ if [ "$_rc" != 0 ]; then
     [ "$_rc" = 1 ] && echo "traffic_logger: already running" >&2 || echo "traffic_logger: lost lock race" >&2
     exit 0
 fi
+_bump() { # $1=file $2=key $3=c $4=e —— 同键累加(小文件整写, 每 5 分钟两次)
+    _bf=$1; _bk=$2; _bc=$3; _be=$4
+    _oc=0; _oe=0
+    _orow=$(grep "^$_bk " "$_bf" 2>/dev/null | head -1)
+    if [ -n "$_orow" ]; then
+        _oc=$(printf '%s' "$_orow" | cut -d' ' -f2)
+        _oe=$(printf '%s' "$_orow" | cut -d' ' -f3)
+    fi
+    case "$_oc" in ''|*[!0-9]*) _oc=0 ;; esac
+    case "$_oe" in ''|*[!0-9]*) _oe=0 ;; esac
+    grep -v "^$_bk " "$_bf" 2>/dev/null > "$_bf.t"
+    echo "$_bk $((_oc + _bc)) $((_oe + _be))" >> "$_bf.t"
+    mv "$_bf.t" "$_bf"
+}
+
 while :; do
     svc_hb traffic_logger
     # v1.5: 只认**活的**承载口 —— IFF_UP(flags bit0) 且带 inet; 陈旧 IP 的 DOWN 口不算
@@ -71,7 +91,13 @@ while :; do
     DT=$((CTC-PT)); [ $DT -lt 0 ] && DT=$CTC
     DE=$((ERC-PE)); [ $DE -lt 0 ] && DE=$ERC
     DF=$((ETC-PF)); [ $DF -lt 0 ] && DF=$ETC
-    echo "$(date +%s) $DC $DT $DE $DF" >> $LOG
+    _now=$(date +%s)
+    echo "$_now $DC $DT $DE $DF" >> $LOG
+    # v1.6: 小时/日汇总累加(键 = 本地对齐的 epoch; 与 API 的桶键同约定)
+    _bump "$HOURF" "$(( (_now + 28800) / 3600 * 3600 ))"  "$((DC + DT))" "$((DE + DF))"
+    _bump "$DAYF"  "$(( (_now + 28800) / 86400 * 86400 ))" "$((DC + DT))" "$((DE + DF))"
+    [ "$(wc -l < $HOURF 2>/dev/null || echo 0)" -gt 1000 ] && { tail -n 960 $HOURF > $HOURF.t 2>/dev/null && mv $HOURF.t $HOURF; }
+    [ "$(wc -l < $DAYF 2>/dev/null || echo 0)" -gt 400 ] && { tail -n 380 $DAYF > $DAYF.t 2>/dev/null && mv $DAYF.t $DAYF; }
     echo "S=$SRC:$CIF; PC=$CRC; PT=$CTC; PE=$ERC; PF=$ETC" > $ST
     L=$(wc -l < $LOG 2>/dev/null || echo 0)
     [ "$L" -gt 11520 ] && { tail -8640 $LOG > $LOG.t 2>/dev/null && mv $LOG.t $LOG; }

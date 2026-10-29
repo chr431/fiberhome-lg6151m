@@ -1,4 +1,4 @@
-# api_sys.sh v1.3 — 系统/状态域模块 (被 api.sh 按端点懒加载; 依赖核心的 helpers)
+# api_sys.sh v1.5 — 系统/状态域模块 (被 api.sh 按端点懒加载; 依赖核心的 helpers)
 # v1.3 (2026-10-17 日志加密轮): traffic 选口回退/qdisc 缺失留痕(api.log)。
 # v1.2: /api/traffic 增 if 字段; v1.1: 探活实证选口。
 # v1.0 (2026-10-17 架构轮): 自 api.sh v2.74 拆出 — status/clients/sys/logs/sse/fan/
@@ -53,34 +53,34 @@ get_traffic() {
 # 输出 {"span","step","buckets":[{"t","c","e"}...],"today":{"c","e"}} (c=蜂窝 e=以太, 字节)
 get_traffic_hist() {
     SPAN=$(form_kv span)
-    case "$SPAN" in month) STEP=86400; N=30 ;; *) SPAN=week; STEP=3600; N=168 ;; esac
+    # v1.5: 读 traffic_logger 维护的**小时/日汇总**(v1.6 起), 不再每次请求 awk 扫 6000 行
+    #   原始采样 —— 那条 awk 是崩溃家族里最常见的落点之一(18h 内 4 次)。
+    case "$SPAN" in
+        month) STEP=86400; N=30;  F=$GWDATA/traffic_day.tsv ;;
+        *)     SPAN=week;  STEP=3600; N=168; F=$GWDATA/traffic_hour.tsv ;;
+    esac
     NOW=$(date +%s)
-    if [ ! -r $GWDATA/traffic_hist.tsv ]; then
+    if [ ! -r "$F" ]; then
         printf '{"span":"%s","step":%s,"buckets":[],"today":{"c":0,"e":0}}' "$SPAN" "$STEP"
         return
     fi
     awk -v step=$STEP -v n=$N -v now=$NOW -v span=$SPAN '
-        { tl = int(($1 + 28800) / step) * step
-          c[tl] += $2 + $3; e[tl] += $4 + $5
+        { tl = $1; c[tl] = $2; e[tl] = $3
           if (tl > mx) mx = tl
           tod0 = int((now + 28800) / 86400) * 86400
-          if (tl >= tod0) { tc += $2 + $3; te += $4 + $5 } }
+          if (tl >= tod0) { tc += $2; te += $3 } }
         END {
-          if (mx <= 0) {   # v2.57: 空文件/尚无数据 — 否则负 epoch 垃圾桶(awk 注释只认 #)
+          if (mx <= 0) {
               printf "{\"span\":\"%s\",\"step\":%d,\"buckets\":[],\"today\":{\"c\":0,\"e\":0}}", span, step
               exit
           }
-          # v2.81: 窗口改为**本地零点对齐** —— 原 "mx - step*(n-1)" 是滚动窗口, 首日只
-          #   覆盖一部分(实测 10-22 在周视图汇总 0G, 而月视图同一自然日 3.7G), 两个
-          #   视图对不上。现在周=今天零点往前 6 天, 月=往前 29 天, 每天都是完整自然日
-          #   (今天进行中), 与月视图的日桶逐日可对。
           start = tod0 - (span == "week" ? 6 : 29) * 86400
           if (start > mx) start = mx - step * (n - 1)
           printf "{\"span\":\"%s\",\"step\":%d,\"buckets\":[", span, step
           for (t = start; t <= mx; t += step)
               printf "%s{\"t\":%d,\"c\":%.6g,\"e\":%.6g}", (t > start ? "," : ""), t - 28800, c[t] + 0, e[t] + 0
           printf "],\"today\":{\"c\":%.6g,\"e\":%.6g}}", tc + 0, te + 0
-        }' $GWDATA/traffic_hist.tsv
+        }' "$F"
 }
 apply_traffic_limit() {
     D=$(form_kv day); M=$(form_kv month)

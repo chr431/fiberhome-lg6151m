@@ -24,7 +24,7 @@ async function api(ep, body) {
     return j;
 }
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
-function fmtB(b) { b = +b; if (!isFinite(b)) return "--"; if (b > 1e9) return (b / 1e9).toFixed(2) + " GB"; if (b > 1e6) return (b / 1e6).toFixed(1) + " MB"; if (b > 1e3) return (b / 1e3).toFixed(0) + " KB"; return Math.round(b) + " B"; }
+function fmtB(b) { b = +b; if (!isFinite(b)) return "--"; if (b >= 1e9) return (b / 1e9).toFixed(2) + " GB"; if (b >= 1e6) return (b / 1e6).toFixed(1) + " MB"; if (b >= 1e3) return (b / 1e3).toFixed(0) + " KB"; return Math.round(b) + " B"; }   // v3.55: 阈值改 >= (1e6 原显示 "1000 KB")
 function toast(msg, bad) {
     const t = document.getElementById("toast");
     t.textContent = msg; t.className = "show" + (bad ? " bad" : "");
@@ -999,6 +999,17 @@ window.trSpan = s => {
     document.querySelectorAll("#tr-tabs button").forEach(b => b.classList.toggle("act", b.dataset.s === s));
     PAGES.traffic.tick();
 };
+/* v3.55: 纵轴自适应 —— 上限取"整刻度"(1/2/2.5/5 × 10^k)凑 4 格, 顶部留 6% 余量。
+ *   原实现把上限跳到下一个数量级(峰值 1.2MB -> 轴到 10MB, 曲线只占 12% 高度),
+ *   现在 1.2MB 的峰值轴到 1.5MB, 曲线占 ~80%。0 数据给 1KB 兜底, 避免刻度全是 0 B。 */
+function niceScale(maxV, ticks) {
+    const v = Math.max(maxV, 1024);
+    const raw = v / ticks;
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const norm = raw / mag;
+    const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * mag;
+    return { max: step * Math.max(1, Math.ceil(v / step - 1e-9)), step: step };
+}
 function trDraw() {
     const cv = $("tr-cv"); if (!cv) return;
     const dpr = window.devicePixelRatio || 1;
@@ -1013,14 +1024,16 @@ function trDraw() {
         return;
     }
     const padL = 46, padR = 10, padT = 12, padB = 22;
-    let mx = 1;
-    for (const b of bs) { if (b.c > mx) mx = b.c; if (b.e > mx) mx = b.e; }
-    for (const u of [1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12]) if (mx <= u) { mx = u; break; }
+    let peak = 0;
+    for (const b of bs) { if (b.c > peak) peak = b.c; if (b.e > peak) peak = b.e; }
+    const sc = niceScale(peak * 1.06, 4);
+    const mx = sc.max;
     const xOf = i => padL + (i + 0.5) / bs.length * (W - padL - padR);
     const yOf = v => padT + (1 - v / mx) * (H - padT - padB);
     x.font = "10px sans-serif";
-    for (let g = 0; g <= 4; g++) {
-        const v = mx * g / 4, y = yOf(v);
+    const nT = Math.round(mx / sc.step);
+    for (let g = 0; g <= nT; g++) {
+        const v = g * sc.step, y = yOf(v);
         x.strokeStyle = g === 0 ? "#3a5270" : "#1f3451";
         x.beginPath(); x.moveTo(padL, y); x.lineTo(W - padR, y); x.stroke();
         x.fillStyle = "#7fa3c4"; x.textAlign = "right"; x.fillText(fmtB(v), padL - 5, y + 3);

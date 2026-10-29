@@ -1,5 +1,5 @@
 #!/bin/sh
-# netlock.sh v1.3 -- serialize route/firewall/address writers + REPAIR ledger.
+# netlock.sh v1.4 -- serialize route/firewall/address writers + REPAIR ledger.
 # v1.3 (2026-10-29 锁重写): 锁从 "flock on fd" 换成 **目录租约** ——
 #   flock 的锁属于进程的文件描述符, 任何在持锁期间 spawn 的长驻子进程都会继承它,
 #   锁的生命周期于是绑到"那个子进程活多久"(实弹: radvd 被在锁内 spawn, 持锁 2h08m,
@@ -64,15 +64,20 @@ netcfg_lock() { # $1=timeout seconds (default NETCFG_TO)
         # 持有者已死 -> 立即回收(比 flock 的"等内核"更早, 也不需要看门狗)
         if [ "$_p" -gt 0 ] && ! kill -0 "$_p" 2>/dev/null && [ "$_r" -lt 3 ]; then
             _r=$((_r + 1))
-            netcfg_log "EVT reclaim: holder pid=$_p gone (attempt $_r)"
-            rm -rf "$NETCFG_LOCKD" 2>/dev/null
+            # v1.4: 回收前复核 owner 未变 —— 否则可能误删别人刚建好的锁(微秒级竞态)
+            [ "$(netcfg_owner | cut -d' ' -f1)" = "$_p" ] && {
+                netcfg_log "EVT reclaim: holder pid=$_p gone (attempt $_r)"
+                rm -rf "$NETCFG_LOCKD" 2>/dev/null
+            }
             continue
         fi
         # 租约过期 -> 视为卡死(正常临界区 <1s)
         if [ "$_t" -gt 0 ] && [ $(( $(date +%s) - _t )) -gt "$NETCFG_TTL" ] && [ "$_r" -lt 3 ]; then
             _r=$((_r + 1))
-            netcfg_log "EVT reclaim: lease expired holder=${_p:-?} age=$(( $(date +%s) - _t ))s"
-            rm -rf "$NETCFG_LOCKD" 2>/dev/null
+            [ "$(netcfg_owner | cut -d' ' -f1)" = "$_p" ] && {
+                netcfg_log "EVT reclaim: lease expired holder=${_p:-?} age=$(( $(date +%s) - _t ))s"
+                rm -rf "$NETCFG_LOCKD" 2>/dev/null
+            }
             continue
         fi
         _i=$((_i + 1))

@@ -1,5 +1,10 @@
 #!/bin/sh
-# netlock.sh v1.4 -- serialize route/firewall/address writers + REPAIR ledger.
+# netlock.sh v1.5 -- serialize route/firewall/address writers + REPAIR ledger.
+# v1.5 (2026-10-29 锁卡死实弹): 锁目录改为"先建私有目录写好 owner, 再 rename 到锁名" ——
+#   锁目录**出现即带 owner**。原实现 mkdir 与写 owner 之间有个窗口, 进程正好在这之间
+#   被 NE 收走就留下**无主目录**: 等待方看到 holder=0/age=huge 既不算死 pid 也不算
+#   过期, 于是永久等待 —— 实弹 13:41 卡到 18:11, 6400+ 次写方超时。另加兜底: 无主
+#   目录等 2 轮仍无 owner 即回收。
 # v1.3 (2026-10-29 锁重写): 锁从 "flock on fd" 换成 **目录租约** ——
 #   flock 的锁属于进程的文件描述符, 任何在持锁期间 spawn 的长驻子进程都会继承它,
 #   锁的生命周期于是绑到"那个子进程活多久"(实弹: radvd 被在锁内 spawn, 持锁 2h08m,
@@ -53,14 +58,24 @@ netcfg_lock() { # $1=timeout seconds (default NETCFG_TO)
     fi
     _i=0; _r=0
     while :; do
+        # v1.5: mkdir 后**立即**写 owner; 两者之间的窗口由下面的"无主目录回收"兜底。
+        #   (曾试过"私有目录写好 owner 再 rename", 但 busybox mv 在目标已存在目录时会把
+        #    源**移进去**并返回 0 —— 互斥直接失效, 已回退。)
         if mkdir "$NETCFG_LOCKD" 2>/dev/null; then
-            echo "$$ $(date +%s)" > "$NETCFG_LOCKD/owner"
+            echo "$$ $(date +%s)" > "$NETCFG_LOCKD/owner" 2>/dev/null
             NETCFG_DEPTH=1
             return 0
         fi
         _own=$(netcfg_owner); _p=${_own%% *}; _t=${_own##* }
         case "$_p" in ''|*[!0-9]*) _p=0 ;; esac
         case "$_t" in ''|*[!0-9]*) _t=0 ;; esac
+        # 无主目录(旧版本残留/异常): 等 2 轮仍无 owner 即回收
+        if [ "$_p" -eq 0 ] && [ "$_i" -ge 2 ] && [ "$_r" -lt 3 ]; then
+            _r=$((_r + 1))
+            netcfg_log "EVT reclaim: lock dir without owner (waited ${_i}s)"
+            rm -rf "$NETCFG_LOCKD" 2>/dev/null
+            continue
+        fi
         # 持有者已死 -> 立即回收(比 flock 的"等内核"更早, 也不需要看门狗)
         if [ "$_p" -gt 0 ] && ! kill -0 "$_p" 2>/dev/null && [ "$_r" -lt 3 ]; then
             _r=$((_r + 1))

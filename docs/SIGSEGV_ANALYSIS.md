@@ -859,6 +859,50 @@ tail -n +2 /data/gw/logs/ne_events.tsv | awk -F'\t' '$1 > '"$(cat /data/gw/logs/
 **现场产物**：`/data/gw/logs/cores/raw/*.core|.hdr`、`/data/repro/r094.log`、
 `/data/repro/pfc_runs.log`；分析脚本 `_local/tmp`（不入库）。
 
+## 22. 直接抓到一次写入：内容是**内核日志文本**（2026-10-30 凌晨）
+
+> 本轮把"猜写入者"换成了"抓写入现场"：自建 `va2pa.ko`（用户 VA→PA）与 `pwatch.ko`
+> （按 PA 轮询比对内容，命中打 jiffies），盯住 pfcanary 栈顶 4 页。
+
+### 22.1 现场（已证实）
+
+- `pwatch` 在 `pa=0xd00fc000`（pfcanary 栈页）的 **0xfc0–0xfff** 抓到 8 个字的**实时变化**：
+  `old=0` → `new=ASCII`；
+- 该页内容与 `dmesg` 里的一行**逐字符相同**：
+
+```
+...x30000, isr = 0x0, rt_req_sta0 = 0x0 rt_req_sta1 = 0x0 rt_req_sta2 = 0xffffffff
+rt_req_sta3 = 0xffffffff dram_sw_con_3 = 0x0, ddren_req_latch = 0x0, apsrc_req_latch = 0x0
+```
+
+- 整页 4 KB 里是**约 16 行连续日志文本**，在页边界处被截断（说明是一条流式写入穿过该页）；
+- 紧邻的 `pa=0xd00fd000` 页里能找到**我们自己的 pwatch 打印**（`<6>[ 4663.803768] pwatchd: ... HIT pa=d00fc000`）
+  —— 即该物理区域当时正是**内核日志环**所在。
+
+### 22.2 结论（强证据，推翻旧方向）
+
+1. **"外部写入"写进去的是内核日志文本**，不是 MD 引擎的 DMA 记录；
+2. 该页当时**同时是 pfcanary 的栈页**（PA 由 `va2pa.ko` 从进程页表实测得到）⇒
+   **内核日志缓冲的物理页与用户进程页重叠**；
+3. 这解释了历史上所有形态：日志行里本来就带 `r180/r094/bat_va` 这类寄存器文本（§21 的
+   "上下文快照"很可能就是这类 dump 的二进制版本），页尾 0xfc0 是日志环在该页的写位置。
+
+### 22.3 与 §11–§15 的关系
+
+§11「写入在 MD 侧」、§15「RV33 无 store」都是**排除法/静态**结论；本节是**直接观测**：
+写入内容 = 内核日志文本，落点 = 用户页。两者冲突时以直接观测为准。
+最可能的所有者：**AP 侧 ccci/mipc 驱动的调试/日志缓冲**（文本正是该驱动的寄存器 dump），
+其页面被释放后又分配给用户进程，驱动仍在往里写。
+
+### 22.4 仍未解决
+
+1. 该缓冲的**确切分配/释放路径**（谁 free 了它、为什么还在写）——需要驱动源码或反汇编；
+2. §21 的 32 字节**二进制**记录与本节 ASCII 文本是否同源（同一缓冲的两种记录格式）；
+3. 日志环的物理范围与用户页重叠的**分配器侧证据**（本轮只拿到"同一页"这一条）。
+
+**产物**：`tmpfiles/repro/{va2pa.c,va2pa.ko,pwatch.c,pwatch.ko,logbuf.c,logbuf.ko}`、
+`/data/repro/{va2pa.ko,pwatch.ko}`、`/tmp/pa_page.bin`（现场页快照）。
+
 ## 20. busybox 补全 + 页尾屏蔽（2026-10-28 夜）
 
 ### 20.1 busybox 重建成功（WSL2 + musl-cross，已部署）

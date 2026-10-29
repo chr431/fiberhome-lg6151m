@@ -1,4 +1,5 @@
-/* v3httpd.c v2.8 (API 域改用自建 busybox 的 sh — 装 vfprintf 闸门; 厂商 /bin/sh
+/* v3httpd.c v2.9 (main 里显式 setenv PATH=/data/gw/sbin:… —— CGI 子进程的 applet 一律
+ *   解析到自建 busybox 的符号链接, 不依赖启动者环境) -- v2.8 (API 域改用自建 busybox 的 sh — 装 vfprintf 闸门; 厂商 /bin/sh
  *   未装闸门, 2026-10-29 实测 API 链上 sh/awk/grep/sed 的崩溃全落在它上面; 自建件
  *   缺失时回退 /bin/sh, 不因缺件拒绝服务) -- v2.6 (P2: 静态面拒绝 *.sh 下载(原 GET /api.sh 直出全部服务端逻辑);
  *   Host 头校验 — 非本机 IP 的 Host 一律 400, 根治 DNS rebinding 经受害者
@@ -344,6 +345,11 @@ static void proxy_tunnel(int c, char *req, int n, const char *path)
 
 int main(void)
 {
+    /* v2.9: 显式钉死 PATH —— CGI 子进程的 applet(awk/sed/grep/ping/tail…)必须解析到
+     *   /data/gw/sbin 下指向自建 busybox(带闸门)的符号链接, 不能依赖启动者的环境
+     *   (2026-10-29 实测: 手工从 SSH 重启 v3httpd 时 PATH 丢掉 /data/gw/sbin,
+     *    API 链上的 awk 立刻退回厂商 /bin/busybox)。 */
+    setenv("PATH", "/data/gw/sbin:/data/gw/bin:/usr/sbin:/usr/bin:/sbin:/bin", 1);
     struct sigaction sa; memset(&sa, 0, sizeof sa);
     sa.sa_handler = on_chld;
     sigemptyset(&sa.sa_mask);
@@ -360,7 +366,7 @@ int main(void)
     a.sin_port = htons(PORT);
     if (bind(s, (struct sockaddr *)&a, sizeof a) < 0) { perror("bind"); return 2; }
     if (listen(s, 8) < 0) { perror("listen"); return 3; }
-    logline("===== v3httpd v2.8 start %s:%d root=%s =====", BIND_IP, PORT, WWW_ROOT);
+    logline("===== v3httpd v2.9 start %s:%d root=%s =====", BIND_IP, PORT, WWW_ROOT);
 
     static char req[32768 + BODY_MAX];
     for (;;) {

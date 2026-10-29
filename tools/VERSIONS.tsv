@@ -2,7 +2,7 @@
 #VER-REGISTRY
 gw/avail_sampler.sh	1.10	manifest	/data/gw/avail_sampler.sh	组件可用性采样器; v1.5(假红实弹): NE 死者退出置态条件只做 cause 注记(11:03 残留 watchdog 实例被 NE 收走, 主实例全程健康却记 10min 退化; 真实死亡由 FAIL 键/重启事件窗口兜住, 覆盖无缺口; 证伪演练=selftest t_avail_ne_drill); v1.4: grep -c case 守卫; v1.3: metrics 活性读台账 epoch; v1.2(防假绿): 窗口迁移+结果组合+活性+WiFi 信号+usb off; 判据分级审计见 AVAILABILITY_DESIGN §8; v1.6(SIGSEGV Phase 1): s:kernel 见 /tmp/fixstack.disabled 判 off(不出事件), 修复栈停用不再假降级; 移除 core_trap 死映射; v1.7(SIGSEGV Phase 2 退役): 移除旧修复栈依赖(dpquar/dpclamp lsmod 与 /proc 判据、sweeps/SW_STUCK), s:kernel 固定 off; v1.8(LAN v6): s:radvd6 四态化(off=仅 V6LAN=0; deg=无 v6 上行; down=该在没在), 事实源 /tmp/v6_state; v1.9(时钟轮): pre-sync 保护(/tmp/ntp_synced 缺失时只刷实况快照, 不写小时直方图/日条/事件表 — 修 24 行 2026090910 假小时行); v1.10(断网轮): +sys.netlock 组件(锁被长持记 deg — failover 有紧急单笔通道与看门狗轮转兜底)
 gw/agg_pins.default	1.0	manifest	/data/gw/agg_pins.default	MAC钉死表出厂缺省基线(只读, 不含任何MAC; 设备侧活文件 agg_pins.conf 由 wan_agg 缺省才写地播种, 个人MAC不入库)
-gw/rc.extend.sh	3.1	manifest	/data/rc.extend.sh	槽位调度器; v2.9(SIGSEGV §8.11 T3): dpclamp 装载后即喂跨启动陈旧集种子(cat dpclamp_pfns.txt > /proc/dpclamp_seed, 守护动物园拉起前), seed 统计入 fixstack.log; v2.8: 自载 panic 感知守卫+fixstack.log; v2.7: 修复栈开机自载; v2.6: boot台账+条件清TRY_A; 历史见git; v3.0(SIGSEGV Phase 1): 内核修复栈默认停用(FIXSTACK_ENABLE=0, 保留代码/文件/登记); panic_on_rcu_stall 改回 0; 停用时写 /tmp/fixstack.disabled 供采样器判 off; 订正 RLIMIT_CORE 注释(管道不受其约束); v3.1(SIGSEGV Phase 2 退役): 整段删除 FIXSTACK 自加载(FIXSTACK_ENABLE/pstore guard/insmod/seed 喂入/fixstack.log); 新方案接入点预留; panic_on_rcu_stall=0 保留
+gw/rc.extend.sh	3.2	manifest	/data/rc.extend.sh	槽位调度器; v2.9(SIGSEGV §8.11 T3): dpclamp 装载后即喂跨启动陈旧集种子(cat dpclamp_pfns.txt > /proc/dpclamp_seed, 守护动物园拉起前), seed 统计入 fixstack.log; v2.8: 自载 panic 感知守卫+fixstack.log; v2.7: 修复栈开机自载; v2.6: boot台账+条件清TRY_A; 历史见git; v3.0(SIGSEGV Phase 1): 内核修复栈默认停用(FIXSTACK_ENABLE=0, 保留代码/文件/登记); panic_on_rcu_stall 改回 0; 停用时写 /tmp/fixstack.disabled 供采样器判 off; 订正 RLIMIT_CORE 注释(管道不受其约束); v3.1(SIGSEGV Phase 2 退役): 整段删除 FIXSTACK 自加载(FIXSTACK_ENABLE/pstore guard/insmod/seed 喂入/fixstack.log); 新方案接入点预留; panic_on_rcu_stall=0 保留; v3.2(闸门覆盖轮): healthdog 改经 PATH 的 sh 启动(自建 busybox), 不再走 shebang 的厂商 /bin/sh
 gw/v3_rc10.extend.sh	2.36	manifest	/data/gw/rc19.sh	v3 启动编排 rc19v2; v2.35(USB 轮): +usb_mgr 守护(USB-C 设备模式: rndis0 桥入 br-lan+三开关); v2.34(P0-2): boot_gate 健康门禁; 历史见git; v2.36(SIGSEGV Phase 0): 摘除 core_trap 每日窗口拉起点(窗口把 core_pattern 降级为文件模式致厂商子树失明)
 gw/usb_mgr.sh	1.1	manifest	/data/gw/usb_mgr.sh	USB-C 设备模式服务管理(总开关+数据/ADB/控制台); 厂商遗留 g1 gadget(RNDIS+ADB+2xACM)只补服务层: rndis0 桥入 br-lan=PC 即 LAN 客户端; OFF=停 keepalive+解绑 UDC 口全灭; 硬件为仅设备模式(host 电气死路, 板上 TCPC 未贴)
 gw/www/api_avail.sh	1.2	manifest	/data/gw/www/api_avail.sh	API 可用性域模块(avail): v1.1: 今日条并入当前小时累计(/tmp/avail_hist, 首小时边界前不再灰条); 只读聚合 avail_daily+hourly(今日实时)+transitions → 90 天日条(degraded 半权/维护窗排除/无数据不进分母)+事件倒序 30 条+24h 覆盖率+总体(上行组最差优先); ash 纪律=循环重定向式读文件(无管道子壳回传问题); v1.2(SIGSEGV Phase 1): 数值聚合(今日实时+24h覆盖率)改纯 shell 单遍累加, 不再用 awk printf 路径(GUI 每次轮询都跑, 崩一次即污染 ne_events 基线); 仅留两处不带 printf 的 awk 过滤/计数
@@ -45,7 +45,7 @@ README.md	1.1	doc	-	仓库总览与快速上手
 gw/bin/multiwan_ctl	1.1	manifest	/data/gw/multiwan_ctl	原厂multiwan引擎ioctl控制器(zig动态链libfhdrv_net_api,36B结构体)
 gw/bin/fhstub.so	1.0	manifest	/data/gw/fhstub.so	FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径)
 gw/led_mgr.sh	3.0	manifest	/data/gw/led_mgr.sh	原厂风格LED守护; v3.0(WiFi 事故): WiFi 灯=AP 服务在服务(svc_bss_count 活套接字+链路), 不再是 netdev 存在; 历史见git
-gw/bin/v3httpd	2.8	manifest	/data/gw/v3httpd	网关GUI HTTP服务; v2.6(P2): 静态面拒*.sh(免认证源码泄露)+Host头校验(根治DNS rebinding); v2.7(SIGSEGV §18): 链接 vfprintf va_list 闸门 v2(写入不再打死进程); v2.8(闸门覆盖轮): CGI 解释器改自建 busybox 的 sh(装 vfprintf 闸门), 自建件缺失回退 /bin/sh
+gw/bin/v3httpd	2.9	manifest	/data/gw/v3httpd	网关GUI HTTP服务; v2.6(P2): 静态面拒*.sh(免认证源码泄露)+Host头校验(根治DNS rebinding); v2.7(SIGSEGV §18): 链接 vfprintf va_list 闸门 v2(写入不再打死进程); v2.8(闸门覆盖轮): CGI 解释器改自建 busybox 的 sh(装 vfprintf 闸门), 自建件缺失回退 /bin/sh
 gw/www/api_sys.sh	1.3	manifest	/data/gw/www/api_sys.sh	API 系统/状态域模块; v1.3(日志加密轮): traffic 选口回退/qdisc 缺失留痕; v1.2: /api/traffic 增 if 字段; v1.1: 探活实证选口
 gw/www/api_wifi.sh	1.1	manifest	/data/gw/www/api_wifi.sh	API WiFi 域模块; v1.1(WiFi 事故): hostapd2g/5g 改活控制套接字判据(iw type AP 在 hostapd 死后仍为真 → GUI 谎报正常); 历史见git
 gw/www/api_lan.sh	1.0	manifest	/data/gw/www/api_lan.sh	API LAN 服务域模块(v2.75 拆出: dhcp/dhcp_static/fw 族; fw_apply.sh 改域内懒加载 — 原对全部请求无条件 source)
@@ -91,7 +91,7 @@ tools/build_v3fix.sh	1.1	tool	-	v3_fix.ko构建; v1.1: 路径修正当前布局 
 tools/gen_kernel_inc.py	1.0	tool	-	kernel头生成(构建辅助)
 gw/src/multiwan_ctl.c	1.1	src	gw/bin/multiwan_ctl	multiwan控制器源码(随产物1.1)
 gw/src/shmsnap.c	1.0	src	gw/bin/shmsnap	cfgmgr快照源码
-gw/src/v3httpd.c	2.8	src	gw/bin/v3httpd	GUI HTTP服务源码; v2.6: 同产物
+gw/src/v3httpd.c	2.9	src	gw/bin/v3httpd	GUI HTTP服务源码; v2.6: 同产物
 gw/src/wpapmk.c	1.0	src	gw/bin/wpapmk	WPA PMK转换源码(纯C PBKDF2)
 gw/src/fhstub.c	1.0	src	gw/bin/fhstub.so	FH符号桩库源码
 gw/defaults.conf	1.10	manifest	/data/gw/defaults.conf	统一配置只读出厂基线(444); v1.9(USB 轮): +USB_ENABLED/USB_ADB/USB_CONSOLE(USB-C 设备模式三开关); 消费方source叠加settings.conf稀疏覆盖; v1.10: +V6LAN(1=启用 LAN IPv6; 0=撤 ULA 停 radvd)

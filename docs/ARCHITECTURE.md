@@ -56,7 +56,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/bin/shmsnap` | **v1.0** | manifest | `/data/gw/shmsnap` | cfgmgr树共享内存快照工具(save/load 16MB原始字节, gzip后127KB, 开机恢复锁定状态) |
 | `gw/bin/v3_fix.ko` | **v1.2** | manifest | `/data/gw/v3_fix.ko` | TTL伪装/PPE解绑内核模块(wan_if/ttl_mode/unhook); v1.2(24h 日志轮): 重建产物 — 旧文件 ELF 节表错位 1B 致每次开机 insmod 静默失败(type 768), 实测 rc=0/TTL/RX 解绑在位 |
 | `gw/bin/v3_steth.ko` | **v1.0** | manifest | `/data/gw/v3_steth.ko` | hook槽位听诊器(bias/interval) |
-| `gw/bin/v3httpd` | **v2.8** | manifest | `/data/gw/v3httpd` | 网关GUI HTTP服务; v2.6(P2): 静态面拒*.sh(免认证源码泄露)+Host头校验(根治DNS rebinding); v2.7(SIGSEGV §18): 链接 vfprintf va_list 闸门 v2(写入不再打死进程); v2.8(闸门覆盖轮): CGI 解释器改自建 busybox 的 sh(装 vfprintf 闸门), 自建件缺失回退 /bin/sh |
+| `gw/bin/v3httpd` | **v2.9** | manifest | `/data/gw/v3httpd` | 网关GUI HTTP服务; v2.6(P2): 静态面拒*.sh(免认证源码泄露)+Host头校验(根治DNS rebinding); v2.7(SIGSEGV §18): 链接 vfprintf va_list 闸门 v2(写入不再打死进程); v2.8(闸门覆盖轮): CGI 解释器改自建 busybox 的 sh(装 vfprintf 闸门), 自建件缺失回退 /bin/sh |
 | `gw/bin/wpapmk` | **v1.0** | manifest | `/data/gw/wpapmk` | WPA口令转PMK(纯C PBKDF2-SHA1; fh魔改hostapd只吃wpa_psk) |
 | `gw/boot_gate.sh` | **v1.3** | manifest | `/data/gw/boot_gate.sh` | 启动健康门禁(P0-2); v1.2: 不写 watchdog.beat(避免污染数字心跳); v1.1: GUI 判据加 HTTP 200; v1.0: 关键链门禁+boot.healthy+TRY_A 读回+10min 稳定窗; v1.3(batch3): svc_lib 锁 + BSS/lo 最小解析 |
 | `gw/capture_ubus.sh` | **v1.1** | manifest | `/data/gw/capture_ubus.sh` | stock拨号一次性捕获(ubus monitor+ccmni采样) |
@@ -82,7 +82,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/night_report.sh` | **v1.0** | manifest | `/data/gw/night_report.sh` | 夜间体检报告 |
 | `gw/ntp_keeper.sh` | **v1.7** | manifest | `/data/gw/ntp_keeper.sh` | 每小时NTP守时(多源; 设备无RTC); v1.4(P1-1): 单实例锁; v1.3: 首同步失败 60s 重试+心跳; v1.2: 时区自愈; 历史见git; v1.5(batch3): svc_lib 锁/心跳; v1.6(时钟轮): 每次成功对时刷新 /tmp/ntp_synced(epoch) — "本 boot 时钟已可信"的权威标记, 供 sampler/core_meta/netlock 判断; v1.7(闸门覆盖轮): ntpclient 调用加 8s 硬超时(实弹 04:01 卡死 70min, 60s 重试失效) |
 | `gw/radvd.conf` | **v1.0** | manifest | `/data/gw/radvd.conf` | IPv6 SLAAC+RDNSS通告(br-lan, ULA fd42:9ac1:7e50::/64) |
-| `gw/rc.extend.sh` | **v3.1** | manifest | `/data/rc.extend.sh` | 槽位调度器; v2.9(SIGSEGV §8.11 T3): dpclamp 装载后即喂跨启动陈旧集种子(cat dpclamp_pfns.txt > /proc/dpclamp_seed, 守护动物园拉起前), seed 统计入 fixstack.log; v2.8: 自载 panic 感知守卫+fixstack.log; v2.7: 修复栈开机自载; v2.6: boot台账+条件清TRY_A; 历史见git; v3.0(SIGSEGV Phase 1): 内核修复栈默认停用(FIXSTACK_ENABLE=0, 保留代码/文件/登记); panic_on_rcu_stall 改回 0; 停用时写 /tmp/fixstack.disabled 供采样器判 off; 订正 RLIMIT_CORE 注释(管道不受其约束); v3.1(SIGSEGV Phase 2 退役): 整段删除 FIXSTACK 自加载(FIXSTACK_ENABLE/pstore guard/insmod/seed 喂入/fixstack.log); 新方案接入点预留; panic_on_rcu_stall=0 保留 |
+| `gw/rc.extend.sh` | **v3.2** | manifest | `/data/rc.extend.sh` | 槽位调度器; v2.9(SIGSEGV §8.11 T3): dpclamp 装载后即喂跨启动陈旧集种子(cat dpclamp_pfns.txt > /proc/dpclamp_seed, 守护动物园拉起前), seed 统计入 fixstack.log; v2.8: 自载 panic 感知守卫+fixstack.log; v2.7: 修复栈开机自载; v2.6: boot台账+条件清TRY_A; 历史见git; v3.0(SIGSEGV Phase 1): 内核修复栈默认停用(FIXSTACK_ENABLE=0, 保留代码/文件/登记); panic_on_rcu_stall 改回 0; 停用时写 /tmp/fixstack.disabled 供采样器判 off; 订正 RLIMIT_CORE 注释(管道不受其约束); v3.1(SIGSEGV Phase 2 退役): 整段删除 FIXSTACK 自加载(FIXSTACK_ENABLE/pstore guard/insmod/seed 喂入/fixstack.log); 新方案接入点预留; panic_on_rcu_stall=0 保留; v3.2(闸门覆盖轮): healthdog 改经 PATH 的 sh 启动(自建 busybox), 不再走 shebang 的厂商 /bin/sh |
 | `gw/rc_netfh.sh` | **v3.13** | manifest | `/data/gw/rc_netfh.sh` | 路线A: FH modem栈环境; v3.10(日志加密轮): 相位计时+settle 每10s ccmni 清单+route/NAT REPAIR+fw_apply rc+总耗时; v3.9: RIL 四件套全退役, 读/写路径直连; v3.11(日志加密轮补): 日志行补 epoch 时间基准(跨日志关联); v3.12(batch3): route/NAT 相位 netcfg 串行化; v3.13(LAN v6): v6 相位迁入 v6_reconcile.sh(判据=任一上行有全局 v6, 可重入; 修 2026-10-28 承载口 v4-only 导致 LAN v6 整 boot 缺失) |
 | `gw/reboot_sched.sh` | **v1.4** | manifest | `/data/gw/reboot_sched.sh` | 定时重启守护; v1.3(P1-1): 单实例锁+心跳; v1.2: 触发行先落 /data+sync; 历史见git; v1.4(batch3): svc_lib 锁/心跳 |
 | `gw/svc_lib.sh` | **v1.3** | manifest | `/data/gw/svc_lib.sh` | 共享监督/锁/心跳/最小解析器库; v1.2(USB 轮): SVC_TABLE +usb_mgr; v1.1(WiFi 事故): hostapd 判据改活控制套接字; 历史见git; v1.3(SIGSEGV Phase 0): SVC_TABLE -core_trap(已停用, 防 watchdog 拉回) |
@@ -129,7 +129,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/src/shmsnap.c` | **v1.0** | src | `gw/bin/shmsnap` | cfgmgr快照源码 |
 | `gw/src/v3_fix.c` | **v1.2** | src | `gw/bin/v3_fix.ko` | TTL/解绑模块源码(版本随产物); v1.2 随产物重建 |
 | `gw/src/v3_steth.c` | **v1.0** | src | `gw/bin/v3_steth.ko` | 听诊器模块源码(版本随产物) |
-| `gw/src/v3httpd.c` | **v2.8** | src | `gw/bin/v3httpd` | GUI HTTP服务源码; v2.6: 同产物 |
+| `gw/src/v3httpd.c` | **v2.9** | src | `gw/bin/v3httpd` | GUI HTTP服务源码; v2.6: 同产物 |
 | `gw/src/wpapmk.c` | **v1.0** | src | `gw/bin/wpapmk` | WPA PMK转换源码(纯C PBKDF2) |
 | `install/run.sh` | **v1.1** | tool | `-` | raw shell自驱脚本(v1.1: 分区次设备号从/proc/partitions动态解析成布局门禁, RP102/RP103通用; v1.0硬编码259:7等) |
 | `tools/agg_pins.conf.example` | **v1.1** | tool | `-` | MAC钉死表模板(真实表设备侧自管, 含个人MAC不入库) |

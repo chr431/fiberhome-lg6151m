@@ -1,5 +1,5 @@
 #!/bin/sh
-# rc.extend.sh v3.1 -- slot-aware dispatcher (shared /data between v2/v3)
+# rc.extend.sh v3.2 -- slot-aware dispatcher (shared /data between v2/v3)
 # v3.1 (SIGSEGV §8.13): 旧内核修复栈整体退役。slot-a 内的全部自载逻辑删除 ——
 #   FIXSTACK_ENABLE 门控、pstore panic guard、两次 insmod、跨启动种子喂入、
 #   fixstack.log 自载台账; 改为一处占位注释, 当前不留任何自动加载动作。
@@ -181,6 +181,9 @@ case "$slot" in
      #   升级成重启, 既丢现场又会打断刚修好的 NE 台账。
      echo 0 > /proc/sys/kernel/panic_on_rcu_stall 2>/dev/null
      [ -e /proc/healthdog ] || insmod /data/gw/healthdog.ko 2>/dev/null
-     pgrep -f healthdog.sh >/dev/null || nohup /data/gw/healthdog.sh >/dev/null 2>&1 &
+     # v3.2 (闸门覆盖轮): 显式 sh —— 直接执行会走 shebang #!/bin/sh(厂商 busybox, 未装闸门),
+#   经 PATH 解析的 sh 才是自建 busybox(/data/gw/sbin/sh)。健康守护每 30s 跑 sed/grep,
+#   是 API 之外少数长期暴露在注入面的进程。
+pgrep -f healthdog.sh >/dev/null || nohup sh /data/gw/healthdog.sh >/dev/null 2>&1 &
      ;;
 esac

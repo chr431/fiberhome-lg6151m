@@ -1,8 +1,13 @@
 #!/bin/sh
-# netlock.sh v1.2 -- serialize route/firewall/address writers + REPAIR ledger.
-# v1.2 (2026-10-29 断网轮): +netcfg_busy/netcfg_holders/netcfg_break —— 锁被长驻
-#   子进程继承(flock fd 泄漏)时看门狗要能发现并轮转锁文件自救; 泄漏实弹:
-#   radvd 在锁内被 spawn, 持锁 2h, 家宽断链时所有写方超时 -> 无法 failover。
+# netlock.sh v1.3 -- serialize route/firewall/address writers + REPAIR ledger.
+# v1.3 (2026-10-29 锁重写): 锁从 "flock on fd" 换成 **目录租约** ——
+#   flock 的锁属于进程的文件描述符, 任何在持锁期间 spawn 的长驻子进程都会继承它,
+#   锁的生命周期于是绑到"那个子进程活多久"(实弹: radvd 被在锁内 spawn, 持锁 2h08m,
+#   家宽断链时所有写方超时 -> 无法 failover)。目录锁不是 fd, **结构上不可能被继承**;
+#   持有者死亡由等待方立即回收, 卡死由 60s 租约过期回收, 不再依赖看门狗轮转。
+#   接口(netcfg_lock/unlock/busy/holders/break/repair/verify/with_netlock)保持不变。
+# v1.2 (2026-10-29 断网轮): +netcfg_busy/netcfg_holders/netcfg_break —— flock 泄漏时
+#   看门狗要能发现并轮转锁文件自救。
 # v1.1 (2026-10-28 时钟轮): 台账行尾加 pre=1 标记 —— 设备无 RTC, 开机到 NTP 首
 #   同步之间 date +%s 是构建日, 那一段的 epoch 不可信(实弹: 118 行 2026-09-09)。
 #   标记依据 = /tmp/ntp_synced(ntp_keeper 写) 缺失, 兼 epoch<2025-01-01 兜底。
@@ -17,23 +22,28 @@
 #   * netcfg_lock / netcfg_unlock are re-entrant inside one process (depth
 #     counter), so a caller may hold the lock and call a library function that
 #     also locks.
-#   * the lock is a flock(2) on /tmp/netcfg.lock via the static busybox
-#     (fallback: atomic mkdir + pid staleness when busybox is unavailable).
+#   * the lock is a **directory lease**: mkdir(2) is atomic and a directory is
+#     not inherited by children, so a daemon spawned inside the critical section
+#     can never hold it.  The holder writes "pid epoch" into owner; waiters
+#     reclaim immediately when that pid is gone, or after NETCFG_TTL (60s) when
+#     the lease looks stuck.
 #   * a waiter times out after NETCFG_TO seconds (default 3) and the caller
 #     logs + skips the write; the level-driven loops retry next cycle, so a
 #     lock timeout never stalls the state machine.
 #   * netcfg_repair appends one durable line per repair to
-#     /data/gw/logs/netcfg_repairs.tsv (epoch, what, rc, verified).  The
-#     watchdog reports the rolling-hour count as a REPAIR-rate metric.
+#     /data/gw/logs/netcfg_repairs.tsv (epoch, what, rc, verified[, pre=1]).
 #
 # Sourced as: . /data/gw/netlock.sh
-NETCFG_LOCK=${NETCFG_LOCK:-/tmp/netcfg.lock}
+NETCFG_LOCKD=${NETCFG_LOCKD:-/tmp/netcfg.lock.d}
 NETCFG_TO=${NETCFG_TO:-3}
+NETCFG_TTL=${NETCFG_TTL:-60}
 NETCFG_DEPTH=${NETCFG_DEPTH:-0}
-BB=${BB:-/data/gw/bin/busybox}
-[ -x "$BB" ] || BB=
 
 netcfg_log() { echo "$(date '+%m-%d %H:%M:%S') $*" >> /tmp/netcfg.log; }
+
+netcfg_owner() { # stdout: "pid epoch"; 空 = 目录里还没有 owner(刚建好)
+    cat "$NETCFG_LOCKD/owner" 2>/dev/null
+}
 
 netcfg_lock() { # $1=timeout seconds (default NETCFG_TO)
     _to=${1:-$NETCFG_TO}
@@ -41,45 +51,38 @@ netcfg_lock() { # $1=timeout seconds (default NETCFG_TO)
         NETCFG_DEPTH=$((NETCFG_DEPTH + 1))
         return 0
     fi
-    if [ -n "$BB" ]; then
-        exec 9>>"$NETCFG_LOCK" 2>/dev/null || return 1
-        # This busybox build has flock -n but no -w: bounded retry loop instead.
-        if "$BB" flock -n 9 2>/dev/null; then
+    _i=0; _r=0
+    while :; do
+        if mkdir "$NETCFG_LOCKD" 2>/dev/null; then
+            echo "$$ $(date +%s)" > "$NETCFG_LOCKD/owner"
             NETCFG_DEPTH=1
             return 0
         fi
-        _i=0
-        while [ "$_i" -lt "$_to" ]; do
-            sleep 1
-            _i=$((_i + 1))
-            if "$BB" flock -n 9 2>/dev/null; then
-                NETCFG_DEPTH=1
-                return 0
-            fi
-        done
-        exec 9>&-
-        echo $(( $(cat /tmp/netcfg_lock_timeouts 2>/dev/null || echo 0) + 1 )) > /tmp/netcfg_lock_timeouts
-        return 1
-    fi
-    # fallback: atomic mkdir + pid staleness (only when busybox is absent)
-    _d=$NETCFG_LOCK.d
-    _i=0
-    while ! mkdir "$_d" 2>/dev/null; do
-        _p=$(cat "$_d/pid" 2>/dev/null)
-        if [ -n "$_p" ] && ! kill -0 "$_p" 2>/dev/null; then
-            rm -rf "$_d"
+        _own=$(netcfg_owner); _p=${_own%% *}; _t=${_own##* }
+        case "$_p" in ''|*[!0-9]*) _p=0 ;; esac
+        case "$_t" in ''|*[!0-9]*) _t=0 ;; esac
+        # 持有者已死 -> 立即回收(比 flock 的"等内核"更早, 也不需要看门狗)
+        if [ "$_p" -gt 0 ] && ! kill -0 "$_p" 2>/dev/null && [ "$_r" -lt 3 ]; then
+            _r=$((_r + 1))
+            netcfg_log "EVT reclaim: holder pid=$_p gone (attempt $_r)"
+            rm -rf "$NETCFG_LOCKD" 2>/dev/null
+            continue
+        fi
+        # 租约过期 -> 视为卡死(正常临界区 <1s)
+        if [ "$_t" -gt 0 ] && [ $(( $(date +%s) - _t )) -gt "$NETCFG_TTL" ] && [ "$_r" -lt 3 ]; then
+            _r=$((_r + 1))
+            netcfg_log "EVT reclaim: lease expired holder=${_p:-?} age=$(( $(date +%s) - _t ))s"
+            rm -rf "$NETCFG_LOCKD" 2>/dev/null
             continue
         fi
         _i=$((_i + 1))
-        [ "$_i" -ge "$_to" ] && {
+        if [ "$_i" -gt "$_to" ]; then
             echo $(( $(cat /tmp/netcfg_lock_timeouts 2>/dev/null || echo 0) + 1 )) > /tmp/netcfg_lock_timeouts
+            netcfg_log "WARN lock timeout ${_to}s (holder=${_p:-?} age=$(( $(date +%s) - ${_t:-0} ))s)"
             return 1
-        }
+        fi
         sleep 1
     done
-    echo $$ > "$_d/pid"
-    NETCFG_DEPTH=1
-    return 0
 }
 
 netcfg_unlock() {
@@ -88,32 +91,34 @@ netcfg_unlock() {
         return 0
     fi
     NETCFG_DEPTH=0
-    if [ -n "$BB" ]; then
-        exec 9>&- 2>/dev/null
-    else
-        rm -rf "$NETCFG_LOCK.d"
-    fi
-}
-
-netcfg_busy() { # 0=被占 1=空闲/无 busybox (返回码与函数名同向)
-    [ -n "$BB" ] || return 1
-    "$BB" flock -n "$NETCFG_LOCK" true 2>/dev/null && return 1
+    # 只删自己那份: 若租约被回收后别人持有, 这里必须放手
+    _own=$(netcfg_owner)
+    [ "${_own%% *}" = "$$" ] && rm -rf "$NETCFG_LOCKD" 2>/dev/null
     return 0
 }
 
-netcfg_holders() { # stdout: 持锁进程的 cmdline(最多 3 条, 分号分隔; 仅诊断用)
-    for _hp in /proc/[0-9]*; do
-        ls -l "$_hp/fd" 2>/dev/null | grep -q "$NETCFG_LOCK" && \
-            tr '\0' ' ' < "$_hp/cmdline" 2>/dev/null | head -c 60
-    done 2>/dev/null | head -3 | tr '\n' ';'
+netcfg_busy() { # 0=被活着的、租约未过期的持有者占用; 1=空闲/残留
+    [ -d "$NETCFG_LOCKD" ] || return 1
+    _own=$(netcfg_owner); _p=${_own%% *}; _t=${_own##* }
+    case "$_p" in ''|*[!0-9]*) return 1 ;; esac
+    kill -0 "$_p" 2>/dev/null || return 1
+    case "$_t" in ''|*[!0-9]*) return 0 ;; esac
+    [ $(( $(date +%s) - _t )) -gt "$NETCFG_TTL" ] && return 1
+    return 0
 }
 
-netcfg_break() { # 轮转锁文件: 泄漏者留在旧 inode(它不释放也不影响新写方); 新写方用新 inode
-    [ -e "$NETCFG_LOCK" ] || return 1
-    _nb="$NETCFG_LOCK.leak.$(date +%s)"
-    mv "$NETCFG_LOCK" "$_nb" 2>/dev/null || return 1
-    : > "$NETCFG_LOCK"
-    netcfg_log "EVT netlock break: rotated to $_nb (holders=$(netcfg_holders))"
+netcfg_holders() { # stdout: 持锁进程 cmdline(仅诊断用)
+    _own=$(netcfg_owner); _p=${_own%% *}
+    case "$_p" in ''|*[!0-9]*) return 0 ;; esac
+    tr '\0' ' ' < "/proc/$_p/cmdline" 2>/dev/null | head -c 60
+}
+
+netcfg_break() { # 回收"死掉或租约过期"的锁目录; 活着的持有者不动
+    [ -d "$NETCFG_LOCKD" ] || return 1
+    netcfg_busy && return 1
+    _own=$(netcfg_owner)
+    rm -rf "$NETCFG_LOCKD" 2>/dev/null
+    netcfg_log "EVT netlock break: removed stale lease (was: ${_own:-none})"
     return 0
 }
 

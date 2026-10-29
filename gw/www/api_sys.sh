@@ -70,7 +70,12 @@ get_traffic_hist() {
               printf "{\"span\":\"%s\",\"step\":%d,\"buckets\":[],\"today\":{\"c\":0,\"e\":0}}", span, step
               exit
           }
-          start = mx - step * (n - 1)
+          # v2.81: 窗口改为**本地零点对齐** —— 原 "mx - step*(n-1)" 是滚动窗口, 首日只
+          #   覆盖一部分(实测 10-22 在周视图汇总 0G, 而月视图同一自然日 3.7G), 两个
+          #   视图对不上。现在周=今天零点往前 6 天, 月=往前 29 天, 每天都是完整自然日
+          #   (今天进行中), 与月视图的日桶逐日可对。
+          start = tod0 - (span == "week" ? 6 : 29) * 86400
+          if (start > mx) start = mx - step * (n - 1)
           printf "{\"span\":\"%s\",\"step\":%d,\"buckets\":[", span, step
           for (t = start; t <= mx; t += step)
               printf "%s{\"t\":%d,\"c\":%.6g,\"e\":%.6g}", (t > start ? "," : ""), t - 28800, c[t] + 0, e[t] + 0

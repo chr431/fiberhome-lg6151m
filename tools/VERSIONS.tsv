@@ -46,7 +46,7 @@ gw/bin/multiwan_ctl	1.1	manifest	/data/gw/multiwan_ctl	原厂multiwan引擎ioctl
 gw/bin/fhstub.so	1.0	manifest	/data/gw/fhstub.so	FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径)
 gw/led_mgr.sh	3.0	manifest	/data/gw/led_mgr.sh	原厂风格LED守护; v3.0(WiFi 事故): WiFi 灯=AP 服务在服务(svc_bss_count 活套接字+链路), 不再是 netdev 存在; 历史见git
 gw/bin/v3httpd	2.9	manifest	/data/gw/v3httpd	网关GUI HTTP服务; v2.6(P2): 静态面拒*.sh(免认证源码泄露)+Host头校验(根治DNS rebinding); v2.7(SIGSEGV §18): 链接 vfprintf va_list 闸门 v2(写入不再打死进程); v2.8(闸门覆盖轮): CGI 解释器改自建 busybox 的 sh(装 vfprintf 闸门), 自建件缺失回退 /bin/sh
-gw/www/api_sys.sh	1.3	manifest	/data/gw/www/api_sys.sh	API 系统/状态域模块; v1.3(日志加密轮): traffic 选口回退/qdisc 缺失留痕; v1.2: /api/traffic 增 if 字段; v1.1: 探活实证选口
+gw/www/api_sys.sh	1.4	manifest	/data/gw/www/api_sys.sh	API 系统/状态域模块; v1.3(日志加密轮): traffic 选口回退/qdisc 缺失留痕; v1.2: /api/traffic 增 if 字段; v1.1: 探活实证选口; v1.4(口径对齐): 周/月窗口改本地零点对齐(周=今起前6天, 月=前29天), 原滚动窗口首日只覆盖部分 -> 与月视图日桶对不上
 gw/www/api_wifi.sh	1.1	manifest	/data/gw/www/api_wifi.sh	API WiFi 域模块; v1.1(WiFi 事故): hostapd2g/5g 改活控制套接字判据(iw type AP 在 hostapd 死后仍为真 → GUI 谎报正常); 历史见git
 gw/www/api_lan.sh	1.0	manifest	/data/gw/www/api_lan.sh	API LAN 服务域模块(v2.75 拆出: dhcp/dhcp_static/fw 族; fw_apply.sh 改域内懒加载 — 原对全部请求无条件 source)
 gw/www/api_agg.sh	1.1	manifest	/data/gw/www/api_agg.sh	API 聚合+上行域模块; v1.1(日志加密轮): 权重/模式/钉死/上行档案变更写 api.log(凭证脱敏)
@@ -55,7 +55,7 @@ gw/www/api_sms.sh	1.2	manifest	/data/gw/www/api_sms.sh	API 短信域模块; v1.2
 gw/www/api.sh	2.80	manifest	/data/gw/www/api.sh	API 核心路由器+helpers; v2.79(可用性轮): +avail 域(api_avail.sh); v2.78: +usb/usb_set 域; v2.76: +请求级日志; v2.75: 域模块懒加载; 历史见git; v2.80(LAN v6): +v6/v6_set 域(api_v6.sh)
 gw/www/index.html	2.34	manifest	/data/gw/www/index.html	v3控制台页面(v2.34: +可用性导航, 缓存v68)
 gw/www/style.css	2.2	manifest	/data/gw/www/style.css	控制台主题; v2.2: 可用性页样式(横幅/90 天条/事件)
-gw/www/app.js	3.55	manifest	/data/gw/www/app.js	控制台SPA; v3.53: 可用性页(总体横幅+组件 90 天状态条+事件表+覆盖率, api avail); 历史见git; v3.54(LAN v6): 状态页 IPv6 卡片改实况(api v6), 系统页 +IPv6 局域网开关; v3.55: 流量图表纵轴自适应(整刻度 1/2/2.5/5×10^k 凑 4 格, 顶部 6% 余量; 原实现跳到下一数量级, 1.2MB 峰值只占 12% 高度) + fmtB 阈值改 >=
+gw/www/app.js	3.56	manifest	/data/gw/www/app.js	控制台SPA; v3.53: 可用性页(总体横幅+组件 90 天状态条+事件表+覆盖率, api avail); 历史见git; v3.54(LAN v6): 状态页 IPv6 卡片改实况(api v6), 系统页 +IPv6 局域网开关; v3.55: 流量图表纵轴自适应(整刻度 1/2/2.5/5×10^k 凑 4 格, 顶部 6% 余量; 原实现跳到下一数量级, 1.2MB 峰值只占 12% 高度) + fmtB 阈值改 >=; v3.56: 流量图加口径说明(每小时/每天合计 + 自然日窗口)
 tools/agg_pins.conf.example	1.1	tool	-	MAC钉死表模板(真实表设备侧自管, 含个人MAC不入库)
 gw/fan_mgr.sh	1.6	manifest	/data/gw/fan_mgr.sh	原厂梯度温控风扇; v1.5(P1-1): 单实例锁; v1.4: 心跳; 历史见git; v1.6(batch3): svc_lib 锁/心跳
 gw/fan_mode.conf	1.0	manifest	/data/gw/fan_mode.conf	风扇模式:performance|silent(静音+6°C偏移)

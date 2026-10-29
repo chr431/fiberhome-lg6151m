@@ -111,11 +111,11 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/www/api_cell.sh` | **v1.1** | manifest | `/data/gw/www/api_cell.sh` | API 蜂窝域模块; v1.1(日志加密轮): cells 成败/耗时、锁频/锁小区/制式/飞行/扫描/PIN 动作写 api.log(PIN 值脱敏) |
 | `gw/www/api_lan.sh` | **v1.0** | manifest | `/data/gw/www/api_lan.sh` | API LAN 服务域模块(v2.75 拆出: dhcp/dhcp_static/fw 族; fw_apply.sh 改域内懒加载 — 原对全部请求无条件 source) |
 | `gw/www/api_sms.sh` | **v1.2** | manifest | `/data/gw/www/api_sms.sh` | API 短信域模块; v1.2(日志加密轮): 发送成败/长度/模组原始响应写 api.log(号码仅末4位, 内容不落盘); v1.1: AT+EMGS 路线 |
-| `gw/www/api_sys.sh` | **v1.3** | manifest | `/data/gw/www/api_sys.sh` | API 系统/状态域模块; v1.3(日志加密轮): traffic 选口回退/qdisc 缺失留痕; v1.2: /api/traffic 增 if 字段; v1.1: 探活实证选口 |
+| `gw/www/api_sys.sh` | **v1.4** | manifest | `/data/gw/www/api_sys.sh` | API 系统/状态域模块; v1.3(日志加密轮): traffic 选口回退/qdisc 缺失留痕; v1.2: /api/traffic 增 if 字段; v1.1: 探活实证选口; v1.4(口径对齐): 周/月窗口改本地零点对齐(周=今起前6天, 月=前29天), 原滚动窗口首日只覆盖部分 -> 与月视图日桶对不上 |
 | `gw/www/api_usb.sh` | **v1.1** | manifest | `/data/gw/www/api_usb.sh` | API USB 域模块(usb 状态/usb_set 三开关); v1.1: 状态行解析修复; 状态单一事实源=usb_mgr.sh status |
 | `gw/www/api_v6.sh` | **v1.0** | manifest | `/data/gw/www/api_v6.sh` | API IPv6 LAN 域模块(v6 状态/v6_set 开关); 单一事实源=v6_reconcile.sh status, 页面不自算状态 |
 | `gw/www/api_wifi.sh` | **v1.1** | manifest | `/data/gw/www/api_wifi.sh` | API WiFi 域模块; v1.1(WiFi 事故): hostapd2g/5g 改活控制套接字判据(iw type AP 在 hostapd 死后仍为真 → GUI 谎报正常); 历史见git |
-| `gw/www/app.js` | **v3.55** | manifest | `/data/gw/www/app.js` | 控制台SPA; v3.53: 可用性页(总体横幅+组件 90 天状态条+事件表+覆盖率, api avail); 历史见git; v3.54(LAN v6): 状态页 IPv6 卡片改实况(api v6), 系统页 +IPv6 局域网开关; v3.55: 流量图表纵轴自适应(整刻度 1/2/2.5/5×10^k 凑 4 格, 顶部 6% 余量; 原实现跳到下一数量级, 1.2MB 峰值只占 12% 高度) + fmtB 阈值改 >= |
+| `gw/www/app.js` | **v3.56** | manifest | `/data/gw/www/app.js` | 控制台SPA; v3.53: 可用性页(总体横幅+组件 90 天状态条+事件表+覆盖率, api avail); 历史见git; v3.54(LAN v6): 状态页 IPv6 卡片改实况(api v6), 系统页 +IPv6 局域网开关; v3.55: 流量图表纵轴自适应(整刻度 1/2/2.5/5×10^k 凑 4 格, 顶部 6% 余量; 原实现跳到下一数量级, 1.2MB 峰值只占 12% 高度) + fmtB 阈值改 >=; v3.56: 流量图加口径说明(每小时/每天合计 + 自然日窗口) |
 | `gw/www/index.html` | **v2.34** | manifest | `/data/gw/www/index.html` | v3控制台页面(v2.34: +可用性导航, 缓存v68) |
 | `gw/www/style.css` | **v2.2** | manifest | `/data/gw/www/style.css` | 控制台主题; v2.2: 可用性页样式(横幅/90 天条/事件) |
 | `gw/zz_data_hook` | **v1.1** | manifest | `/data/build/rootfs/etc/init.d/zz_data_hook` | S98数据钩子(v1.1: plain sh——原厂无/etc/rc.common, rc.common式shebang致开机栈全灭; 回归实测发现) |

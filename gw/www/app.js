@@ -1062,6 +1062,7 @@ PAGES.traffic = {
           <button class="tb" data-s="month" onclick="trSpan('month')">月</button>
         </div>
         <canvas id="tr-cv" style="width:100%;height:300px"></canvas>
+        <div id="tr-cap" style="color:#7fa3c4;font-size:12px;margin-top:4px"></div>
         <div style="display:flex;gap:16px;margin-top:6px;font-size:12px">
           <span><i style="display:inline-block;width:10px;height:10px;background:${TR_COL_C};border-radius:2px;vertical-align:-1px"></i> 蜂窝</span>
           <span><i style="display:inline-block;width:10px;height:10px;background:${TR_COL_E};border-radius:2px;vertical-align:-1px"></i> 以太网</span>
@@ -1088,6 +1089,9 @@ PAGES.traffic = {
             T("tre-rx", `${fmtB(tr.erx)} / ${fmtB(tr.etx)}`);
             F("tr-day", tr.day_limit_mb); F("tr-month", tr.month_limit_mb);
         }
+        T("tr-cap", TR.span === "week"
+            ? "口径：每小时合计 · 最近 7 个自然日（今天为进行中）"
+            : "口径：每天合计 · 最近 30 个自然日（今天为进行中）");
         trDraw();
     }
 };

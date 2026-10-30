@@ -1,5 +1,7 @@
 #!/bin/sh
-# traffic_logger.sh v1.6 — 蜂窝/以太网流量采样器(5 分钟粒度, /data 持久)
+# traffic_logger.sh v1.7 — 蜂窝/以太网流量采样器(5 分钟粒度, /data 持久)
+# v1.7 (2026-10-31 时间源统一轮): pre-sync(ntp_synced 缺失)不落账不推基线 —
+#   首个同步拍把 pre-sync 流量并入正确时间桶。v1.6 见台账。
 # 输出: /data/gw/traffic_hist.tsv  每行: epoch drx_c dtx_c drx_e dtx_e (字节增量)
 # 语义: 增量为"距上次采样"; 计数器回绕/接口重建(ccmni 漂移)/重启(新值<旧值)
 #       按新值计(=计数器自身纪元的累计, 自洽); prev 存 /tmp(重启后首拍即
@@ -92,13 +94,19 @@ while :; do
     DE=$((ERC-PE)); [ $DE -lt 0 ] && DE=$ERC
     DF=$((ETC-PF)); [ $DF -lt 0 ] && DF=$ETC
     _now=$(date +%s)
-    echo "$_now $DC $DT $DE $DF" >> $LOG
-    # v1.6: 小时/日汇总累加(键 = 本地对齐的 epoch; 与 API 的桶键同约定)
-    _bump "$HOURF" "$(( (_now + 28800) / 3600 * 3600 ))"  "$((DC + DT))" "$((DE + DF))"
-    _bump "$DAYF"  "$(( (_now + 28800) / 86400 * 86400 ))" "$((DC + DT))" "$((DE + DF))"
-    [ "$(wc -l < $HOURF 2>/dev/null || echo 0)" -gt 1000 ] && { tail -n 960 $HOURF > $HOURF.t 2>/dev/null && mv $HOURF.t $HOURF; }
-    [ "$(wc -l < $DAYF 2>/dev/null || echo 0)" -gt 400 ] && { tail -n 380 $DAYF > $DAYF.t 2>/dev/null && mv $DAYF.t $DAYF; }
-    echo "S=$SRC:$CIF; PC=$CRC; PT=$CTC; PE=$ERC; PF=$ETC" > $ST
+    # v1.7 (时间源统一轮): pre-sync(/tmp/ntp_synced 缺失)不落任何带日期的行 —
+    #   开机窗的采样此前按构建日 epoch 落桶, 假日期桶与真日期桶并存污染首日
+    #   统计。**基线 $ST 也不推进**: 首个同步拍把 pre-sync 期间的流量差值并入
+    #   正确的(同步后)时间桶, 而不是静默丢弃。
+    if [ -s /tmp/ntp_synced ]; then
+        echo "$_now $DC $DT $DE $DF" >> $LOG
+        # v1.6: 小时/日汇总累加(键 = 本地对齐的 epoch; 与 API 的桶键同约定)
+        _bump "$HOURF" "$(( (_now + 28800) / 3600 * 3600 ))"  "$((DC + DT))" "$((DE + DF))"
+        _bump "$DAYF"  "$(( (_now + 28800) / 86400 * 86400 ))" "$((DC + DT))" "$((DE + DF))"
+        [ "$(wc -l < $HOURF 2>/dev/null || echo 0)" -gt 1000 ] && { tail -n 960 $HOURF > $HOURF.t 2>/dev/null && mv $HOURF.t $HOURF; }
+        [ "$(wc -l < $DAYF 2>/dev/null || echo 0)" -gt 400 ] && { tail -n 380 $DAYF > $DAYF.t 2>/dev/null && mv $DAYF.t $DAYF; }
+        echo "S=$SRC:$CIF; PC=$CRC; PT=$CTC; PE=$ERC; PF=$ETC" > $ST
+    fi
     L=$(wc -l < $LOG 2>/dev/null || echo 0)
     [ "$L" -gt 11520 ] && { tail -8640 $LOG > $LOG.t 2>/dev/null && mv $LOG.t $LOG; }
     sleep 300

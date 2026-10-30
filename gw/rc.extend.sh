@@ -89,6 +89,12 @@ fi
 # tokens survive reboots (bad after password rotation); v3httpd/rc19 start
 # after this script, ordering is safe.
 rm -f /tmp/gui_tokens/* 2>/dev/null
+# --- v3.5 (时间源统一轮): per-boot 运行态失效 — 同一根因(/tmp 跨重启存活),
+#     下列文件的上一 boot 残值会伪装成新鲜状态:
+#       ntp_synced  时钟可信标记(残值 = 假钟被当真钟, 污染全部 ntp_synced 消费方)
+#       wan_alive   判活权威(hb=uptime 跨 boot 不可比; wan_agg 数秒内重发布)
+#       authd_state 会话信号(ts 为 epoch, 跨 boot 残值经负龄钳位才安全, 此处根治)
+rm -f /tmp/ntp_synced /tmp/wan_alive /tmp/wan_alive.tmp /tmp/authd_state 2>/dev/null
 
 # --- v1.9 (审计P0-5): /etc/shadow 覆盖 -- rootfs squashfs 只读, 凭据轮换经
 # /data/gw/shadow.override bind 到 /etc/shadow (dropbear/getty 每次认证时读取,

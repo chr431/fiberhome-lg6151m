@@ -1,5 +1,7 @@
 #!/bin/sh
-# led_mgr.sh v3.0 — 原厂风格指示灯状态守护 (绝对电平驱动 + 自愈 + 全灯覆盖)
+# led_mgr.sh v3.1 — 原厂风格指示灯状态守护 (绝对电平驱动 + 自愈 + 全灯覆盖)
+# v3.1 (2026-10-31 时间源统一轮): wan_alive 判龄改 svc_lib wa_age()(hb=uptime
+#   单调时基, 见 wan_agg v3.8 发布格式); epoch 仅留日志展示。
 # v2.8 (2026-10-20 stability batch1): 每 2s 轮写 /tmp/led_mgr.hb — watchdog
 #   用心跳识别“进程活但显示循环卡死”。
 # v2.7 (2026-10-19 SIGSEGV 根治轮): 单实例锁排除自身 pid — watchdog spawn 预写
@@ -118,9 +120,9 @@ set_4g_off() {
 bb_data_alive() {
     _wa=$(cat /tmp/wan_alive 2>/dev/null)
     _h=$(printf '%s' "$_wa" | sed -n 's/.*home=\([01]\).*/\1/p')
-    _t=$(printf '%s' "$_wa" | sed -n 's/.*ts=\([0-9]*\).*/\1/p')
-    [ -n "$_t" ] || return 1
-    [ $(( $(date +%s) - _t )) -le 30 ] || return 1
+    # v3.1 (时间源统一轮): 判龄走 svc_lib wa_age() —— hb=uptime 优先(单调,
+    #   NTP 跳变/跨 boot 残值免疫), 无 hb 回退旧 ts= 格式; 过期仍"未知=不亮"
+    [ "$(wa_age)" -le 30 ] || return 1
     [ "$_h" = 1 ]
 }
 
@@ -226,8 +228,7 @@ while :; do
         # v2.4: 状态变化附原始输入 — 灯判据争议时可直接对照现场
         _cinv=$(ip -o -4 addr show 2>/dev/null | grep ccmni | awk '{print $2":"$4}' | tr '\n' ',')
         _wa=$(cat /tmp/wan_alive 2>/dev/null)
-        _wt=$(printf '%s' "$_wa" | sed -n 's/.*ts=\([0-9]*\).*/\1/p')
-        _wage=-1; [ -n "$_wt" ] && _wage=$(( $(date +%s) - _wt ))
+        _wage=$(wa_age)   # v3.1: hb= 优先的单调判龄
         llog "state: $NS epoch=$(date +%s) 5g=$(cell_sub) wan_led=$BB (carrier=$BBP) ccmni=[${_cinv%,}] wan_alive=[${_wa:-none}] age=${_wage}s"
         ST=$NS
     fi

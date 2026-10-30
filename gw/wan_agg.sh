@@ -1,5 +1,10 @@
 #!/bin/sh
-# wan_agg.sh v3.7 — 双上行聚合主管: 探活 + 故障转移 FSM + 未打标主路策略 + CLI
+# wan_agg.sh v3.8 — 双上行聚合主管: 探活 + 故障转移 FSM + 未打标主路策略 + CLI
+# v3.8 (2026-10-31 时间源统一轮): 内部新鲜度时基 epoch→uptime —— now/W1_OK/W2_OK/
+#   T0 全部改 /proc/uptime(NTP 跳变瞬间原实现"双侧同死": 跳前写的 W*_OK 减跳后
+#   epoch 巨大 → 硬截止误触发, 拆规则停摆一个环循); wan_alive 增发 hb=<uptime>,
+#   消费方经 svc_lib wa_age() 单调判龄。authd_state 契约不变(私有 authd 写
+#   epoch), 仅加负龄钳位(跨 boot 残值/回拨 → 视为无信号)。
 # v3.7 (2026-10-31 质量轮): /tmp/wan_alive 改 tmp+原子 mv 发布(见 §判活发布处注) —
 #   原 truncate+write 的微秒窗里读者拿到空文件即判 stale。
 # v3.2 (2026-10-17 日志加密轮): 每 ~30s TICK 汇总(存活/计数/authd/承载口/候选),
@@ -247,7 +252,10 @@ S1=1; S2=1; D1=0; D2=0; U1=0; U2=0
 # v2.21: 安全启动 — W2_OK=0(eth 从未验证成功) => 硬截止立即判死 => 5G 起步;
 # eth 探活 3 连过后自动回切。杜绝"上行已死时重启/开机, 状态机先盲目把
 # 流量灌进死 eth0"的黑洞窗口(2026-10-08 00:33 实弹 29s 黑洞)。
-W1_OK=$(date +%s); W2_OK=0
+# v3.8: 时基 uptime —— W2_OK 哨兵取大负值(uptime 减之必 >25s), 保住 v2.21
+#   "eth 从未验证成功 => 硬截止立即判死 => 5G 起步"的语义(原 W2_OK=0 配 epoch
+#   减法恒为巨值; 直接沿用 0 会在开机 uptime<25s 时误判活)。
+W1_OK=$(cut -d. -f1 /proc/uptime); W2_OK=-1000000
 if [ "$AGG_ON" = 1 ]; then
     [ "$ENGINE" = iptables ] && fw_setup 60
     fw6_rules; fw6_setup 1   # v2.4: v6 低8位自建分流
@@ -259,7 +267,7 @@ log "init: engine=$ENGINE agg_on=$AGG_ON weights=$W1_PCT/$W2_PCT s1=$S1 s2=$S2"
 
 CYC=0; CAND_LAST=""; AS_LAST=""; W2R_LAST=""; P1R_LAST=""; P2R_LAST=""; CW_LAST=""
 while :; do
-    CYC=$((CYC+1)); T0=$(date +%s)
+    CYC=$((CYC+1)); T0=$(cut -d. -f1 /proc/uptime)   # v3.8: uptime 时基(环循耗时)
     [ $((CYC % 10)) -eq 0 ] && log_rot
     # 5G 承载漂移检测: 活跃 ccmni 变了就刷新 表100/main/NAT/FORWARD (幂等)
     # v3.1 (RIL 清零轮回归): 原判据取 `ip addr show | head -1` —— 字母序第一个。
@@ -361,12 +369,18 @@ while :; do
     fi
     # v2.24: 读取 authd 会话信号(每环循) — 新鲜度: up<=45s(重询问周期30s+余量),
     # down<=60s(authd 30s 重试循环持续刷新); 过期视为无信号
-    AS=""; AST=0
+    AS=""; AST=0; ASAGE=999999
     if [ -r /tmp/authd_state ]; then
         set -- $(cat /tmp/authd_state 2>/dev/null)
-        case "$1" in up|down) AS=$1; AST=${2:-0} ;; esac
+        case "$1" in up|down)
+            AS=$1; AST=${2:-0}
+            case "$AST" in *[!0-9]*|"") AST=0 ;; esac
+            # v3.8: authd 契约是 epoch; 同 boot 内假钟亦按真实速率走, 差值可靠;
+            #   负龄 = NTP 回拨或跨 boot 残值 → 视为无信号(authd 30s 重写自愈)
+            ASAGE=$(( $(date +%s) - AST ))
+            [ "$ASAGE" -lt 0 ] && ASAGE=999999
+            ;; esac
     fi
-    ASAGE=$(( $(date +%s) - AST ))
     AUTHD_UP=0; AUTHD_DOWN=0
     [ "$AS" = up ] && [ $ASAGE -le 45 ] && AUTHD_UP=1
     [ "$AS" = down ] && [ $ASAGE -le 60 ] && AUTHD_DOWN=1
@@ -378,8 +392,8 @@ while :; do
     # 信号过期: 状态文件在但已不新鲜(认证程序可能卡死/未刷新)
     [ -n "$AS" ] && [ "$AUTHD_UP$AUTHD_DOWN" = "00" ] && [ $((CYC % 10)) -eq 0 ] && \
         log "WARN authd signal stale: state=$AS age=${ASAGE}s (>45/60s)"
-    if w1_alive; then P1R=$PRB_RES; U1=$((U1+1)); D1=0; W1_OK=$(date +%s); else P1R=$PRB_RES; D1=$((D1+1)); U1=0; fi
-    if w2_alive; then P2R=$PRB_RES; U2=$((U2+1)); D2=0; W2_OK=$(date +%s); else P2R=$PRB_RES; D2=$((D2+1)); U2=0; fi
+    if w1_alive; then P1R=$PRB_RES; U1=$((U1+1)); D1=0; W1_OK=$(cut -d. -f1 /proc/uptime); else P1R=$PRB_RES; D1=$((D1+1)); U1=0; fi
+    if w2_alive; then P2R=$PRB_RES; U2=$((U2+1)); D2=0; W2_OK=$(cut -d. -f1 /proc/uptime); else P2R=$PRB_RES; D2=$((D2+1)); U2=0; fi
     # v2.27: 首败同轮复核 — 家宽首败立即复探, 再败即确认(D2=3)。背景(2026-10-11
     #   实弹): 上游交换机 EAP 重启窗口内"载波在/数据死"最长 25s(硬截止)才转移,
     #   LAN 探测流量漏出 eth0 被上游拦截页 302 → 手机把 SSID 标"需要认证"转投
@@ -387,9 +401,9 @@ while :; do
     #   单包丢失在复探中自愈不误切。authd 会话重启(交换机 EAP restart)由此
     #   最快 ~5s 摘除 eth0 出口。
     if [ $S2 -eq 1 ] && [ $D2 -eq 1 ]; then
-        if w2_alive; then P2R=$PRB_RES; U2=$((U2+1)); D2=0; W2_OK=$(date +%s); else P2R=$PRB_RES; D2=3; fi
+        if w2_alive; then P2R=$PRB_RES; U2=$((U2+1)); D2=0; W2_OK=$(cut -d. -f1 /proc/uptime); else P2R=$PRB_RES; D2=3; fi
     fi
-    now=$(date +%s)
+    now=$(cut -d. -f1 /proc/uptime)   # v3.8: uptime 时基 — 硬截止免疫 NTP 跳变
     NS1=$S1; NS2=$S2
     # v2.20: 硬截止判死 — 活侧距上次成功探活 >25s 即判死, 跳过3连击(计数制可被
     #   迟滞/饥饿模式饿死; 时间截止不可, 故障转移上界 = 60s + 一个环循周期)
@@ -442,14 +456,16 @@ while :; do
     # v3.7: tmp+原子 mv —— 本文件 ~3s 一写、跨进程读者 5+(watchdog/boot_gate/
     #   dial_keeper/led_mgr/api), 原直写的微秒窗里读者拿到空文件 = ts 解析为空
     #   → 判 stale → 2/3 采样后无谓重启本守护; 同仓其余状态文件早已是 tmp+mv。
-    echo "home=$NS2 cell=$NS1 ts=$(date +%s)" > /tmp/wan_alive.tmp && mv -f /tmp/wan_alive.tmp /tmp/wan_alive
+    # v3.8: +hb=<uptime> — 消费方(svc_lib wa_age)优先单调时基判龄; ts= 保留
+    #   供人读与旧消费方回退。
+    echo "home=$NS2 cell=$NS1 ts=$(date +%s) hb=$(cut -d. -f1 /proc/uptime)" > /tmp/wan_alive.tmp && mv -f /tmp/wan_alive.tmp /tmp/wan_alive
     # v3.2: 探活结果边沿 + 每 10 环循(~30s)汇总 — 24h 分析的主时间线
     if [ "$P1R" != "$P1R_LAST" ] || [ "$P2R" != "$P2R_LAST" ]; then
         log "EVT probe w1[$W1_IF]=[$P1R] alive=$NS1 | w2[$W2_IF]=[$P2R] alive=$NS2"
         P1R_LAST=$P1R; P2R_LAST=$P2R
     fi
     if [ $((CYC % 10)) -eq 0 ]; then
-        log "TICK epoch=$now cyc=$CYC loop=$((now - T0))s s=$S1/$S2 ns=$NS1/$NS2 d=$D1/$D2 u=$U1/$U2 authd=${AS:-none}/${ASAGE}s w2rdy=$W2_READY car=${W2_CAR:-?} ip=${W2_IP:-none} cw=${CW:-none} prim=${P_LAST:-none} mode=$MODE w1=$W1_PCT agg=$AGG_ON eng=$ENGINE slp=$SLP"
+        log "TICK up=$now cyc=$CYC loop=$((now - T0))s s=$S1/$S2 ns=$NS1/$NS2 d=$D1/$D2 u=$U1/$U2 authd=${AS:-none}/${ASAGE}s w2rdy=$W2_READY car=${W2_CAR:-?} ip=${W2_IP:-none} cw=${CW:-none} prim=${P_LAST:-none} mode=$MODE w1=$W1_PCT agg=$AGG_ON eng=$ENGINE slp=$SLP"
         log "TICK probe w1=[$P1R] w2=[$P2R] cand=[$(echo $_cand | tr ' ' ',')]"
     fi
     if [ "$AGG_ON" = 1 ] && { [ "$E1$E2" != "$S1$S2" ] || [ "${FORCE:-0}" = 1 ]; }; then

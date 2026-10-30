@@ -1,5 +1,7 @@
 #!/bin/sh
-# dial_keeper.sh v1.8 -- 拨号自持守护 (ROADMAP P2, 2026-10-06)
+# dial_keeper.sh v1.10 -- 拨号自持守护 (ROADMAP P2, 2026-10-06)
+# v1.10 (2026-10-31 时间源统一轮): cell_alive 判龄改 svc_lib wa_age()(hb=
+#   uptime 单调时基, 见 wan_agg v3.8)。v1.9 见台账。
 #
 # v1.9 (2026-10-20 stability batch3): 单实例锁/心跳改用 svc_lib 共享原语;
 #   锁语义(v1.7 绝对路径+非僵尸, v1.8 排除自身)不变.
@@ -149,12 +151,13 @@ dial() {  # $1=apn — v1.4: ccmni_up 拨号+落地一体(回退旧裸配方)
 
 # v1.4: 数据面判活(堵僵尸 IP 洞) — 消费 wan_agg 的唯一权威结论;
 #   无文件/ts 过期(>30s)回退 0(=由调用方回退 IP-only 旧判据)。
+# v1.10 (时间源统一轮): 判龄走 svc_lib wa_age() —— hb=uptime 单调时基, NTP
+#   跳变不再造成 30s 假 stale(跳变轮拨号误回退 IP-only 判据); 缺失=999999。
 cell_alive() {
     _wa=$(cat /tmp/wan_alive 2>/dev/null); WA_RAW=$_wa
     _c=$(printf '%s' "$_wa" | sed -n 's/.*cell=\([01]\).*/\1/p')
-    _t=$(printf '%s' "$_wa" | sed -n 's/.*ts=\([0-9]*\).*/\1/p')
-    if [ -n "$_t" ]; then WA_AGE=$(( $(date +%s) - _t )); else WA_AGE=-1; fi
-    [ -n "$_t" ] || { WA_STATE=no_file; return 0; }
+    WA_AGE=$(wa_age)
+    [ "$WA_AGE" -lt 999999 ] || { WA_STATE=no_file; return 0; }
     [ "$WA_AGE" -le 30 ] || { WA_STATE=stale; return 0; }
     [ "$_c" = 1 ] && { WA_STATE=alive; return 0; }
     WA_STATE=dead; return 1

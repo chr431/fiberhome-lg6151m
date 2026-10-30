@@ -1,5 +1,7 @@
 #!/bin/sh
-# boot_gate.sh v1.3 -- real boot health gate (replaces the rc19 120s timer).
+# boot_gate.sh v1.4 -- real boot health gate (replaces the rc19 120s timer).
+# v1.4 (2026-10-31 时间源统一轮): c_wanalive 判龄改 svc_lib wa_age()(hb=
+#   uptime 单调); c_authd 负龄钳位(跨 boot 残值/NTP 回拨不再伪装新鲜)。
 # v1.3 (batch3): shared svc_lib lock + minimal parsers (BSS from hostapd control
 #   sockets + sysfs link flags, loopback from sysfs flags); no iw/ip-link probe
 #   in the gate's critical path.
@@ -88,17 +90,19 @@ c_authd() {
     [ "$_en" = "1" ] || return 0
     _st=$(awk '{print $2}' /tmp/authd_state 2>/dev/null)
     case "$_st" in ''|*[!0-9]*) return 1 ;; esac
-    [ -n "$(pidof authd 2>/dev/null)" ] && [ $(( $(date +%s) - _st )) -lt 300 ]
+    # v1.4 (时间源统一轮): 负龄钳位 — 同 boot 内 epoch 差值可靠(authd 契约),
+    #   负值 = NTP 回拨或跨 boot 残值(rc.extend 开机已 rm, 双保险), 判不健康
+    _age=$(( $(date +%s) - _st )); [ "$_age" -lt 0 ] && _age=999999
+    [ -n "$(pidof authd 2>/dev/null)" ] && [ "$_age" -lt 300 ]
 }
 c_uplink() { # at least one uplink interface with an address + a default route
     TMO 5 "ip route show default 2>/dev/null | grep -q default" || return 1
     TMO 5 "ip -o -4 addr show 2>/dev/null" | grep -qE ' (eth0|ccmni[0-9]+) +inet '
 }
-c_wanalive() { # wan_agg's own timestamp, when the daemon is up
+c_wanalive() { # wan_agg's own liveness publication, when the daemon is up
     pgrep -f 'wan_agg[.]sh' >/dev/null 2>&1 || return 1
-    _ts=$(sed -n 's/.* ts=\([0-9][0-9]*\).*/\1/p' /tmp/wan_alive 2>/dev/null)
-    case "$_ts" in ''|*[!0-9]*) return 1 ;; esac
-    [ $(( $(date +%s) - _ts )) -lt 120 ]
+    # v1.4: 判龄走 svc_lib wa_age()(hb=uptime 单调; ts= 旧格式回退)
+    [ "$(wa_age)" -lt 120 ]
 }
 
 # critical = boot chain itself (boot.done).  healthy = critical + firmware

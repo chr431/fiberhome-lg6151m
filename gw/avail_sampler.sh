@@ -1,5 +1,7 @@
 #!/bin/sh
-# avail_sampler.sh v1.11 -- 组件可用性采样器 (AVAILABILITY_DESIGN §3, 防假绿轮)
+# avail_sampler.sh v1.12 -- 组件可用性采样器 (AVAILABILITY_DESIGN §3, 防假绿轮)
+# v1.12 (2026-10-31 时间源统一轮): FRESH 判据的 cycle 键改 uptime 比较(watchdog
+#   v1.40 起发布 uptime 时基)。v1.11 见台账。
 # v1.11 (SIGSEGV fix): +sys.nerepair(记录修复 supervisor) —— pid 在 + /tmp/nerepair.hb
 #   新鲜度(<=180s) 判 op/deg/down; watchdog SVC_TABLE nerepair 项负责拉起。
 # v1.10 (2026-10-29 断网轮): +sys.netlock(网络写锁) —— netcfg 锁被长持时所有写方
@@ -85,8 +87,10 @@ lks() { # 多键 AND: 任一 down→down, 任一 nodata→nodata, 全 op→op
 }
 
 # ---- 监督层新鲜度 (watchdog cycle 键, >120s = 监督失明) ----
+# v1.12 (时间源统一轮): cycle 自 watchdog v1.40 起为 uptime 时基(单调), 本侧
+#   同步改 uptime 比较 —— NTP 跳变不再造成一窗假"监督失明"
 CY=$(kv cycle); FRESH=0
-case "$CY" in ''|*[!0-9]*) ;; *) [ $((NOW - CY)) -le 120 ] && FRESH=1 ;; esac
+case "$CY" in ''|*[!0-9]*) ;; *) [ $(( $(cut -d. -f1 /proc/uptime) - CY )) -le 120 ] && FRESH=1 ;; esac
 
 # ---- 窗口信号: 行数游标 (rotation 收缩时取 head 近似, 覆盖率自会体现) ----
 lc() { wc -l < "$1" 2>/dev/null || echo 0; }

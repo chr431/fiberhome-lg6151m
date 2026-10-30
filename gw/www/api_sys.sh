@@ -1,4 +1,5 @@
-# api_sys.sh v1.7 (质量轮: traffic_hist 的 span 回退 qkv — 原只认 POST body, 是
+# api_sys.sh v1.8 (时间源统一轮: status 判活新鲜度 hb=uptime 优先, 与 wan_agg
+#   v3.8 发布格式配套)。v1.7 (质量轮: traffic_hist 的 span 回退 qkv — 原只认 POST body, 是
 #   全部读端点里唯一不可 GET 的, 与"GET=read"契约相悖; v1.6 头注追平台账) —
 #   系统/状态域模块 (被 api.sh 按端点懒加载; 依赖核心的 helpers)
 # v1.3 (2026-10-17 日志加密轮): traffic 选口回退/qdisc 缺失留痕(api.log)。
@@ -233,9 +234,17 @@ get_status() {
     WAN_ALIVE=$(cat /tmp/wan_alive 2>/dev/null)
     _ah=$(printf '%s' "$WAN_ALIVE" | sed -n 's/.*home=\([01]\).*/\1/p')
     _ac=$(printf '%s' "$WAN_ALIVE" | sed -n 's/.*cell=\([01]\).*/\1/p')
-    _at=$(printf '%s' "$WAN_ALIVE" | sed -n 's/.*ts=\([0-9]*\).*/\1/p')
+    # v1.8 (时间源统一轮): 判龄 hb=uptime 优先(单调; 与 svc_lib wa_age 同款,
+    #   CGI 热路径不 source 库故内联), 无 hb 回退旧 ts= 格式
+    _ahb=$(printf '%s' "$WAN_ALIVE" | sed -n 's/.*hb=\([0-9]*\).*/\1/p')
     _fresh=0
-    [ -n "$_at" ] && [ $(( $(date +%s) - _at )) -le 30 ] && _fresh=1
+    if [ -n "$_ahb" ]; then
+        _aw=$(( $(cut -d. -f1 /proc/uptime) - _ahb ))
+        [ "$_aw" -ge 0 ] && [ "$_aw" -le 30 ] && _fresh=1
+    else
+        _at=$(printf '%s' "$WAN_ALIVE" | sed -n 's/.*ts=\([0-9]*\).*/\1/p')
+        [ -n "$_at" ] && [ $(( $(date +%s) - _at )) -le 30 ] && _fresh=1
+    fi
     ETH_DP=0; [ "$_fresh" = 1 ] && [ "$_ah" = 1 ] && ETH_DP=1
     C5G_DP=0; [ "$_fresh" = 1 ] && [ "$_ac" = 1 ] && C5G_DP=1
     AGG_M=$(grep -m1 "Current mode" /proc/multi_wan/mode 2>/dev/null | grep -oE "[0-9]+$")

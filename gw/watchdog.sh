@@ -1,5 +1,9 @@
 #!/bin/sh
-# watchdog.sh v1.39 -- on-device continuous invariant monitor.
+# watchdog.sh v1.40 -- on-device continuous invariant monitor.
+# v1.40 (2026-10-31 时间源统一轮): 新鲜度/预算窗口时基 epoch→uptime ——
+#   cycle 键(供 avail_sampler FRESH)、wan_alive 判龄(svc_lib wa_age, hb= 优先)、
+#   hostapd 重启预算窗、NETLOCK_BREAKS 窗、authd_state 负龄钳位。epoch 仅保留
+#   给时钟跳变检测与日志展示。
 # v1.39 (2026-10-31 质量轮): NETLOCK_BREAKS 补 1h 窗口复位 —— v1.36 头注语义
 #   "每小时最多 3 次"此前从未实现, 计数器只在进程内累加: 看门狗长驻数周, 累计
 #   3 次轮转后自愈配额永久耗尽, 再遇锁泄漏(v1.36 防御的场景)写方持续超时、
@@ -302,7 +306,8 @@ run_cycle() {
     # v1.31 (可用性轮): 每轮刷新 cycle 新鲜度键 — set_state 是迁移式写入,
     # 无此键则全绿时段 state 文件 mtime/内容不动, 采样器无法判监督层活着。
     grep -v '^cycle=' $STATE 2>/dev/null > $STATE.tmp
-    echo "cycle=$(date +%s)" >> $STATE.tmp
+    # v1.40: cycle 改 uptime 时基(单调, NTP 跳变不致监督层"假失明/假失聪")
+    echo "cycle=$UP" >> $STATE.tmp
     mv $STATE.tmp $STATE
     # v1.15: 时钟跳变检测 — NTP 校时/回拨会让本地时间戳不可跨段比较; epoch 与
     #   uptime 增量不一致即留痕(设备无 RTC, 开机曾出现 8h 跳变)。
@@ -336,12 +341,12 @@ run_cycle() {
             set_state netlock 1 "netcfg write lock"
             FAILS=$((FAILS+1))
             log "FAIL detail netlock busy=${NETLOCK_BUSY}x holders=[${_nlh:-?}]"
-            # v1.39: 滚动 1h 窗口 — 距上次轮转 >=3600s 即归还配额(时钟回拨时
-            #   差值为负不复位, 保守方向: 少轮转, watchdog 其余判据兜底)
-            [ $(( $(date +%s) - ${NETLOCK_BREAKS_AT:-0} )) -ge 3600 ] && NETLOCK_BREAKS=0
+            # v1.39: 滚动 1h 窗口 — 距上次轮转 >=3600s 即归还配额(v1.40: 时基
+            #   改 uptime, NTP 跳变不误开/误关窗口)
+            [ $(( UP - ${NETLOCK_BREAKS_AT:--1000000} )) -ge 3600 ] && NETLOCK_BREAKS=0
             if [ "${NETLOCK_BREAKS:-0}" -lt 3 ] && netcfg_break; then
                 NETLOCK_BREAKS=$(( ${NETLOCK_BREAKS:-0} + 1 ))
-                NETLOCK_BREAKS_AT=$(date +%s)
+                NETLOCK_BREAKS_AT=$UP
                 log "EVT netlock broken (rotation ${NETLOCK_BREAKS}/3)"
             fi
         fi
@@ -499,7 +504,13 @@ run_cycle() {
         _apid=$(pidof authd 2>/dev/null | awk '{print $1}')
         _ast=$(awk '{print $2}' /tmp/authd_state 2>/dev/null)
         case "$_ast" in ''|*[!0-9]*) _ast="" ;; esac
-        if [ -n "$_apid" ] && [ -n "$_ast" ] && [ $((_NOW - _ast)) -lt 300 ]; then
+        # v1.40: authd_state 的 ts 是 epoch 契约(私有 authd 写); 同 boot 内差值
+        #   可靠, 负龄(NTP 回拨/跨 boot 残值)钳为极旧 → 走 unhealthy 分支
+        _aage=999999
+        if [ -n "$_ast" ]; then
+            _aage=$(( _NOW - _ast )); [ "$_aage" -lt 0 ] && _aage=999999
+        fi
+        if [ -n "$_apid" ] && [ "$_aage" -lt 300 ]; then
             set_state authd 0 "uplink auth"
             strike_clear authd
         elif [ "$UP" -lt 240 ]; then
@@ -507,7 +518,7 @@ run_cycle() {
         else
             set_state authd 1 "uplink auth"
             FAILS=$((FAILS+1))
-            log "WARN  authd unhealthy (pid=${_apid:-none} state_age=$((_NOW - ${_ast:-_NOW}))s)"
+            log "WARN  authd unhealthy (pid=${_apid:-none} state_age=${_aage}s)"
             if strike authd; then
                 if rl_ok authd; then
                     [ -n "$_apid" ] && kill -9 "$_apid" 2>/dev/null
@@ -580,9 +591,9 @@ EOF
         if [ "$_fire" = 1 ]; then
             _hn=0; _ht=0
             [ -r /tmp/watchdog_hostapd.rec ] && read _hn _ht < /tmp/watchdog_hostapd.rec
-            _now2=$(date +%s)
+            _now2=$UP   # v1.40: 预算窗时基 uptime(单调); 旧 rec 的 epoch 值超窗自复位
             case "$_hn" in ''|*[!0-9]*) _hn=0 ;; esac
-            case "$_ht" in ''|*[!0-9]*) _ht=$_now2 ;; esac
+            case "$_ht" in ''|*[!0-9]*|'') _ht=$_now2 ;; esac
             [ $((_now2 - _ht)) -gt 3600 ] && { _hn=0; _ht=$_now2; }
             # independent confirmation before touching the radios: log the
             # live sockets and the affected clients, but never refuse because
@@ -618,9 +629,8 @@ EOF
     fi
 
     # ---- wan_agg: wan_alive freshness + boot grace (v1.25 semantics) ----
-    _wa_ts=$(sed -n 's/.* ts=\([0-9][0-9]*\).*/\1/p' /tmp/wan_alive 2>/dev/null)
-    _wa_age=999999
-    [ -n "$_wa_ts" ] && _wa_age=$(( _NOW - _wa_ts ))
+    # v1.40: 判龄走 svc_lib wa_age()(hb=uptime 优先, 单调; 兼容旧 ts= 格式)
+    _wa_age=$(wa_age)
     _wastale=0
     [ "$UP" -gt 240 ] && [ "$_wa_age" -gt 120 ] && _wastale=1
     if [ "$_wastale" = 0 ] && alive 'wan_agg[.]sh' wan_agg wan_agg.sh; then
@@ -872,7 +882,7 @@ EOF
 
 # ---- main ----
 case "${1:-}" in
---version) echo "watchdog v1.39"; exit 0 ;;
+--version) echo "watchdog v1.40"; exit 0 ;;
 esac
 touch $LOG $STATE
 # v1.20: 看门狗单实例 — 双实例会重复自愈/告警(现场曾出现 2 个).

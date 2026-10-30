@@ -1,5 +1,8 @@
 #!/bin/sh
-# svc_lib.sh v1.4 -- shared supervision, lock, heartbeat and minimal-parser library.
+# svc_lib.sh v1.5 -- shared supervision, lock, heartbeat and minimal-parser library.
+# v1.5 (2026-10-31 时间源统一轮): +wa_age() —— /tmp/wan_alive 新鲜度统一走
+#   uptime(hb= 优先, 免疫 NTP 跳变与跨 boot 残值; ts= 旧格式回退); rl_ok 重启
+#   预算窗口改 uptime 时基(原 epoch 窗在 NTP 跳变时会误重置/误保留预算)。
 # v1.4 (SIGSEGV fix): SVC_TABLE +nerepair(记录修复 supervisor; hb /tmp/nerepair.hb
 #   60s, max-hb-age 180; recipe sh /data/gw/nerepair_launch.sh 写 /tmp/nerepair.lock 后 exec).
 # v1.3 (SIGSEGV Phase 0): SVC_TABLE -core_trap(每日文件模式窗口停用)。该登记项
@@ -78,11 +81,13 @@ strike_clear() { # $1=key; records a PASS sample
     case "$_h" in ???*) _h="${_h#?}" ;; esac
     echo "${_h}0" > "$_f"
 }
-# Per-service restart budget: max 3 per hour (tmpfs; reboot resets).
+# Per-service restart budget: max 3 per hour (uptime time base, reboot resets).
+# v1.5: 窗口时基 epoch→uptime —— NTP 跳变不再误重置/误保留预算; 旧 .rec 文件里
+#   的 epoch 时间戳在新时基下必然超窗, 各服务预算一次性归零(一次性迁移, 可接受)。
 rl_ok() { # $1=name
     _f=/tmp/watchdog_svc_$1.rec; _n=0; _t=0
     [ -r "$_f" ] && read _n _t < "$_f"
-    _now=$(date +%s)
+    _now=$(cut -d. -f1 /proc/uptime)
     case "$_n" in ''|*[!0-9]*) _n=0 ;; esac
     case "$_t" in ''|*[!0-9]*) _t=$_now ;; esac
     [ $((_now - _t)) -gt 3600 ] && { _n=0; _t=$_now; }
@@ -112,6 +117,22 @@ svc_lock() {
 }
 svc_lock_assert() { echo $$ > "/tmp/$1.lock" 2>/dev/null; }
 svc_hb() { cut -d. -f1 /proc/uptime > "/tmp/$1.hb" 2>/dev/null; }
+
+# v1.5 (时间源统一轮): /tmp/wan_alive 的年龄(秒)。
+#   发布方(wan_agg)写 "home=.. cell=.. ts=<epoch> hb=<uptime>"; 优先 hb=uptime
+#   基(单调, 免疫 NTP 跳变; 跨 boot 残值表现为负龄), 无 hb 回退 ts=epoch 旧格式
+#   (滚动升级窗口兼容)。负龄/缺失/不可解析 → 999999(=极旧)。
+wa_age() {
+    _l=$(cat /tmp/wan_alive 2>/dev/null)
+    _hb=$(printf '%s' "$_l" | sed -n 's/.*hb=\([0-9]*\).*/\1/p')
+    if [ -n "$_hb" ]; then
+        _a=$(( $(cut -d. -f1 /proc/uptime) - _hb ))
+        [ "$_a" -ge 0 ] && echo "$_a" || echo 999999
+        return
+    fi
+    _ts=$(printf '%s' "$_l" | sed -n 's/.*ts=\([0-9]*\).*/\1/p')
+    case "$_ts" in ''|*[!0-9]*) echo 999999 ;; *) echo $(( $(date +%s) - _ts )) ;; esac
+}
 
 # ---- minimal static parsers ---------------------------------------------
 # Link UP bit (IFF_UP=1) from sysfs; no iw/ip needed.

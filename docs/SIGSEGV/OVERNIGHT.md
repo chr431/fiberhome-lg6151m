@@ -5,11 +5,11 @@
 
 ## 1. 装置（已就位）
 - **vaguard 关闭**：`/data/gw/bin/busybox` = `busybox.pre-vfguard`（1,115,944 B，`grep -ac vaguard`=0）；`/data/gw/bin/ip` = vendor `/usr/libexec/ip-full`（547,744 B，无 vaguard）；备份 `busybox.vfguard`（1,609,800 B）/ `ip.vfguard`（798,552 B）。
-- **nerepair v1.2**：`/data/gw/bin/nerepair`（1,150,720 B，md5 `84eff57f…`），经 `/data/gw/nerepair_launch.sh` 单实例启动（`/tmp/nerepair.lock`），每 60s 写 `/tmp/nerepair.hb`。
+- **nerepair v1.3**（v1.3 修 SIGALRM SA_RESTART：v1.2 的 signal() 带 SA_RESTART，waitpid 被重启，心跳/STAT 不刷新，watchdog 会误判 stale 并重启）：`/data/gw/bin/nerepair`（1,150,720 B，md5 `84eff57f…`），经 `/data/gw/nerepair_launch.sh` 单实例启动（`/tmp/nerepair.lock`），每 60s 写 `/tmp/nerepair.hb`。
 - **watchdog**：`svc_lib.sh v1.4` 的 `SVC_TABLE` 新增 `nerepair` 行（recipe=launcher，hb=`/tmp/nerepair.hb`，max=180）；`/tmp/watchdog_state` 已出现 `nerepair=0`。
 - **status**：`avail_sampler.sh v1.11` 新增 `sys.nerepair`（pid + hb 新鲜度 → op/deg/down）。
 - **canary**：vsurv4 仍 24 个（`/data/repro/h4_*` 继续增长）；nerepair 对 vsurv4 只 `PASS reason=canary`（不修）。
-- **基线**（`/data/gw/logs/overnight_baseline.txt`）：epoch 1788942873，ne=1590，vaguard=49，reboots=10，h4=229，nerepair_pid=15727，guard=off。
+- **基线**（`/data/gw/logs/overnight_baseline.txt`）：epoch 1788942974，ne=1590，vaguard=49，reboots=10，h4=230，aee=19，stacks=1，nerepair_pid=6942，guard=off。
 
 ## 2. 假设
 - **H1**：vaguard 关闭后，记录家族会在自然进程里重新出现；

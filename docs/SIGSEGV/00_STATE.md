@@ -12,6 +12,8 @@
 
 **判决（C-145）**：**Transport = PA/DMA（E2）**；记录 = WED TXD；页级 kprobe 判决被 `CONFIG_KPROBES=n` 阻断（C-144），故停在 E2。详见 [VERDICT.md](VERDICT.md)。
 
+**修复（C-146..C-149）**：`nerepair` 已部署（`/data/gw/bin/nerepair` + `rc.extend v3.3` 开机自启）；修复记录家族 SIGSEGV（`Xt=sp, pc+=4`，抑制信号），覆盖所有用户进程（PID 1 + fork 跟随），排除 vsurv4 canary；**不停止 DMA 写入**（根修复需厂商驱动 R1 或 SMMU R2）。详见 [FIX.md](FIX.md)。
+
 ## 2. 已确立（E2/E3）
 
 | ID | 结论 | 关键数字 |

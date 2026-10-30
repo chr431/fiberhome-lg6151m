@@ -1,4 +1,6 @@
-/* app.js v3.54 (LAN v6 轮: 状态页 IPv6 卡片改读 api v6 实况 — 原为硬编码
+/* app.js v3.57 (质量轮: 4 个无 body 写调用 logout/wifi_restart/diag_gen/sys_reboot
+   改带 body 走 POST — api.sh v2.82 起写端点强制 POST; 头注自 v3.55 起追平台账)
+   -- app.js v3.56/v3.55 见 tools/VERSIONS.tsv -- v3.54 (LAN v6 轮: 状态页 IPv6 卡片改读 api v6 实况 — 原为硬编码
    "ULA fd42:9ac1:7e50::/64 / 自动分配 + NAT 兼容", v6 全挂时照样报绿; 系统页
    +IPv6 局域网开关(api v6_set)) -- app.js v3.53 (可用性页 P1: 组件 90 天状态条+事件表+覆盖率 — api avail, avail_sampler.sh v1.0; AVAILABILITY_DESIGN §4.2) -- app.js v3.52 (系统页 USB-C 接口卡片: 总开关/ADB/控制台三设置 + 实况(主机连接/桥接/载波/门位) — api usb/usb_set, usb_mgr.sh v1.0) -- app.js v3.51 (移除宵断卡片 — 用户裁定判定不做先验, wan_agg v2.29 同步移除) -- v3.50 (聚合页有线宵断卡片: 启用/起止时间/窗口内状态 — wan_agg v2.28 同源) -- v3.49 (诊断卡片时间取自包尾行(尾部必含); v3.48 系统页诊断日志卡片: 生成按钮+诊断包尾部展示 — 日志改善专项轮) -- v3.47 (WiFi 卡片增 MLO 实况行: 双链路/单链路降级/未建立 — api 直读 mwctl dump ap_mld) -- v3.46 (定时重启卡片: 系统页开关+时间设置, 默认每日 04:00; 下次执行按设备侧 now/today/last 推导) -- v3.45 字体统一: 线路状态值去 mono(中文文案误用等宽, 与有线卡不一致) + mono 输入框 placeholder 全 ASCII 化) -- v3.44 状态页线路状态改数据面实测: 有线/蜂窝各增"线路状态"行+标签按 dp 而非 carrier — 21:30 实弹"载波在而断网"全程显示已连接=误导) -- v3 gateway console SPA
  * v3.39 (WiFi 分析仪 4 视图改进: 信道图邻居SSID标注+避让+文字光晕; 评级修复不可见信道号/徽标重叠+经典道同口径+本机标记+干扰计数; 列表可排序/色标/带宽/信号条; 时间图图例+数据点+历史本地持久)
@@ -115,7 +117,7 @@ function setLogin(on) {
     TOKEN = on ? TOKEN : "";
     if (!on) sessionStorage.removeItem("gw_token");
 }
-function logout() { api("logout").catch(() => {}); setLogin(false); showLoginWall(); }
+function logout() { api("logout", "1").catch(() => {}); setLogin(false); showLoginWall(); }   // v3.57: 写端点改 POST(api v2.82 强制)
 window.logout = logout;
 
 /* ---------- 视图小件 ---------- */
@@ -392,7 +394,7 @@ window.bpDel = async (mac) => {
     else toast(eMsg(j.error), 1);
 };
 window.bpApply = async () => {
-    const j = await api("wifi_restart").catch(e => ({ error: e.message }));
+    const j = await api("wifi_restart", "1").catch(e => ({ error: e.message }));   // v3.57: POST
     if (j.ok) { toast("已应用，无线重启中"); setTimeout(() => PAGES.wifi.tick(), 4000); }
     else toast(eMsg(j.error), 1);
 };
@@ -1277,7 +1279,7 @@ PAGES.sys = {
 };
 window.dgGen = async () => {
     toast("正在生成诊断包…");
-    await api("diag_gen").catch(e => ({ error: e.message }));
+    await api("diag_gen", "1").catch(e => ({ error: e.message }));   // v3.57: POST
     setTimeout(async () => { await PAGES.sys.tick(); toast("诊断包已生成"); }, 3000);
 };
 window.fanTgl = async () => {
@@ -1327,7 +1329,7 @@ window.syReboot = () => {
 };
 window.syRebootGo = async () => {
     modalClose();
-    await api("sys_reboot").catch(() => {});
+    await api("sys_reboot", "1").catch(() => {});   // v3.57: POST
     toast("重启中…约 3 分钟");
 };
 

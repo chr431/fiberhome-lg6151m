@@ -1,5 +1,11 @@
 #!/bin/sh
-# core_meta.sh v1.9 -- core_pattern metadata wrapper (stability P1-2/P1-5).
+# core_meta.sh v1.10 -- core_pattern metadata wrapper (stability P1-2/P1-5).
+# v1.10 (2026-10-31 质量轮): ne_events.tsv 加 4000 行上限(tail+原子 mv, 与
+#   netcfg_repairs.tsv 同款) — 兄弟台账全有界, 唯独 NE 台账无界, 风暴下 /data
+#   无限膨胀且采样器游标扫描成本随之增长。avail_sampler 的行数游标对轮转收缩
+#   已有 head 近似分支(new_lines else 臂), 收缩安全。
+#   同轮: stackdump 自 v1.10 起为 deploy manifest 正式件(源码 gw/src/stackdump.c,
+#   此前靠手工推送 = 部署不可重现点)。
 # v1.7 (2026-10-30 自然 NE 分类): 每次崩溃额外落一份 fault-time 栈窗口
 #   (.stack = 16 pages = 64 KiB, 由 /data/gw/bin/stackdump 读 /proc/<pid>/mem)。
 #   目的: 自然 NE 也能按“fault addr 是否对齐栈上记录”分类，不再只有 canary 有栈。
@@ -75,7 +81,7 @@ PARGS=$(tr '\0' ' ' 2>/dev/null < /proc/$PPID_/cmdline | head -c 300)
 ARGS=$(tr '\0' ' ' 2>/dev/null < /proc/$PID/cmdline | head -c 600)
 
 {
-    echo "# core metadata (core_meta v1.2)"
+    echo "# core metadata (core_meta v1.10)"
     echo "epoch=$_ts date=$(date '+%Y-%m-%d %H:%M:%S') uptime=$(uptime_s) btime=$_bt"
     echo "pid=$PID comm=[$COMM] signal=$SIG uid=$UID_ gid=$GID_"
     echo "exe=[$EXE] ppid=$PPID_ pcomm=[$PCOMM]"
@@ -154,6 +160,12 @@ _us=""
 _or=$(_origin "$PID")
 case "$_or" in our-tree|vendor-tree) ;; *) _or=unknown ;; esac
 [ -s "$F" ] && echo "$_ts	$PID	${COMM:-?}	sig=$SIG	exe=${EXE:-?}	args=${ARGS:-?}$_us	origin=$_or	stack=${STACK:-?}" >> "$TSV" 2>/dev/null
+
+# v1.10: census cap -- keep the newest 4000 rows (atomic tail+mv).  Readers
+# (avail_sampler line cursors) already tolerate rotation shrinkage.
+_n=$(wc -l < "$TSV" 2>/dev/null)
+case "$_n" in ''|*[!0-9]*) _n=0 ;; esac
+[ "$_n" -gt 4000 ] && tail -n 4000 "$TSV" > "$TSV.tmp.$$" 2>/dev/null && mv -f "$TSV.tmp.$$" "$TSV"
 
 # quota: keep the 300 newest metadata files
 _n=$(ls "$DIR" 2>/dev/null | wc -l)

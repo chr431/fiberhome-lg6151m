@@ -1,5 +1,7 @@
 #!/bin/sh
-# wan_agg.sh v3.6 — 双上行聚合主管: 探活 + 故障转移 FSM + 未打标主路策略 + CLI
+# wan_agg.sh v3.7 — 双上行聚合主管: 探活 + 故障转移 FSM + 未打标主路策略 + CLI
+# v3.7 (2026-10-31 质量轮): /tmp/wan_alive 改 tmp+原子 mv 发布(见 §判活发布处注) —
+#   原 truncate+write 的微秒窗里读者拿到空文件即判 stale。
 # v3.2 (2026-10-17 日志加密轮): 每 ~30s TICK 汇总(存活/计数/authd/承载口/候选),
 #   探活逐目标结果、硬截止触发、ccmni 清单变化、authd/W2_READY 边沿、主路写失败
 #   全部留痕; 本文件日志自轮转(400 行) — 24h 分析不再依赖偶然的状态迁移行。
@@ -437,7 +439,10 @@ while :; do
     #   led_mgr(WAN 灯)与 api.sh(状态页)消费本文件, 不再各自用一套判据
     #   (2026-10-16 宵断实弹: 三处共用错判据 → 灯/状态页/转移全部谎报)。
     #   消费方须校验 ts 新鲜度, 过期回退自身探测。
-    echo "home=$NS2 cell=$NS1 ts=$(date +%s)" > /tmp/wan_alive
+    # v3.7: tmp+原子 mv —— 本文件 ~3s 一写、跨进程读者 5+(watchdog/boot_gate/
+    #   dial_keeper/led_mgr/api), 原直写的微秒窗里读者拿到空文件 = ts 解析为空
+    #   → 判 stale → 2/3 采样后无谓重启本守护; 同仓其余状态文件早已是 tmp+mv。
+    echo "home=$NS2 cell=$NS1 ts=$(date +%s)" > /tmp/wan_alive.tmp && mv -f /tmp/wan_alive.tmp /tmp/wan_alive
     # v3.2: 探活结果边沿 + 每 10 环循(~30s)汇总 — 24h 分析的主时间线
     if [ "$P1R" != "$P1R_LAST" ] || [ "$P2R" != "$P2R_LAST" ]; then
         log "EVT probe w1[$W1_IF]=[$P1R] alive=$NS1 | w2[$W2_IF]=[$P2R] alive=$NS2"

@@ -1,4 +1,6 @@
-# api_sys.sh v1.5 — 系统/状态域模块 (被 api.sh 按端点懒加载; 依赖核心的 helpers)
+# api_sys.sh v1.7 (质量轮: traffic_hist 的 span 回退 qkv — 原只认 POST body, 是
+#   全部读端点里唯一不可 GET 的, 与"GET=read"契约相悖; v1.6 头注追平台账) —
+#   系统/状态域模块 (被 api.sh 按端点懒加载; 依赖核心的 helpers)
 # v1.3 (2026-10-17 日志加密轮): traffic 选口回退/qdisc 缺失留痕(api.log)。
 # v1.2: /api/traffic 增 if 字段; v1.1: 探活实证选口。
 # v1.0 (2026-10-17 架构轮): 自 api.sh v2.74 拆出 — status/clients/sys/logs/sse/fan/
@@ -53,6 +55,7 @@ get_traffic() {
 # 输出 {"span","step","buckets":[{"t","c","e"}...],"today":{"c","e"}} (c=蜂窝 e=以太, 字节)
 get_traffic_hist() {
     SPAN=$(form_kv span)
+    [ -n "$SPAN" ] || SPAN=$(qkv span)   # v1.7: 读端点恢复 GET-able(form_kv 只认 POST body)
     # v1.5: 读 traffic_logger 维护的**小时/日汇总**(v1.6 起), 不再每次请求 awk 扫 6000 行
     #   原始采样 —— 那条 awk 是崩溃家族里最常见的落点之一(18h 内 4 次)。
     case "$SPAN" in

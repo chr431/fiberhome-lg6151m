@@ -1,5 +1,7 @@
 #!/bin/sh
-# api.sh v2.81 (v2.80, 2026-10-28 LAN v6 修复: +v6/v6_set 域模块(api_v6.sh, IPv6
+# api.sh v2.82 (质量轮: 写端点统一 need_write=POST+token — 原 GET?token= 可触发
+#   写操作, 头注的 GET=read/POST=write 约定自此成为强制; cell_set 补控制字符
+#   一票否决, 与 gw_set 对称)。v2.81, 2026-10-28 LAN v6 修复: +v6/v6_set 域模块(api_v6.sh, IPv6
 #   LAN 开关+实况; 状态页不再硬编码 ULA); v2.79, 可用性轮 P1: +avail 域(api_avail.sh, 组件可用性
 #   90 天日条/事件表/覆盖率 — AVAILABILITY_DESIGN §4.1); v2.78, 2026-10-24 USB 轮: +usb/usb_set 域模块(api_usb.sh, USB-C
 #   设备模式三开关: 总开关/ADB/控制台, 状态含 UDC/桥接/载波/门位); v2.76, 2026-10-17
@@ -13,8 +15,12 @@
 #   v2.74: 命名中性化; v2.73: status 消费 /tmp/wan_alive; v2.72: 蜂窝上行 qdisc
 #   口径; 历史见各域模块头注与 git) -- v3 gateway API router (busybox sh; v3httpd
 #   fork+exec, no shell in C)
-#   GET  /api/<ep>            read endpoints (open, LAN-only)
+#   GET  /api/<ep>            read endpoints (token 可经 ?token=; LAN-only)
 #   POST /api/<ep>  token=... write endpoints (sha256 auth, /tmp/gui_tokens)
+#   v2.82 (质量轮): 写端点统一 need_write —— 强制 POST + token。原实现全部写
+#   端点不校验方法且 tok_ok 接受 query 传 token, GET /api/sys_reboot?token=…
+#   即可触发状态变更(头注宣称的 GET=read/POST=write 此前只是约定); 前端 v3.57
+#   同步把 4 个无 body 写调用(logout/wifi_restart/diag_gen/sys_reboot)改 POST。
 # 注入防线: 所有写端点参数过 case/regex 白名单, 拒绝一切元字符 (原厂 send_msg
 # 的 popen 注入教训)。body 为 form-encoded: a=1&b=2 (V3_BODY)。
 GWDATA=/data/gw   # v2.12: 基座路径统一到 /data/gw
@@ -119,6 +125,10 @@ tok_ok() {
     [ -f "$TOKDIR/$_t" ]
 }
 need_tok() { tok_ok || jerr need_login; }
+need_write() {  # v2.82: 写端点门禁 = 方法 POST + token(写操作不得经 GET 触发)
+    [ "$V3_METHOD" = POST ] || jerr post_only
+    need_tok
+}
 
 # ---------- 配置助手 (v2.14: defaults只读 + settings稀疏覆盖; 写方只动 settings) ----------
 cfg_load() {
@@ -145,6 +155,10 @@ gw_del() {  # v2.37: gw_del <key> — 从 settings.conf 删除键(回退派生�
 #   CELL_i)与 grep+append(重复键), 全部收敛到本助手(gw_set 同款原子语义)。
 cell_set() {  # cell_set <key> <value>
     K=$1; V=$2; F=$GWDATA/cellular.conf
+    # v2.82 (质量轮): 补 gw_set 同款一票否决 — cellular.conf 会被 root 身份
+    # source(get_cellular/get_netmode 等), 控制字符可注入整行命令。当前各写方
+    # 都有值域校验, 此为纵深第二道(与 gw_set 对称, 防未来新增写方破口)。
+    printf '%s' "$V" | LC_ALL=C grep -q '[^ -~]' && jerr bad_chars
     grep -v "^$K=" "$F" 2>/dev/null > "$F.new.$$"
     echo "$K=$V" >> "$F.new.$$"
     mv "$F.new.$$" "$F"
@@ -195,8 +209,8 @@ case "$EP" in
         printf '{"ok":true,"token":"%s","default":%s}' "$(tok_new)" "$_D"
         ;;
     logout)
-        need_tok; rm -f $TOKDIR/$(form_kv token); ok_json ;;
-    pass_set)   need_tok; apply_pass_set ;;
+        need_write; rm -f $TOKDIR/$(form_kv token); ok_json ;;
+    pass_set)   need_write; apply_pass_set ;;
     # system 域 (状态/日志/流量/风扇/LED/NTP/定时重启/SSE)
     status)     need_tok; . $APID/api_sys.sh; get_status ;;
     clients)    need_tok; . $APID/api_sys.sh; get_clients ;;
@@ -204,67 +218,67 @@ case "$EP" in
     logs)       need_tok; . $APID/api_sys.sh; get_logs ;;
     sse)        need_tok; . $APID/api_sys.sh; get_sse ;;   # v2.48(P1): +token 门(原为路由表唯一未认证读端点, 泄蜂窝身份/信号=位置侧信道); EventSource 走 ?token=
     fan)        need_tok; . $APID/api_sys.sh; get_fan ;;
-    fan_set)    need_tok; . $APID/api_sys.sh; apply_fan ;;
+    fan_set)    need_write; . $APID/api_sys.sh; apply_fan ;;
     led)        need_tok; . $APID/api_sys.sh; get_led ;;
-    led_set)    need_tok; . $APID/api_sys.sh; apply_led ;;
+    led_set)    need_write; . $APID/api_sys.sh; apply_led ;;
     ntp)        need_tok; . $APID/api_sys.sh; get_ntp ;;
-    ntp_set)    need_tok; . $APID/api_sys.sh; apply_ntp ;;
+    ntp_set)    need_write; . $APID/api_sys.sh; apply_ntp ;;
     reboot_sched)     need_tok; . $APID/api_sys.sh; get_reboot ;;
-    reboot_sched_set) need_tok; . $APID/api_sys.sh; apply_reboot ;;
+    reboot_sched_set) need_write; . $APID/api_sys.sh; apply_reboot ;;
     traffic)    need_tok; . $APID/api_sys.sh; get_traffic ;;
     traffic_hist)  need_tok; . $APID/api_sys.sh; get_traffic_hist ;;
-    traffic_limit) need_tok; . $APID/api_sys.sh; apply_traffic_limit ;;
-    sys_reboot) need_tok; ok_json; (sleep 1; reboot) & ;;
-    diag_gen)   need_tok; (sh /data/gw/diag_dump.sh > /data/gw/logs/diag_last.txt 2>&1) & ok_json ;;
+    traffic_limit) need_write; . $APID/api_sys.sh; apply_traffic_limit ;;
+    sys_reboot) need_write; ok_json; (sleep 1; reboot) & ;;
+    diag_gen)   need_write; (sh /data/gw/diag_dump.sh > /data/gw/logs/diag_last.txt 2>&1) & ok_json ;;
     # usb 域 (USB-C 设备模式; v2.78)
     usb)        need_tok; . $APID/api_usb.sh; get_usb ;;
-    usb_set)    need_tok; . $APID/api_usb.sh; apply_usb ;;
+    usb_set)    need_write; . $APID/api_usb.sh; apply_usb ;;
     # v6 域 (LAN IPv6 开关+实况; v2.80)
     v6)         need_tok; . $APID/api_v6.sh; get_v6 ;;
-    v6_set)     need_tok; . $APID/api_v6.sh; apply_v6 ;;
+    v6_set)     need_write; . $APID/api_v6.sh; apply_v6 ;;
     # avail 域 (可用性评定; v2.79)
     avail)      need_tok; . $APID/api_avail.sh; get_avail ;;
     # wifi 域
     wifi)       need_tok; . $APID/api_wifi.sh; get_wifi ;;
-    wifi_set)   need_tok; . $APID/api_wifi.sh; apply_wifi ;;
+    wifi_set)   need_write; . $APID/api_wifi.sh; apply_wifi ;;
     wifi_adv)   need_tok; . $APID/api_wifi.sh; get_wifi_adv ;;
-    wifi_adv_set) need_tok; . $APID/api_wifi.sh; apply_wifi_adv ;;
+    wifi_adv_set) need_write; . $APID/api_wifi.sh; apply_wifi_adv ;;
     band_pin)     need_tok; . $APID/api_wifi.sh; get_band_pin ;;
-    band_pin_add) need_tok; . $APID/api_wifi.sh; apply_band_pin_add ;;
-    band_pin_del) need_tok; . $APID/api_wifi.sh; apply_band_pin_del ;;
+    band_pin_add) need_write; . $APID/api_wifi.sh; apply_band_pin_add ;;
+    band_pin_del) need_write; . $APID/api_wifi.sh; apply_band_pin_del ;;
     wifiscan)   need_tok; . $APID/api_wifi.sh; get_wifiscan ;;
-    wifi_restart) need_tok; sh $GWDATA/wifi_up.sh >/tmp/wifi_up.log 2>&1 & ok_json ;;
+    wifi_restart) need_write; sh $GWDATA/wifi_up.sh >/tmp/wifi_up.log 2>&1 & ok_json ;;
     # LAN 服务域 (DHCP + 防火墙)
     dhcp)       need_tok; . $APID/api_lan.sh; get_dhcp ;;
-    dhcp_set)   need_tok; . $APID/api_lan.sh; apply_dhcp ;;
+    dhcp_set)   need_write; . $APID/api_lan.sh; apply_dhcp ;;
     dhcp_static)     need_tok; . $APID/api_lan.sh; get_dhcp_static ;;
-    dhcp_static_set) need_tok; . $APID/api_lan.sh; apply_dhcp_static ;;
+    dhcp_static_set) need_write; . $APID/api_lan.sh; apply_dhcp_static ;;
     fw)         need_tok; . $APID/api_lan.sh; get_fw ;;
-    fwd_add)    need_tok; . $APID/api_lan.sh; apply_fwd_add ;;
-    fwd_del)    need_tok; . $APID/api_lan.sh; apply_fwd_del ;;
-    dmz_set)    need_tok; . $APID/api_lan.sh; apply_dmz ;;
-    block_set)  need_tok; . $APID/api_lan.sh; apply_block ;;
-    fw_apply)   need_tok; . $APID/api_lan.sh; fw_apply; ok_json ;;
+    fwd_add)    need_write; . $APID/api_lan.sh; apply_fwd_add ;;
+    fwd_del)    need_write; . $APID/api_lan.sh; apply_fwd_del ;;
+    dmz_set)    need_write; . $APID/api_lan.sh; apply_dmz ;;
+    block_set)  need_write; . $APID/api_lan.sh; apply_block ;;
+    fw_apply)   need_write; . $APID/api_lan.sh; fw_apply; ok_json ;;
     # 聚合+上行域
     agg)        need_tok; . $APID/api_agg.sh; get_agg ;;
-    agg_weights) need_tok; . $APID/api_agg.sh; apply_agg_weights ;;
-    agg_mode)   need_tok; . $APID/api_agg.sh; apply_agg_mode ;;
-    agg_pin)    need_tok; . $APID/api_agg.sh; apply_agg_pin ;;
+    agg_weights) need_write; . $APID/api_agg.sh; apply_agg_weights ;;
+    agg_mode)   need_write; . $APID/api_agg.sh; apply_agg_mode ;;
+    agg_pin)    need_write; . $APID/api_agg.sh; apply_agg_pin ;;
     uplink)     need_tok; . $APID/api_agg.sh; get_uplink ;;
-    uplink_set) need_tok; . $APID/api_agg.sh; apply_uplink ;;
-    uplink_form) need_tok; . $APID/api_agg.sh; apply_uplink_form ;;
+    uplink_set) need_write; . $APID/api_agg.sh; apply_uplink ;;
+    uplink_form) need_write; . $APID/api_agg.sh; apply_uplink_form ;;
     # 蜂窝域
     cellular)   need_tok; . $APID/api_cell.sh; get_cellular ;;
     sim)        need_tok; . $APID/api_cell.sh; get_sim ;;
-    pin_set)    need_tok; . $APID/api_cell.sh; apply_pin ;;
+    pin_set)    need_write; . $APID/api_cell.sh; apply_pin ;;
     netmode)    need_tok; . $APID/api_cell.sh; get_netmode ;;
-    netmode_set) need_tok; . $APID/api_cell.sh; apply_netmode ;;
-    airplane_set) need_tok; . $APID/api_cell.sh; apply_airplane ;;
-    plmn_scan)  need_tok; . $APID/api_cell.sh; net_plmn_scan ;;
-    cell_bandlock) need_tok; . $APID/api_cell.sh; apply_bandlock ;;
-    cell_lock)  need_tok; . $APID/api_cell.sh; apply_celllock ;;
+    netmode_set) need_write; . $APID/api_cell.sh; apply_netmode ;;
+    airplane_set) need_write; . $APID/api_cell.sh; apply_airplane ;;
+    plmn_scan)  need_write; . $APID/api_cell.sh; net_plmn_scan ;;
+    cell_bandlock) need_write; . $APID/api_cell.sh; apply_bandlock ;;
+    cell_lock)  need_write; . $APID/api_cell.sh; apply_celllock ;;
     # 短信域
     sms)        need_tok; . $APID/api_sms.sh; get_sms ;;
-    sms_send)   need_tok; . $APID/api_sms.sh; apply_sms_send ;;
+    sms_send)   need_write; . $APID/api_sms.sh; apply_sms_send ;;
     *) jerr unknown ;;
 esac

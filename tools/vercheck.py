@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """vercheck.py -- 版本注册表机制（唯一事实源 tools/VERSIONS.tsv）。
+v1.6 (质量轮, 审计): device() 二进制行补字节级比对(BYTES-DIFFER, 原读出
+  dmd5 从不使用, 版本号未 bump 的内容漂移全漏检); git ls-files 失败不再被吞
+  (第 7 链在无 git 元数据环境拒绝给全绿假信号)。
 
 三条同步链，全部由本脚本机械保证，杜绝手工抄写漂移：
   1. 注册表 <-> deploy.py MANIFEST：kind=manifest 的行必须与 MANIFEST 一一对应
@@ -170,10 +173,15 @@ def check(fail=True):
     FREE_ZONES += tuple(d + "/" for d in os.listdir(REPO)
                         if d.endswith("_analysis") and os.path.isdir(os.path.join(REPO, d)))
     try:
-        ls = subprocess.run(["git", "ls-files"], capture_output=True, text=True,
-                            cwd=REPO).stdout.split("\n")
-    except Exception:
-        ls = []
+        _ls = subprocess.run(["git", "ls-files"], capture_output=True, text=True,
+                             cwd=REPO)
+    except OSError as e:
+        sys.exit("VERCHECK-FAIL: git ls-files 不可执行(%r) — 第 7 链(全跟踪文件可归类)"
+                 "拒绝静默跳过: 无 git 元数据的环境不会给出全绿假信号" % e)
+    if _ls.returncode != 0:
+        sys.exit("VERCHECK-FAIL: git ls-files rc=%d(%s) — 第 7 链拒绝静默跳过"
+                 % (_ls.returncode, _ls.stderr.strip()[:120]))
+    ls = _ls.stdout.split("\n")
     regnames = {r[0] for r in reg}
     for f in ls:
         f = f.replace("\\", "/").strip()
@@ -234,10 +242,18 @@ def device():
         if row is None:
             print("device-only: %s" % name)
             continue
-        mark = "OK" if dver == row[1] else "STALE(device=%s local=v%s)" % (dver, row[1])
+        marks = []
         if dver != row[1]:
-            drift += 1
-        print("%-22s %s" % (name, mark))
+            marks.append("STALE(device=%s local=v%s)" % (dver, row[1]))
+        elif len(parts) >= 4 and not name.endswith(".sh") and dmd5 != "-" and parts[3] != "-":
+            # v1.6: 二进制行补字节级比对 — 快照同时记录了设备侧 md5 与快照时本地
+            # md5, 版本号相同而字节不同 = push 假成功/手改设备的直接证据(原实现
+            # 读出 dmd5 却从不使用)。.sh 行设备副本含 #DEPLOY 戳, 直接比对必误报,
+            # 逐件内容比对由 deploy.py doctor 负责(去戳后 md5)。
+            if dmd5 != parts[3]:
+                marks.append("BYTES-DIFFER(device=%s snapshot-local=%s)" % (dmd5, parts[3]))
+        drift += len(marks)
+        print("%-22s %s" % (name, " ".join(marks) if marks else "OK"))
     sys.exit(1 if drift else 0)
 
 

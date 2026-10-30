@@ -1,6 +1,42 @@
-// nerepair.c v1.1 -- ptrace supervisor: repair the 32B-record va_list fault, cover all user processes.
-// v1.1: structured event log (epoch/iso/pid/comm/event/detail), 1MB rotation, 20 lines/s
-//       rate limit, 60s STAT heartbeat, SIGTERM/SIGINT EXIT record.
+/*
+ * nerepair.c v1.4 -- ptrace supervisor: repair the 32B-record va_list fault
+ * in place, cover every user process on the device.
+ *
+ * Role in the SIGSEGV fix (docs/SIGSEGV/FIX.md): vaguard protects the static
+ * binaries we build; nerepair is the runtime safety net for everything else
+ * (vendor binaries, ash/awk/grep CGI chains).  It attaches to all pids, and
+ * on each SIGSEGV/SIGBUS stop decides whether the fault matches the known
+ * va_list corruption shape; if it does, the faulting load is skipped and the
+ * destination register is pointed at the stack so the callee survives.  The
+ * vsurv4 canary is always passed through so the fix stays measurable.
+ *
+ * Event log: /data/gw/logs/nerepair.log, TSV
+ *   epoch  iso8601  pid  comm  event  detail
+ * 1MB rotation (single .1 generation), 20 lines/s rate limit, 60s STAT
+ * heartbeat, heartbeat file /tmp/nerepair.hb (uptime seconds, for the
+ * watchdog SVC_TABLE liveness probe).
+ *
+ * v1.4 (code-quality round):
+ *   - attach_pid: waitpid is now retried on EINTR and PTRACE_DETACHes on any
+ *     other failure.  Since v13 SIGALRM deliberately lacks SA_RESTART, an
+ *     alarm landing inside attach could abort the wait and leave the tracee
+ *     in group-stop forever (attaching to dropbear would freeze SSH).
+ *   - logev: snprintf return values are clamped before advancing the write
+ *     cursor (snprintf returns the *would-be* length; the old accounting
+ *     could index past msg[] if a format string ever grew past the buffer).
+ *   - main: the SIGTERM sigaction no longer shadows the wait status `st`.
+ *   - version string centralized in NEREPAIR_VER (START record), comment
+ *     style aligned with the rest of gw/src.
+ * v1.3: SIGALRM handler installed without SA_RESTART so waitpid returns
+ *   EINTR and the heartbeat/STAT ticks actually fire.
+ * v1.2: /tmp/nerepair.hb heartbeat (60s) for watchdog svc_supervise.
+ * v1.1: structured TSV log + 1MB rotation + 20 lines/s rate limit + 60s
+ *   STAT + SIGTERM/SIGINT EXIT record.
+ * v1.0: repair core (is_ldr_same/shape_ok/register rewrite).
+ *
+ * Build: sh tools/build_nerepair.sh   (zig cc aarch64-linux-musl, static,
+ * vaguard linked like every other static binary -- see FIX.md §"保持现状".)
+ */
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,6 +71,7 @@
 #endif
 #define NT_PRSTATUS 1
 #define LOGPATH "/data/gw/logs/nerepair.log"
+#define NEREPAIR_VER "1.4"
 
 struct regs64 { unsigned long regs[31]; unsigned long sp, pc, pstate; };
 static pid_t self_pid;
@@ -75,15 +112,22 @@ static int rate_ok(void)
 }
 static void logev(const char *ev, pid_t pid, const char *fmt, ...)
 {
-    char msg[512]; char comm[32]; int n; va_list ap; time_t t; struct tm tm;
+    char msg[512]; char comm[32]; int n, m; va_list ap; time_t t; struct tm tm;
     time(&t); localtime_r(&t, &tm);
     comm_of(pid, comm, sizeof comm);
     n = snprintf(msg, sizeof msg, "%ld\t%04d-%02d-%02dT%02d:%02d:%02d\t%d\t%s\t%s",
                  (long)t, tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
                  tm.tm_hour, tm.tm_min, tm.tm_sec, (int)pid, comm, ev);
-    if (n < (int)sizeof msg - 2) msg[n++] = 0x09;
-    va_start(ap, fmt); n += vsnprintf(msg + n, sizeof msg - n, fmt, ap); va_end(ap);
-    if (n < (int)sizeof msg - 1) msg[n++] = '\n';
+    if (n < 0) return;
+    if (n > (int)sizeof msg - 2) n = (int)sizeof msg - 2;   /* clamp: would-be length */
+    msg[n++] = '\t';
+    va_start(ap, fmt);
+    m = vsnprintf(msg + n, sizeof msg - n, fmt, ap);
+    va_end(ap);
+    if (m < 0) m = 0;
+    if (m > (int)sizeof msg - 1 - n) m = (int)sizeof msg - 1 - n;
+    n += m;
+    msg[n++] = '\n';
     if (logfd >= 0) { ssize_t r = write(logfd, msg, n); (void)r; }
     rotate_log();
 }
@@ -161,10 +205,14 @@ static int traced(pid_t pid)
 }
 static void attach_pid(pid_t pid)
 {
-    int st;
+    int st; pid_t w;
     if (pid == self_pid || pid <= 0) return;
     if (ptrace(PTRACE_ATTACH, pid, 0, 0) < 0) return;
-    if (waitpid(pid, &st, __WALL) < 0) return;
+    /* v1.4: EINTR-retry (SIGALRM has no SA_RESTART since v1.3) and detach on
+     * any other wait failure -- a tracee abandoned in group-stop is frozen
+     * for good (PTRACE_DETACH on a dead/non-stopped pid just fails softly). */
+    do { w = waitpid(pid, &st, __WALL); } while (w < 0 && errno == EINTR);
+    if (w < 0 || !WIFSTOPPED(st)) { ptrace(PTRACE_DETACH, pid, 0, 0); return; }
     ptrace(PTRACE_SETOPTIONS, pid, 0, PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK | PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXEC);
     ptrace(PTRACE_CONT, pid, 0, 0);
     g_attached++;
@@ -196,10 +244,10 @@ int main(void)
     int st; pid_t pid;
     self_pid = getpid();
     logfd = open(LOGPATH, O_WRONLY | O_CREAT | O_APPEND, 0644);
-    logev("START", 0, "pid=%d ver=1.3", self_pid);
+    logev("START", 0, "pid=%d ver=%s", self_pid, NEREPAIR_VER);
     write_hb();
     { struct sigaction sa; memset(&sa, 0, sizeof sa); sa.sa_handler = on_alarm; sa.sa_flags = 0; sigaction(SIGALRM, &sa, NULL); }
-    { struct sigaction st; memset(&st, 0, sizeof st); st.sa_handler = on_term; st.sa_flags = 0; sigaction(SIGTERM, &st, NULL); sigaction(SIGINT, &st, NULL); }
+    { struct sigaction sa; memset(&sa, 0, sizeof sa); sa.sa_handler = on_term; sa.sa_flags = 0; sigaction(SIGTERM, &sa, NULL); sigaction(SIGINT, &sa, NULL); }
     alarm(60);
     if (!traced(1)) attach_pid(1);
     scan_proc();

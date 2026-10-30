@@ -105,10 +105,17 @@ if ! grep -q ' /etc/shadow ' /proc/mounts; then
     if [ -n "$_pick" ]; then
         [ "$_pick" = "$SB" ] && cp -f "$SB" "$SO" 2>/dev/null   # bak 有效而主坏: 自愈回写
         [ "$_pick" = "$SO" ] && cp -f "$SO" "$SB" 2>/dev/null    # 主有效: 刷新存档
-        chmod 600 "$SO" 2>/dev/null
-        mount --bind "$SO" /etc/shadow 2>/dev/null \
-            && logger -t rc.extend "shadow bind OK (via $_pick)" \
-            || logger -t rc.extend "shadow bind FAILED ($_pick)"
+        # v3.4 (质量轮): 自愈 cp 失败(/data 满/IO 错)时 $SO 仍是坏文件, 若照常
+        # bind 则 SSH+串口认证同时锁死(v2.1 要杜绝的自锁事故换个入口回归)。
+        # cp 后复验, 主文件无效即放弃 bind(保住 /etc/shadow 原件 = 至少可登录修复)。
+        if ! grep -qE '^toor:(\$[16]\$|!)' "$SO" 2>/dev/null; then
+            logger -t rc.extend "shadow self-heal FAILED (override invalid after cp) -- skip bind"
+        else
+            chmod 600 "$SO" 2>/dev/null
+            mount --bind "$SO" /etc/shadow 2>/dev/null \
+                && logger -t rc.extend "shadow bind OK (via $_pick)" \
+                || logger -t rc.extend "shadow bind FAILED ($_pick)"
+        fi
     else
         logger -t rc.extend "shadow.override 无有效文件, 跳过 bind"
     fi

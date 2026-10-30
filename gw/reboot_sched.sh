@@ -1,5 +1,10 @@
 #!/bin/sh
-# reboot_sched.sh v1.4 -- 定时重启守护(出厂默认: 每日 04:00)
+# reboot_sched.sh v1.5 -- 定时重启守护(出厂默认: 每日 04:00)
+# v1.5 (质量轮, 审计 P1): 时钟可信判据 "年份>=2024" → /tmp/ntp_synced(权威标记,
+#   ntp_keeper v1.6 首次同步后落盘; avail_sampler/core_meta/netlock 均已消费)。
+#   原判据在构建日 2026-09-09 的假钟下恒真: 无 RTC 设备离线运行时假钟按真实
+#   速率走完 24h 必然穿过 04:00 窗 → 在任意真实时刻重启; 且 last 文件记的是
+#   假日期, 次日即失效可每日重复, NTP 跳变后同一天还可能再触发一次(双重启)。
 # 配置: defaults.conf(只读出厂) 叠 settings.conf(用户稀疏覆盖), 与 NTP/WiFi 族同源;
 #   每轮重读 → GUI 改配置无需重启本守护。
 # v1.2 (2026-10-18 04:00 事件复盘): 触发行同时落 /data/gw/logs/reboots.log(持久) —
@@ -10,8 +15,8 @@
 #   不能依赖别的守护的时序(ntp_keeper 也做, 幂等双保险)。
 # 护栏(缺一不发; 每一条都对应一种真实故障):
 #   1) REBOOT_EN=1                      -- 用户可停用
-#   2) 时钟可信: 年份 >= 2024           -- 设备无 RTC, 冷启动时钟可能停在 1970/2000,
-#      否则 "00:xx 命中 04:00" 类假命中会变成重启循环
+#   2) 时钟可信: /tmp/ntp_synced 存在   -- 设备无 RTC, 开机时钟=固件构建日(2026),
+#      年份阈值拦不住它; NTP 首次同步前的假钟命中窗口 = 任意真实时刻重启(v1.5)
 #   3) 已运行 >= 300s                   -- 重启后本守护再启动, 时钟未校准时也不复触发
 #   4) 命中窗口 [目标时刻, +5min)       -- 容忍 30s 轮询抖动与对时跳变
 #   5) 当日未执行(last 文件比对)        -- 跨重启持久(/data), 杜绝同日二次重启
@@ -40,14 +45,14 @@ while :; do
         echo "$TZ" > /etc/TZ
     fi
     if [ "${REBOOT_EN:-0}" = 1 ]; then
-        Y=$(date +%Y); U=$(cut -d. -f1 /proc/uptime 2>/dev/null)
+        U=$(cut -d. -f1 /proc/uptime 2>/dev/null)
         H=$(date +%H); M=$(date +%M); D=$(date +%F)
         TH=${REBOOT_TIME%%:*}; TM=${REBOOT_TIME#*:}
         # busybox ash: 前导零按八进制解析(08/09 直接报错) -- 去零再算术
         H=$(( ${H#0} + 0 )); M=$(( ${M#0} + 0 ))
         TH=$(( ${TH#0} + 0 )); TM=$(( ${TM#0} + 0 ))
         DIFF=$(( H * 60 + M - TH * 60 - TM ))
-        if [ "${Y:-0}" -ge 2024 ] && [ "${U:-0}" -ge 300 ] \
+        if [ -s /tmp/ntp_synced ] && [ "${U:-0}" -ge 300 ] \
            && [ $DIFF -ge 0 ] && [ $DIFF -lt 5 ] \
            && [ "$(cat $LAST 2>/dev/null)" != "$D" ]; then
             echo "$D" > $LAST

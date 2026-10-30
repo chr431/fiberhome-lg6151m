@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """leak_check.py -- 敏感词零命中门禁（本仓库 = 公开固件仓）。
 
+v2.3 (质量轮, 审计): (1) 模式在启动时逐条 re.compile 校验 —— 外置
+  leak_patterns.py 含非法正则时立即 exit 1, 不再让拼接模式静默炸成零命中
+  (零命中 = 泄漏被放行); (2) LG_SECRETS_DIR 已显式指定而文件缺失时
+  exit 1(fail-closed)——公开仓的普通 clone(无 _local)保持 WARN 放行,
+  但"明确配置过个人PII层的机器"不允许静默降级。
+
 任何专有/私有标识不得出现在本仓库。默认扫描工作树；--history 追加全部
 git 提交对象（内容与提交信息）。命中 = exit 1。
 
@@ -35,8 +41,19 @@ if os.path.isfile(_pfile):
     PERSONAL = _ns.get("PATTERNS", [])
     if not PERSONAL:
         print("WARN: %s 存在但 PATTERNS 为空" % _pfile)
+elif os.environ.get("LG_SECRETS_DIR"):
+    # v1.3: 显式指定了 secrets 目录却说没有 —— 配置漂移, 拒绝降级为仅仓纪律词
+    sys.exit("!! LG_SECRETS_DIR 已指向 %s 但 leak_patterns.py 缺失 — "
+             "个人PII层拒绝静默跳过" % SECRETS_DIR)
 else:
     print("WARN: 个人PII模式未配置(%s) — 仅扫描仓纪律词" % _pfile)
+# v1.3: 模式合法性前置校验(fail-closed)。PATTERNS 允许是正则(如手机号
+# 1[0-9]{11}), 因此不转义——但非法正则必须在此刻报错, 不能等到扫描时炸成零命中。
+for _p in PAT_GENERIC + PERSONAL:
+    try:
+        re.compile(_p, re.I)
+    except re.error as _e:
+        sys.exit("!! 模式非法(re.error: %s): %r — 门禁拒绝启动" % (_e, _p))
 SCAN_PAT = re.compile("|".join(PAT_GENERIC + PERSONAL), re.I)
 
 

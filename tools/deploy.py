@@ -1,6 +1,20 @@
 #!/usr/bin/env python3
-"""deploy.py v2.31 -- single source of truth for PC<->CPE deployment + drift guard.
+"""deploy.py v2.33 -- single source of truth for PC<->CPE deployment + drift guard.
 
+v2.33 (质量轮, 审计 P0/P1): (1) push() REFUSED/MD5-MISMATCH 计入退出码 —— 原实现
+     部分失败甚至全部拒送仍 exit 0, CI 把失败部署判成功(正是本工具要消灭的
+     "fix experiments silently never run" 形态); (2) post-deploy selftest 超时
+     120s→900s 且捕获 TimeoutExpired(103 测试/296 次 SSH exec 常态远超 120s,
+     原实现部署成功却以 traceback 收场); (3) push_serial 目标侧改 tmp+md5 门禁
+     +原子 mv(与 push/put 同款; 原直写最终路径, 串口弱网重试窗口内设备上是
+     已 chmod +x 的残件); (4) connect() 指纹不匹配(PinPolicy 检出中间人)不再
+     被裸 except 吞成 "no mgmt path" —— 立即中止并给出真实告警; (5) put()
+     校验 --mode 八进制与 remote 字符集, attic() 对设备侧文件名 shlex.quote
+     (strays 数据源是设备 ls 输出, 属不可信输入); (6) MANIFEST +gw/bin/stackdump
+     (core_meta v1.7+ 的运行时依赖, 原靠手工推送 = 部署不可重现点);
+     (7) MANIFEST -gw/udhcpc_eth1.script -gw/wedge_watch.sh -gw/night_report.sh
+     (零消费方死件; 详见提交说明)。
+v2.32 (LAN v6 轮, 台账先行/头注本次追平): MANIFEST +gw/v6_reconcile.sh +gw/www/api_v6.sh。
 v2.31 (SIGSEGV §8.13): MANIFEST -gw/bin/dpquar.ko -gw/bin/dpclamp.ko —— 旧内核
      修复栈整体退役(源码/产物/构建脚本同批删除, 可经 git 历史取回)。
 v2.30 (avail round): MANIFEST +gw/avail_sampler.sh +gw/www/api_avail.sh
@@ -47,6 +61,7 @@ Usage:
 """
 import sys, os, re, hashlib, subprocess
 import datetime
+import shlex
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # 凭证外置: _local/secrets/device_local.py (LG_SECRETS_DIR 可覆盖)
@@ -97,7 +112,6 @@ MANIFEST = [
     ("gw/v3_babysit_v2.sh", "/data/rescue/babysit.sh"),   # boot babysitter (preinit)
     ("gw/boot_gate.sh", "/data/gw/boot_gate.sh"),      # boot health gate (P0-2; boot.done/healthy/TRY_A)
     ("gw/core_meta.sh", "/data/gw/core_meta.sh"),      # core_pattern metadata wrapper (P1-2/P1-5)
-    ("gw/night_report.sh", "/data/gw/night_report.sh"),
     ("gw/wifi_guard.sh", "/data/gw/wifi_guard.sh"),   # BA-stall auto-recovery
     ("gw/bin/wpapmk", "/data/gw/wpapmk"),          # WPA passphrase->PMK (fh hostapd only eats wpa_psk)
     ("gw/bin/mipc_cellular", "/data/gw/mipc_cellular"),  # cellular MIPC direct CLI (P1 engine base)
@@ -138,23 +152,22 @@ MANIFEST = [
     ("gw/fan_mode.conf", "/data/gw/fan_mode.conf"),     # performance | silent
     ("gw/bin/healthdog.ko", "/data/gw/healthdog.ko"),
     ("gw/bin/nerepair", "/data/gw/bin/nerepair"),
+    ("gw/bin/stackdump", "/data/gw/bin/stackdump"),   # fault-time stack window (core_meta v1.7+ dep; v2.32 manifest member)
     ("gw/nerepair_launch.sh", "/data/gw/nerepair_launch.sh"),
     ("gw/bin/v3_fix.ko", "/data/gw/v3_fix.ko"),
     ("gw/bin/v3_steth.ko", "/data/gw/v3_steth.ko"),
-    ("gw/udhcpc_eth1.script", "/data/gw/udhcpc_eth1.script"),
     ("gw/defaults.conf", "/data/gw/defaults.conf"),
     ("gw/watchdog.sh", "/data/gw/watchdog.sh"),  # L13: continuous invariant monitor
     ("gw/log_keeper.sh", "/data/gw/log_keeper.sh"),  # log persistence daemon (syslog/dmesg mirror + /tmp snapshots)
     ("gw/core_trap.sh", "/data/gw/core_trap.sh"),  # daily user-space core capture window (P3)
     ("gw/diag_dump.sh", "/data/gw/diag_dump.sh"),  # one-shot redacted diagnostics bundle
-    ("gw/wedge_watch.sh", "/data/gw/wedge_watch.sh"),
     ("gw/zz_data_hook", "/data/build/rootfs/etc/init.d/zz_data_hook"),     # hook-slot watchdog (stethoscope)
 ]
 
 DEVICE_SET = {remote for _, remote in MANIFEST}
 # runtime tools that live in /data/gw but are not part of the deploy set
 EXTRA_KEEP = ["DEPLOY_MANIFEST", "ppe_reg",
-              "udhcpc_eth1.script", "portal_auth", "restore_wan.sh",
+              "portal_auth", "restore_wan.sh",
               "bin", "sbin",       # static toolchain dirs (P2; toolchain_init.sh owns them)
               "settings.conf",   # device-side sparse override of defaults.conf (api gw_set; not deployed)
               "agg_pins.conf",   # 含用户MAC的钉死表: 设备侧自管(模板见 agg_pins.conf.example)
@@ -190,6 +203,13 @@ def connect(tries=2):
                           timeout=10, allow_agent=False, look_for_keys=False,
                           banner_timeout=20)
                 return c, ip
+            except paramiko.SSHException as e:
+                # v2.32: 指纹钉死检出中间人时不静默轮换候选地址重试 —— 立即中止。
+                # 其余 SSHException(banner 超时等)与旧式不可达同路 continue。
+                if "fingerprint mismatch" in str(e):
+                    sys.exit("!! %s host key fingerprint mismatch -- possible MITM, "
+                             "refusing to continue: %s" % (ip, e))
+                continue
             except Exception:
                 continue
         time.sleep(2)
@@ -319,11 +339,13 @@ def push(names=None):
             sys.exit("!! no manifest entry matches %s" % names)
     c, ip = connect()
     print("pushing via %s" % ip)
+    refused = mismatch = 0
     for local, remote in targets:
         lp = os.path.join(REPO, local)
         st, tr = git_state(local)
         if st == "DIRTY" or tr == "UNTRACKED":
             print("REFUSED %-22s %s/%s -- commit it first" % (local, st, tr))
+            refused += 1
             continue
         data = open(lp, "rb").read()
         if local.endswith(".sh"):
@@ -361,7 +383,14 @@ def push(names=None):
         finally:
             ssh_cmd(c, "rm -f %s" % tmp)
         print("%-22s -> %-26s %s" % (local, remote, "OK" if got == want else "MD5-MISMATCH"))
+        if got != want:
+            mismatch += 1
     c.close()
+    # v2.32: 部分失败必须反映在退出码(原实现隐式 return None -> exit 0 假成功)
+    if refused or mismatch:
+        print("!! push incomplete: %d refused, %d md5-mismatch" % (refused, mismatch))
+        return 1
+    return 0
 
 
 def push_serial(names=None):
@@ -394,11 +423,21 @@ def push_serial(names=None):
         want = hashlib.md5(data).hexdigest()
         # v2.1 (2026-10-03 教训: 串口噪声打坏 b64 行, 首推 v6.0 损坏上设备):
         # md5 失配自动整文件重推, 最多 3 次; 仍失配则醒目报错退出非零
+        # v2.32 (P0): 目标侧 tmp+md5 门禁+原子 mv(与网络通道 push()/put() 同款)。
+        #   原实现 `> %s` 直写最终路径: 重试窗口内设备上的目标文件一直是损坏
+        #   内容且已 chmod +x —— 开机 dispatcher 执行残件正是 v2.13 修掉的事故
+        #   形态, 而串口恰是弱网高发路径。失败分支的 .dp 未 chmod, 无残件风险。
         for attempt in range(1, 4):
-            out = scmd("openssl base64 -d </tmp/dp.b64 > %s 2>/tmp/dp.err; chmod +x %s; md5sum %s" % (remote, remote, remote), 30)
+            out = scmd("openssl base64 -d </tmp/dp.b64 > %s.dp 2>/tmp/dp.err; md5sum %s.dp" % (remote, remote), 30)
             got = [l for l in out.splitlines() if want in l]
             if got:
-                break
+                scmd("chmod +x %s.dp; mv -f %s.dp %s" % (remote, remote, remote), 30)
+                out = scmd("md5sum %s" % remote, 30)
+                got = [l for l in out.splitlines() if want in l]
+                if got:
+                    break
+                print("%-22s attempt %d post-mv MD5-MISMATCH -- rewriting whole file" % (local, attempt))
+                continue
             print("%-22s attempt %d MD5-MISMATCH -- rewriting whole file" % (local, attempt))
             scmd("rm -f /tmp/dp.b64")
             for chunk in b64:
@@ -418,7 +457,9 @@ def attic():
     if not strays:
         print("nothing to attic"); c.close(); return
     print("attic: %s" % " ".join(strays))
-    ssh_cmd(c, "mkdir -p /data/gw/attic && cd /data/gw && mv %s attic/ 2>/dev/null" % " ".join(strays))
+    # v2.32: strays 来自设备 ls 输出(不可信输入)—— 逐个 shlex.quote 再拼接
+    ssh_cmd(c, "mkdir -p /data/gw/attic && cd /data/gw && mv %s attic/ 2>/dev/null"
+            % " ".join(shlex.quote(s) for s in strays))
     print("kept in place: manifest + %s" % " ".join(sorted(extra)))
     c.close()
 
@@ -462,9 +503,14 @@ def put():
     local, remote = argv
     if not os.path.isfile(local):
         sys.exit("!! 本地文件不存在: %s" % local)
+    if mode is not None and not re.fullmatch(r"[0-7]{3,4}", mode):
+        sys.exit("!! --mode 必须是八进制权限位(如 755), 得到 %r" % mode)
     if not remote.startswith("/"):
         sys.exit("!! remote 必须是以 / 开头的绝对路径(得到 %r)。"
                  "Git-Bash/MSYS 会把 /xx 转成 Windows 路径——调用时加 MSYS_NO_PATHCONV=1" % remote)
+    # v2.32: remote 会以字符串拼接进远端 shell 命令 —— 只放行无元字符的绝对路径
+    if not re.fullmatch(r"/[A-Za-z0-9_./+-]*", remote):
+        sys.exit("!! remote 含空格/shell 元字符(得到 %r) —— 拒绝拼接注入面" % remote)
     data = open(local, "rb").read()
     want = hashlib.md5(data).hexdigest()
     c, ip = connect()
@@ -530,13 +576,21 @@ if __name__ == "__main__":
         names = [a for a in sys.argv[2:] if not a.startswith("-")]
         rc = fn(names or None)
         # post-deploy selftest (L13: 部署后自动验证, 非 push 之外的操作)
-        if rc in (0, None) and "--no-test" not in sys.argv:
+        # v2.32: 超时 120s→900s(selftest 103 项/296 次 SSH exec 常态远超 120s)
+        #   并捕获 TimeoutExpired —— 原实现部署成功却以未捕获异常 traceback 收场
+        if rc == 0 and "--no-test" not in sys.argv:
             print("\n--- post-deploy selftest ---")
-            st = subprocess.run(
-                [sys.executable, os.path.join(REPO, "tools", "selftest.py")],
-                cwd=REPO, timeout=120)
-            if st.returncode != 0:
-                print("!! selftest FAILURES after deploy -- check above")
+            try:
+                st = subprocess.run(
+                    [sys.executable, os.path.join(REPO, "tools", "selftest.py")],
+                    cwd=REPO, timeout=900)
+            except subprocess.TimeoutExpired:
+                print("!! selftest 超时(900s) -- 部署本身已成功, 验证未完成;"
+                      "请手动运行 selftest 后再信任本次部署")
                 rc = 1
+            else:
+                if st.returncode != 0:
+                    print("!! selftest FAILURES after deploy -- check above")
+                    rc = 1
         sys.exit(rc)
     sys.exit(fn())

@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""upgrade_slot v1.0 -- SSH 整槽升级器: 不经串口重刷 slot A rootfs (P3/第一档加固)
+"""upgrade_slot v1.1 -- SSH 整槽升级器: 不经串口重刷 slot A rootfs (P3/第一档加固)
+
+v1.1 (质量轮, 审计 P0-1): 修复 payload 占位符替换链 —— v1.0 的
+  .replace("__MD5", "__MD5__").replace("__MD5__", md5) 会把 PAYLOAD 里的
+  __MD5__ 膨胀成 __MD5____ 再替换, 残留两个尾下划线, 设备端 md5-gate 恒 FAIL
+  (fail-closed: 不会刷坏设备, 但整槽升级自 v1.0 起从未可能成功)。现改为
+  一次性唯一占位符 __DEVMD5__。同轮: --img/--md5 入参校验(路径拼进远端
+  shell 命令, 只放行安全字符); payload 送达失败时清理 PC 侧临时文件。
 
 设计(与 LK 串口管线等价的安全网, 全程网络):
   1. 预检: vercheck 全绿 / 当前 bootslot=a / 设备侧镜像存在且 md5 双验 /
@@ -32,7 +39,7 @@ LOG_REMOTE = "/data/upgrade/upgrade.log"
 PAYLOAD = r'''#!/bin/sh
 # do_upgrade.sh v1.0 -- slot A 原位重镜像(自驱; SSH 会在 REBOOTING 处断开)
 IMG="__IMG__"
-MD5="__MD5__"
+MD5="__DEVMD5__"
 P26=/dev/mmcblk0p26
 MISC=/dev/mmcblk0p1
 BK=/data/upgrade/old_p26.bak
@@ -103,6 +110,12 @@ def main():
 
     c = lgssh.connect()
     run = lgssh.run
+    # v1.1: --img/--md5 会以字符串拼接进远端 shell 命令 —— 入参即注入面, 校验后放行
+    import re as _re
+    if not _re.fullmatch(r"/[A-Za-z0-9_./+-]+", a.img or ""):
+        sys.exit("FAIL: --img 必须是无元字符的绝对路径(得到 %r)" % a.img)
+    if a.md5 and not _re.fullmatch(r"[0-9a-f]{32}", a.md5):
+        sys.exit("FAIL: --md5 必须是 32 位十六进制(得到 %r)" % a.md5)
     # 2) 设备态断言
     slot = run(c, "cat /proc/cmdline | tr ' ' '\n' | grep '^bootslot='").strip()
     if slot != "bootslot=a":
@@ -116,7 +129,8 @@ def main():
     print("preflight: image md5 = %s %s" % (dev_md5, "(校验通过)" if a.md5 else "(未指定预期, 以此为基准)"))
 
     # 3) 生成并发送 payload(经 deploy put, 唯一投递通道)
-    payload = PAYLOAD.replace("__IMG__", a.img).replace("__MD5", "__MD5__").replace("__MD5__", dev_md5)
+    # v1.1: 单次唯一占位符替换(v1.0 的三步链残留 "__", md5-gate 恒 FAIL)
+    payload = PAYLOAD.replace("__IMG__", a.img).replace("__DEVMD5__", dev_md5)
     run(c, "mkdir -p /data/upgrade")
     import tempfile
     with tempfile.NamedTemporaryFile("w", suffix=".do_upgrade.sh", delete=False,
@@ -130,6 +144,7 @@ def main():
     out = (r.stdout + r.stderr).strip()
     print(out.splitlines()[-1] if out else "put: (no output)")
     if r.returncode != 0 or "OK" not in out:
+        os.unlink(local)          # v1.1: 失败路径也清理 PC 侧临时文件
         sys.exit("FAIL: payload 送达未确认")
     os.unlink(local)
     if a.dry_run:

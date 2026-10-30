@@ -1,5 +1,9 @@
 #!/bin/sh
-# watchdog.sh v1.38 -- on-device continuous invariant monitor.
+# watchdog.sh v1.39 -- on-device continuous invariant monitor.
+# v1.39 (2026-10-31 质量轮): NETLOCK_BREAKS 补 1h 窗口复位 —— v1.36 头注语义
+#   "每小时最多 3 次"此前从未实现, 计数器只在进程内累加: 看门狗长驻数周, 累计
+#   3 次轮转后自愈配额永久耗尽, 再遇锁泄漏(v1.36 防御的场景)写方持续超时、
+#   failover 停摆而无人自救。
 # v1.38 (2026-10-29 流量口径轮): qdisc 对账改用绝对路径 /sbin/tc —— PATH 里的
 #   /data/gw/sbin/tc 是 busybox 的, 不支持 "-s qdisc show", 该对账一直报假 "missing"。
 # v1.37 (2026-10-29 feat.usb 轮): 重启配方 "sh /data/gw/<script> <args>" 不再丢参数 ——
@@ -332,8 +336,12 @@ run_cycle() {
             set_state netlock 1 "netcfg write lock"
             FAILS=$((FAILS+1))
             log "FAIL detail netlock busy=${NETLOCK_BUSY}x holders=[${_nlh:-?}]"
+            # v1.39: 滚动 1h 窗口 — 距上次轮转 >=3600s 即归还配额(时钟回拨时
+            #   差值为负不复位, 保守方向: 少轮转, watchdog 其余判据兜底)
+            [ $(( $(date +%s) - ${NETLOCK_BREAKS_AT:-0} )) -ge 3600 ] && NETLOCK_BREAKS=0
             if [ "${NETLOCK_BREAKS:-0}" -lt 3 ] && netcfg_break; then
                 NETLOCK_BREAKS=$(( ${NETLOCK_BREAKS:-0} + 1 ))
+                NETLOCK_BREAKS_AT=$(date +%s)
                 log "EVT netlock broken (rotation ${NETLOCK_BREAKS}/3)"
             fi
         fi
@@ -864,7 +872,7 @@ EOF
 
 # ---- main ----
 case "${1:-}" in
---version) echo "watchdog v1.38"; exit 0 ;;
+--version) echo "watchdog v1.39"; exit 0 ;;
 esac
 touch $LOG $STATE
 # v1.20: 看门狗单实例 — 双实例会重复自愈/告警(现场曾出现 2 个).

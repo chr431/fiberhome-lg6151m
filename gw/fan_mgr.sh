@@ -1,5 +1,9 @@
 #!/bin/sh
-# fan_mgr.sh v1.6 -- 原厂梯度温控风扇守护 (2026-10-04 破案后固化)
+# fan_mgr.sh v1.7 -- 原厂梯度温控风扇守护 (2026-10-04 破案后固化)
+# v1.7 (质量轮, 审计 P1): 温度源失效 fail-safe — soc_max 温区缺失/temp 不可读时
+#   原 temp() 兜底 echo 0 = 0°C < OFF → 每轮 force-off 关扇且零告警(PWM 回读校验
+#   目标也是 0, 连 WARN 都不触发), 正是 v1.4 头注"散热件不允许静默停摆"要防的
+#   形态。现改为输出 999°C(顶挡全速) + 状态迁移时落一条日志。
 # v1.5 (P1-1): 单实例锁 + 心跳(v1.4) — 看门狗重启不会拉出双实例.
 # v1.4 (2026-10-20 stability batch1): 每轮写 /tmp/fan_mgr.hb — watchdog 用
 #   心跳识别“进程活但 PWM 卡死”; 散热件不允许静默停摆。
@@ -11,11 +15,24 @@ RPM=/sys/devices/platform/pwm-fan-cap/hwmon/hwmon2/pwm1_rpm
 LOG=/tmp/fan_mgr.log
 flog() { echo "$(date '+%m-%d %H:%M:%S') $*" >> $LOG; }
 
-temp() {  # soc_max 温度(°C)
+_TEMP_OK=1
+temp() {  # soc_max 温度(m°C); 失效时 fail-safe 999000(=999°C → 顶挡)
+    _v=""
     for z in /sys/class/thermal/thermal_zone*; do
-        [ "$(cat $z/type 2>/dev/null)" = "soc_max" ] && { cat $z/temp; return; }
+        [ "$(cat $z/type 2>/dev/null)" = "soc_max" ] && { _v=$(cat $z/temp 2>/dev/null); break; }
     done
-    echo 0
+    case "$_v" in
+        -[0-9]*|[0-9]*)
+            [ "$_TEMP_OK" = 0 ] && flog "INFO soc_max temp recovered"
+            _TEMP_OK=1
+            echo "$_v"
+            ;;
+        *)
+            [ "$_TEMP_OK" = 1 ] && flog "WARN soc_max temp unavailable -> fail-safe 999C (top level)"
+            _TEMP_OK=0
+            echo 999000
+            ;;
+    esac
 }
 
 lvl_pwm() {  # 梯度表: performance

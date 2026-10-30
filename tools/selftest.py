@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """selftest.py -- assertion-based functional test suite for the LG6151M gateway.
+v2.68 (2026-10-31 质量轮): 类别名存在性校验(拼错=exit 1, 原 0 测试全绿);
+  dev() timeout 形参透传到 lgssh.run(原恒 60s)。
 v2.67 (2026-10-26 SIGSEGV §8.13): 旧内核修复栈整体退役 -- t_fixstack 改为退役
   断言(lsmod / /proc 节点 / /data .ko / rc19 非注释引用 四处零残留), 并删除
   marker 分支与 SKIP 台账断言(该台账不再产生)。
@@ -156,7 +158,7 @@ def dev(cmd, timeout=15):
     global _c
     if _c is None:
         _c = lgssh.connect()
-    return lgssh.run(_c, cmd)
+    return lgssh.run(_c, cmd, timeout=timeout)   # v2.68: 形参此前从未透传(恒 60s)
 
 
 def api(endpoint, token=None, timeout=10):
@@ -2363,6 +2365,13 @@ def main():
             pass
     args = sys.argv[1:]
     cats = [a for a in args if not a.startswith("-")]
+    # v2.68: 类别名做存在性校验 —— 拼错名(如 wifiy)原实现匹配 0 个测试、
+    # 0 失败、exit 0, CI 里手误即静默全绿
+    known = {cat for _, cat, _ in _REGISTRY}
+    bad = [c for c in cats if c not in known]
+    if bad:
+        print(f"!! 未知测试类别: {', '.join(bad)} (已知: {', '.join(sorted(known))})")
+        return 1
     json_out = "--json" in args
     if "--list" in args:
         for name, cat, fn in _REGISTRY:

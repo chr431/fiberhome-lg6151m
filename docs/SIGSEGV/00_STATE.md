@@ -10,6 +10,8 @@
 
 **2026-10-31 更新**：vsurv4 H4v1 普查 **88/112** 份 canary dump 含记录（78.6%，Wilson 95% CI **70.1–85.2%**）；`top-x2=0x390` 在 **111/112** 恒定；记录有三副本（`x2` 82、`x2-0x240` 66、`x2-0x130` 18）。canary 作为记录探测器已被验证（C-137/C-139）；自然 NE 份额 **0/4**（3 自然 core + 1 自然 .stack），Wilson 95% 上界 **49.0%**（C-142）；不能用 canary 外推（C-140）。
 
+**判决（C-145）**：**Transport = PA/DMA（E2）**；记录 = WED TXD；页级 kprobe 判决被 `CONFIG_KPROBES=n` 阻断（C-144），故停在 E2。详见 [VERDICT.md](VERDICT.md)。
+
 ## 2. 已确立（E2/E3）
 
 | ID | 结论 | 关键数字 |
@@ -49,7 +51,7 @@
 |---|---|---|---|
 | C-006 | 0x780 暂存槽 vs ap2 是两个目标地址；71/32 的物理含义 | 暂存槽只活 ~10 条指令；固定写 ap2 产生不了 A0B2 | **vsurv5**：手写 va_copy 到不同暂存偏移；A0B2 跟暂存槽走/消失则 B-1 成立 |
 | C-009 | sh.core 的“bystander”是否安全 | sh.core 是装置 shell；记录两个零字可把指针槽清零 | 降 E1；补良性正对照 |
-| C-013/C-034 | 传输是 uaccess 还是 GUP-DMA | 固定 VA/PA 排除；VA-resolved；copy_to_user 强阴性；ref=1025 杀死泄漏 pin；canary 88/112 落在自身栈（C-140） | **mtk_warp** GUP/zerocopy 静态；页级 probe（pgprobe）判决 |
+| C-013/C-034 | 传输是 uaccess 还是 GUP-DMA | **判决 PA/DMA（E2，C-145）**；页级 kprobe 被 CONFIG_KPROBES=n 阻断（C-144） | 升 E3：重编内核开 KPROBES，或用户态 remap/RO 实验 |
 | C-025 | 自然 NE 中记录家族占比 | 3 份自然 core 0/3 record；95% 上界 63%；canary 88/112 验证探测器 | 自然 NE 栈普查；分层；不要用 canary 外推 |
 | C-026/C-038 | GUP/stale 用户指针 | 内核有完整 zerocopy 栈；模块 0 GUP 导入；驱动 dma_map_page | 查 mtk_warp/mt_wifi 的 skb frag/zerocopy；ref/use-after-unpin |
 | C-035 | cth_cfu 正对照 Oops/重启 | 一次未复现；3 个候选机制 | 修 cth（递归守卫、去 dump_stack、默认关 c2u）后再跑 |

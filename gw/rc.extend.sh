@@ -176,6 +176,10 @@ case "$slot" in
      _fore=0; [ -e /data/gw/healthdog.forensic ] && _fore=1
      insmod /data/gw/healthdog.ko forensic=$_fore armed=0 2>/dev/null
      nohup sh /data/gw/rc19.sh >/tmp/rc19.log 2>&1 &
+     # v3.3 (SIGSEGV fix): nerepair -- ptrace supervisor for the 32B-record family.
+     #   Repairs the va_list fault (ldr Xt,[Xt] + record shape at x2) in any user
+     #   process; vsurv4 canary is excluded so its H4 diagnostic keeps working.
+     pgrep -f '/data/gw/bin/nerepair' >/dev/null 2>&1 ||          nohup /data/gw/bin/nerepair >>/data/gw/logs/nerepair.out 2>&1 &
      # v3.0 (SIGSEGV Phase 1): 改回内核默认 0。该设置原本只为"锁内深遍历 +
      #   旧栈"组合兜底, 叠加源已随旧栈退役消失(§8.13); 保留 1 会把任何真实 RCU 停顿
      #   升级成重启, 既丢现场又会打断刚修好的 NE 台账。

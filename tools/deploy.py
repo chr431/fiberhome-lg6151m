@@ -137,6 +137,7 @@ MANIFEST = [
     ("gw/fan_mgr.sh", "/data/gw/fan_mgr.sh"),        # stock-ladder thermal fan supervisor
     ("gw/fan_mode.conf", "/data/gw/fan_mode.conf"),     # performance | silent
     ("gw/bin/healthdog.ko", "/data/gw/healthdog.ko"),
+    ("gw/bin/nerepair", "/data/gw/bin/nerepair"),
     ("gw/bin/v3_fix.ko", "/data/gw/v3_fix.ko"),
     ("gw/bin/v3_steth.ko", "/data/gw/v3_steth.ko"),
     ("gw/udhcpc_eth1.script", "/data/gw/udhcpc_eth1.script"),

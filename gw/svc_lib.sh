@@ -1,5 +1,7 @@
 #!/bin/sh
-# svc_lib.sh v1.3 -- shared supervision, lock, heartbeat and minimal-parser library.
+# svc_lib.sh v1.4 -- shared supervision, lock, heartbeat and minimal-parser library.
+# v1.4 (SIGSEGV fix): SVC_TABLE +nerepair(记录修复 supervisor; hb /tmp/nerepair.hb
+#   60s, max-hb-age 180; recipe sh /data/gw/nerepair_launch.sh 写 /tmp/nerepair.lock 后 exec).
 # v1.3 (SIGSEGV Phase 0): SVC_TABLE -core_trap(每日文件模式窗口停用)。该登记项
 #   必须同时摘掉: 留着它 watchdog 就会把已停用的守护重新拉起, 并再次改写
 #   core_pattern 为文件模式(观测盲窗)。
@@ -250,4 +252,5 @@ log_keeper|log_keeper[.]sh|log_keeper.sh|sh /data/gw/log_keeper.sh|/tmp/log_keep
 healthdog|healthdog[.]sh|healthdog.sh|sh /data/gw/healthdog.sh|/tmp/healthdog.hb|60|
 dial_keeper|dial_keeper[.]sh|dial_keeper.sh|sh /data/gw/dial_keeper.sh|/tmp/dial_keeper.hb|90|LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib PATH=/data/gw/sbin:/data/gw/bin:/usr/sbin:/usr/bin:/sbin:/bin:/fhrom/bin:/fhrom/fhshell
 usb_mgr|usb_mgr[.]sh|usb_mgr.sh|sh /data/gw/usb_mgr.sh daemon|/tmp/usb_mgr.hb|180|
+nerepair|nerepair|bin/nerepair|sh /data/gw/nerepair_launch.sh|/tmp/nerepair.hb|180|
 '

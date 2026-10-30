@@ -1,5 +1,7 @@
 #!/bin/sh
-# avail_sampler.sh v1.10 -- 组件可用性采样器 (AVAILABILITY_DESIGN §3, 防假绿轮)
+# avail_sampler.sh v1.11 -- 组件可用性采样器 (AVAILABILITY_DESIGN §3, 防假绿轮)
+# v1.11 (SIGSEGV fix): +sys.nerepair(记录修复 supervisor) —— pid 在 + /tmp/nerepair.hb
+#   新鲜度(<=180s) 判 op/deg/down; watchdog SVC_TABLE nerepair 项负责拉起。
 # v1.10 (2026-10-29 断网轮): +sys.netlock(网络写锁) —— netcfg 锁被长持时所有写方
 #   (wan_agg/wan_eth/fw_apply/ccmni_up)超时降级, 记 deg 而非 down(failover 有单笔
 #   紧急通道 + 看门狗轮转自救兜底); 判据键 = watchdog 的 netlock。
@@ -207,6 +209,7 @@ TABLE='
 sys.boot|启动链|系统|K:bootgate+boot
 sys.kernel|内核/修复栈|系统|s:kernel
 sys.supervisor|监督层|系统|s:supervisor
+sys.nerepair|记录修复|系统|s:nerepair
 sys.netlock|网络写锁|系统|s:netlock
 sys.logging|日志管线|系统|s:logging
 sys.gui|网关 GUI|系统|s:gui
@@ -271,6 +274,15 @@ level_of() { # $1=判据串 → 级别 (op/deg/down/nodata/off)
         ;;
     s:supervisor)
         [ "$FRESH" = 1 ] && echo op || echo down
+        ;;
+    s:nerepair)
+        if ! pgrep -f '/data/gw/bin/nerepair' >/dev/null 2>&1; then echo down; return; fi
+        _h=$(cat /tmp/nerepair.hb 2>/dev/null)
+        _u=$(cut -d. -f1 /proc/uptime)
+        case "$_h" in
+        ''|*[!0-9]*) echo deg ;;
+        *) [ $((_u - _h)) -le 180 ] && echo op || echo deg ;;
+        esac
         ;;
     s:netlock)
         # v1.10: 锁被长持 = 写方全部超时(降级), 但主路切换仍有单笔紧急通道 +

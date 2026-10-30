@@ -181,6 +181,14 @@ static void scan_proc(void)
     }
     closedir(d);
 }
+static void write_hb(void)
+{
+    int fd, n; char b[32]; unsigned long up = 0;
+    fd = open("/proc/uptime", O_RDONLY);
+    if (fd >= 0) { n = read(fd, b, sizeof b - 1); close(fd); if (n > 0) { b[n] = 0; up = strtoul(b, NULL, 10); } }
+    fd = open("/tmp/nerepair.hb", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd >= 0) { n = snprintf(b, sizeof b, "%lu", up); b[n++] = 10; if (write(fd, b, n) < 0) {} close(fd); }
+}
 static void on_alarm(int s) { (void)s; g_alarm = 1; }
 static void on_term(int s) { (void)s; g_term = 1; }
 int main(void)
@@ -188,7 +196,8 @@ int main(void)
     int st; pid_t pid;
     self_pid = getpid();
     logfd = open(LOGPATH, O_WRONLY | O_CREAT | O_APPEND, 0644);
-    logev("START", 0, "pid=%d ver=1.1", self_pid);
+    logev("START", 0, "pid=%d ver=1.2", self_pid);
+    write_hb();
     signal(SIGALRM, on_alarm); alarm(60);
     signal(SIGTERM, on_term); signal(SIGINT, on_term);
     if (!traced(1)) attach_pid(1);
@@ -204,7 +213,7 @@ int main(void)
         if (pid < 0) {
             if (errno == EINTR) {
                 if (g_alarm) {
-                    g_alarm = 0; alarm(60);
+                    g_alarm = 0; alarm(60); write_hb();
                     logev("STAT", 0, "attached=%lu segv=%lu repaired=%lu passed=%lu suppressed=%lu",
                           g_attached, g_segv, g_repaired, g_passed, g_suppressed);
                 }

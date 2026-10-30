@@ -2005,16 +2005,24 @@ def t_watchdog_aee():
     hist = dev("wc -l < /data/log/aee_exp/db_history 2>/dev/null").strip()
     # v2.65: core_trap 已停用并移出 SVC_TABLE(不再产生 state 行), 改查仍在表的 log_keeper
     st = dev("grep -cE '^log_keeper=' /tmp/watchdog_state 2>/dev/null").strip()
-    ver = dev("grep -c 'watchdog v1.34 start' /tmp/watchdog.log 2>/dev/null").strip()
-    # v2.62: /tmp/watchdog.log 会被 TICK 轮转(约 8h 挤掉横幅) — 持久 syslog 兜底
-    vers = dev("grep 'watchdog v1' /data/gw/logs/syslog.log 2>/dev/null | tail -1 | grep -c 'v1.34 start'").strip()
-    if ver == "0" and vers == "1":
-        ver = "1"
+    # v2.69: 横幅断言去硬编码(v1.34 字面量随每次 watchdog bump 必然腐化) —
+    #   取最近一条 "watchdog vN.M start" 横幅, 校验 N.M >= 1.34;
+    #   /tmp/watchdog.log 会被 TICK 轮转(v2.62), 持久 syslog 兜底
+    ver = dev("grep -oE 'watchdog v[0-9]+\\.[0-9]+ start' /tmp/watchdog.log 2>/dev/null | tail -1").strip()
+    if not ver:
+        ver = dev("grep -oE 'watchdog v[0-9]+\\.[0-9]+ start' /data/gw/logs/syslog.log 2>/dev/null | tail -1").strip()
+    vern = 0
+    if ver.startswith("watchdog v") and ver.endswith("start"):
+        try:
+            _maj, _min = ver.split()[1][1:].split(".")[:2]
+            vern = 1 if (int(_maj), int(_min)) >= (1, 34) else 0
+        except ValueError:
+            vern = 0
     ok = False
     if code not in ("", "0") and cnt.isdigit() and hist.isdigit():
-        ok = abs(int(cnt) - int(hist)) <= 2 and int(st or 0) > 0 and int(ver or 0) > 0
+        ok = abs(int(cnt) - int(hist)) <= 2 and int(st or 0) > 0 and vern > 0
     record(t_watchdog_aee._test_name, "system", ok,
-           "code=%s base=%s hist=%s state=%s ver=%s" % (code, cnt, hist, st, ver))
+           "code=%s base=%s hist=%s state=%s ver=%s" % (code, cnt, hist, st, ver or "?"))
 
 
 @test("stability P0/P3: 限时/3 次确认/统一监督表/心跳 (v1.29)")

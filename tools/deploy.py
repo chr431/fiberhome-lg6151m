@@ -176,7 +176,8 @@ EXTRA_KEEP = ["DEPLOY_MANIFEST", "ppe_reg",
               "shadow.override.bak",  # rc.extend v2.1 回退存档(rotate_toor v1.4 维护)
               "DO_UBUS_CAP", "MODE.fh",  # rc.extend.sh 运行时模式标记(dispatcher引用, 非脚本)
               "boot_attempts.tsv",       # rc.extend v2.6 boot 尝试台账(运行时追加)
-              "healthdog.forensic"]      # v2.6 healthdog FORENSIC 打印 opt-in marker
+              "healthdog.forensic",      # v2.6 healthdog FORENSIC 打印 opt-in marker
+              "logs"]                    # /data/gw/logs 目录(rc.extend/watchdog 台账落点, dispatcher 引用)
 MD5_LINE = re.compile(r"^([0-9a-f]{32})  (.*)$", re.M)
 
 

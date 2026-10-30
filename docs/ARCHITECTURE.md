@@ -147,7 +147,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/build_v3fix.sh` | **v1.1** | tool | `-` | v3_fix.ko构建; v1.1: 路径修正当前布局 + uapi/asm junction 失效改就地复制 + 记录产物错位事故 |
 | `tools/build_v3httpd.sh` | **v1.1** | tool | `-` | v3httpd构建(zig cc aarch64-linux-musl全静态, 同mipc_cellular链); v1.1(SIGSEGV §18): 链接 vaguard.o(va_list 闸门) |
 | `tools/build_vaguard.sh` | **v1.0** | tool | `-` | 编译 gw/src/vfprintf_guard.c 为可链接对象(须在 libc 之前链接) |
-| `tools/deploy.py` | **v2.33** | tool | `-` | v2.33(2026-10-31 质量轮): push 部分失败计入退出码(原全拒送仍 exit 0)/selftest 超时 120s→900s 且捕获/push_serial 目标侧 tmp+mv 原子化/指纹失配立即中止不再吞成 no-mgmt-path/put+attic 注入面收口/MANIFEST +stackdump -死件×3; 部署/漂移守卫; v2.30(可用性轮): MANIFEST +avail_sampler/api_avail; v2.29: +usb_mgr/api_usb; v2.27/2.28: +dpquar/dpclamp; 历史见git; v2.31(SIGSEGV Phase 2 退役): MANIFEST -dpquar.ko -dpclamp.ko; v2.32(LAN v6): MANIFEST +v6_reconcile/api_v6 |
+| `tools/deploy.py` | **v2.33** | tool | `-` | v2.34(时间源统一轮): EXTRA_KEEP +logs(rc.extend 引用 /data/gw/logs 目录, doctor 误报 UNKNOWN); v2.33(2026-10-31 质量轮): push 部分失败计入退出码(原全拒送仍 exit 0)/selftest 超时 120s→900s 且捕获/push_serial 目标侧 tmp+mv 原子化/指纹失配立即中止不再吞成 no-mgmt-path/put+attic 注入面收口/MANIFEST +stackdump -死件×3; 部署/漂移守卫; v2.30(可用性轮): MANIFEST +avail_sampler/api_avail; v2.29: +usb_mgr/api_usb; v2.27/2.28: +dpquar/dpclamp; 历史见git; v2.31(SIGSEGV Phase 2 退役): MANIFEST -dpquar.ko -dpclamp.ko; v2.32(LAN v6): MANIFEST +v6_reconcile/api_v6 |
 | `tools/device_local.py.example` | **v1.0** | tool | `-` | 凭证模板(真件gitignored) |
 | `tools/doc_audit.py` | **v1.2** | tool | `-` | 台账↔文档内联标记双向审计; v1.2: 子进程显式 UTF-8(gbk 环境不再中断 deploy 文档门禁); 历史见git |
 | `tools/fetch_static_busybox.sh` | **v1.0** | tool | `-` | Alpine busybox-static 1.36.1-r31 拉取+SHA256 钉死(解包到 gw/bin/busybox) |

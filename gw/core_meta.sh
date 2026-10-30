@@ -1,5 +1,5 @@
 #!/bin/sh
-# core_meta.sh v1.7 -- core_pattern metadata wrapper (stability P1-2/P1-5).
+# core_meta.sh v1.8 -- core_pattern metadata wrapper (stability P1-2/P1-5).
 # v1.7 (2026-10-30 自然 NE 分类): 每次崩溃额外落一份 fault-time 栈窗口
 #   (.stack = 16 pages = 64 KiB, 由 /data/gw/bin/stackdump 读 /proc/<pid>/mem)。
 #   目的: 自然 NE 也能按“fault addr 是否对齐栈上记录”分类，不再只有 canary 有栈。
@@ -103,8 +103,12 @@ ARGS=$(tr '\0' ' ' 2>/dev/null < /proc/$PID/cmdline | head -c 600)
 } > "$F" 2>/dev/null
 
 # v1.7: fault-time stack window (process is stopped; /proc/<pid>/mem is valid)
+# v1.8: keep stackdump stderr and rc in a .stackerr file so a missing .stack can
+#       be diagnosed from the field (PID/permission/timing).
 if [ -x "$STACKDUMP" ]; then
-    "$STACKDUMP" "$PID" "$STACK" 16 2>/dev/null || STACK=""
+    "$STACKDUMP" "$PID" "$STACK" 16 >/dev/null 2>"$DIR/${_bt}-${PID}-${_ts}.stackerr"
+    _src=$?
+    [ "$_src" -ne 0 ] && STACK=""
 else
     STACK=""
 fi

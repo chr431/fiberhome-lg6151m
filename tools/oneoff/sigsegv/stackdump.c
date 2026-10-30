@@ -29,6 +29,9 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/ptrace.h>
+#include <sys/wait.h>
+#include <signal.h>
 
 #define SD_MAGIC "SDMPv1"
 #define SD_VERSION 1

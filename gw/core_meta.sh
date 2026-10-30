@@ -1,5 +1,5 @@
 #!/bin/sh
-# core_meta.sh v1.8 -- core_pattern metadata wrapper (stability P1-2/P1-5).
+# core_meta.sh v1.9 -- core_pattern metadata wrapper (stability P1-2/P1-5).
 # v1.7 (2026-10-30 自然 NE 分类): 每次崩溃额外落一份 fault-time 栈窗口
 #   (.stack = 16 pages = 64 KiB, 由 /data/gw/bin/stackdump 读 /proc/<pid>/mem)。
 #   目的: 自然 NE 也能按“fault addr 是否对齐栈上记录”分类，不再只有 canary 有栈。
@@ -155,10 +155,10 @@ _or=$(_origin "$PID")
 case "$_or" in our-tree|vendor-tree) ;; *) _or=unknown ;; esac
 [ -s "$F" ] && echo "$_ts	$PID	${COMM:-?}	sig=$SIG	exe=${EXE:-?}	args=${ARGS:-?}$_us	origin=$_or	stack=${STACK:-?}" >> "$TSV" 2>/dev/null
 
-# quota: keep the 120 newest metadata files
+# quota: keep the 300 newest metadata files
 _n=$(ls "$DIR" 2>/dev/null | wc -l)
-if [ "${_n:-0}" -gt 120 ]; then
-    ls -t "$DIR" 2>/dev/null | tail -n +121 | while read -r _f; do rm -f "$DIR/$_f"; done
+if [ "${_n:-0}" -gt 300 ]; then
+    ls -t "$DIR" 2>/dev/null | tail -n +301 | while read -r _f; do rm -f "$DIR/$_f"; done
 fi
 
 # v1.7: stack window quota (64 KiB each; keep 200 newest)

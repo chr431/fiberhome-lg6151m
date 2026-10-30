@@ -196,10 +196,11 @@ int main(void)
     int st; pid_t pid;
     self_pid = getpid();
     logfd = open(LOGPATH, O_WRONLY | O_CREAT | O_APPEND, 0644);
-    logev("START", 0, "pid=%d ver=1.2", self_pid);
+    logev("START", 0, "pid=%d ver=1.3", self_pid);
     write_hb();
-    signal(SIGALRM, on_alarm); alarm(60);
-    signal(SIGTERM, on_term); signal(SIGINT, on_term);
+    { struct sigaction sa; memset(&sa, 0, sizeof sa); sa.sa_handler = on_alarm; sa.sa_flags = 0; sigaction(SIGALRM, &sa, NULL); }
+    { struct sigaction st; memset(&st, 0, sizeof st); st.sa_handler = on_term; st.sa_flags = 0; sigaction(SIGTERM, &st, NULL); sigaction(SIGINT, &st, NULL); }
+    alarm(60);
     if (!traced(1)) attach_pid(1);
     scan_proc();
     logev("SCAN", 0, "attached_total=%lu", g_attached);

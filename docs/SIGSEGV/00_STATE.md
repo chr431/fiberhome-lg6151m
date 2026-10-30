@@ -8,6 +8,8 @@
 **记录真实、来自进程外部、不是受害者自己生成的；它精确落在 fault-time va_list，目标随进程栈布局（top-x2 恒 0x390），固定 VA 与固定 PA 都已排除。**
 当前主问题：**VA-resolved 的写入是 uaccess 还是 GUP-DMA；写入者是否在 AP 可达范围。**
 
+**2026-10-31 更新**：vsurv4 H4v1 普查 **88/112** 份 canary dump 含记录（78.6%，Wilson 95% CI **70.1–85.2%**）；`top-x2=0x390` 在 **111/112** 恒定；记录有三副本（`x2` 82、`x2-0x240` 66、`x2-0x130` 18）。canary 作为记录探测器已被验证（C-137/C-139）；自然 NE 份额 **0/4**（3 自然 core + 1 自然 .stack），Wilson 95% 上界 **49.0%**（C-142）；不能用 canary 外推（C-140）。
+
 ## 2. 已确立（E2/E3）
 
 | ID | 结论 | 关键数字 |
@@ -25,6 +27,11 @@
 | C-052 | 固定 VA 与固定 PA 都排除；目标是 stack-top-relative、VA-resolved | top-x2=0x390；x2 页内偏移 0x570 vs 0xf30 |
 | C-053 | sh.core 是 canary2.sh 装置 shell，不是自然进程；记录有两个零字、含公网 IP | NT_PRPSINFO pr_fname=canary2.sh |
 | C-055 | 空模型 0/19232；handler 伪影排除；106 份是 43 pids/one boot/40.6 min | C-002/003/004/028 降 E2 |
+| C-137 | H4v1 shape 扫描：88/112 h4 含记录（A0B2/B0A2 在 x2/x2-0x240/x2-0x130）；旧 0/17 是字面字节扫描 bug | 88/112；95% CI 70.1–85.2% |
+| C-139 | vsurv4 canary 是有效记录探测器；自然 NE 0/3 不是探测器伪影 | 88/112 vs 0/3 |
+| C-140 | canary 记录落在自身栈、固定 top-relative 偏移；PA/DMA+页复用比 VA-targeted 更能解释（外部写入者拿不到 va_list VA）；transport 倾向 PA/DMA | 88/112；top-x2 0x390×111；w2=len\|ip |
+| C-141 | core_meta v1.9 .stack/.stackerr 在真实死亡进程上验证通过 | .stack 65592 B；readable=16 |
+| C-142 | 自然 NE 记录份额 0/4；Wilson 95% 上界 49.0%；自然 .stack 的 3 个 shape 都是巧合 | 0/4；≤49% |
 
 ## 3. 已撤回 / 不可再引用（X）
 
@@ -42,8 +49,8 @@
 |---|---|---|---|
 | C-006 | 0x780 暂存槽 vs ap2 是两个目标地址；71/32 的物理含义 | 暂存槽只活 ~10 条指令；固定写 ap2 产生不了 A0B2 | **vsurv5**：手写 va_copy 到不同暂存偏移；A0B2 跟暂存槽走/消失则 B-1 成立 |
 | C-009 | sh.core 的“bystander”是否安全 | sh.core 是装置 shell；记录两个零字可把指针槽清零 | 降 E1；补良性正对照 |
-| C-013/C-034 | 传输是 uaccess 还是 GUP-DMA | 固定 VA/PA 排除；VA-resolved；copy_to_user 强阴性；ref=1025 杀死泄漏 pin | **mtk_warp** GUP/zerocopy 静态；三哨兵按 B-4 重写 |
-| C-025 | 自然 NE 中记录家族占比 | 3 份自然 core 0/3 record；95% 上界 63% | 自然 NE 栈普查；分层；不要外推 |
+| C-013/C-034 | 传输是 uaccess 还是 GUP-DMA | 固定 VA/PA 排除；VA-resolved；copy_to_user 强阴性；ref=1025 杀死泄漏 pin；canary 88/112 落在自身栈（C-140） | **mtk_warp** GUP/zerocopy 静态；页级 probe（pgprobe）判决 |
+| C-025 | 自然 NE 中记录家族占比 | 3 份自然 core 0/3 record；95% 上界 63%；canary 88/112 验证探测器 | 自然 NE 栈普查；分层；不要用 canary 外推 |
 | C-026/C-038 | GUP/stale 用户指针 | 内核有完整 zerocopy 栈；模块 0 GUP 导入；驱动 dma_map_page | 查 mtk_warp/mt_wifi 的 skb frag/zerocopy；ref/use-after-unpin |
 | C-035 | cth_cfu 正对照 Oops/重启 | 一次未复现；3 个候选机制 | 修 cth（递归守卫、去 dump_stack、默认关 c2u）后再跑 |
 | C-044..C-048 | ip 是页级写入的受害者；HIF-TXD/FOE 形状候选 | ip 全 .text 无写 filter.pfx；mtk_wed 32B 描述符 +0x10/+0x14；hw_nat FOE IP +0x10/+0x14 | **mtk_warp**（738KB，未扫）是真正 ring/DMA；mt_wifi fh_netlink_send_to_user |

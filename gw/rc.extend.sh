@@ -192,7 +192,9 @@ case "$slot" in
      # v3.3 (SIGSEGV fix): nerepair -- ptrace supervisor for the 32B-record family.
      #   Repairs the va_list fault (ldr Xt,[Xt] + record shape at x2) in any user
      #   process; vsurv4 canary is excluded so its H4 diagnostic keeps working.
-     pgrep -f '/data/gw/bin/nerepair' >/dev/null 2>&1 ||          nohup /data/gw/bin/nerepair >>/data/gw/logs/nerepair.out 2>&1 &
+     # v3.6: 改经 nerepair_launch.sh(svc_lock 单实例) — 原直启绕过 launcher,
+     #   开机态无 /tmp/nerepair.lock, watchdog alive() 只能落到 pgrep 回退分支。
+     pgrep -f '/data/gw/bin/nerepair' >/dev/null 2>&1 ||          nohup sh /data/gw/nerepair_launch.sh >>/data/gw/logs/nerepair.out 2>&1 &
      # v3.0 (SIGSEGV Phase 1): 改回内核默认 0。该设置原本只为"锁内深遍历 +
      #   旧栈"组合兜底, 叠加源已随旧栈退役消失(§8.13); 保留 1 会把任何真实 RCU 停顿
      #   升级成重启, 既丢现场又会打断刚修好的 NE 台账。

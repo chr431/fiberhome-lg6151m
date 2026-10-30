@@ -70,3 +70,32 @@
 1. **短期**：部署 `nerepair`（已做），先止住“进程被打死”；
 2. **中期**：向厂商报 `mtk_warp` TX/RX ring stale-PA 问题（附 C-137/C-138/C-140/C-145）；
 3. **长期**：若拿到驱动源码，按 R1 修；或启用 SMMU（R2）。
+## 4. 关于“用自建 busybox 替换原厂 busybox”（评估结论：不做）
+
+### 4.1 事实
+| 项 | 原厂 /bin/busybox | 自建 /data/gw/bin/busybox |
+|---|---|---|
+| 大小 | 591,784 B | 1,609,800 B |
+| 权限 | setuid root (-rwsr-xr-x) | 非 setuid |
+| 链接 | 动态（vendor musl + libgcc） | 静态 |
+| 版本 | BusyBox 1.36.1 | BusyBox 1.36.1（同版本） |
+| applet | 112（/bin/* 为符号链接 → busybox） | 402 |
+| 缺失 applet | — | lock、netmsg（厂商自定义） |
+| 根文件系统 | squashfs ro（不可原地替换） | /data 可写 |
+
+### 4.2 结论：兼容性不足，不替换
+1. 2 个厂商自定义 applet 缺失（lock、netmsg）：bind mount 后 /bin/lock、/bin/netmsg 会 “applet not found”；
+2. setuid 语义变化：原厂 busybox 是 setuid root，自建不是；保留需 chmod u+s（402 个 applet 全 setuid，安全面扩大），不保留则 ping/su 等依赖 setuid 的 applet 行为变化；
+3. 只覆盖 S98 之后启动的进程：rc.extend.sh 在 S98 运行，init/procd 及更早的进程已映射原厂二进制；
+4. 零增量崩溃覆盖：nerepair 已覆盖所有用户进程（含原厂动态 busybox 进程），替换只省 ptrace 往返，收益是性能不是覆盖。
+
+### 4.3 如果仍要替换（opt-in 设计，未实施）
+- 门禁：自建 applet 集合 ⊇ 原厂集合（当前差 lock/netmsg，门禁直接失败）；
+- setuid：显式决定（建议否，接受 ping/su 行为变化）；
+- 冒烟：sh -c 'echo ok'、ls、cat、mount、ip、awk 全通过；
+- 回滚：umount /bin/busybox；
+- 持久化：rc.extend.sh 加 mount --bind 块（带门禁与冒烟），失败自动跳过。
+
+### 4.4 建议
+- 保持现状：nerepair 负责全进程覆盖；vaguard 负责静态二进制（已拦 49 次，零稳态开销）；
+- 不动原厂 busybox：替换的收益（少量 ptrace 开销）远小于风险（lock/netmsg 缺失、setuid 面扩大、init 兼容性）。

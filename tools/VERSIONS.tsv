@@ -137,4 +137,4 @@ tools/build_busybox_wsl.sh	1.0	tool	-	WSL2/Linux 下用 musl.cc 交叉工具链�
 
 gw/v6_reconcile.sh	1.2	manifest	/data/gw/v6_reconcile.sh	LAN IPv6 收敛器(ULA+NAT66+radvd, 幂等可重入): 判据=任一上行(eth0/ccmni*)有全局 v6; 调用点 rc_netfh 开机/ccmni_up 拨号落地/watchdog 每 2min; v1.1: 稳态无锁快路径 + 取不到锁跳过本轮(不破坏单写方纪律); mode=on/disabled/noup/wait/nobr 写 /tmp/v6_state 供采样器与 GUI 共用(修 2026-10-28 LAN v6 整 boot 缺失); v1.2(2026-10-29 断网实弹): radvd 改为解锁后拉起 — 锁内 spawn 会让长驻子进程继承 flock fd, 锁永不释放(radvd 持锁 2h -> wan_agg failover 全超时 -> 家宽断链即整机断网)
 gw/www/api_v6.sh	1.0	manifest	/data/gw/www/api_v6.sh	API IPv6 LAN 域模块(v6 状态/v6_set 开关); 单一事实源=v6_reconcile.sh status, 页面不自算状态
-gw/bin/nerepair	1.0	manifest	/data/gw/bin/nerepair	32B 记录 SIGSEGV 修复 supervisor(ptrace 修复 va_list 故障; 排除 vsurv4 canary)
+gw/bin/nerepair	1.1	manifest	/data/gw/bin/nerepair	32B 记录 SIGSEGV 修复 supervisor(ptrace 修复 va_list 故障; 排除 vsurv4 canary); v1.1: 结构化 TSV 日志(epoch/iso/pid/comm/event/detail)+1MB 轮转+20行/秒限流+60s STAT 心跳+SIGTERM/SIGINT EXIT

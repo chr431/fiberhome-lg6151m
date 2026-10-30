@@ -52,7 +52,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/bin/logcut` | **v1.0** | manifest | `/data/gw/bin/logcut` | 静态锚点截取器: 输出文件中最后一次精确匹配锚行之后的全部内容; 单遍扫描+单行缓冲, 无数组/无printf/无locale; 取代 log_keeper delta() 的 busybox awk(其运行期数组退出清理约 1% SIGSEGV)；⟦收口 §22⟧ awk 缺陷说未证实且不再必要(§16.3)；保留理由=少 spawn/无数组 |
 | `gw/bin/mipc_cellular` | **v0.18** | manifest | `/data/gw/mipc_cellular` | 蜂窝MIPC直连CLI; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘; v0.18(SIGSEGV §18): 链接 vfprintf va_list 闸门 v2 |
 | `gw/bin/multiwan_ctl` | **v1.1** | manifest | `/data/gw/multiwan_ctl` | 原厂multiwan引擎ioctl控制器(zig动态链libfhdrv_net_api,36B结构体) |
-| `gw/bin/nerepair` | **v1.0** | manifest | `/data/gw/bin/nerepair` | 32B 记录 SIGSEGV 修复 supervisor(ptrace 修复 va_list 故障; 排除 vsurv4 canary) |
+| `gw/bin/nerepair` | **v1.1** | manifest | `/data/gw/bin/nerepair` | 32B 记录 SIGSEGV 修复 supervisor(ptrace 修复 va_list 故障; 排除 vsurv4 canary); v1.1: 结构化 TSV 日志(epoch/iso/pid/comm/event/detail)+1MB 轮转+20行/秒限流+60s STAT 心跳+SIGTERM/SIGINT EXIT |
 | `gw/bin/procmatch` | **v1.0** | manifest | `/data/gw/bin/procmatch` | 静态 pidof/pgrep 替代: /proc 扫描 + ERE, 有界手写输出(无 printf/无 locale); 覆盖 busybox pidof(~2.7 次/天崩溃面)与 pgrep(-x 语义修正)；⟦收口 §22⟧ 崩溃面收益=主机制缓解；独立价值=pgrep -x 语义修正 |
 | `gw/bin/shmsnap` | **v1.0** | manifest | `/data/gw/shmsnap` | cfgmgr树共享内存快照工具(save/load 16MB原始字节, gzip后127KB, 开机恢复锁定状态) |
 | `gw/bin/v3_fix.ko` | **v1.2** | manifest | `/data/gw/v3_fix.ko` | TTL伪装/PPE解绑内核模块(wan_if/ttl_mode/unhook); v1.2(24h 日志轮): 重建产物 — 旧文件 ELF 节表错位 1B 致每次开机 insmod 静默失败(type 768), 实测 rc=0/TTL/RX 解绑在位 |

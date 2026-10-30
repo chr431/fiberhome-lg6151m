@@ -1,0 +1,5 @@
+# local build artifacts (sources + build commands are tracked)
+vsurv4
+stackdump
+probe_selftest/probe_selftest.ko
+probe_selftest/probe_selftest_user

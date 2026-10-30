@@ -1,5 +1,7 @@
 # SIGSEGV 写入源调查 · 第二轮（内核镜像标定 + EL1 写陷阱）
 
+> **历史文档（2026-10-30 归档）**：当前状态见 [docs/SIGSEGV/00_STATE.md](SIGSEGV/00_STATE.md)；结论台账见 [01_CLAIMS.tsv](SIGSEGV/01_CLAIMS.tsv)。本文保留原样，勿据此判断当前结论。
+
 日期：2026-10-30 07:15–07:56　设备：LG6151M（bootslot=a，uptime 28 min，未重启留隐患）
 
 ## 1. 结论摘要

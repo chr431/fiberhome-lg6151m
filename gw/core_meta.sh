@@ -1,5 +1,9 @@
 #!/bin/sh
-# core_meta.sh v1.6 -- core_pattern metadata wrapper (stability P1-2/P1-5).
+# core_meta.sh v1.7 -- core_pattern metadata wrapper (stability P1-2/P1-5).
+# v1.7 (2026-10-30 自然 NE 分类): 每次崩溃额外落一份 fault-time 栈窗口
+#   (.stack = 16 pages = 64 KiB, 由 /data/gw/bin/stackdump 读 /proc/<pid>/mem)。
+#   目的: 自然 NE 也能按“fault addr 是否对齐栈上记录”分类，不再只有 canary 有栈。
+#   部署前: bump VERSIONS.tsv core_meta 版本; push stackdump 后 chmod 755。
 # v1.6 (2026-10-29 取证配额): 每次崩溃都另存一份 4KB 的 note 头(.hdr = ELF 头 + PT_NOTE,
 #   含全部寄存器与 siginfo: PC/SP/LR/故障地址)。完整 core 只留最新 6 份(几十 MB 级),
 #   但**每一次**崩溃都能定位 —— 实测 19:03-23:48 有 35 起 NE, 完整 core 只留得下 3 份。
@@ -46,6 +50,7 @@ BB=/data/gw/bin/busybox
 [ -x "$BB" ] || BB=
 DIR=/data/gw/logs/cores/meta
 TSV=/data/gw/logs/ne_events.tsv
+STACKDUMP=/data/gw/bin/stackdump
 PID=${1:-0}
 SIG=${2:-0}
 UID_=${3:-0}
@@ -61,6 +66,7 @@ mkdir -p "$DIR" 2>/dev/null
 _bt=$(awk '/^btime/{print $2; exit}' /proc/stat 2>/dev/null)
 _ts=$(date +%s)
 F=$DIR/${_bt}-${PID}-${_ts}.txt
+STACK=$DIR/${_bt}-${PID}-${_ts}.stack
 COMM=$(catf /proc/$PID/comm)
 EXE=$(rlink /proc/$PID/exe)
 PPID_=$(awk '{print $4}' /proc/$PID/stat 2>/dev/null)
@@ -75,6 +81,7 @@ ARGS=$(tr '\0' ' ' 2>/dev/null < /proc/$PID/cmdline | head -c 600)
     echo "exe=[$EXE] ppid=$PPID_ pcomm=[$PCOMM]"
     echo "parent_args=[$PARGS]"
     echo "args=[$ARGS]"
+    echo "stack=[$STACK]"
     echo "--- status (selected) ---"
     if [ -n "$BB" ]; then
         "$BB" grep -E '^(Name|State|Tgid|Pid|PPid|Uid|Gid|Threads|SigQ|SigPnd|ShdPnd|SigBlk|SigIgn|SigCgt|CapEff|voluntary|nonvoluntary):' /proc/$PID/status 2>/dev/null
@@ -94,6 +101,13 @@ ARGS=$(tr '\0' ' ' 2>/dev/null < /proc/$PID/cmdline | head -c 600)
     echo "--- aee db_history tail ---"
     tail -n 5 /data/log/aee_exp/db_history 2>/dev/null
 } > "$F" 2>/dev/null
+
+# v1.7: fault-time stack window (process is stopped; /proc/<pid>/mem is valid)
+if [ -x "$STACKDUMP" ]; then
+    "$STACKDUMP" "$PID" "$STACK" 16 2>/dev/null || STACK=""
+else
+    STACK=""
+fi
 
 # ---- v1.2: origin 归属 -----------------------------------------------------
 # 静态农场下 exe 不可用于判定: 崩溃进程和它的祖先几乎都是同一个静态件
@@ -135,12 +149,18 @@ _us=""
 { [ ! -s /tmp/ntp_synced ] || [ "${_ts:-0}" -lt 1735689600 ]; } 2>/dev/null && _us="	unsync=1"
 _or=$(_origin "$PID")
 case "$_or" in our-tree|vendor-tree) ;; *) _or=unknown ;; esac
-[ -s "$F" ] && echo "$_ts	$PID	${COMM:-?}	sig=$SIG	exe=${EXE:-?}	args=${ARGS:-?}$_us	origin=$_or" >> "$TSV" 2>/dev/null
+[ -s "$F" ] && echo "$_ts	$PID	${COMM:-?}	sig=$SIG	exe=${EXE:-?}	args=${ARGS:-?}$_us	origin=$_or	stack=${STACK:-?}" >> "$TSV" 2>/dev/null
 
 # quota: keep the 120 newest metadata files
 _n=$(ls "$DIR" 2>/dev/null | wc -l)
 if [ "${_n:-0}" -gt 120 ]; then
     ls -t "$DIR" 2>/dev/null | tail -n +121 | while read -r _f; do rm -f "$DIR/$_f"; done
+fi
+
+# v1.7: stack window quota (64 KiB each; keep 200 newest)
+_n=$(ls "$DIR"/*.stack 2>/dev/null | wc -l)
+if [ "${_n:-0}" -gt 200 ]; then
+    ls -t "$DIR"/*.stack 2>/dev/null | tail -n +201 | while read -r _f; do rm -f "$DIR/$_f"; done
 fi
 
 # --- hand the core to aee exactly as before (stdin untouched) -------------

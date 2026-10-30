@@ -1,5 +1,7 @@
 # SIGSEGV 家族调查报告（2026-10-30 定稿）
 
+> **历史文档（2026-10-30 归档）**：当前状态见 [docs/SIGSEGV/00_STATE.md](SIGSEGV/00_STATE.md)；结论台账见 [01_CLAIMS.tsv](SIGSEGV/01_CLAIMS.tsv)。本文保留原样，勿据此判断当前结论。
+
 > 本文是 2026-10-22 至 10-30 全部工作的**闭环版**：只写"实测确认"与"实测排除"，
 > 过程见 `SIGSEGV_ANALYSIS.md` §1–§24。
 

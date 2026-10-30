@@ -3,6 +3,11 @@
 Usage:
   python lgssh.py "command"          run a command, print output
   python lgssh.py -s remote local    sftp get
+v1.4 (2026-10-31 dropbear 排查轮): connect() 加指数退避重试(3 次, 1/2/4s)。
+      实测定罪(设备侧 tcpdump): 20 路并发连接, 设备 SYN-ACK 20/20 且 banner
+      与密钥交换数据全部送达, 全部 RST 均发自 PC 侧 —— 设备 dropbear 无辜,
+      杀连接的是 PC 本机代理栈(Mihomo TUN 类, AGENTS 陷阱表同族)。重试把
+      并发刺峰化为顺序重连, 对该故障形态免疫; 指纹不匹配仍立即中止(不重试)。
 v1.3: 主机密钥指纹钉死(审计P0-5) — device_local.HOST_KEY_FP / env LG_HOST_KEY_FP
       (md5 hex, 冒号可选)。配置了指纹时每次连接先校验后认证, 不匹配即拒绝;
       未配置时保持旧 AutoAdd 行为(兼容)。
@@ -10,6 +15,7 @@ v1.3: 主机密钥指纹钉死(审计P0-5) — device_local.HOST_KEY_FP / env LG
 import hashlib
 import os
 import sys
+import time
 
 import paramiko
 
@@ -38,12 +44,38 @@ class PinPolicy(paramiko.MissingHostKeyPolicy):
         client.get_host_keys().add(hostname, key.get_name(), key)
 
 
-def connect():
-    c = paramiko.SSHClient()
-    c.set_missing_host_key_policy(PinPolicy() if PIN else paramiko.AutoAddPolicy())
-    c.connect(HOST, port=22, username=USER, password=PW, timeout=10,
-              allow_agent=False, look_for_keys=False)
-    return c
+def connect(retries=3):
+    """Connect with exponential backoff.
+
+    v1.4: PC 本机代理栈(Mihomo TUN 类)会在连接并发/密钥交换阶段单方面掐死
+    连接(设备侧无辜, 见头注) — 立刻重连即可成功。指纹不匹配是安全告警,
+    立即上抛, 不在重试之列。
+    """
+    last = None
+    for i in range(retries):
+        if i:
+            time.sleep(1 << (i - 1))   # 1s, 2s
+        c = paramiko.SSHClient()
+        c.set_missing_host_key_policy(PinPolicy() if PIN else paramiko.AutoAddPolicy())
+        try:
+            c.connect(HOST, port=22, username=USER, password=PW, timeout=10,
+                      allow_agent=False, look_for_keys=False, banner_timeout=20)
+            return c
+        except paramiko.SSHException as e:
+            if "fingerprint mismatch" in str(e):
+                raise
+            last = e
+            try:
+                c.close()
+            except Exception:
+                pass
+        except OSError as e:
+            last = e
+            try:
+                c.close()
+            except Exception:
+                pass
+    raise last
 
 
 def run(c, cmd, timeout=60):

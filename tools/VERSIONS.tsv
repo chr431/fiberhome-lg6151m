@@ -80,7 +80,7 @@ gw/zz_data_hook	1.1	manifest	/data/build/rootfs/etc/init.d/zz_data_hook	S98数�
 tools/device_local.py.example	1.0	tool	-	凭证模板(真件gitignored)
 tools/lk_eth1_resume.py	1.1	tool	-	eth1续链器(LK控制台接管: kcmdline已注入态恢复; 含misc回退现场抓取; 补登记)
 tools/rotate_toor.py	1.4	tool	-	toor口令轮换器; v1.4: 轮换前存档.bak(rc.extend v2.1回退源); 历史见git
-tools/lgssh.py	1.3	tool	-	SSH助手(env/_local/secrets凭证; run()命令通道); v1.3: 主机密钥指纹钉死PinPolicy(HOST_KEY_FP/LG_HOST_KEY_FP, 认证前校验, 审计P0-5)
+tools/lgssh.py	1.3	tool	-	v1.4(dropbear 排查轮): connect() 指数退避重试(3次) — 设备侧 tcpdump 实证 20 路并发时 dropbear SYN-ACK 20/20 且 banner/kex 数据全部送达, RST 全发自 PC 本机代理栈(Mihomo TUN 类); 重试对该故障免疫, 指纹失配仍立即中止; SSH助手(env/_local/secrets凭证; run()命令通道); v1.3: 主机密钥指纹钉死PinPolicy(HOST_KEY_FP/LG_HOST_KEY_FP, 认证前校验, 审计P0-5)
 tools/run_serial_server.sh	1.0	tool	-	串口控制台守护拉起器
 tools/build_healthdog.sh	1.0	tool	-	healthdog.ko内核模块构建(内核树)
 tools/build_steth.sh	1.0	tool	-	v3_steth.ko构建

@@ -162,13 +162,19 @@ def watcher():
     while True:
         try:
             if con.logged_in:
+                # v1.2 (质量轮): pump/判 lost 必须持锁 —— 原实现 acquire 后立刻
+                # release 再在锁外 pump+清 buf, 与 run() 的输出收集交错会偷走
+                # marker → 误报 TIMEOUT 并触发不必要的整段重发。持锁窗口内
+                # 只做 0.2s pump, 对命令延迟的影响可忽略。
                 if con.lock.acquire(timeout=5):
-                    con.lock.release()
-                con.pump(0.2)
-                if b"login:" in con.buf[-512:]:
-                    con.buf = b""
-                    con.logged_in = False
-                    log("shell lost, relogging in")
+                    try:
+                        con.pump(0.2)
+                        if b"login:" in con.buf[-512:]:
+                            con.buf = b""
+                            con.logged_in = False
+                            log("shell lost, relogging in")
+                    finally:
+                        con.lock.release()
                 time.sleep(3)
                 continue
             ok = con.ensure_login()

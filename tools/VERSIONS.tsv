@@ -34,7 +34,7 @@ gw/src/healthdog.c	1.0	src	gw/bin/healthdog.ko	看门狗模块源码(版本随�
 gw/src/v3_fix.c	1.2	src	gw/bin/v3_fix.ko	TTL/解绑模块源码(版本随产物); v1.2 随产物重建
 gw/src/v3_steth.c	1.0	src	gw/bin/v3_steth.ko	听诊器模块源码(版本随产物)
 tools/deploy.py	2.33	tool	-	v2.33(2026-10-31 质量轮): push 部分失败计入退出码(原全拒送仍 exit 0)/selftest 超时 120s→900s 且捕获/push_serial 目标侧 tmp+mv 原子化/指纹失配立即中止不再吞成 no-mgmt-path/put+attic 注入面收口/MANIFEST +stackdump -死件×3; 部署/漂移守卫; v2.30(可用性轮): MANIFEST +avail_sampler/api_avail; v2.29: +usb_mgr/api_usb; v2.27/2.28: +dpquar/dpclamp; 历史见git; v2.31(SIGSEGV Phase 2 退役): MANIFEST -dpquar.ko -dpclamp.ko; v2.32(LAN v6): MANIFEST +v6_reconcile/api_v6
-tools/serial_server.py	1.7	tool	-	常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets)
+tools/serial_server.py	1.7	tool	-	v1.8(2026-10-31 质量轮): watcher 的 pump/lost 判定改全程持锁(原 acquire 即 release 后锁外清 buf, 与 run() 输出收集交错偷走 marker=误报 TIMEOUT 整段重发); 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets)
 tools/serial_cmd.py	1.3	tool	-	串口命令瘦客户端(marker输出捕获; v1.3示例路径更新)
 tools/lk_flip2.py	1.1	tool	-	LK 一键翻槽(a|b, misc[2060]字节)
 tools/lk_write.py	1.6	tool	-	LK raw-shell 文件写入(回显校验+tmpfs挂载+cmdlist巡检, 取代lk_fix_access)

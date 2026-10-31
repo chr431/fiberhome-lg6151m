@@ -326,7 +326,7 @@ ntp_keeper|ntp_keeper[.]sh|ntp_keeper.sh|sh /data/gw/ntp_keeper.sh|/tmp/ntp_keep
 traffic_logger|traffic_logger[.]sh|traffic_logger.sh|sh /data/gw/traffic_logger.sh|/tmp/traffic_logger.hb|900|
 wifi_guard|wifi_guard[.]sh|wifi_guard.sh|sh /data/gw/wifi_guard.sh|/tmp/wifi_guard.hb|90|
 reboot_sched|reboot_sched[.]sh|reboot_sched.sh|sh /data/gw/reboot_sched.sh|/tmp/reboot_sched.hb|900|
-led_mgr|led_mgr[.]sh|led_mgr.sh|sh /data/gw/led_mgr.sh|/tmp/led_mgr.hb|60|
+led_mgr|led_mgr[.]sh|led_mgr.sh|sh /data/gw/led_mgr.sh|/tmp/led_mgr.hb|120|
 fan_mgr|fan_mgr[.]sh|fan_mgr.sh|sh /data/gw/fan_mgr.sh|/tmp/fan_mgr.hb|60|
 wan_eth|wan_eth[.]sh|wan_eth.sh|sh /data/gw/wan_eth.sh|/tmp/wan_eth.hb|150|
 log_keeper|log_keeper[.]sh|log_keeper.sh|sh /data/gw/log_keeper.sh|/tmp/log_keeper.hb|180|

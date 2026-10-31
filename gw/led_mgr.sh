@@ -239,7 +239,10 @@ while :; do
         llog "state v$S_ver applied ($_ld_note) readback=$_ld_vok"
         LASTVER=$S_ver
     fi
-    if [ $((LCYC % 10)) -eq 0 ]; then
+    # v4.3(实弹): 信标检查 10 拍 -> 60 拍。busybox dmesg|grep 是本循环最贵的一步,
+    # 实测把 1s 循环拖到 hb 43s 陈旧 -> watchdog 判失效并重启(反复抖动)。
+    # 信标事件本身是稀少事件, 60s 检一次足够(wifi_guard 另有独立监视)。
+    if [ $((LCYC % 60)) -eq 0 ]; then
         BCN_NOW=$(svc_dmesg_count 'AP: Beacon OFF|Beacon lost - Error|Beacon interval is illegal')
         if [ -n "$BCN_LAST" ] && [ "$BCN_NOW" -gt "$BCN_LAST" ]; then
             llog "beacon-loss event ($BCN_LAST->$BCN_NOW) — re-arming beacons"

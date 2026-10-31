@@ -77,8 +77,10 @@ COMM=$(catf /proc/$PID/comm)
 EXE=$(rlink /proc/$PID/exe)
 PPID_=$(awk '{print $4}' /proc/$PID/stat 2>/dev/null)
 PCOMM=$(catf /proc/$PPID_/comm)
-PARGS=$(tr '\0' ' ' 2>/dev/null < /proc/$PPID_/cmdline | head -c 300)
-ARGS=$(tr '\0' ' ' 2>/dev/null < /proc/$PID/cmdline | head -c 600)
+# v1.11 (巡检轮): ARGS/PARGS 换行/制表压平 — awk 脚本类 argv 自带字面换行,
+#   直落 TSV 即破行(今晨 6 行碎片混入台账; v1.1 声称的清洗在后续改动中丢失)。
+PARGS=$(tr '\0' ' ' 2>/dev/null < /proc/$PPID_/cmdline | tr '\n\r\t' '   ' | head -c 300)
+ARGS=$(tr '\0' ' ' 2>/dev/null < /proc/$PID/cmdline | tr '\n\r\t' '   ' | head -c 600)
 
 {
     echo "# core metadata (core_meta v1.10)"

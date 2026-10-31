@@ -1,5 +1,7 @@
 #!/bin/sh
-# watchdog.sh v1.40 -- on-device continuous invariant monitor.
+# watchdog.sh v1.41 -- on-device continuous invariant monitor.
+# v1.41 (2026-10-31 巡检轮): authd 判定恢复"无信号不判"守卫 — authd_state
+#   非原子覆盖写与本守护 30s 周期偶发撕读, v1.40 曾把空读当极旧判死(假 FAIL)。
 # v1.40 (2026-10-31 时间源统一轮): 新鲜度/预算窗口时基 epoch→uptime ——
 #   cycle 键(供 avail_sampler FRESH)、wan_alive 判龄(svc_lib wa_age, hb= 优先)、
 #   hostapd 重启预算窗、NETLOCK_BREAKS 窗、authd_state 负龄钳位。epoch 仅保留
@@ -506,11 +508,17 @@ run_cycle() {
         case "$_ast" in ''|*[!0-9]*) _ast="" ;; esac
         # v1.40: authd_state 的 ts 是 epoch 契约(私有 authd 写); 同 boot 内差值
         #   可靠, 负龄(NTP 回拨/跨 boot 残值)钳为极旧 → 走 unhealthy 分支
+        # v1.41(巡检实弹): authd 对该文件是非原子覆盖写, 与本守护 30s 周期偶发
+        #   相撞时 $2 读空(撕读) — v1.40 把空读并入 999999 判死 = 每 13 分钟级
+        #   假 FAIL(07:18/07:31/07:44/07:57, state_age=999999 而 wan_agg 同刻
+        #   读到 up/6s)。恢复旧 [ -n _ast ] 守卫语义: 无信号本轮不判不罚。
         _aage=999999
         if [ -n "$_ast" ]; then
             _aage=$(( _NOW - _ast )); [ "$_aage" -lt 0 ] && _aage=999999
         fi
-        if [ -n "$_apid" ] && [ "$_aage" -lt 300 ]; then
+        if [ -z "$_ast" ]; then
+            :
+        elif [ -n "$_apid" ] && [ "$_aage" -lt 300 ]; then
             set_state authd 0 "uplink auth"
             strike_clear authd
         elif [ "$UP" -lt 240 ]; then
@@ -882,7 +890,7 @@ EOF
 
 # ---- main ----
 case "${1:-}" in
---version) echo "watchdog v1.40"; exit 0 ;;
+--version) echo "watchdog v1.41"; exit 0 ;;
 esac
 touch $LOG $STATE
 # v1.20: 看门狗单实例 — 双实例会重复自愈/告警(现场曾出现 2 个).

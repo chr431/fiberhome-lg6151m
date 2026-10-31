@@ -16,6 +16,11 @@
  * heartbeat, heartbeat file /tmp/nerepair.hb (uptime seconds, for the
  * watchdog SVC_TABLE liveness probe).
  *
+ * v1.5 (patrol round): attach wait bounded to 3s (WNOHANG poll + deadline,
+ *   detach on timeout) -- an un-stoppable tracee could block the v1.4 retry
+ *   loop forever, freezing the supervisor (07:05-07:08 field incident:
+ *   heartbeat silent 234s, watchdog restart).  Supervisor liveness beats
+ *   per-pid coverage.
  * v1.4 (code-quality round):
  *   - attach_pid: waitpid is now retried on EINTR and PTRACE_DETACHes on any
  *     other failure.  Since v13 SIGALRM deliberately lacks SA_RESTART, an
@@ -71,7 +76,7 @@
 #endif
 #define NT_PRSTATUS 1
 #define LOGPATH "/data/gw/logs/nerepair.log"
-#define NEREPAIR_VER "1.4"
+#define NEREPAIR_VER "1.5"
 
 struct regs64 { unsigned long regs[31]; unsigned long sp, pc, pstate; };
 static pid_t self_pid;
@@ -205,14 +210,30 @@ static int traced(pid_t pid)
 }
 static void attach_pid(pid_t pid)
 {
-    int st; pid_t w;
+    int st; pid_t w; time_t deadline;
     if (pid == self_pid || pid <= 0) return;
     if (ptrace(PTRACE_ATTACH, pid, 0, 0) < 0) return;
     /* v1.4: EINTR-retry (SIGALRM has no SA_RESTART since v1.3) and detach on
      * any other wait failure -- a tracee abandoned in group-stop is frozen
-     * for good (PTRACE_DETACH on a dead/non-stopped pid just fails softly). */
-    do { w = waitpid(pid, &st, __WALL); } while (w < 0 && errno == EINTR);
-    if (w < 0 || !WIFSTOPPED(st)) { ptrace(PTRACE_DETACH, pid, 0, 0); return; }
+     * for good (PTRACE_DETACH on a dead/non-stopped pid just fails softly).
+     * v1.5: bounded wait -- a D-state/unstoppable tracee may never report the
+     * attach stop, and an unbounded (even EINTR-correct) wait freezes the
+     * supervisor itself: field 2026-10-31 07:05-07:08, heartbeat silent for
+     * 234s and the watchdog killed us.  WNOHANG polling with a 3s deadline;
+     * on timeout PTRACE_DETACH and give up on this pid (better a missing
+     * tracee than a frozen supervisor). */
+    deadline = time(NULL) + 3;
+    for (;;) {
+        w = waitpid(pid, &st, __WALL | WNOHANG);
+        if (w == pid) break;
+        if (w < 0 && errno == EINTR) continue;
+        if (w < 0 || time(NULL) > deadline) {
+            ptrace(PTRACE_DETACH, pid, 0, 0);
+            return;
+        }
+        usleep(20000);
+    }
+    if (!WIFSTOPPED(st)) { ptrace(PTRACE_DETACH, pid, 0, 0); return; }
     ptrace(PTRACE_SETOPTIONS, pid, 0, PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK | PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXEC);
     ptrace(PTRACE_CONT, pid, 0, 0);
     g_attached++;

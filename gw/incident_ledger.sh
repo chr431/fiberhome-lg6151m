@@ -890,8 +890,12 @@ do_prune() { # $1=reason $2=tier [$3=category]
     fi
 }
 data_free_kb() {
+    # IL_DATA_KB 是**演练用**显式覆盖（优先级最高）：R1.6 的守卫触发路径必须能在
+    # 不真填盘的前提下被验证（真填到 <100MB 会毁掉真证据，见 docs §10 演练记录）。
+    if [ -n "$IL_DATA_KB" ]; then
+        case "$IL_DATA_KB" in ''|*[!0-9]*) ;; *) echo "$IL_DATA_KB"; return 0 ;; esac
+    fi
     _v=$(/data/gw/bin/busybox df -k /data 2>/dev/null | tail -1 | awk '{print $4}')
-    case "$_v" in ''|*[!0-9]*) _v=$IL_DATA_KB ;; esac
     case "$_v" in ''|*[!0-9]*) _v=999999999 ;; esac
     echo "$_v"
 }

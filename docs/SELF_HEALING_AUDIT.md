@@ -110,6 +110,8 @@ L3  14 个脚本守护 + 7 个专用服务 = 全部常驻服务面
 | G9 | /data 空间耗尽**无自动清理**(watchdog 只 WARN <100MB) | 磁盘满 → 台账写失败 → 可观测性先崩 | watchdog.sh HEALTH 块 | **未修**; 属 R1.6 磁盘守卫(M1 流), 报告交叉引用 |
 | G10 | 设备**无 crond**, 无法用 cron 做周期任务 | 新增周期任务必须挂已有 tick | ps w 无 cron | 已按此设计: soak 挂 log_keeper 5min 块, 零新增守护 |
 | G11 | radvd/v6_reconcile 失败时无告警升级 | IPv6 静默降级 | watchdog radvd 键 | 接受(有 state 键, GUI 可见) |
+| **G12** | **alive() 假活**: 回退分支 pgrep -f /data/gw/<script> 是全命令行子串匹配, 任何 cmdline 里提到该路径的进程都会让 watchdog 误判守护还活着 | 服务已死而监督层报正常 = **M2 监测诚实性违反**(假绿家族) | 2026-11-01 00:05 实弹: ntp_keeper 被杀后死 153s, watchdog 连续两轮报 ntp_keeper=0; 同刻 pgrep -f ntp_keeper[.]sh 为空。证据 /tmp/watchdog.log 00:05:47 / 00:06:54 | **已升级 P1 交 svc-probe 修**(Lead 裁决): 回退分支必须校验 argv[0]/exe, 禁止全命令行子串; 需补负样本回归(假进程 argv 只含路径) |
+| G13 | **dropbear 恢复会杀全部会话**: watchdog 的重启配方是 kill -9 全部 dropbear | 远程管理通道在恢复瞬间全断(含正在做恢复的人) | gw/watchdog.sh 第 465-474 行 | 接受但需知会; 也使 dropbear 注入无法在不丢传输通道的前提下测量(已声明限制) |
 
 ---
 

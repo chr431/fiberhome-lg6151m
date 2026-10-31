@@ -1,5 +1,5 @@
 #!/bin/sh
-# soak_checkpoint.sh v1.2 -- 30d soak 装置: 每日资源 checkpoint + 每次开机记账 + 漂移告警
+# soak_checkpoint.sh v1.3 -- 30d soak 装置: 每日资源 checkpoint + 每次开机记账 + 漂移告警
 # (RELIABILITY_SPEC M4 R4.2/R4.3; 验收口径见 docs/ACCEPTANCE.md)
 #
 # 为什么是"被 fork 驱动"而不是常驻守护:
@@ -31,10 +31,12 @@
 #   现在所有参与比较的量都过 num_or 兜底(实测证据: 00:35 那条 2026-11-01 行)。
 # v1.2 (2026-11-01 演练轮): 阈值改环境变量可覆盖 —— 判据类改动必须有假状态演练,
 #   没有覆盖入口就没法演练(制造故障->判据变红->恢复->回绿)。
+# v1.3 (2026-11-01 冷启动验收): today_done 增加 boot_id 比对 —— 原实现只比日期,
+#   04:00 冷启动后当日行仍是重启前写的, 重启后的资源/判定永远进不了日台账(假绿风险)。
 #
 # 退出码: 0=正常(含跳过), 非 0 只表示参数错误。运行期异常不得影响调用方。
 
-VER=1.2
+VER=1.3
 DIR=/data/gw/logs
 DAILY=$DIR/soak_daily.tsv
 BOOTS=$DIR/soak_boots.tsv
@@ -79,7 +81,13 @@ count_24h() {
 today() { date +%F; }
 today_done() {
     [ -r "$DAILY" ] || return 1
-    grep -q "^$(today)	" "$DAILY" 2>/dev/null
+    _l=$(tail -1 "$DAILY" 2>/dev/null)
+    [ -n "$_l" ] || return 1
+    [ "$(printf %s "$_l" | cut -f1)" = "$(today)" ] || return 1
+    # v1.3: 同一天但换了 boot(冷启动/非计划重启)必须补一行 —— 否则 04:00 重启后的状态
+    # 永远进不了日台账, 设备起不来时台账仍显示重启前的"正常" = 假绿。
+    [ "$(printf %s "$_l" | cut -f4)" = "$(boot_id)" ] || return 1
+    return 0
 }
 last_boot_id() {
     [ -r "$BOOTS" ] || { echo ''; return; }

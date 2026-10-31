@@ -60,6 +60,14 @@ def fetch(offline):
         _, out["census"] = d.run(BA.CENSUS_CMD, timeout=180)
     return out
 
+# 已知归因补充(事后认定, 不覆盖设备侧原始记录):
+# 设备台账在事发时刻只能写 unknown(尾行未匹配已知标记), 这是诚实; 事后由 crash-root
+# 用 pstore 证据认定为 rmmod mtk_wed 实验导致的 teardown UAF。报告里标注, 台账保持原样。
+KNOWN_ATTRIB = {
+    "2026-11-01 02:57:28": ("experiment-kernel-oops",
+        "attrib=crash-root rmmod mtk_wed: fault @ mtk_wed base+0x54, lr=__handle_irq_event_percpu -> teardown UAF"),
+}
+
 CANON = {'fault_inject': 'epoch\tiso\tid\tclass\ttarget\tpre_ok\trecovered\tdur_s\tmaxw_s\trebooted\tverdict\tevidence', 'drills': 'start_epoch\tend_epoch\tkind\ttarget\towner\tnote', 'soak_daily': 'day\tepoch\tup_s\tboot_id\tboot_epoch\tboots_24h\tboots_sched_24h\tboots_unplanned_24h\tscheduled_missed\tdata_used_kb\tdata_free_kb\tdata_used_pct\ttmp_free_kb\tlogs_kb\tprocs\tzombies\tfd_used\tfd_max\tmem_avail_kb\tmem_total_kb\tload1\tne_24h\tne_total\trepairs_24h\tsvc_lt5_24h\tsvc_5_20_24h\tsvc_gt20_24h\tincidents_24h\tsev1_24h\tsev2_24h\tsev3_24h\tverdict\tnotes', 'soak_boots': 'epoch\tiso\tboot_id\tbtime\tup_at_record_s\tprev_boot_id\tcause\tcause_evidence'}
 
 def tsv_rows(text, canon=None):
@@ -275,7 +283,8 @@ def main():
     A("| 启动时刻 | 类别 | 证据 |")
     A("|---|---|---|")
     for r in bres["rows"]:
-        A("| %s | %s | %s |" % (r["iso"], r["category"], r["reason"][:60].replace("|", "/")))
+        _c, _rs = KNOWN_ATTRIB.get(r["iso"], (r["category"], r["reason"]))
+        A("| %s | %s | %s |" % (r["iso"], _c, _rs[:70].replace("|", "/")))
     A("")
     A("</details>")
     A("")

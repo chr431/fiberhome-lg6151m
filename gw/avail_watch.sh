@@ -49,11 +49,14 @@ fi
 touch "$EDGES" 2>/dev/null   # 健康态(零翻转)也要让台账在位(采样器游标/selftest 护栏)
 
 logf() { echo "$(date +%s) $(date '+%F %T') $*" >> "$EDGES"; }
+# v1.4(实弹): ash 无 local —— edge() 的轮转计数曾用 _n, 踩掉 update() 的
+#   事实名 → 状态写回到 st_<行数>, st_gui 永不更新(重复 down/永无 up 实弹
+#   抓获)。helper 内部变量一律 _ew_ 前缀隔离。
 edge() { # $1=id $2=event $3=detail
     logf "$1 $2 $3"
-    _n=$(wc -l < "$EDGES" 2>/dev/null)
-    case "$_n" in *[!0-9]*) _n=0 ;; esac
-    [ "$_n" -gt 4000 ] && { tail -n 2000 "$EDGES" > "$EDGES.tmp" 2>/dev/null && mv -f "$EDGES.tmp" "$EDGES"; }
+    _ewl=$(wc -l < "$EDGES" 2>/dev/null)
+    case "$_ewl" in *[!0-9]*) _ewl=0 ;; esac
+    [ "$_ewl" -gt 4000 ] && { tail -n 2000 "$EDGES" > "$EDGES.tmp" 2>/dev/null && mv -f "$EDGES.tmp" "$EDGES"; }
 }
 
 # ---- 事实读取(全部有界、只读) ----

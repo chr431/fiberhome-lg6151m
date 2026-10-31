@@ -66,9 +66,17 @@ classify() { # $1=probe $2=start $3=end
     _c_now=$(date +%s)
     # ① 演练窗口（Lead v1.2 契约；end=0 视为仍在进行，防止忘记回填把假中断放行）
     if [ -r "$DRILLS" ]; then
-        _c_d=$(awk -v a="$_c_a" -v b="$_c_b" -v now="$_c_now" '
+        _c_d=$(awk -v a="$_c_a" -v b="$_c_b" -v now="$_c_now" -v maxopen="${DRILL_MAX_OPEN:-1800}" '
             /^[#]/ { next }
-            NF >= 2 { st=$1+0; en=$2+0; if (en==0) en=now;
+            NF >= 2 {
+                      # 演练作用域: WiFi TX/hostapd 域演练不影响网关服务判据(tcp80/dns),
+                      # 直接跳过 —— 否则一条 1h 的 hw-drill warp1 会把同窗口内真实中断全排除。
+                      tgt = tolower($4)
+                      if (tgt ~ /warp|wifi|ra0|rai0|beacon|hostapd/) next
+                      st=$1+0; en=$2+0
+                      # end=0 = 注入进行中; 但忘记回填的行不能变成无限期排除(会藏掉真中断),
+                      # 上界 DRILL_MAX_OPEN(默认 1800s), 超界按 start+上界关闭。
+                      if (en==0) { en=now; if (en > st+maxopen) en=st+maxopen }
                       if (a <= en+30 && b >= st-30) { print st"-"en"("$4")"; exit } }' "$DRILLS")
         if [ -n "$_c_d" ]; then
             _c_attr=drill; _c_ex=1; _c_why=drill; _c_ev="drills:$_c_d"
@@ -142,11 +150,15 @@ sev_of() { # $1=dur_s
     awk -v d="$1" 'BEGIN{ if (d>20) print "SEV1"; else if (d>=5) print "SEV2"; else print "SEV3" }'
 }
 
-emit() { # $1=start $2=end $3=probe $4=path $5=flags
-    _e_st=$(num0 "$1"); _e_en=$(num0 "$2")
-    [ "$_e_en" -ge "$_e_st" ] || return 0
+emit() { # $1=start_ms $2=end_ms $3=probe $4=path $5=flags
+    # 上游(fast_facts/avail_edges)一律给毫秒；台账列与 classify 一律用**秒**
+    # （drills/reboots/ne_events 全是 epoch 秒 —— 单位不一致会让演练排除静默失效，
+    #  实弹：ms 与 s 直接比较导致演练窗永不命中）。
+    _e_st_ms=$(num0 "$1"); _e_en_ms=$(num0 "$2")
+    [ "$_e_en_ms" -ge "$_e_st_ms" ] || return 0
+    _e_st=$(( _e_st_ms / 1000 )); _e_en=$(( _e_en_ms / 1000 ))
     # dur 单位=秒（台账字段语义）；severity 用秒判定（1s 采样下毫秒无意义）
-    _e_dur=$(( ( _e_en - _e_st ) / 1000 ))
+    _e_dur=$(( _e_en - _e_st ))
     _e_sev=$(sev_of "$_e_dur")
     _e_cls=$(classify "$3" "$_e_st" "$_e_en")
     _e_attr=$(printf '%s' "$_e_cls" | cut -d'|' -f1)
@@ -260,7 +272,7 @@ do_daily() {
     _t=$RUN/svc_daily.tmp
     awk -F'\t' '
       $1 ~ /^[0-9]+$/ {
-        d = strftime("%Y%m%d", int(($1+0)/1000))
+        d = strftime("%Y%m%d", $1+0)   # 台账 start 列已是 epoch 秒
         k = d "|" $4
         tot[k]++
         if ($8+0 == 1) ex[k]++

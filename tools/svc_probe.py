@@ -503,6 +503,13 @@ def anchor_once(evidence_dir):
 # --------------------------------------------------------------------------
 # derive outages from samples
 # --------------------------------------------------------------------------
+DRILL_MAX_OPEN_S = 1800   # 未回填演练行的最大生效时长（见 attribute()）
+# 演练作用域：只门控 WiFi TX / hostapd 的演练**不会**影响以太 LAN 路径的客户端观测。
+# 不做这个区分，一条 1 小时、target=warp1 的硬件演练就会把同窗口内真实的 GUI/DNS
+# 中断全部"排除"掉 —— 那不是审计，是把证据藏起来。（实弹：crash-root 的
+# hw-drill warp1 00:12–01:13 窗口吞掉了 state-truth 的四条真实服务中断。）
+_DRILL_WIFI_ONLY = ("warp", "wifi", "ra0", "rai0", "beacon", "hostapd")
+
 PROBES = ("icmp", "dns", "tcp80", "tcp22")
 PROBE_COL = {"icmp": (3, 4), "dns": (5, 6), "tcp80": (7, 8), "tcp22": (9, 10)}
 
@@ -756,7 +763,15 @@ def attribute(inc, ev):
     #    is treated as still open so a forgotten close cannot leak fake outages
     #    into the acceptance count.
     for d in ev.get("drills", []):
-        dend = d["end"] if d["end"] else now_ms() // 1000
+        _t = (d.get("target") or "").lower()
+        if any(k in _t for k in _DRILL_WIFI_ONLY) and inc.get("path") not in ("wifi", "rndis"):
+            continue          # WiFi 域演练不影响以太/RNDIS 路径的观测
+        # end_epoch=0 表示"注入进行中"。但一行忘记回填的演练如果被当成无限期，
+        # 会把之后所有真实中断都排掉 —— 那是另一种自欺。因此给未回填行设上界
+        # DRILL_MAX_OPEN_S（默认 30min），超界按 start+上界关闭，并在报告里列为
+        # stale_open 告警（可审计），而不是静默放大排除范围。
+        dend = d["end"] if d["end"] else min(now_ms() // 1000,
+                                             d["start"] + DRILL_MAX_OPEN_S)
         if t0 <= dend + 30 and t1 >= d["start"] - 30:
             return ("drill/%s" % (d["target"] or d["kind"]),
                     "drills.tsv:%d-%d" % (d["start"], d["end"]), 1, "drill")
@@ -864,6 +879,9 @@ def build_report(evidence_dir, days=7, pull=False):
         "excluded": [i for i in incidents if i["excluded"]],
         "drills": {"windows": ev.get("drills", []),
                    "open": [d for d in ev.get("drills", []) if not d["end"]],
+                   "stale_open": [d for d in ev.get("drills", [])
+                                  if not d["end"]
+                                  and (now_ms() // 1000) - d["start"] > DRILL_MAX_OPEN_S],
                    "excluded_incidents": [i for i in incidents
                                           if i["excl_reason"] == "drill"]},
         "incidents": incidents,
@@ -908,8 +926,14 @@ def print_report(o):
                % (iso(d["start"]), iso(d["end"]) if d["end"] else "(open)",
                   d["kind"], d["target"], d["owner"], d["note"]))
         if o["drills"]["open"]:
-            _p("  WARN: %d drill window(s) still open (end_epoch=0) -- treated as "
-               "open-ended; ask the injector to close them" % len(o["drills"]["open"]))
+            _p("  WARN: %d drill window(s) still open (end_epoch=0) -- capped at %d min; "
+               "ask the injector to close them"
+               % (len(o["drills"]["open"]), DRILL_MAX_OPEN_S // 60))
+        if o["drills"]["stale_open"]:
+            _p("  WARN: %d drill row(s) open longer than %d min -- treated as closed at "
+               "start+%d min (NOT open-ended, so real outages are not hidden)"
+               % (len(o["drills"]["stale_open"]), DRILL_MAX_OPEN_S // 60,
+                  DRILL_MAX_OPEN_S // 60))
         _p("")
     _p("incidents (%d, excluded %d):" % (len(o["incidents"]), len(o["excluded"])))
     for i in o["incidents"]:

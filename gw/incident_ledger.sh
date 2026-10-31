@@ -175,6 +175,7 @@ BATCH=/tmp/il_batch.$$
 IL_SRC=-
 IL_SRC_SEQ=0
 IL_BACKFILL=0
+IL_PRESYNC_MODE=0
 # 注意：必须在当前 shell 里自增（用 $(src_ref) 会进子壳，计数永远停在 1）
 mkref() {
     IL_SRC_SEQ=$(( IL_SRC_SEQ + 1 ))
@@ -649,6 +650,12 @@ ingest() {
         IL_BACKFILL=1
         printf '%s\n' "$_body" | $_h
         IL_BACKFILL=0
+        if [ "$IL_PRESYNC_MODE" != 1 ]; then
+            append_batch
+            if [ "$IL_APPENDED" -gt 0 ]; then
+                seal_write append "backfill src=$_nm"
+            fi
+        fi
         _n=$(printf '%s\n' "$_body" | wc -l); _n=$(num0 "$_n")
         cur_set "$_nm" "$_last" $(( _sq + _n ))
         cnt_add lines_read "$_n"
@@ -698,6 +705,14 @@ $_tail"
     _take=$(printf '%s\n' "$_body" | head -n "$MAX_ROWS")
     _n=$(printf '%s\n' "$_take" | wc -l); _n=$(num0 "$_n")
     printf '%s\n' "$_take" | $_h
+    # 耐久性：先把本轮的行落盘并写 seal，再推进游标 —— 否则 SSH 中途断开会让
+    # "游标已前移但行未落盘"的窗口丢数据（首轮回填 1359 行尤其不可接受）。
+    if [ "$IL_PRESYNC_MODE" != 1 ]; then
+        append_batch
+        if [ "$IL_APPENDED" -gt 0 ]; then
+            seal_write append "src=$_nm"
+        fi
+    fi
     _last=$(printf '%s\n' "$_take" | tail -n 1)
     cur_set "$_nm" "$_last" $(( _sq + _n ))
     cnt_add lines_read "$_n"
@@ -1018,6 +1033,7 @@ fi
 
 if [ "$PRESYNC" = 1 ]; then
     il "pre-sync buffering only"
+    IL_PRESYNC_MODE=1
     cnt_set repairs_seen 0
     ingest wdlog   "$DIR/tmp/watchdog.log"      "$DIR/tmp.prev/watchdog.log" h_wdlog
     ingest ne      "$DIR/ne_events.tsv"         -                            h_ne

@@ -129,6 +129,12 @@ def cmd_trend(a):
     ds = [x for x in ds if x[0] and x[1] is not None]
     if len(ds) >= 2:
         dt = (ds[-1][0] - ds[0][0]) / 86400.0
+        # 窗口 <6h 时斜率没有意义(两条样本 27min 相距会算出 +650MB/day 的假数字);
+        # 诚实性纪律: 宁可不给斜率, 也不给一个会误导人的外推。
+        if dt < 0.25:
+            print()
+            print("窗口仅 %.2f 天(<6h), 不做斜率外推 —— 等 soak 累积 >=1 天后重跑" % dt)
+            return 0
         if dt > 0:
             g_data = (ds[-1][1] - ds[0][1]) / dt
             g_logs = ((ds[-1][2] or 0) - (ds[0][2] or 0)) / dt

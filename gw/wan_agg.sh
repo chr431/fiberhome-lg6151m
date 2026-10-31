@@ -1,5 +1,11 @@
 #!/bin/sh
-# wan_agg.sh v3.8 — 双上行聚合主管: 探活 + 故障转移 FSM + 未打标主路策略 + CLI
+# wan_agg.sh v4.0 — 双上行聚合主管: 探活 + 故障转移 FSM + 未打标主路策略 + CLI
+# v4.0 (M4 G2 配置漂移自愈轮): +CLI --reapply —— 按本守护自己发布的 /tmp/wan_mode
+#   (agg:S1:S2) + /tmp/wan_engine 幂等重建"当前生效态"的 NAT/FORWARD/mangle/fwmark,
+#   供 cfg_heal.sh 在配置被外力删除时调用。不重启 FSM、不改状态、不写状态文件;
+#   全部复用本文件既有函数(agg_conf_load/cell_iface_pick/fw_setup/fw6_setup*/
+#   ensure_rules), 零新增规则文本; 与主环循同一把 netcfg 锁, 临界区 <1s。
+#   幂等性实测: 连跑两次第二次不产生任何变更(见 docs/CFG_HEAL.md §8 D6)。
 # v3.8 (2026-10-31 时间源统一轮): 内部新鲜度时基 epoch→uptime —— now/W1_OK/W2_OK/
 #   T0 全部改 /proc/uptime(NTP 跳变瞬间原实现"双侧同死": 跳前写的 W*_OK 减跳后
 #   epoch 巨大 → 硬截止误触发, 拆规则停摆一个环循); wan_alive 增发 hb=<uptime>,
@@ -224,6 +230,51 @@ case "$1" in
     main_primary_apply "$2"
     echo "main-primary -> $2"
     ip route show default; ip -6 route show default
+    exit 0 ;;
+--reapply)
+    # v4.0 (M4 G2 配置漂移自愈轮): 幂等重建"当前生效态"的内核装置, 供
+    #   /data/gw/cfg_heal.sh 在检测到配置被外力删除(NAT MASQUERADE / mangle WANAGG
+    #   MARK / fwmark / FORWARD 放行)时调用。**不重启 FSM、不改状态、不写状态文件**;
+    #   状态一律读本守护自己发布的 /tmp/wan_mode(agg:S1:S2) 与 /tmp/wan_engine,
+    #   不另立第二套判据。main 表主默认不在此写(主环循 main_primary_apply 每周期已复位)。
+    #   锁: 与主环循同一把 netcfg 锁; 临界区 = 一批 iptables/ip 单命令, 锁内不 spawn
+    #   长驻子进程(AGENTS 陷阱表"锁被长持"的成因形态)。
+    # 退出码: 0=完成 2=状态未知(wan_mode 缺失/非法, 不动手) 3=锁超时
+    _ss=$(cat /tmp/wan_mode 2>/dev/null)
+    case "$_ss" in agg:[01]:[01]) ;; *)
+        echo "reapply: wan_mode=[$_ss] unknown, skip" >&2; exit 2 ;; esac
+    _s1=$(printf '%s' "$_ss" | cut -d: -f2)
+    _s2=$(printf '%s' "$_ss" | cut -d: -f3)
+    agg_conf_load 30
+    AGG_ON=1; grep -q '^ENABLE=0' /data/gw/agg.conf 2>/dev/null && AGG_ON=0
+    _eng=$(cat /tmp/wan_engine 2>/dev/null); [ -n "$_eng" ] || _eng=iptables
+    netcfg_lock 5 || { echo "reapply: netcfg lock timeout" >&2; exit 3; }
+    _cw=$(cell_iface_pick 2>/dev/null)
+    for _if in $_cw; do
+        ip route replace default dev $_if table $T1 2>/dev/null
+        ip -6 route replace default dev $_if table $T1 2>/dev/null
+        iptables -t nat -C POSTROUTING -s $LAN_NET -o $_if -j MASQUERADE 2>/dev/null || \
+            iptables -t nat -A POSTROUTING -s $LAN_NET -o $_if -j MASQUERADE
+        iptables -C FORWARD -i br-lan -o $_if -j ACCEPT 2>/dev/null || \
+            iptables -I FORWARD -i br-lan -o $_if -j ACCEPT
+        iptables -C FORWARD -i $_if -o br-lan -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || \
+            iptables -I FORWARD -i $_if -o br-lan -m state --state ESTABLISHED,RELATED -j ACCEPT
+        log "REAPPLY cell if=$_if (nat+fwd ensured)"
+    done
+    if [ "$AGG_ON" = 1 ]; then
+        if [ "$_eng" = iptables ]; then
+            if [ "$_s1" = 1 ] && [ "$_s2" = 1 ]; then fw_setup $W2_PCT
+            elif [ "$_s2" = 0 ]; then fw_setup 0
+            else fw_setup 100; fi
+        fi
+        if [ "$_s1" = 1 ] && [ "$_s2" = 1 ]; then fw6_setup 1
+        elif [ "$_s2" = 0 ]; then fw6_setup 0
+        else fw6_setup_alive2; fi
+        S1=$_s1; S2=$_s2; ensure_rules
+    fi
+    netcfg_unlock
+    log "REAPPLY done s=$_s1/$_s2 eng=$_eng agg=$AGG_ON if=[$_cw]"
+    echo "reapply: ok s=$_s1/$_s2 eng=$_eng if=[$_cw]"
     exit 0 ;;
 esac
 

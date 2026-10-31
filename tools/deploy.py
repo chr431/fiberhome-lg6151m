@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """deploy.py v2.40 -- single source of truth for PC<->CPE deployment + drift guard.
 
+v2.41 (M4 G2 配置漂移自愈轮): MANIFEST +gw/cfg_heal.sh(配置漂移自愈器 —— 只做
+  "发现漂移 + 调度既有施加器重建": 聚合/NAT/FORWARD 走 wan_agg.sh --reapply,
+  端口映射/WAN 纵深守卫走 fw_apply.sh apply, br-lan 成员走 brctl addif; 自身不持
+  netcfg 写锁、无新守护、正常态 0 次重建; 台账 /data/gw/logs/cfg_heal.tsv)。
 v2.40 (M1 台账轮): MANIFEST +gw/incident_ledger.sh(事故台账归一+分级留存 seal; 由
   log_keeper 5min 块 fork, 无新守护) +gw/retention_audit.sh(留存审计: 完整性/seq
   缺口对账/各 tier 最老龄 vs 合同阈值, 只读可反复跑)。
@@ -184,6 +188,7 @@ MANIFEST = [
     ("gw/svc_outage.sh", "/data/gw/svc_outage.sh"),  # 服务中断台账消费者 (M3/R3.3-R3.5; 读 fast_facts.tsv, 不采样非常驻)
     ("gw/incident_ledger.sh", "/data/gw/incident_ledger.sh"),  # 事故台账归一+分级留存 (M1/R1.1-R1.6; log_keeper 5min fork, 无新守护)
     ("gw/retention_audit.sh", "/data/gw/retention_audit.sh"),  # 留存审计/证明 (M1/R1.3-R1.5; 只读, 一条命令可反复跑)
+    ("gw/cfg_heal.sh", "/data/gw/cfg_heal.sh"),  # 配置漂移自愈 (M4 G2/R4.1; 只发现+调度既有施加器, 无新守护, 不持 netcfg 锁)
     ("gw/core_trap.sh", "/data/gw/core_trap.sh"),  # daily user-space core capture window (P3)
     ("gw/diag_dump.sh", "/data/gw/diag_dump.sh"),  # one-shot redacted diagnostics bundle
     ("gw/zz_data_hook", "/data/build/rootfs/etc/init.d/zz_data_hook"),     # hook-slot watchdog (stethoscope)

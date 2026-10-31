@@ -1,6 +1,6 @@
 # 可靠性验收报告 (M4 自持性 + 汇总口径)
 
-> 生成时刻: 2026-11-01 04:08:12 (UTC+8)  生成器: `tools/acceptance/report.py`
+> 生成时刻: 2026-11-01 04:09:02 (UTC+8)  生成器: `tools/acceptance/report.py`
 > 合同: `docs/RELIABILITY_SPEC.md` v1.0  证据: 设备 `/data/gw/logs/*`(可复核) + 本机归档
 > 原则: 每个判定都指向一个设备侧文件与时间窗; 数据缺失记 **unknown**, 不记 0。
 
@@ -227,12 +227,52 @@
 
 > 契约: `drills.tsv`(Lead v1.2) 是唯一演练标记文件; 消费方(svc-probe/state-truth/obs-ledger)按窗口打 excluded。
 
-- 窗口行总数: 77 (批级 0 / 逐条 0)
+- 窗口行总数: 78 (批级 59 / 逐条 19)
 - 残留 end_epoch=0 的行: **0** (无残留)
-- 演练总时长: 0 s
+- 演练总时长: 7848 s
 
 | start | end | kind | target | owner |
 |---|---|---|---|---|
+| 1793469291 | 1793469334 | fault-injection | batch-K22 | soak-qa |
+| 1793469291 | 1793469373 | fault-injection | batch-K12 | soak-qa |
+| 1793469291 | 1793469373 | fault-injection | batch-K05 | soak-qa |
+| 1793469292 | 1793469373 | fault-injection | batch-K06 | soak-qa |
+| 1793469292 | 1793469334 | fault-injection | K22:wan_agg.sh | soak-qa |
+| 1793469292 | 1793469373 | fault-injection | K12:nerepair | soak-qa |
+| 1793469292 | 1793469373 | fault-injection | K05:wifi_guard.sh | soak-qa |
+| 1793469292 | 1793469373 | fault-injection | K06:reboot_sched.sh | soak-qa |
+| 1793469374 | 1793469441 | fault-injection | batch-K07 | soak-qa |
+| 1793469374 | 1793469441 | fault-injection | batch-K08 | soak-qa |
+| 1793469374 | 1793469438 | fault-injection | batch-K09 | soak-qa |
+| 1793469374 | 1793469414 | fault-injection | batch-K18 | soak-qa |
+| 1793469374 | 1793469441 | fault-injection | K07:log_keeper.sh | soak-qa |
+| 1793469375 | 1793469441 | fault-injection | K08:usb_mgr.sh | soak-qa |
+| 1793469375 | 1793469438 | fault-injection | K09:wan_eth.sh | soak-qa |
+| 1793469375 | 1793469414 | fault-injection | K18:atcid | soak-qa |
+| 1793469952 | 1793470112 | drill-manual | v3httpd | svc-probe |
+| 1793462160 | 1793462172 | drill-manual | v3httpd | svc-probe |
+| 1793469883 | 1793469894 | drill-manual | nat:ccmni2 (D1) | cfg-heal |
+| 1793469888 | 1793469904 | drill-manual | br-lan:eth1 (D4) | cfg-heal |
+| 1793470413 | 1793470422 | drill-manual | v3httpd | state-truth |
+| 1793470425 | 1793470435 | drill-manual | dnsmasq | state-truth |
+| 1793470438 | 1793470447 | drill-manual | v3httpd | state-truth |
+| 1793470450 | 1793470460 | drill-manual | dnsmasq | state-truth |
+| 1793470463 | 1793470472 | drill-manual | v3httpd | state-truth |
+| 1793470475 | 1793470484 | drill-manual | dnsmasq | state-truth |
+| 1793470487 | 1793470499 | drill-manual | hostapd | state-truth |
+| 1793470502 | 1793470512 | drill-manual | v3httpd | state-truth |
+| 1793470515 | 1793470526 | drill-manual | hostapd | state-truth |
+| 1793470529 | 1793470572 | drill-manual | wan_agg | state-truth |
+| 1793470575 | 1793470588 | drill-manual | eth0 down | state-truth |
+| 1793470591 | 1793470604 | drill-manual | eth0 down | state-truth |
+| 1793470607 | 1793470619 | drill-manual | rai0 down | state-truth |
+| 1793470622 | 1793470635 | drill-manual | rai0 down | state-truth |
+| 1793470638 | 1793470649 | drill-manual | fast_watch | state-truth |
+| 1793470652 | 1793470663 | drill-manual | fast_watch | state-truth |
+| 1793470675 | 1793470748 | drill-manual | led_mgr | state-truth |
+| 1793470751 | 1793470824 | drill-manual | fan_mgr | state-truth |
+| 1793470827 | 1793470901 | drill-manual | led_mgr | state-truth |
+| 1793470904 | 1793470942 | drill-manual | LED_NIGHT=1 | state-truth |
 
 ## 9. 假状态演练记录(判据类改动的实弹)
 

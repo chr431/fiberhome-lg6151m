@@ -68,8 +68,9 @@ def tsv_rows(text, canon=None):
         return []
     # v1.0 注入器没把表头变量带进 runner, 落成了空行 -> 首行是数据行。
     # 这里用规范表头兜底, 保证旧台账也能读(而不是整份读成 None)。
-    _f0 = lines[0].split(chr(9))[0]
-    if canon and (chr(9) not in lines[0] or _f0.isdigit()):
+    _f0 = lines[0].split(chr(9))[0].strip()
+    _known = ("start_epoch", "epoch", "day", "id")
+    if canon and _f0 not in _known:
         lines.insert(0, canon)
     lines[0] = lines[0].replace(chr(92) + "t", chr(9))  # 兼容 v1.0 注入器写的字面 backslash-t 表头
     hdr = lines[0].split("\t")
@@ -126,9 +127,11 @@ def main():
         i = min(len(durs) - 1, int(round(p * (len(durs) - 1))))
         return "%ds" % durs[i]
 
-    open_rows = [r for r in drills if r.get("end_epoch") == "0"]
-    closed = [r for r in drills if r.get("end_epoch") not in ("0", "", None)]
-    per_item = [r for r in closed if ":" in r.get("target", "")]
+    # 只有 end_epoch 是纯数字才算"已闭合"; 空/0/异常格式都不算。
+    open_rows = [r for r in drills if str(r.get("end_epoch", "")).strip() == "0"]
+    closed = [r for r in drills if str(r.get("end_epoch", "")).strip().isdigit()
+              and str(r.get("end_epoch", "")).strip() != "0"]
+    per_item = [r for r in closed if ":" in str(r.get("target", ""))]
     total_drill_s = sum(int(r["end_epoch"]) - int(r["start_epoch"])
                         for r in closed
                         if str(r.get("end_epoch", "")).isdigit()

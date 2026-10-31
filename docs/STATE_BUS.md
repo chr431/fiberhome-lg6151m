@@ -383,3 +383,55 @@ avail_sampler 的边缘收割字段位置假设与生产方日志格式不匹配
 （日志里的 `bss=`、直接消费 wan_alive、引用 watchdog 的 WAN 键）。v4.1 把判据移交给状态总线后必然变红，
 **需要随架构更新断言**（本轮未改，因为只被授权改 `t_avail` 一处）。部署前基线 102 pass/1 fail，
 部署后 98 pass/5 fail：其中 t_avail 由红转绿，其余 4 条即上述腐化 + 1 条 watchdog 启动 PATH（已修）。
+### 11.6 最终验收数据（02:37 快照）
+
+| 项 | 数值 | 证据 |
+|---|---|---|
+| **selftest** | **103 pass / 0 fail**（部署前基线 102/1，唯一红项即 t_avail） | /tmp/st_final4.log |
+| detect 滞后 | **p50 1000 ms · p99 3020 ms · max 3070 ms（n=139）** | /data/gw/logs/lag_audit.tsv |
+| publish 滞后 | 与 detect 同（同拍发布，n=139） | 同上 |
+| led 写入滞后 | **p50 1510 ms · p99 1770 ms · max 1850 ms（n=10）** | 同上（stage=led） |
+| gui 渲染滞后 | 1760 ms（n=1，等价客户端） | 同上（stage=gui） |
+| 迁移流 | 139 行 | /data/gw/logs/state_events.tsv |
+| 事实流 | 2366 行，NF!=5 = 0 | /data/gw/logs/fast_facts.tsv |
+| 边缘流 | 108 行（新契约） | /data/gw/logs/avail_edges.tsv |
+| 演练标记 | 78 行，**悬挂行 0** | /data/gw/logs/drills.tsv |
+| doctor | **CLEAN** | deploy.py doctor |
+| vercheck | OK（158 文件 / 86 MANIFEST） | vercheck.py check |
+
+**R2.7 重演结果（20 次注入，10 次拿到可度量红迁移）**
+
+| 注入 | 组件 | detect 滞后 |
+|---|---|---|
+| kill v3httpd ×2 | sys.gui | 1020 ms / 2040 ms |
+| kill dnsmasq ×2 | lan.bridge | 1010 ms / 1000 ms |
+| kill hostapd ×2 | lan.wifi2g | 1020 ms / 970 ms |
+| kill wan_agg | wan.ethernet | 1010 ms |
+| kill led_mgr | feat.led | 1010 ms |
+| ip link eth0 down | wan.ethernet | **170 ms** |
+| ip link rai0 down | lan.wifi5g | 980 ms |
+
+未拿到红迁移的 10 次及原因（都落 drills.tsv，可复核）：
+- 服务被 kill 后 watchdog **秒级/30s 级拉回**，注入窗口内已回绿（v3httpd/dnsmasq ×3、eth0 ×1、rai0 ×1）；
+- fan_mgr 心跳阈值 60s > 观察窗（1 次）；
+- fast_watch 自杀 ×2：**总线整体停摆，没有组件迁移可记**，但 beat_age 实测 10s/24s —— GUI 会显示
+  「陈旧/未知」而非绿（设计行为正确，但 R2.7 的判据形式对它不适用）；
+- LED_NIGHT 改配置 ×1：只改灯色不改组件级别（设计如此）；
+- led_mgr 第 1 次 ×1：落在其抖动重启窗口内。
+
+### 11.7 未定位的共性缺陷（本流唯一 P0，如实记录）
+
+**两个 shell 长驻守护会静默退出**：fast_watch（trap 记到 exit=2，STEP=sample/beat/hb）与 led_mgr
+（watchdog 记到 process absent，无 NE、无 dmesg、无 stderr）。频率在活跃期约 1 次/1–2 min，
+空闲期显著降低。已排除：SIGSEGV（ne_events 30min 内 0 条）、OOM（memavail 1.3GB）、
+显式 exit 2（源码无此路径）、svc_lock 竞争（tick>0 证明是主实例）。
+
+已做的缓解（本轮已上线）：
+1. **watchdog v1.46 档A 快路径**：进程不存在 = 确定死亡 → 本拍立即重启，不等 2-of-3。
+   实测日志出现 definitive death (process absent) — tier-A immediate restart，恢复 ≤35s（旧 90–120s）。
+2. **led_mgr v4.3**：信标检查（busybox dmesg|grep，全循环最贵）10 拍→60 拍；svc_lib v1.11 把
+   led_mgr 心跳上限 60→120s，消除抖动式重启循环。
+3. GUI/LED 在总线陈旧时显示「陈旧/未知」/全灭 —— **故障可见，不会假绿**。
+
+待办：用 v1.8 的 STEP 台账 + 下一步的 pid/ppid 列定位根因（怀疑 busybox ash 长驻循环在特定外部
+写入（sysfs GPIO 竞争写 / dmesg 并发）下的异常退出，需对照实验验证，不做猜测结论）。

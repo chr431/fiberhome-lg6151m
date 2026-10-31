@@ -2341,7 +2341,9 @@ def t_arith_octal():
     want = ["708", "709", "700", "708", "709", "700"]
     files = ("fast_watch.sh", "led_mgr.sh", "www/api_state.sh")
     idiom = [dev("grep -c '#0}; \\[ -n' /data/gw/%s 2>/dev/null" % f).strip() for f in files]
-    ten = [dev("grep -c '10#' /data/gw/%s 2>/dev/null" % f).strip() for f in files]
+    # 只算**代码行**: 注释里提到 10# 是历史记录(告诉后人为何不能用), 不算依赖。
+    ten = [dev("grep -c '10#[$]' /data/gw/%s 2>/dev/null" % f).strip()
+           for f in files]
     ok = (("arithmetic" in neg) or ("syntax" in neg)) and pos == want \
          and all(c.isdigit() and int(c) >= 1 for c in idiom) \
          and all(c.isdigit() and int(c) == 0 for c in ten)

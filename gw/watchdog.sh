@@ -1,5 +1,9 @@
 #!/bin/sh
-# watchdog.sh v1.44 -- on-device continuous invariant monitor.
+# watchdog.sh v1.45 -- on-device continuous invariant monitor.
+# v1.45(同轮补): authd 拉活失败回滚预算(rl_refund, svc_lib v1.7) — rl_ok 先记账
+#   后执行, 实弹 23:11 strike 通过却 budget exhausted(22:28 起三次坏配方失败
+#   尝试占满 3/h), 修复版被自己的旧失败限流卡死。失败不占预算; 节奏由 strike
+#   2-of-3 限频, 风暴可见性由 FAIL 行承担。
 # v1.44 (2026-10-31 authd 首崩断网轮): authd 自愈配方修复 — _acmd 原以 sed
 #   字面量提取, 引号(api_agg v2.51 '...' 落盘格式)未求值, spawn sh -c 把
 #   "'/data/gw/authd eth0'" 当单个命令名 → ENOENT 静默失败(>/dev/null 吞错);
@@ -557,9 +561,15 @@ run_cycle() {
                     # v1.44: 拉起后校验 — 旧版 spawn 失败(引号/路径/权限)无声,
                     #   预算耗尽后空转到人工。输出留 /tmp 落证据, 1s 后进程不在
                     #   即 FAIL 行(下次轮询 strike 链自然续拉)。
+                    # v1.45: 失败回滚预算(rl_refund) — rl_ok 先记账后执行, 坏配方
+                    #   时代的失败尝试同样吃 3/h, 真修复被限流卡死(实弹 23:11
+                    #   strike 已过而 budget exhausted)。失败不占预算, 重试节奏
+                    #   由 strike 2-of-3 限频。
                     sleep 1
-                    pidof "${_abin:-authd}" >/dev/null 2>&1 || \
-                        log "FAIL  authd restart did not come up (see /tmp/watchdog_authd.out)"
+                    if ! pidof "${_abin:-authd}" >/dev/null 2>&1; then
+                        rl_refund authd
+                        log "FAIL  authd restart did not come up (budget refunded; see /tmp/watchdog_authd.out)"
+                    fi
                 else
                     log "WARN  authd restart budget exhausted (3/h) — alert only"
                 fi
@@ -929,7 +939,7 @@ if [ "$_rc" != 0 ]; then
     exit 0
 fi
 # v1.42: 启动横幅改用 VER 单一来源(此前字面量停在 v1.38, 识别/syslog 断言被骗)
-VER=1.44
+VER=1.45
 log "===== watchdog v$VER start (svc_lib primitives + minimal parsers + batch3 metrics; avail keys + outcome probes + bearer-follow dp; alert LED 5G orange) ====="
 logger -t watchdog "watchdog v$VER start"
 # initialize state to current (suppress initial alarms)

@@ -1,5 +1,10 @@
 #!/bin/sh
-# svc_lib.sh v1.6 -- shared supervision, lock, heartbeat and minimal-parser library.
+# svc_lib.sh v1.7 -- shared supervision, lock, heartbeat and minimal-parser library.
+# v1.7 (2026-10-31 authd 首崩断网轮): +rl_refund() — rl_ok 是先记账后执行,
+#   坏配方时代 spawn 失败(进程未起)同样消耗 3/h 预算, 真修复被限流卡死
+#   (实弹 23:11 strike 已过而 budget exhausted 空转到窗过期)。失败回滚:
+#   spawn 后校验未起来即回退一次计数; 重试节奏由 strike 2-of-3 天然限频
+#   (~60-90s), 风暴可见性由调用方 FAIL 行承担(watchdog log → sampler 窗口)。
 # v1.6 (2026-10-31 判据审计轮): SVC_TABLE +avail_watch(秒级边缘侦测器; hb 30s
 #   写一次, max-hb-age 120)。
 # v1.5 (2026-10-31 时间源统一轮): +wa_age() —— /tmp/wan_alive 新鲜度统一走
@@ -95,6 +100,16 @@ rl_ok() { # $1=name
     [ $((_now - _t)) -gt 3600 ] && { _n=0; _t=$_now; }
     [ "$_n" -ge 3 ] && return 1
     echo "$((_n + 1)) $_t" > "$_f"
+    return 0
+}
+
+# v1.7: 回滚一次 rl_ok 记账(spawn 失败不占预算; 见头注)。文件缺失/坏值 = 无票可退, 静默成功。
+rl_refund() { # $1=name
+    _f=/tmp/watchdog_svc_$1.rec; _n=0; _t=0
+    [ -r "$_f" ] && read _n _t < "$_f"
+    case "$_n" in ''|*[!0-9]*) return 0 ;; esac
+    case "$_t" in ''|*[!0-9]*) _t=$(cut -d. -f1 /proc/uptime) ;; esac
+    [ "$_n" -gt 0 ] && echo "$((_n - 1)) $_t" > "$_f"
     return 0
 }
 

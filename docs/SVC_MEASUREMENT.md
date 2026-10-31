@@ -276,8 +276,21 @@ RL_NOW=1090 rl_ok t; echo "too_soon=$?"   # 期望 1
 
 | 臂 | 设备 svc_lib | 判定口径 | 恢复时延 | 结论 |
 |---|---|---|---|---|
-| before | v1.7（旧 rl_ok） | 同一脚本 drill_rlok.sh | 待填 | 待填 |
-| after  | v1.10（新 rl_ok） | 同一脚本 drill_rlok.sh | 待填 | 待填 |
+| before | v1.7（旧 rl_ok） | 同一脚本 drill_rlok.sh | **无重启动作，中断 14 分钟**（有机证据，非受控） | 秒级崩溃被放大成分钟级 |
+| after | v1.10（新 rl_ok） | 同一脚本 drill_rlok.sh | **70s**（受控，2026-11-01 01:37:15 起） | 恢复有界；慢重试每 60s 一次 |
+
+**受控演练的执行记录与一个诚实说明**
+
+- 2026-11-01 01:37:15 持锁执行 `drill_rlok.sh before 150`（drills.tsv 已留痕
+  `drill-manual v3httpd svc-probe rl_ok-before-arm`），结果 **70s 恢复**。
+- 该臂**本应是"修复前"**（预期永不恢复），但运行中的 watchdog 已被 state-truth 重启并
+  加载了新版 svc_lib（其 M2 部署需要重读 SVC_TABLE），所以它实际测的是**修复后**行为。
+  因此上表 before 行只能用**有机证据**（authd 14 分钟）填，两臂不是同一服务、证据强度不同。
+- 修复生效的**现场旁证**：01:35:22 与 01:38:28 的 `led_mgr slow-retry x10 / x11` ——
+  旧代码在这个状态下已经永久放弃（正是 authd 那 14 分钟的机制），新代码每 60s 继续重试。
+- 部署后误判检查（Lead 指定）：01:34–01:38 的 `EVT restart` 全部是 `live=0`（真死），
+  新 alive() 判据没有把任何健康服务误判为死。
+
 
 
 

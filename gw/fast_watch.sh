@@ -649,6 +649,13 @@ run_loop() {
         if [ $(( TICK % 60 )) -eq 0 ] && [ -r "$D/svc_outage.sh" ]; then
             "$BB" timeout -s KILL 5 sh "$D/svc_outage.sh" tick >/dev/null 2>&1 || true
         fi
+        # M4/G2 配置漂移自愈(cfg-heal, cfg_heal.sh): 每 5 拍(5s)一次。
+        # 硬超时取 3s 而非它们建议的 8s: 同步调用下 8s 会让一拍最长停 8s,
+        # 直接违反 R2.2 的 1s 检测。实际成本 = 6 fork + 纯 shell 匹配(百毫秒级),
+        # 3s 已是 30 倍余量; 万一超拍会记入 fast_watch.overrun.tsv(可复核)。
+        if [ $(( TICK % 5 )) -eq 0 ] && [ -r "$D/cfg_heal.sh" ]; then
+            "$BB" timeout -s KILL 3 sh "$D/cfg_heal.sh" --tick >/dev/null 2>&1 || true
+        fi
         # 审计心跳: 证明 lag_audit 在写(不带 lag_ms=, 不污染 p50/p99)
         if [ $(( TICK % 30 )) -eq 0 ]; then
             ep_ms "$CS"

@@ -115,3 +115,28 @@
 - **nerepair** 现已对全部进程修复同一家族（vsurv4 除外）→ **修复后自然 NE 不再可比**；干净的自然份额窗口需**停闸门 + 停 nerepair**（canary 仍记录 h4）。
 - 闸门 49 次命中的时间跨度 ≈42 h（epoch 1793183044..1793333882）→ ≥1.17 次/小时的记录家族事件（受闸门覆盖的二进制内）；因闸门在写 core/h4 之前就修复，不能换算成自然份额（C-153）。
 
+## 10. 运行时消元：HW_TX_EN 门控实验（2026-11-01 00:12–00:47，C-154）
+
+**判决**：把 mtk_warp 的 `HW_TX_EN`（`/proc/warp_ctrl/warp1/ctrl`）置 FALSE，**不改变** 32B 记录写入率。
+→ **WED tuple 路径在本负载下不是（或未被激活的）写入者**；"证伪"待 rmmod mtk_wed 实验。
+
+**关键数字**（4× vsurv4 canary，按 WED TX 包归一）
+- A 臂（TRUE）：456 命中 / 20.3 min / 300,152 TX 包 = **1.519 命中/千包**
+- B 臂（FALSE）：246 命中 / 8.1 min / 176,990 TX 包 = **1.390 命中/千包**
+- 比值 **0.915（95% CI 0.783–1.068）**；吞吐 24.6→36.4 MB/min（无下降）、loadavg 12.63→12.50（无变化）
+- 自然 NE：A +1、B +0 → 75 min 窗口对 0.5/h 基线无功效，**不作结论**（§6 停止规则）
+
+**静态依据**：`warp_wlan_tx`(.text+0x970) 读 `[ctx+0xd31]`（HW_TX_EN），为 0 则 return 0，跳过
+`wifi_tx_tuple_add`；`ctrl` 写处理器(.text+0x5d6c) 只 `strb`，无 MMIO 写；mtk_wed.ko 0x8b8 调
+`warp_wlan_tx`、0x8bc `cbz w0` → 0 则走 `ops->tx` 软件回退。**门控是惰性的可能原因**：
+`warp_wlan_tx` 还有第一道门 `wifi_hw_tx_allow`（mt_wifi 回调），本次未控制。
+
+**副产物（测量学）**：canary 命中率 **1.3–1.5 次/千个 WED TX 包、20–35 次/min**（4 实例），
+B 臂 8 min 即 246 命中（P(0)=e^-246）→ **后续机制 A/B 只需 5–10 min/臂**；
+自然 NE 仍必须 ≥6 h（canary 暴露率≈100% vs 自然进程≈0，不可互推）。
+
+**证据**：`_local/evidence/crash-root/hwtx_*.jsonl`（主机侧）；设备 `/data/repro/h4_*.bin`（334→1243）；
+`docs/SIGSEGV/07_LEVER.md` §6；`tools/oneoff/sigsegv/hwtx_gate.sh`（门控脚本，status/off/on/verify）。
+**下一实验**：02:17–02:42 —— P1 WARP_DBG_INF + TX ring cell dump（形状比对）→ P2 rmmod/insmod 往返 → P3 rmmod 10min A/B。
+
+

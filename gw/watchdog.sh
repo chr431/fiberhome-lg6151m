@@ -890,7 +890,7 @@ EOF
 
 # ---- main ----
 case "${1:-}" in
---version) echo "watchdog v1.41"; exit 0 ;;
+--version) echo "watchdog v1.42"; exit 0 ;;
 esac
 touch $LOG $STATE
 # v1.20: 看门狗单实例 — 双实例会重复自愈/告警(现场曾出现 2 个).
@@ -900,8 +900,10 @@ if [ "$_rc" != 0 ]; then
     echo "watchdog: another live instance owns the lock (rc=$_rc)" >&2
     exit 0
 fi
-log "===== watchdog v1.38 start (svc_lib primitives + minimal parsers + batch3 metrics; avail keys + outcome probes + bearer-follow dp; alert LED 5G orange) ====="
-logger -t watchdog "watchdog v1.38 start"
+# v1.42: 启动横幅改用 VER 单一来源(此前字面量停在 v1.38, 识别/syslog 断言被骗)
+VER=1.42
+log "===== watchdog v$VER start (svc_lib primitives + minimal parsers + batch3 metrics; avail keys + outcome probes + bearer-follow dp; alert LED 5G orange) ====="
+logger -t watchdog "watchdog v$VER start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
 while :; do

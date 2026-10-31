@@ -238,6 +238,19 @@ emit() { # $1=cat $2=comp $3=dur $4=evref $5=detail [$6=ts]
     _ev=$(sev_of "$_ec" "$_ep" "$_ed" "$_ex")
     # 历史回填标记：行来自源台账的历史段（非本次实时观测），诚实标注
     [ "$IL_BACKFILL" = 1 ] && _ex="backfill=1 $_ex"
+    # 时钟可疑判据（项目铁律：设备无 RTC，开机时钟 = 固件构建日）：
+    # ts 落在构建日 +2 天内 = 写于 NTP 首同步之前，日期不可信。
+    # 实弹 2026-11-01：ne_events 有 10 行 mdscan/pfcanary 带构建日 ts(2026-09-09)，
+    # 回填后把「最老 SEV1」顶成 52.6 天 —— 假留存证据，必须挡在入账前。
+    if [ -n "$IL_BUILD_EPOCH" ]; then
+        case "$_ets" in
+        ''|*[!0-9]*) ;;
+        *) if [ "$_ets" -le $(( IL_BUILD_EPOCH + 172800 )) ]; then
+               _ex="pre_sync=1 src_ts=$_ets $_ex"
+               _ets=$NOW
+           fi ;;
+        esac
+    fi
     _ex=$(drill_tag "$_ets" "$_ex")
     printf '%s:%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
         "$_ec" "$_er" "$_ets" "$_ev" "$_ec" "$_ep" "$_ed" "$_er" \
@@ -625,6 +638,29 @@ syslog_epoch() { # "Sat Oct 31 18:44:31 2026 user.err : ..." -> epoch
     case "$_e" in ''|*[!0-9]*) return 1 ;; esac
     echo "$_e"
 }
+# 内核构建时刻（uname -v 里的 "Wed Sep 9 01:42:03 2026"）—— 设备无 RTC，
+# 开机时钟就是这个日期；任何落在这天附近的 ts 都写于 NTP 首同步之前。
+build_epoch() {
+    _v=$(uname -v 2>/dev/null)
+    _mon=$(printf '%s' "$_v" | sed -n 's/.* \([A-Z][a-z][a-z]\) \([0-9][0-9]*\) \([0-9][0-9]*:[0-9][0-9]*:[0-9][0-9]*\) \([0-9][0-9][0-9][0-9]\).*/\1/p')
+    _dd=$(printf '%s' "$_v" | sed -n 's/.* \([A-Z][a-z][a-z]\) \([0-9][0-9]*\) \([0-9][0-9]*:[0-9][0-9]*:[0-9][0-9]*\) \([0-9][0-9][0-9][0-9]\).*/\2/p')
+    _hms=$(printf '%s' "$_v" | sed -n 's/.* \([A-Z][a-z][a-z]\) \([0-9][0-9]*\) \([0-9][0-9]*:[0-9][0-9]*:[0-9][0-9]*\) \([0-9][0-9][0-9][0-9]\).*/\3/p')
+    _yr=$(printf '%s' "$_v" | sed -n 's/.* \([A-Z][a-z][a-z]\) \([0-9][0-9]*\) \([0-9][0-9]*:[0-9][0-9]*:[0-9][0-9]*\) \([0-9][0-9][0-9][0-9]\).*/\4/p')
+    case "$_mon" in
+    Jan) _m=01 ;; Feb) _m=02 ;; Mar) _m=03 ;; Apr) _m=04 ;;
+    May) _m=05 ;; Jun) _m=06 ;; Jul) _m=07 ;; Aug) _m=08 ;;
+    Sep) _m=09 ;; Oct) _m=10 ;; Nov) _m=11 ;; Dec) _m=12 ;;
+    *) return 1 ;;
+    esac
+    case "$_dd" in ''|*[!0-9]*) return 1 ;; esac
+    _dl=$(printf '%s' "$_dd" | wc -c)
+    [ "$_dl" -eq 2 ] && _dd=0$_dd
+    case "$_hms" in ''|*[!0-9:]*) return 1 ;; esac
+    _e=$(date -d "$_yr-$_m-$_dd $_hms" +%s 2>/dev/null) || return 1
+    case "$_e" in ''|*[!0-9]*) return 1 ;; esac
+    echo "$_e"
+}
+
 h_syslog() {
     while IFS= read -r L; do
         [ -n "$L" ] || continue
@@ -911,6 +947,7 @@ write_status() {
         echo "uptime=$UP"
         echo "boot_id=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)"
         echo "presync=$PRESYNC"
+        echo "build_epoch=$IL_BUILD_EPOCH"
         echo "rows=$_rows"
         echo "bytes=$_bytes"
         echo "appended=$IL_APPENDED"
@@ -1032,6 +1069,9 @@ fi
 
 load_planned
 load_drills
+[ -n "$IL_BUILD_EPOCH" ] || IL_BUILD_EPOCH=$(build_epoch 2>/dev/null)
+case "$IL_BUILD_EPOCH" in ''|*[!0-9]*) IL_BUILD_EPOCH="" ;; esac
+il "build_epoch=$IL_BUILD_EPOCH"
 
 if [ "$1" = "--flush-pending" ]; then
     flush_pending

@@ -353,7 +353,7 @@ setlvl() {
         eval "CN_$_sm_k=0 CD_$_sm_k= LG_$_sm_k=$CS"
         return 0
     fi
-    eval "_sm_cd=\$CD_$_sm_k _sm_cn=\$CN_$_sm_k _sm_cf=\$CF_$_sm_k"
+    eval "_sm_cd=\$CD_$_sm_k _sm_cn=\$CN_$_sm_k _sm_cf=\$CF_$_sm_k _sm_lg=\$LG_$_sm_k"
     case "$_sm_cn" in ''|*[!0-9]*) _sm_cn=0 ;; esac
     if [ "$_sm_cd" = "$_sm_c" ]; then
         _sm_cn=$(( _sm_cn + 1 ))

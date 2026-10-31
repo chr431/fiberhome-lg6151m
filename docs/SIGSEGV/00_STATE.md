@@ -117,8 +117,10 @@
 
 ## 10. 运行时消元：HW_TX_EN 门控实验（2026-11-01 00:12–00:47，C-154）
 
-**判决**：把 mtk_warp 的 `HW_TX_EN`（`/proc/warp_ctrl/warp1/ctrl`）置 FALSE，**不改变** 32B 记录写入率。
-→ **WED tuple 路径在本负载下不是（或未被激活的）写入者**；"证伪"待 rmmod mtk_wed 实验。
+**判决（02:43 经 P1 诊断修正）**：把 mtk_warp 的 `HW_TX_EN`（`/proc/warp_ctrl/warp1/ctrl`）置 FALSE，
+**不改变** 32B 记录写入率；且 **P1 诊断证明 `wifi_tx_tuple_add()` 在本负载下从未被调用**。
+→ 正确口径：**该路径在本负载下未被激活，因此 A/B 的"无变化"是门控惰性，不构成对该路径的证伪**。
+（"WED tuple 路径不是写入者"这句话**不可**再作为结论引用。）
 
 **关键数字**（4× vsurv4 canary，按 WED TX 包归一）
 - A 臂（TRUE）：456 命中 / 20.3 min / 300,152 TX 包 = **1.519 命中/千包**
@@ -137,8 +139,17 @@ B 臂 8 min 即 246 命中（P(0)=e^-246）→ **后续机制 A/B 只需 5–10 
 
 **证据**：`_local/evidence/crash-root/hwtx_*.jsonl`（主机侧）；设备 `/data/repro/h4_*.bin`（334→1243）；
 `docs/SIGSEGV/07_LEVER.md` §6；`tools/oneoff/sigsegv/hwtx_gate.sh`（门控脚本，status/off/on/verify）。
-**下一实验（本轮未执行）**：原定 P1 WARP_DBG_INF 诊断 + rmmod mtk_wed/hw_nat A/B，因排程压缩（02:37→02:50→取消）**未执行**。
-所需条件：**P1 需 5 min**（仅改 log level）；**rmmod 需 20 min**（5 s 往返演练 + 8 min 观察 + 1.5 min 恢复 + hw_nat 臂），
-前提 = 独占 device_lock + WiFi 客户端在线（数据面守卫）+ 模块 .ko 在位（`/lib/modules/5.15.134/{mtk_wed,hw_nat}.ko` 已确认）。
+**P1 诊断（02:41–02:43，已执行）**：`echo 2 > /proc/warp_ctrl/warp1/stat`（WARP_DBG_INF）75 s，
+期间 WED_TX1_MIB 3534→3759（225 个 TX 包）；`dmesg | grep -ic tuple` = **0**，
+而同期 WARP_DBG_INF 的 `warp_msg_send_cmd/HwCtrlTask` 日志正常刷屏（证明 level 2 生效）。
+→ **`wifi_tx_tuple_add()` 未被调用**（该函数在 level>1 时必然打印，字符串前缀 `wifi_rx_tuple_add`）。
+
+**形状排除（P1 附带）**：`echo 3 [ring] [idx] > wed` 的 TX 环 dump **走 dmesg 不是 stdout**；实测 WPDMA TX 环条目 16B =
+`{PA_lo, ctrl, PA_hi, 0}`（如 `00 a8 94 a4 | 48 40 4c 80 | 60 40 20 a4 | 00 00 00 00`），**不含 len/src_ip**
+→ **32B 记录不是 WPDMA TX 环条目**。
+
+**下一实验（本轮未执行）**：rmmod mtk_wed（P1 已判"路径未激活"→按 Lead 指令跳过 hw_nat 臂）。
+所需条件：**20 min**（2 min 基线 + 5 s 往返演练 + 12 min 观察 + 2 min 恢复），
+前提 = 独占 device_lock + WiFi 客户端在线（数据面守卫，防"WiFi 死了所以没 TX"假阴性）+ `.ko` 在位（已确认）。
 
 

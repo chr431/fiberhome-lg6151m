@@ -2082,26 +2082,59 @@ def t_p0_boot_gate():
            % (ex, hv[:8], cur[:8], st, done, tryb, att[:60], chk, timer))
 
 
+
+# v2.76: 单实例计数的权威做法 —— 遍历 /proc 取 argv, 用 grep -x **整行精确匹配**
+#   脚本路径。不能用 pgrep -f: 它做全命令行子串匹配, 会把"命令行里提到守护名"的
+#   进程算进来(本项目已两次栽在这里: alive() 假绿、selftest 假红 2026-11-01)。
+#   也不受自身污染: 本命令的 argv 里那段脚本文本整行不等于任何 /data/gw/X.sh。
+SINGLETON_COUNT = ("for d in /proc/[0-9]*; do tr '\\0' '\\n' < $d/cmdline 2>/dev/null; done "
+                   "| grep -x '/data/gw/[a-z_0-9]*[.]sh' | sort | uniq -c")
+
+
+def _singleton_counts():
+    out = dev(SINGLETON_COUNT + " 2>/dev/null").strip()
+    cnt = {}
+    for ln in out.splitlines():
+        f = ln.split()
+        if len(f) == 2 and f[1].startswith("/data/gw/"):
+            cnt[f[1].rsplit("/", 1)[-1][:-3]] = int(f[0])
+    return cnt
+
+
 @test("stability P1: 服务监督表单实例 (每守护恰 1 个)")
 def t_p1_singletons():
     pats = ["watchdog", "led_mgr", "fan_mgr", "dial_keeper", "log_keeper",
             "wan_agg", "wan_eth", "wifi_guard", "ntp_keeper", "traffic_logger",
             "reboot_sched", "healthdog", "boot_gate"]
-    out = dev("for p in %s; do echo -n \"$p=\"; pgrep -f \"/data/gw/${p}[.]sh\" 2>/dev/null | wc -l; done"
-              % " ".join(pats)).strip()
+    cnt = _singleton_counts()
     bad = []
     # boot_gate exits by design after the 10-minute observation window; when it
     # is gone, stable=1 in boot.healthy is the proof that it finished its job.
     _stable = dev("sed -n 's/^stable=//p' /data/gw/boot.healthy 2>/dev/null | tail -1").strip()
-    for ln in out.splitlines():
-        if "=" in ln:
-            k, v = ln.split("=", 1)
-            if v.strip() != "1":
-                if k == "boot_gate" and v.strip() == "0" and _stable == "1":
-                    continue
-                bad.append("%s:%s" % (k, v.strip()))
+    for p in pats:
+        v = cnt.get(p, 0)
+        if v != 1:
+            if p == "boot_gate" and v == 0 and _stable == "1":
+                continue
+            bad.append("%s:%d" % (p, v))
     record(t_p1_singletons._test_name, "system", not bad,
-           "bad=%s all=%s" % (bad or "none", " ".join(out.split())))
+           "bad=%s all=%s" % (bad or "none", " ".join("%s=%d" % (k, cnt.get(k, 0)) for k in pats)))
+
+
+@test("stability P1: 单实例计数不被命令行子串污染 (pgrep -f 自匹配回归)")
+def t_p1_singleton_no_selfmatch():
+    # 2026-11-01 实弹: lead 用 pgrep -f boot_gate 同时命中真守护和自己的检查命令;
+    #   本套件也曾报 log_keeper:2 / boot_gate:2 的假红。断言: 一个 argv 里**含有**
+    #   守护路径字符串、但 argv 不是该路径的进程, 不得被计入单实例数。
+    base = _singleton_counts().get("boot_gate", 0)
+    dev("sh -c 'echo /data/gw/boot_gate.sh; sleep 25' >/dev/null 2>&1 & echo started")
+    dev("sleep 2; echo ok")
+    after = _singleton_counts().get("boot_gate", 0)
+    dev("for d in /proc/[0-9]*; do tr '\\0' '\\n' < $d/cmdline 2>/dev/null "
+        "| grep -qx 'echo /data/gw/boot_gate.sh; sleep 25' && kill -9 $(basename $d) 2>/dev/null; done; echo cleaned")
+    ok = (after == base)
+    record(t_p1_singleton_no_selfmatch._test_name, "system", ok,
+           "boot_gate base=%d with_decoy=%d (must be equal)" % (base, after))
 
 
 @test("stability P1: 残余崩溃取证链 (core wrapper/logc/selftest/census)")

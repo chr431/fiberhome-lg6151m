@@ -16,6 +16,11 @@
  * heartbeat, heartbeat file /tmp/nerepair.hb (uptime seconds, for the
  * watchdog SVC_TABLE liveness probe).
  *
+ * v1.7 (patrol round 2): heartbeat starvation fix -- g_alarm is now consumed
+ *   at the top of the main loop instead of only in the waitpid-EINTR branch;
+ *   a tracee event storm (constant fork/exec/signal stops) kept waitpid from
+ *   ever blocking, so the flag was set but never serviced and the heartbeat
+ *   starved for minutes (field: five 284-651s gaps, two watchdog restarts).
  * v1.6 (vaguard retirement round): single-layer doctrine -- the in-process
  *   vfprintf guard is retired everywhere (source of the fault family is gone
  *   since the kernel fixstack retirement; guard historically caught 49 hits).
@@ -81,7 +86,7 @@
 #endif
 #define NT_PRSTATUS 1
 #define LOGPATH "/data/gw/logs/nerepair.log"
-#define NEREPAIR_VER "1.6"
+#define NEREPAIR_VER "1.7"
 
 struct regs64 { unsigned long regs[31]; unsigned long sp, pc, pstate; };
 static pid_t self_pid;
@@ -279,6 +284,17 @@ int main(void)
     scan_proc();
     logev("SCAN", 0, "attached_total=%lu", g_attached);
     for (;;) {
+        /* v1.7: 心跳改在循环顶消费 g_alarm —— 原实现只在 waitpid 返回 EINTR
+         * 的分支里检查该标志; tracee 事件风暴(fork/exec/信号停止连发)期间
+         * waitpid 永远有排队停止可返、不阻塞也就不 EINTR, 标志被置却无人
+         * 消费, 心跳被无限饿死(实弹 2026-10-31 18:00 巡检: 5 次 284-651s
+         * 断流, 两次 230/242s 触发看门狗重启)。循环顶检查使心跳节奏与事件
+         * 风暴解耦; EINTR 分支保留原逻辑作兜底。 */
+        if (g_alarm) {
+            g_alarm = 0; alarm(60); write_hb();
+            logev("STAT", 0, "attached=%lu segv=%lu repaired=%lu passed=%lu suppressed=%lu",
+                  g_attached, g_segv, g_repaired, g_passed, g_suppressed);
+        }
         if (g_term) {
             logev("EXIT", 0, "signal attached=%lu segv=%lu repaired=%lu passed=%lu suppressed=%lu",
                   g_attached, g_segv, g_repaired, g_passed, g_suppressed);
@@ -287,11 +303,6 @@ int main(void)
         pid = waitpid(-1, &st, __WALL);
         if (pid < 0) {
             if (errno == EINTR) {
-                if (g_alarm) {
-                    g_alarm = 0; alarm(60); write_hb();
-                    logev("STAT", 0, "attached=%lu segv=%lu repaired=%lu passed=%lu suppressed=%lu",
-                          g_attached, g_segv, g_repaired, g_passed, g_suppressed);
-                }
                 continue;
             }
             if (errno == ECHILD) { usleep(500000); scan_proc(); continue; }

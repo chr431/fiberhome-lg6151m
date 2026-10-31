@@ -296,8 +296,11 @@ run_audit() {
 # 单测：合成台账上跑全部判据（含 4 个篡改用例必须 FAIL）
 # =====================================================================
 mkfix() { # $1=dir $2=rowsfile $3=rm1 $4=rm2 $5=rm3 $6=first_seq
+    # 目录参数必须非空 —— 空值会把重定向写到当前目录并留下 0/2/3 之类垃圾文件
+    # （2026-10-31 实弹：selftest 早期版本在 CWD 留下 0/2/3 三个垃圾文件）。
     _d=$1
-    rm -rf "$_d"; mkdir -p "$_d"
+    case "$_d" in ''|/) echo "mkfix: bad dir" >&2; return 1 ;; esac
+    rm -rf "$_d"; mkdir -p "$_d" || return 1
     _i=$(( $6 - 1 ))
     : > "$_d/incidents.tsv"
     while IFS='	' read -r _t _s _c; do
@@ -305,12 +308,14 @@ mkfix() { # $1=dir $2=rowsfile $3=rm1 $4=rm2 $5=rm3 $6=first_seq
         _i=$((_i + 1))
         printf '%s\t%s\t%s\tfixture\t-\tfixture\tfixture row\t%s\n' "$_t" "$_s" "$_c" "$_i" >> "$_d/incidents.tsv"
     done < "$2"
-    _rows=$(wc -l < "$_d/incidents.tsv" 2>/dev/null); _rows=$(num0 "$_rows")
-    _bytes=$(wc -c < "$_d/incidents.tsv" 2>/dev/null); _bytes=$(num0 "$_bytes")
-    _md5=$(md5sum "$_d/incidents.tsv" 2>/dev/null | cut -d' ' -f1)
-    _ls=$(tail -n 1 "$_d/incidents.tsv" 2>/dev/null | cut -f8); _ls=$(num0 "$_ls")
+    # 注意：本函数中间变量一律 _mk_ 前缀 —— 早期版本用 _rows 覆盖了调用方
+    # selftest 的夹具路径变量，后续重定向于是写到名为 0/2/3 的垃圾文件（实弹教训）。
+    _mk_rows=$(wc -l < "$_d/incidents.tsv" 2>/dev/null); _mk_rows=$(num0 "$_mk_rows")
+    _mk_bytes=$(wc -c < "$_d/incidents.tsv" 2>/dev/null); _mk_bytes=$(num0 "$_mk_bytes")
+    _mk_md5=$(md5sum "$_d/incidents.tsv" 2>/dev/null | cut -d' ' -f1)
+    _mk_ls=$(tail -n 1 "$_d/incidents.tsv" 2>/dev/null | cut -f8); _mk_ls=$(num0 "$_mk_ls")
     printf 'op=append ts=%s rows=%s bytes=%s md5=%s first_seq=%s last_seq=%s sev1=0 sev2=0 sev3=0 rm1=%s rm2=%s rm3=%s oldest_sev1_ts=- oldest_sev1_md5=- reason=fixture\n' \
-        "$NOW" "$_rows" "$_bytes" "$_md5" "$6" "$_ls" "$3" "$4" "$5" > "$_d/incidents.seal"
+        "$NOW" "$_mk_rows" "$_mk_bytes" "$_mk_md5" "$6" "$_mk_ls" "$3" "$4" "$5" > "$_d/incidents.seal"
 }
 selftest() {
     _td=/tmp/ra_selftest.$$
@@ -319,7 +324,7 @@ selftest() {
     _D10=$(( NOW - 10 * 86400 ))
     _D3=$(( NOW - 3 * 86400 ))
     _D2=$(( NOW - 2 * 86400 ))
-    _rows=$_td/rows.txt
+    _rowsf=$_td/rows.txt
     chk() { # $1=name $2=expect $3=dir
         _n=$((_n + 1))
         _o=$(IL_DIR=$3 IL_NOW=$NOW sh "$0" --json 2>/dev/null)
@@ -333,36 +338,36 @@ selftest() {
     }
     mkdir -p "$_td"
     # 1) 健康台账：SEV1 40d / SEV2 10d / SEV3 3d
-    printf '%s\tSEV1\tne\n%s\tSEV2\tsvc_restart\n%s\tSEV3\tnetcfg_repair\n' "$_D40" "$_D10" "$_D3" > "$_rows"
-    mkfix "$_td/good" "$_rows" 0 0 0 1
+    printf '%s\tSEV1\tne\n%s\tSEV2\tsvc_restart\n%s\tSEV3\tnetcfg_repair\n' "$_D40" "$_D10" "$_D3" > "$_rowsf"
+    mkfix "$_td/good" "$_rowsf" 0 0 0 1
     chk good PROVEN "$_td/good"
     # 2) seq 断口未记账（中间删行）→ 必须 FAIL
-    mkfix "$_td/gap" "$_rows" 0 0 0 1
+    mkfix "$_td/gap" "$_rowsf" 0 0 0 1
     sed '2d' "$_td/gap/incidents.tsv" > "$_td/gap/t" && mv "$_td/gap/t" "$_td/gap/incidents.tsv"
     chk seq_gap_unaccounted FAIL "$_td/gap"
     # 3) 追加行但不更新 seal（md5/rows 不符）→ 必须 FAIL
-    mkfix "$_td/tail" "$_rows" 0 0 0 1
+    mkfix "$_td/tail" "$_rowsf" 0 0 0 1
     printf '%s\tSEV3\tledger\tx\t-\tfixture\tunsealed\t99\n' "$NOW" >> "$_td/tail/incidents.tsv"
     chk unsealed_append FAIL "$_td/tail"
     # 4) 台账够老但 SEV1 只留了 2 天（=被裁掉）→ 必须 FAIL
-    printf '%s\tSEV1\tne\n%s\tSEV2\tsvc_restart\n%s\tSEV3\tnetcfg_repair\n' "$_D2" "$_D10" "$_D3" > "$_rows"
-    mkfix "$_td/young" "$_rows" 0 0 0 1
+    printf '%s\tSEV1\tne\n%s\tSEV2\tsvc_restart\n%s\tSEV3\tnetcfg_repair\n' "$_D2" "$_D10" "$_D3" > "$_rowsf"
+    mkfix "$_td/young" "$_rowsf" 0 0 0 1
     chk sev1_too_young PARTIAL "$_td/young"
     # 5) 已记账的 prune（seq 从 3 起，rm3=2）→ 不算断口
-    printf '%s\tSEV1\tne\n%s\tSEV2\tsvc_restart\n%s\tSEV3\tnetcfg_repair\n' "$_D40" "$_D10" "$_D3" > "$_rows"
-    mkfix "$_td/pruned" "$_rows" 0 0 2 3
+    printf '%s\tSEV1\tne\n%s\tSEV2\tsvc_restart\n%s\tSEV3\tnetcfg_repair\n' "$_D40" "$_D10" "$_D3" > "$_rowsf"
+    mkfix "$_td/pruned" "$_rowsf" 0 0 2 3
     chk recorded_prune PROVEN "$_td/pruned"
     # 6) 某级无行 → PARTIAL（NODATA 不等于 PASS）
-    printf '%s\tSEV1\tne\n%s\tSEV3\tnetcfg_repair\n' "$_D40" "$_D3" > "$_rows"
-    mkfix "$_td/nodata" "$_rows" 0 0 0 1
+    printf '%s\tSEV1\tne\n%s\tSEV3\tnetcfg_repair\n' "$_D40" "$_D3" > "$_rowsf"
+    mkfix "$_td/nodata" "$_rowsf" 0 0 0 1
     chk tier_nodata PARTIAL "$_td/nodata"
     # 7) 台账自身只有 2 天（SEV1 合同 7d 未到）→ GROWING，不是 FAIL
-    printf '%s\tSEV1\tne\n%s\tSEV2\tsvc_restart\n%s\tSEV3\tnetcfg_repair\n' "$_D2" "$(( NOW - 86400 ))" "$NOW" > "$_rows"
-    mkfix "$_td/growing" "$_rows" 0 0 0 1
+    printf '%s\tSEV1\tne\n%s\tSEV2\tsvc_restart\n%s\tSEV3\tnetcfg_repair\n' "$_D2" "$(( NOW - 86400 ))" "$NOW" > "$_rowsf"
+    mkfix "$_td/growing" "$_rowsf" 0 0 0 1
     chk growing PARTIAL "$_td/growing"
     # 8) SEV1 被 prune 过（rm1>0）→ 完整性红线 FAIL
-    printf '%s\tSEV2\tsvc_restart\n%s\tSEV3\tnetcfg_repair\n' "$_D10" "$_D3" > "$_rows"
-    mkfix "$_td/sev1gone" "$_rows" 1 0 0 2
+    printf '%s\tSEV2\tsvc_restart\n%s\tSEV3\tnetcfg_repair\n' "$_D10" "$_D3" > "$_rowsf"
+    mkfix "$_td/sev1gone" "$_rowsf" 1 0 0 2
     chk sev1_pruned_flag FAIL "$_td/sev1gone"
     rm -rf "$_td"
     echo "retention_audit selftest cases=$_n failures=$_bad"

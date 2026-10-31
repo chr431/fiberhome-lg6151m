@@ -13,7 +13,7 @@ mtk_warp 暴露了一个**纯软件**的运行时开关 `/proc/warp_ctrl/warp1/c
 ## 2. 静态证据（可复核）
 
 目标：`analysis/vendor/mtk_warp.ko`（sha256 `246dce7929ef15e33c21caed3d4fe43d695dfb574c0d4bd2e2363017b6ef8c37`）
-反汇编语料：`prv-lg6151m/analysis/ko_corpus/mtk_warp/mtk_warp.asm`（relocation-aware）
+反汇编语料：`<private-repo>/analysis/ko_corpus/mtk_warp/mtk_warp.asm`（relocation-aware）
 
 | 位置 | 事实 |
 |---|---|

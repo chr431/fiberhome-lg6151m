@@ -58,7 +58,9 @@ get_state() {
 
 # GUI 回传渲染 (R2.5): v=渲染的 state 版本, a=渲染瞬间的数据年龄(ms, 设备侧口径)
 apply_render() {
-    _v=$(qkv v); _a=$(qkv a)
+    # GUI 走 POST(app.js api() 带 body), 脚本/探测器走 GET —— 两种都支持
+    _v=$(form_kv v); [ -z "$_v" ] && _v=$(qkv v)
+    _a=$(form_kv a); [ -z "$_a" ] && _a=$(qkv a)
     case "$_v" in ''|*[!0-9]*) jerr bad_v; return ;; esac
     case "$_a" in ''|*[!0-9]*) _a=0 ;; esac
     [ "$_a" -gt 600000 ] && _a=600000

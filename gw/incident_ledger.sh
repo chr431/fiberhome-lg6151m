@@ -518,13 +518,28 @@ IL_EDGE_OPEN=$DIR/.inc_edge_open
 h_edges() {
     while IFS= read -r L; do
         [ -n "$L" ] || continue
-        _norm=$(printf '%s' "$L" | tr -s ' 	' ' ')
+        # avail_edges.tsv 有**两代格式**（2026-11-01 实弹：M2 换 fast_watch 时
+        # 契约从空格分隔改成管道分隔，消费方若只认一种会静默丢行）：
+        #   旧: <epoch> <YYYY-MM-DD> <HH:MM:SS> <id> <edge_down|edge_up>
+        #   新: <epoch>|<YYYY-MM-DDTHH:MM:SS>|<id>|<edge_down|edge_up>[|<kind>]
+        # 判据 = 第 2 个字段里有没有 'T'（旧格式第 2 段是纯日期）。
+        _norm=$(printf '%s' "$L" | tr -s ' 	|' ' ')
         _e=$(printf '%s' "$_norm" | cut -d' ' -f1)
         case "$_e" in ''|*[!0-9]*) continue ;; esac
-        # 实测格式: <epoch> <YYYY-MM-DD> <HH:MM:SS> <id> <edge_down|edge_up>
-        _id=$(printf '%s' "$_norm" | cut -d' ' -f4)
-        _ev=$(printf '%s' "$_norm" | cut -d' ' -f5)
+        _f2=$(printf '%s' "$_norm" | cut -d' ' -f2)
+        case "$_f2" in
+        *T*)
+            _id=$(printf '%s' "$_norm" | cut -d' ' -f3)
+            _ev=$(printf '%s' "$_norm" | cut -d' ' -f4)
+            _kind=$(printf '%s' "$_norm" | cut -d' ' -f5) ;;
+        *)
+            _id=$(printf '%s' "$_norm" | cut -d' ' -f4)
+            _ev=$(printf '%s' "$_norm" | cut -d' ' -f5)
+            _kind="" ;;
+        esac
         [ -n "$_id" ] || continue
+        _extra=""
+        [ -n "$_kind" ] && _extra=" kind=$_kind"
         case "$_ev" in
         edge_down)
             grep -v "^$_id	" "$IL_EDGE_OPEN" 2>/dev/null > "$IL_EDGE_OPEN.tmp"
@@ -535,9 +550,10 @@ h_edges() {
             case "$_o" in ''|*[!0-9]*) continue ;; esac
             mkref
             _dur=$(( _e - _o )); [ "$_dur" -lt 0 ] && _dur=0
-            emit svc_outage "$(san_comp "$_id")" "$_dur" "$_ref" "probe=$_id path=edge down=$_o up=$_e" "$_e"
+            emit svc_outage "$(san_comp "$_id")" "$_dur" "$_ref" "probe=$_id path=edge down=$_o up=$_e$_extra" "$_e"
             grep -v "^$_id	" "$IL_EDGE_OPEN" 2>/dev/null > "$IL_EDGE_OPEN.tmp"
             mv "$IL_EDGE_OPEN.tmp" "$IL_EDGE_OPEN" ;;
+        *)  continue ;;
         esac
     done
 }

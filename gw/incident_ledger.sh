@@ -495,7 +495,9 @@ h_netcfg() {
         case "$L" in *pre=1*) _pre=1 ;; esac
         cnt_add repairs_seen 1
         _n=$(cnt_get repairs_seen)
-        if [ "$_n" -gt 10 ]; then
+        # 风暴判据只对**实时增量**有效：回填历史时同一轮会读到上百条历史修复，
+        # 那不是风暴（实弹：首轮回填把 150 条历史 REPAIR 全判成 SEV2 风暴）。
+        if [ "$IL_BACKFILL" != 1 ] && [ "$_n" -gt 10 ]; then
             emit netcfg_storm netcfg - "$_ref" "repairs_in_window=$_n reason=$(san "$_why") pre=$_pre" "$_e"
         else
             emit netcfg_repair netcfg - "$_ref" "reason=$(san "$_why") pre=$_pre raw=$(san "$L")" "$_e"

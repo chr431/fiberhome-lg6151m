@@ -64,7 +64,7 @@ def fetch(offline):
 # 设备台账在事发时刻只能写 unknown(尾行未匹配已知标记), 这是诚实; 事后由 crash-root
 # 用 pstore 证据认定为 rmmod mtk_wed 实验导致的 teardown UAF。报告里标注, 台账保持原样。
 KNOWN_ATTRIB = {
-    "2026-11-01 02:57:28": ("experiment-kernel-oops",
+    "2026-11-01 02:55:48": ("experiment-kernel-oops",
         "attrib=crash-root rmmod mtk_wed: fault @ mtk_wed base+0x54, lr=__handle_irq_event_percpu -> teardown UAF"),
 }
 

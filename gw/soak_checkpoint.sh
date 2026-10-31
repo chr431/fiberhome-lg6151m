@@ -117,7 +117,13 @@ boot_cause() {
         *'procd: reboot'*|*'Restarting system'*)
             printf 'clean\t%s\n' "pstore/console-ramoops.$_bid.txt(tail:procd/reboot)"; return ;;
         esac
-        printf 'unknown\t%s\n' "pstore/console-ramoops.$_bid.txt(tail:unmatched)"
+	# v1.3: 尾行不匹配时做一次整文件深扫(262KB, 每 boot 一次) —— 实弹: 2026-11-01 02:55
+	# 的 Oops 不在最后 8 行, 旧实现只能写 unknown; 深扫能直接判 crash。判据宁严不假。
+	if grep -qa 'Kernel panic\|Unable to handle kernel\|Internal error' "$_pf" 2>/dev/null; then
+		printf 'crash\t%s\n' "pstore/console-ramoops.$_bid.txt(deepgrep:panic/oops)"
+	else
+		printf 'unknown\t%s\n' "pstore/console-ramoops.$_bid.txt(tail+deep:unmatched)"
+	fi
         return
     fi
     printf 'unknown\t%s\n' 'no pstore file for boot_id'

@@ -1,6 +1,6 @@
 # 可靠性验收报告 (M4 自持性 + 汇总口径)
 
-> 生成时刻: 2026-11-01 04:10:17 (UTC+8)  生成器: `tools/acceptance/report.py`
+> 生成时刻: 2026-11-01 04:10:55 (UTC+8)  生成器: `tools/acceptance/report.py`
 > 合同: `docs/RELIABILITY_SPEC.md` v1.0  证据: 设备 `/data/gw/logs/*`(可复核) + 本机归档
 > 原则: 每个判定都指向一个设备侧文件与时间窗; 数据缺失记 **unknown**, 不记 0。
 
@@ -186,7 +186,7 @@
 | 2026-10-31 12:16:37 | clean | procd/reboot |
 | 2026-10-31 18:11:33 | clean | procd/reboot |
 | 2026-10-31 18:44:31 | clean | procd/reboot |
-| 2026-11-01 02:55:48 | crash | Internal error: Oops: 86000007 [#1 |
+| 2026-11-01 02:55:48 | experiment-kernel-oops | attrib=crash-root rmmod mtk_wed: fault @ mtk_wed base+0x54, lr=__handl |
 | 2026-11-01 04:00:57 | scheduled | reboots.log(+32s) |
 
 </details>

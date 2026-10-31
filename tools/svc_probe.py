@@ -56,7 +56,7 @@ try:
 except Exception:
     pass
 
-VERSION = "1.4"
+VERSION = "1.5"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_EVIDENCE = os.path.abspath(os.path.join(
     REPO, "..", "_local", "evidence", "svc_probe"))
@@ -403,6 +403,15 @@ class Sampler(object):
                     self.icmp[key] = None
                     _p("warn: raw icmp unavailable (%s); icmp probe disabled for %s" % (e, src))
             ip = self.icmp.get(key)
+            # 实弹(2026-11-01 03:0x): 设备崩溃重启后本机 DHCP 租约丢失,
+            # raw socket 连续失败被回收成 None 后就**再也没被重建**(1635 拍无 icmp)。
+            # 现在: 处于 None 时每 10 拍重试一次建 socket, 保证长时间运行不会静默降级。
+            if ip is None and (tick % 10) == 0:
+                try:
+                    self.icmp[key] = IcmpProbe(p["dst"], src)
+                    ip = self.icmp[key]
+                except OSError as e:
+                    _p("warn: raw icmp recreate failed (%s); retry in 10 ticks" % e)
             if ip:
                 i_ok, i_ms, i_err = ip.probe(0.9)
                 # a raw socket can go stale when the interface is re-plumbed

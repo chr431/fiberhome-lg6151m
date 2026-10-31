@@ -56,7 +56,7 @@ try:
 except Exception:
     pass
 
-VERSION = "1.3"
+VERSION = "1.4"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_EVIDENCE = os.path.abspath(os.path.join(
     REPO, "..", "_local", "evidence", "svc_probe"))

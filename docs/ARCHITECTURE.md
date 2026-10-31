@@ -170,6 +170,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/health_check.py` | **v1.1** | tool | `-` | v4全系统体检器(SSH 18项; v1.1 fw_ver读/data/gw/VERSIONS: 身份/槽位/bootctrl/服务/WiFi/5G/外网/资源/温度/存储/数据/日志) |
 | `tools/identify2.py` | **v1.0** | tool | `-` | 残留终验取证器(user_data清单/p26纯净性挂载验证/proc-net快照) |
 | `tools/identify_fw.py` | **v1.0** | tool | `-` | 只读固件身份取证器(release/cmdline/v4标记/挂载表; 前置空格防tty首字符丢失) |
+| `tools/incident_audit.py` | **v1.0** | tool | `-` | PC 侧独立留存审计(M1/R1.4): 经 SSH 取回 incidents.tsv/seal/status 原始字节, 本地重算 md5/行数/seq 连续性/各 tier 最老龄并与设备侧 retention_audit 交叉核对, 报告落 _local/evidence/; 丢行或篡改 exit 1; --selftest 本地合成用例(不连设备) |
 | `tools/leak_check.py` | **v2.4** | tool | `-` | v2.4(巡检轮): scan_tree 对 Windows 保留设备名(nul 等 shell 重定向残渣)免疫 — relpath ValueError 曾令门禁整崩(fail-open); v2.3(质量轮): 模式逐条编译校验(非法正则 exit 1 不再零命中放行)/LG_SECRETS_DIR 显式指定而缺失时 fail-closed; 敏感词零命中门禁; v2.2: --history 全量扫提交正文(%B, 原仅扫标题%s可漏检消息体); v2.1: 修复 PAT_PARTS NameError; 历史见git |
 | `tools/lgssh.py` | **v1.4** | tool | `-` | v1.4(dropbear 排查轮): connect() 指数退避重试(3次) — 设备侧 tcpdump 实证 20 路并发时 dropbear SYN-ACK 20/20 且 banner/kex 数据全部送达, RST 全发自 PC 本机代理栈(Mihomo TUN 类); 重试对该故障免疫, 指纹失配仍立即中止; SSH助手(env/_local/secrets凭证; run()命令通道); v1.3: 主机密钥指纹钉死PinPolicy(HOST_KEY_FP/LG_HOST_KEY_FP, 认证前校验, 审计P0-5) |
 | `tools/lk_eth1_resume.py` | **v1.1** | tool | `-` | eth1续链器(LK控制台接管: kcmdline已注入态恢复; 含misc回退现场抓取; 补登记) |

@@ -1,5 +1,10 @@
 #!/bin/sh
-# log_keeper.sh v2.11 -- 日志持久化守护（日志改善专项轮）
+# log_keeper.sh v2.12 -- 日志持久化守护（日志改善专项轮）
+#   v2.12 (M1/M4 台账轮): 5min 块新增两个 fork 触发点（**无新守护**，仍是单进程）：
+#     ① incident_ledger.sh — 事故台账归一台账 + 分级留存 seal（M1/R1.1-R1.6）；
+#     ② soak_checkpoint.sh --tick — M4 每日 checkpoint（脚本自节流，soak-qa 约定）。
+#     两者都 [ -x ] 守卫 + || true：脚本缺失/崩溃绝不影响日志主链路（日志是本项目
+#     唯一的取证面，不能被附属功能拖死）。
 #   v2.11 (SIGSEGV §8.13): 旧内核修复栈退役 —— 删除其持有集收割段(union 种子
 #   文件 + 每 boot 快照) 与 stability_metrics 的 fix-stack 四列(clamp/dheld/
 #   deeps/episodes: 模块不存在时恒为 -1 的死列, 不再产生)。
@@ -311,6 +316,14 @@ while :; do
         # v2.9: 可用性采样器 (10min 节拍; 首采即时) — 无新守护的设计前提
         if [ $((CYC % 20)) -eq 0 ] || [ "$CYC" = 1 ]; then
             sh /data/gw/avail_sampler.sh >/dev/null 2>&1 || true
+        fi
+        # v2.12 (M1): 事故台账归一台账 + 分级留存 seal（5min 节拍；无新守护）
+        if [ -x /data/gw/incident_ledger.sh ]; then
+            sh /data/gw/incident_ledger.sh >/dev/null 2>&1 || true
+        fi
+        # v2.12 (M4): soak 每日 checkpoint 触发点（soak-qa 约定；脚本自节流到每日）
+        if [ -x /data/gw/soak_checkpoint.sh ]; then
+            sh /data/gw/soak_checkpoint.sh --tick >/dev/null 2>&1 || true
         fi
         _nf=$(ls $DIR/tmp/*.log 2>/dev/null | wc -l)
         _nb=$(cat $DIR/tmp/*.log 2>/dev/null | wc -c)

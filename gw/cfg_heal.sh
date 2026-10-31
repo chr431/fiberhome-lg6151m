@@ -74,6 +74,8 @@ BEAT=/tmp/cfg_heal.beat
 PENDF=/tmp/cfg_heal.pending
 RPID=/tmp/cfg_heal.repair.pid
 RLSPAM=/tmp/cfg_heal.rlspam
+SUSF=/tmp/cfg_heal.suspect.stamp
+OBSF=/tmp/cfg_heal.obs.stamp
 CFG_HEAL_IVL=4
 CFG_HEAL_CONFIRM=4
 CFG_HEAL_BOOT=240
@@ -501,7 +503,12 @@ do_repair() { # $1=已确认的漂移串
 }
 
 # ---------------- 观测类(只记不改) ----------------
-emit_obs() {
+emit_obs() { # 只观测项: 每 300s 最多记一行(否则 5s 一拍会把台账刷满)
+    [ -n "$OBS" ] || return 0
+    _now=$(date +%s); _ls=$(cat $OBSF 2>/dev/null)
+    case "$_ls" in ''|*[!0-9]*) _ls=0 ;; esac
+    [ $(( _now - _ls )) -lt 300 ] && return 0
+    echo "$_now" > $OBSF
     for _o in $OBS; do
         _ok=$(printf '%s' "$_o" | cut -d: -f1)
         _oi=$(printf '%s' "$_o" | cut -d: -f2)
@@ -562,8 +569,13 @@ tick() {
     fi
 
     echo "$UP_NOW $DET" > $PENDF
-    ledger misc "$(printf '%s' "$DET" | tr ' ' ',')" observe suspect 0
-    log "SUSPECT drift [$DET] (first seen, will re-check next tick)"
+    _now=$(date +%s); _ls=$(cat $SUSF 2>/dev/null)
+    case "$_ls" in ''|*[!0-9]*) _ls=0 ;; esac
+    if [ $(( _now - _ls )) -ge 60 ]; then
+        echo "$_now" > $SUSF
+        ledger misc "$(printf '%s' "$DET" | tr ' ' ',')" observe suspect 0
+        log "SUSPECT drift [$DET] (first seen, will re-check next tick)"
+    fi
     printf '%s\n' "$(date +%s) suspect [$DET]" > $LASTF
     return 0
 }

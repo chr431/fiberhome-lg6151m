@@ -306,9 +306,10 @@ passed / conn / ledger / note)。
 
 | # | 风险 | 现状 | 处置 |
 |---|---|---|---|
-| 1 | 补丁 A 未合入 -> NAT/mangle 类只检测不重建 | 已实现 escalate 分支 | 报 Lead 裁决(§7); 合入后 D1/D2 才有 repair 行 |
-| 2 | 补丁 B/C 未合入 -> 自愈器没有 tick 驱动 | 可手工 --once | 二者任一即可满足 ≤60s; 补丁 B 在 watchdog(无人认领) |
+| 1 | wan_agg --reapply 的幂等性只在演练 D6 验证一次 | 已实施(Lead 授权 A 项) | D6 断言"第二次 delta=0 行"; 后续若有 wan_agg 改动需重跑 |
+| 2 | tick 被 fast_watch 3s 硬超时打断 | 正常态 <0.4s; 修复已移出 tick(后台 worker) | 若出现 tick 超时, 现象是 pending 不推进(不修也不坏) |
 | 3 | incidents 里单次修复是 SEV3 而非合同要求的 SEV2 | incident_ledger 既有映射 | 需求登记给 obs-ledger(一行 reason 映射) |
 | 4 | vendor 引擎(内核模块分流)下 mangle 面不适用 | 已加引擎闸门, 不判 | 引擎切换时本器自动跟随 /tmp/wan_engine |
 | 5 | 承载口在 --reapply 期间刚好漂移 -> 可能短暂双写 | 两者都持同一把 netcfg 锁, 串行 | 观测; 若出现则让 --reapply 复用主环循的 W1_IF 缓存 |
-| 6 | 设备当前被 crash-root 持有(内核 A/B 实验), 演练窗口待排 | 排队 | 锁到手即跑 D0/D4/D1/D2/D5 |
+| 6 | 后台 worker 是短命进程, 但若施加器卡死它最长占 8s(硬超时) | mto 兜底 + netlock 60s TTL | 有界; 不新增长驻进程 |
+| 7 | 演练窗口只有 15min(排队), 30min baseline 需跨窗 | 见 §8 D0 | baseline 只读, 可在别人窗口内跑; 注入类必须持锁 |

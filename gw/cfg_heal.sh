@@ -141,18 +141,22 @@ fwd_ok() {
     esac
     return 1
 }
-# $1=iptables -t mangle -S 全文 -> 0=分流链结构完整(链/跳转/打标/存标四件)
-#   注意: watchdog 的 "grep -q MARK" 会把只剩 CONNMARK --save-mark 的残链判成绿,
-#   本判据要求四件齐全 —— 这正是 C02 注入能长期静默失效的原因。
+# $1=iptables -t mangle -S **WANAGG**(链内) $2=iptables -t mangle -S(整表, 仅用于查跳转)
+#   0=分流链结构完整(链/跳转/打标/存标四件)
+#   两次实弹教训:
+#   1) watchdog 的 "grep -q MARK" 会把只剩 CONNMARK --save-mark 的残链判成绿 -> 本判据要求四件齐全;
+#   2) 本脚本 v1.0 曾用**整表**文本查打标, 而本机 mangle 表里有厂商 QoS 链(qos_Default*)
+#      满载 --set-xmark -> 删掉 WANAGG 的打标后仍判绿(演练 D2 实弹 00:51 抓出)。
+#      v1.1 起打标/存标/链存在性一律只看 **WANAGG 链内**文本, 跳转才看整表。
 split_ok() {
     case "$1" in *"-N WANAGG"*) ;; *) return 1 ;; esac
-    case "$1" in *"-A PREROUTING -i br-lan -j WANAGG"*) ;; *) return 1 ;; esac
     case "$1" in
         *"--set-xmark"*) ;;
         *"--set-mark"*) ;;
         *) return 1 ;;
     esac
-    case "$1" in *"CONNMARK --save-mark"*) return 0 ;; esac
+    case "$1" in *"CONNMARK --save-mark"*) ;; *) return 1 ;; esac
+    case "$2" in *"-A PREROUTING -i br-lan -j WANAGG"*) return 0 ;; esac
     return 1
 }
 # $1=已用次数 $2=窗口起点 $3=now -> 0=预算内
@@ -232,6 +236,7 @@ snap() {
     NAT_S=$(iptables -t nat -S 2>/dev/null)
     FLT_S=$(iptables -S 2>/dev/null)
     MGL_S=$(iptables -t mangle -S 2>/dev/null)
+    MGLW_S=$(iptables -t mangle -S WANAGG 2>/dev/null)
     BR_S=$(brctl show br-lan 2>/dev/null)
     ADR_S=$($IPB -o -4 addr show 2>/dev/null)
     WAN_MODE=$(cat /tmp/wan_mode 2>/dev/null)
@@ -280,7 +285,7 @@ detect() {
     #     旁路模式(ENABLE=0)下链**应该被拆**, wan_agg 状态陈旧时**不许猜** ——
     #     三种情况都不得判漂移(误判=双引擎对打/在死状态上乱装)。
     if [ "$AGG_ON" = 1 ] && [ "$WAN_ENG" = iptables ] && [ "$WFRESH" = 1 ] && [ "$LIB_OK" = 1 ]; then
-        split_ok "$MGL_S" || DET="$DET split:wanagg"
+        split_ok "$MGLW_S" "$MGL_S" || DET="$DET split:wanagg"
         [ "$S1" = 1 ] && { rule_present "$IPR" "$W1_MARK" "$W_MASK" "$T1" || DET="$DET mark:w1"; }
         [ "$S2" = 1 ] && { rule_present "$IPR" "$W2_MARK" "$W_MASK" "$T2" || DET="$DET mark:w2"; }
     fi
@@ -691,14 +696,20 @@ selftest() {
 -A WANAGG -j CONNMARK --save-mark --nfmask 0xfc000000
 -A WANAGG -m conntrack --ctstate NEW -m mark --mark 0x0/0xfc000000 -j MARK --set-xmark 0x8000000/0xfc000000
 -A PREROUTING -i br-lan -j WANAGG'
-    split_ok "$_M"; _t 0 $? "split_ok complete"
+    split_ok "$_M" "$_M"; _t 0 $? "split_ok complete"
     split_ok '-N WANAGG
+-A WANAGG -j CONNMARK --save-mark
+-A PREROUTING -i br-lan -j WANAGG' '-N WANAGG
 -A WANAGG -j CONNMARK --save-mark
 -A PREROUTING -i br-lan -j WANAGG'; _t 1 $? "split_ok no-mark (watchdog grep -q MARK 会漏判)"
     split_ok '-N WANAGG
 -A WANAGG -j MARK --set-xmark 0x8000000/0xfc000000
+-A PREROUTING -i br-lan -j WANAGG' '-N WANAGG
+-A WANAGG -j MARK --set-xmark 0x8000000/0xfc000000
 -A PREROUTING -i br-lan -j WANAGG'; _t 1 $? "split_ok no-connmark"
     split_ok '-N WANAGG
+-A WANAGG -j MARK --set-xmark 0x8000000/0xfc000000
+-A WANAGG -j CONNMARK --save-mark' '-N WANAGG
 -A WANAGG -j MARK --set-xmark 0x8000000/0xfc000000
 -A WANAGG -j CONNMARK --save-mark'; _t 1 $? "split_ok no-jump"
     budget_ok 0 0 1000;      _t 0 $? "budget fresh"

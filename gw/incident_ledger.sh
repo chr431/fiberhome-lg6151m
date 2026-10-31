@@ -456,10 +456,13 @@ load_planned() {
     done | tr '\n' ' ')
 }
 planned_near() {
+    # 计划窗 ±300s（5min）。原来是 ±900s，太宽 —— 2026-11-01 04:13 的 state-truth 维护重启
+    # 被 04:00:25 的定时重启"吸"成了 death_reason=planned（实弹）。定时重启 late=0min、
+    # boot_attempts 在触发后 ~30s 落行，±300s 足够覆盖正常抖动。
     _p=$1
     for _x in $IL_PLANNED; do
         _d=$(( _p - _x )); [ "$_d" -lt 0 ] && _d=$(( -_d ))
-        [ "$_d" -le 900 ] && return 0
+        [ "$_d" -le 300 ] && return 0
     done
     return 1
 }
@@ -490,7 +493,7 @@ h_bootatt() {
             emit boot_fail - - "$_ref" "result=$_res death_reason=$_why boot_id=$(san "$_bid") raw=$(san "$L")" "$_e"
         elif [ "$_why" = unplanned ]; then
             # 一次开机只落一行：非计划重启（boot 健康但 reboots.log 无匹配）= SEV2
-            emit reboot_unplanned - - "$_ref" "boot_ok result=$_res death_reason=unplanned (no reboots.log match +/-900s) boot_id=$(san "$_bid") epoch=$_e" "$_e"
+            emit reboot_unplanned - - "$_ref" "boot_ok result=$_res death_reason=unplanned (no reboots.log match +/-300s) boot_id=$(san "$_bid") epoch=$_e" "$_e"
         else
             emit boot_ok - - "$_ref" "result=$_res death_reason=planned boot_id=$(san "$_bid")" "$_e"
         fi

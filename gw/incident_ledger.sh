@@ -175,19 +175,33 @@ san_comp() {
 #   但 detail 前置 [drill] 并带 drill=1/drill_kind/drill_owner，
 #   供验收统计单列排除（可审计，不是黑箱）。
 IL_DRILLS=""
+# 只装载"近 2 天内仍有效"的窗口（演练窗口天然短命），并对总量封顶 —— 否则每次
+# emit 都要遍历全部历史窗口，回填期会把 5min tick 拖成分钟级。
 load_drills() {
-    IL_DRILLS=$(awk -F'\t' 'NF>=4 { s=$1+0; e=$2+0; if (e==0) e=9999999999; printf "%s:%s:%s:%s ", s, e, $3, $5 }' "$DRILLF" 2>/dev/null)
+    IL_DRILLS=$(awk -F'\t' -v n="$NOW" '
+        NF>=4 {
+            s=$1+0; e=$2+0; if (e==0) e=9999999999
+            if (e < n-172800) next
+            printf "%s:%s:%s:%s ", s, e, $3, $5
+        }' "$DRILLF" 2>/dev/null)
+    _cnt=$(printf '%s' "$IL_DRILLS" | wc -w); _cnt=$(num0 "$_cnt")
+    if [ "$_cnt" -gt 60 ]; then
+        IL_DRILLS=$(printf '%s' "$IL_DRILLS" | tr ' ' '\n' | tail -n 60 | tr '\n' ' ')
+    fi
 }
 drill_tag() { # $1=ts $2=detail -> detail（可能被标记）
     _dt=$1; _dd=$2
     [ -n "$IL_DRILLS" ] || { echo "$_dd"; return 0; }
+    # 无 fork 的窗口判定：IFS 切分 + set --（每行每窗口 4 次 cut 会拖死回填）
+    _dt_save=$_dt
+    _oldifs=$IFS
     for _w in $IL_DRILLS; do
-        _ws=$(printf '%s' "$_w" | cut -d: -f1)
-        _we=$(printf '%s' "$_w" | cut -d: -f2)
-        _wk=$(printf '%s' "$_w" | cut -d: -f3)
-        _wo=$(printf '%s' "$_w" | cut -d: -f4)
+        IFS=':'
+        set -- $_w
+        IFS=$_oldifs
+        _ws=$1; _we=$2; _wk=$3; _wo=$4
         case "$_ws$_we" in ''|*[!0-9]*) continue ;; esac
-        if [ "$_dt" -ge "$_ws" ] && [ "$_dt" -le "$_we" ]; then
+        if [ "$_dt_save" -ge "$_ws" ] && [ "$_dt_save" -le "$_we" ]; then
             echo "[drill] drill=1 drill_kind=$_wk drill_owner=$_wo $_dd"
             return 0
         fi
@@ -598,7 +612,10 @@ ingest() {
     IL_SRC=$_nm
     IL_SRC_SEQ=$_sq
     if [ -z "$_anc" ]; then
-        _body=$(tail -n "$BACKFILL_N" "$_f" 2>/dev/null)
+        _bfn=$BACKFILL_N
+        # 首轮全量回填 ne_events（SEV1 历史直接决定"7 天前的事故在哪"能否回答）
+        if [ "$_nm" = ne ] && [ -n "$IL_BACKFILL_N_NE" ]; then _bfn=$IL_BACKFILL_N_NE; fi
+        _body=$(tail -n "$_bfn" "$_f" 2>/dev/null)
         _last=$(tail -n 1 "$_f" 2>/dev/null)
         [ -n "$_body" ] || return 0
         IL_BACKFILL=1
@@ -607,7 +624,7 @@ ingest() {
         _n=$(printf '%s\n' "$_body" | wc -l); _n=$(num0 "$_n")
         cur_set "$_nm" "$_last" $(( _sq + _n ))
         cnt_add lines_read "$_n"
-        il "backfill $_nm n=$_n"
+        il "backfill $_nm n=$_n (cap=$_bfn)"
         return 0
     fi
     _rc=1

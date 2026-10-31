@@ -1,4 +1,5 @@
 #!/bin/sh
+# v1.46(2026-11-01 M2 状态真值总线轮, lead 裁定): svc_supervise 分两档 —— 进程不存在(强证据)本拍立即重启不等 2-of-3; 进程在但心跳陈旧(弱证据)保留 2-of-3
 # watchdog.sh v1.45 -- on-device continuous invariant monitor.
 # v1.45(同轮补): authd 拉活失败回滚预算(rl_refund, svc_lib v1.7) — rl_ok 先记账
 #   后执行, 实弹 23:11 strike 通过却 budget exhausted(22:28 起三次坏配方失败
@@ -282,7 +283,15 @@ svc_supervise() { # $1=name $2=pattern $3=lock $4=recipe $5=hb $6=maxage $7=env
     else
         log "WARN  $_sn not running (hb=${_hb}s)"
     fi
-    strike "$_sn" || { log "SKIP  $_sn recovery (failure sample recorded; need 2 of last 3)"; return 0; }
+    if [ "$_live" = 1 ]; then
+        # 档B(弱证据, lead v1.x 裁定): 进程在但心跳陈旧 —— 有误判风险(探针忧忽), 保留 2-of-3 确认
+        strike "$_sn" || { log "SKIP  $_sn recovery (failure sample recorded; need 2 of last 3)"; return 0; }
+    else
+        # 档A(强证据): 进程**不存在** = 确定死亡, 不存在误判 —— 本拍立即重启, 不等确认。
+        #   实测: 旧行为(2-of-3)把"死亡到拉回"拉长到 90-120s, 直接冲击「中断 >20s <1 次/7d」。
+        #   重启预算(rl_ok 3/h + 慢重试)仍然生效, 防崩溃循环。
+        log "EVT $_sn definitive death (process absent) — tier-A immediate restart"
+    fi
     if rl_ok "$_sn"; then
         _oldpid=$(cat /tmp/$_sn.lock 2>/dev/null)
         if [ -n "$_oldpid" ] && kill -0 "$_oldpid" 2>/dev/null && \

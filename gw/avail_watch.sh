@@ -57,8 +57,11 @@ edge() { # $1=id $2=event $3=detail
 }
 
 # ---- 事实读取(全部有界、只读) ----
+# v1.3(实弹定案): v3httpd 只绑 192.168.9.1(v2.0 安全改动), 127.0.0.1:80
+#   天生拒连 —— gui 事实自 v1.0 起是恒 0 死判据(隔离实测 alive-rc=1 抓获)。
 TCP=/data/gw/bin/tcpok
-r_gui() { $TCP 127.0.0.1 80 1500 >/dev/null 2>&1 && echo 1 || echo 0; }
+GUI_IP=192.168.9.1
+r_gui() { $TCP "$GUI_IP" 80 1500 >/dev/null 2>&1 && echo 1 || echo 0; }
 r_ssh() { _b=$($BB timeout 3 $BB nc 127.0.0.1 22 </dev/null 2>/dev/null | head -c 4)
           case "$_b" in SSH-*) echo 1 ;; *) echo 0 ;; esac; }
 r_dns() { [ -n "$($BB pidof dnsmasq 2>/dev/null)" ] && echo 1 || echo 0; }

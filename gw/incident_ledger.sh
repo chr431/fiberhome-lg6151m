@@ -123,12 +123,30 @@ sev_of() {
     case "$_c" in
     ke_panic|oom|ne|boot_fail)  echo SEV1; return 0 ;;
     ledger_gap)                 echo SEV2; return 0 ;;
-    svc_outage|svc_fail)
+    svc_outage)
+        # 2s 边缘侦测器的真实时长 —— 与 M3/R3.1 的口径同源，阈值照合同字面用
         case "$_dur" in
         ''|-) echo SEV3; return 0 ;;
         *[!0-9]*) echo SEV3; return 0 ;;
         *)  if [ "$_dur" -gt 20 ]; then echo SEV1
             elif [ "$_dur" -ge 5 ]; then echo SEV2
+            else echo SEV3; fi
+            return 0 ;;
+        esac ;;
+    svc_fail)
+        # watchdog FAIL/OK 的时长分辨率只有 30s（监督周期）。合同 R1.2 的 20s 阈值
+        # 建立在 M3 的 ≤1s 采样上，直接套到 30s 分辨率会把"单次探针抖动"判成 SEV1
+        # （实弹：dp5g 一次丢包 = 一个 30-40s 的 FAIL 窗 = SEV1，SEV1 会瞬间被噪声
+        # 淹没，而 SEV1 是要保留 90 天的最高档）。故按监督分辨率放大阈值：
+        #   ≤60s（1-2 个监督周期，自愈型抖动）→ SEV3
+        #   61-300s（真实降级，跨多个周期）→ SEV2
+        #   >300s（长时间降级/需人工介入）→ SEV1
+        # 真正的"服务中断 >20s"仍由 svc_outage(2s 边缘) 按合同字面判 SEV1。
+        case "$_dur" in
+        ''|-) echo SEV3; return 0 ;;
+        *[!0-9]*) echo SEV3; return 0 ;;
+        *)  if [ "$_dur" -gt 300 ]; then echo SEV1
+            elif [ "$_dur" -gt 60 ]; then echo SEV2
             else echo SEV3; fi
             return 0 ;;
         esac ;;
@@ -238,6 +256,14 @@ hms_secs() {
     case "$_h$_m$_s" in ''|*[!0-9]*) return 1 ;; esac
     _sl=$(printf '%s' "$_s" | wc -c)
     [ "$_sl" -eq 2 ] || return 1
+    # 去前导 0：POSIX 算术把 08/09 当八进制 -> "value too great for base"（实弹，
+    # 2026-11-01 演练：23:08/23:09 的 watchdog 行整批时间戳退化为入账时刻）。
+    while :; do case "$_h" in 0?*) _h=${_h#0} ;; *) break ;; esac; done
+    while :; do case "$_m" in 0?*) _m=${_m#0} ;; *) break ;; esac; done
+    while :; do case "$_s" in 0?*) _s=${_s#0} ;; *) break ;; esac; done
+    [ -n "$_h" ] || _h=0
+    [ -n "$_m" ] || _m=0
+    [ -n "$_s" ] || _s=0
     echo $(( _h * 3600 + _m * 60 + _s ))
 }
 line_epoch() {
@@ -890,8 +916,11 @@ selftest() {
     t SEV3 svc_outage gui 4 "probe=gui"
     t SEV3 svc_outage gui - "open"
     t SEV2 svc_restart led_mgr - "evt=restart"
-    t SEV1 svc_fail led_mgr 30 "label=led_mgr"
-    t SEV2 svc_fail led_mgr 20 "label=led_mgr"
+    t SEV3 svc_fail led_mgr 30 "label=led_mgr"
+    t SEV3 svc_fail led_mgr 60 "label=led_mgr"
+    t SEV2 svc_fail led_mgr 61 "label=led_mgr"
+    t SEV2 svc_fail led_mgr 300 "label=led_mgr"
+    t SEV1 svc_fail led_mgr 301 "label=led_mgr"
     t SEV3 svc_fail led_mgr 2 "label=led_mgr"
     t SEV2 netcfg_storm netcfg - "repairs_in_window=11"
     t SEV3 netcfg_repair netcfg - "reason=route"

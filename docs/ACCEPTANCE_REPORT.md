@@ -1,6 +1,6 @@
 # 可靠性验收报告 (M4 自持性 + 汇总口径)
 
-> 生成时刻: 2026-11-01 00:25:15 (UTC+8)  生成器: `tools/acceptance/report.py`
+> 生成时刻: 2026-11-01 01:59:13 (UTC+8)  生成器: `tools/acceptance/report.py`
 > 合同: `docs/RELIABILITY_SPEC.md` v1.0  证据: 设备 `/data/gw/logs/*`(可复核) + 本机归档
 > 原则: 每个判定都指向一个设备侧文件与时间窗; 数据缺失记 **unknown**, 不记 0。
 
@@ -8,10 +8,10 @@
 
 | 需求 | 判定 | 一句话依据 |
 |---|---|---|
-| R4.1 守护覆盖审计 | PASS | 覆盖表 + 5 条注入实测, 见 §2/§6 |
+| R4.1 守护覆盖审计 | PASS | 覆盖表 + 17 条注入实测, 见 §2/§6 |
 | R4.2 资源不泄漏 | PASS | 每日 checkpoint 趋势 + 轮转上界, 见 §3 |
-| R4.3 30d soak 装置 | PASS | 装置在位并已产生 1 条样本, 见 §4 |
-| R4.4 故障注入 >=30 | FAIL | 有效 4 条: 4 条自愈(100%), 0 条失败, 1 条中止/跳过, 见 §6 |
+| R4.3 30d soak 装置 | PASS | 装置在位并已产生 2 条样本, 见 §4 |
+| R4.4 故障注入 >=30 | FAIL | 有效 16 条: 16 条自愈(100%), 0 条失败, 1 条中止/跳过, 见 §6 |
 | R4.5 无人干预声明 | PASS | 人工动作清单已列全并逐条处置, 见 §7 |
 
 **本报告不宣称 30 天已跑完**: 30d 不可在一个会话内等待, 交付物是「装置 + 已运行样本 + 外推论证 + 每日自动日报」; 装置在无人值守下继续累积。
@@ -35,20 +35,32 @@
 | `ntp_keeper.sh` | kill_daemon | 0s | **ABORTED_HARNESS** |
 | `ntp_keeper.sh` | kill_daemon | 42s | **PASS** |
 | `traffic_logger.sh` | kill_daemon | 96s | **PASS** |
+| `authd` | kill_daemon | 0s | **PASS** |
+| `hostapd` | kill_daemon | 19s | **PASS** |
+| `v3httpd` | kill_daemon | 61s | **PASS** |
+| `dnsmasq` | kill_daemon | 61s | **PASS** |
+| `wan_agg.sh` | kill_daemon | 42s | **PASS** |
+| `wifi_guard.sh` | kill_daemon | 81s | **PASS** |
+| `nerepair` | kill_daemon | 81s | **PASS** |
+| `reboot_sched.sh` | kill_daemon | 81s | **PASS** |
+| `atcid` | kill_daemon | 39s | **PASS** |
+| `wan_eth.sh` | kill_daemon | 63s | **PASS** |
+| `log_keeper.sh` | kill_daemon | 67s | **PASS** |
+| `usb_mgr.sh` | kill_daemon | 66s | **PASS** |
 
-自愈耗时分布: min=42s p50=105s p90=120s max=120s
+自愈耗时分布: min=0s p50=66s p90=105s max=120s
 
 ## 3. R4.2 资源不泄漏
 
 | 维度 | 现值 | 上界/机制 | 判定 |
 |---|---|---|---|
-| /data 剩余 | 1554668 KB (used 33%) | 阈值 102400KB | PASS |
-| /tmp 剩余 | 867416 KB | tmpfs 重启即清 | PASS |
-| 进程数 | 254 | 基线 ~250 | PASS |
-| 僵尸 | 0 | 阈值 20 | PASS |
+| /data 剩余 | 1542420 KB (used 34%) | 阈值 102400KB | PASS |
+| /tmp 剩余 | 867376 KB | tmpfs 重启即清 | PASS |
+| 进程数 | 257 | 基线 ~250 | PASS |
+| 僵尸 |  | 阈值 20 | FAIL |
 | 全局 fd | 512 / 173554 | 阈值 90% | PASS |
-| 可用内存 | 1326412 KB / 1738184 KB | 阈值 200000KB | PASS |
-| 日志总量 | 99036 KB | 见 §3.1 | PASS |
+| 可用内存 | 1326088 KB / 1738184 KB | 阈值 200000KB | PASS |
+| 日志总量 | 99168 KB | 见 §3.1 | PASS |
 
 ### 3.1 日志轮转上界(静态核对 gw/log_keeper.sh)
 
@@ -71,6 +83,7 @@
 | day | up_s | /data free | fd | zombies | NE 24h | boots 24h(计划/非计划) | 计划该来没来 | verdict |
 |---|---|---|---|---|---|---|---|---|
 | 2026-10-31 | 18893 | 1554668 KB | 512 | 0 | 12 | 1 (0/1) | 0 | **DEGRADED** |
+| 2026-11-01 | 20504 | 1542420 KB | 512 |  | 12 | 1 (0/1) | 0 | **DEGRADED** |
 
 ### 4.1 重启归因(设备侧可复核证据)
 
@@ -178,18 +191,20 @@
 
 ## 5. M3 三档计数(验收口径)
 
-_`/data/gw/logs/svc_daily.tsv` 尚未落地(M3 流交付中) —— 记 **unknown**, 不记 0。_
+| 天 | 三档 | 排除 |
+|---|---|---|
+| None | {'#svc_daily v1.0 | date path lt5 n5_20 n20 total excluded preliminary': '20261101|gw|0|0|0|5|5|0'} | None |
 
 ## 6. R4.4 故障注入 campaign
 
 装置: `tools/acceptance/inject.py` (PC 驱动, 设备侧单次 exec 内完成 注入→轮询→回滚→落账)。
 每条注入: 必须持设备锁、距 04:00 >=15min、有回滚路径、恢复即验证、结果落 `/data/gw/logs/fault_inject.tsv`。
 
-- 注入条目总数: **5** (要求 >=30 条有效注入)
-- 有效 4 条 / 中止或跳过 1 条(不计入通过率)
-- 判定分布: {'PASS': 4, 'ABORTED_HARNESS': 1}
+- 注入条目总数: **17** (要求 >=30 条有效注入)
+- 有效 16 条 / 中止或跳过 1 条(不计入通过率)
+- 判定分布: {'PASS': 16, 'ABORTED_HARNESS': 1}
 - 通过率(仅有效): 100%
-- 自愈耗时: min=42s p50=105s p90=120s max=120s
+- 自愈耗时: min=0s p50=66s p90=105s max=120s
 
 ### 6.1 失败项(未自愈) —— 必须闭环
 
@@ -210,26 +225,66 @@ _`/data/gw/logs/svc_daily.tsv` 尚未落地(M3 流交付中) —— 记 **unknow
 
 > 契约: `drills.tsv`(Lead v1.2) 是唯一演练标记文件; 消费方(svc-probe/state-truth/obs-ledger)按窗口打 excluded。
 
-- 窗口行总数: 12 (批级 6 / 逐条 6)
+- 窗口行总数: 53 (批级 36 / 逐条 17)
 - 残留 end_epoch=0 的行: **0** (无残留)
-- 演练总时长: 5039 s
+- 演练总时长: 7186 s
 
 | start | end | kind | target | owner |
 |---|---|---|---|---|
-| 1793462476 | 1793462936 | fault-injection | batch-A | soak-qa |
-| 1793462476 | 1793462596 | fault-injection | K01:led_mgr.sh | soak-qa |
-| 1793462603 | 1793462708 | fault-injection | K02:fan_mgr.sh | soak-qa |
-| 1793462714 | 1793462935 | fault-injection | K03:ntp_keeper.sh | soak-qa |
-| 1793463007 | 1793463159 | fault-injection | batch-K03 | soak-qa |
-| 1793463024 | 1793463159 | fault-injection | batch-K03 | soak-qa |
-| 1793463043 | 1793463085 | fault-injection | batch-K03 | soak-qa |
-| 1793463043 | 1793463085 | fault-injection | K03:ntp_keeper.sh | soak-qa |
-| 1793463106 | 1793463159 | fault-injection | batch-K03,K04,K05,K06,K07,K08,K09,K10,K11,K12,K15,K16,K17,K18,K19,K20 | soak-qa |
-| 1793463106 | 1793463148 | fault-injection | K03:ntp_keeper.sh | soak-qa |
-| 1793463152 | 1793463159 | fault-injection | K04:traffic_logger.sh | soak-qa |
-| 1793463169 | 1793466829 | hw-drill | warp1 | crash-root |
+| 1793466287 | 1793466297 | drill-manual | dnsmasq | state-truth |
+| 1793466300 | 1793466309 | drill-manual | led_mgr | state-truth |
+| 1793466312 | 1793466321 | drill-manual | fan_mgr | state-truth |
+| 1793466324 | 1793466333 | drill-manual | ntp_keeper | state-truth |
+| 1793466360 | 1793466369 | drill-manual | v3httpd | state-truth |
+| 1793466372 | 1793466381 | drill-manual | v3httpd | state-truth |
+| 1793466384 | 1793466393 | drill-manual | dnsmasq | state-truth |
+| 1793466397 | 1793467084 | drill-manual | hostapd | state-truth |
+| 1793466398 | 1793466411 | drill-manual | eth0 down | state-truth |
+| 1793466414 | 1793466427 | drill-manual | eth0 down | state-truth |
+| 1793466430 | 1793466442 | drill-manual | rai0 down | state-truth |
+| 1793466445 | 1793466457 | drill-manual | rai0 down | state-truth |
+| 1793466477 | 1793466488 | drill-manual | hostapd | state-truth |
+| 1793466491 | 1793466502 | drill-manual | fast_watch | state-truth |
+| 1793466505 | 1793466516 | drill-manual | fast_watch | state-truth |
+| 1793466519 | 1793466528 | drill-manual | v3httpd | state-truth |
+| 1793466531 | 1793466543 | drill-manual | hostapd | state-truth |
+| 1793468235 | 1793468311 | drill-manual | v3httpd | svc-probe |
+| 1793469230 | 1793469291 | fault-injection | batch-K16 | soak-qa |
+| 1793469230 | 1793469250 | fault-injection | batch-K19 | soak-qa |
+| 1793469230 | 1793469230 | fault-injection | batch-K15 | soak-qa |
+| 1793469230 | 1793469291 | fault-injection | K16:v3httpd | soak-qa |
+| 1793469230 | 1793469230 | fault-injection | K15:authd | soak-qa |
+| 1793469231 | 1793469250 | fault-injection | K19:hostapd | soak-qa |
+| 1793469291 | 1793469334 | fault-injection | batch-K22 | soak-qa |
+| 1793469291 | 1793469373 | fault-injection | batch-K12 | soak-qa |
+| 1793469291 | 1793469373 | fault-injection | batch-K05 | soak-qa |
+| 1793469292 | 1793469373 | fault-injection | batch-K06 | soak-qa |
+| 1793469292 | 1793469334 | fault-injection | K22:wan_agg.sh | soak-qa |
+| 1793469292 | 1793469373 | fault-injection | K12:nerepair | soak-qa |
+| 1793469292 | 1793469373 | fault-injection | K05:wifi_guard.sh | soak-qa |
+| 1793469292 | 1793469373 | fault-injection | K06:reboot_sched.sh | soak-qa |
+| 1793469374 | 1793469441 | fault-injection | batch-K07 | soak-qa |
+| 1793469374 | 1793469441 | fault-injection | batch-K08 | soak-qa |
+| 1793469374 | 1793469438 | fault-injection | batch-K09 | soak-qa |
+| 1793469374 | 1793469414 | fault-injection | batch-K18 | soak-qa |
+| 1793469374 | 1793469441 | fault-injection | K07:log_keeper.sh | soak-qa |
+| 1793469375 | 1793469441 | fault-injection | K08:usb_mgr.sh | soak-qa |
+| 1793469375 | 1793469438 | fault-injection | K09:wan_eth.sh | soak-qa |
+| 1793469375 | 1793469414 | fault-injection | K18:atcid | soak-qa |
 
-## 9. 未决风险与下一步
+## 9. 假状态演练记录(判据类改动的实弹)
+
+> spec 0: 判据类改动必须附「制造故障->判据必须变红->恢复->必须回绿」; soak_checkpoint v1.2 把判定阈值改为环境变量可覆盖, 正是为了让这条演练可执行(否则没有注入点)。
+
+| 步骤 | 命令 | 期望 | 实测 |
+|---|---|---|---|
+| 绿(基线) | `sh /tmp/soak_drill.sh --once --force` | PASS/DEGRADED | DEGRADED(notes=unplanned_reboot,src_partial) |
+| 红(制造故障) | `TH_DATA_FREE_KB=99999999 sh /tmp/soak_drill.sh --once --force` | **FAIL** + 告警行 | **FAIL**, soak_alerts 新增 `data_free 1520796 KB` |
+| 回绿(恢复) | 再跑一次正常阈值 | 回到 PASS/DEGRADED | DEGRADED |
+
+演练在隔离台账目录(/tmp/soakdrill)执行, 不污染生产台账; 2026-11-01 01:55 实弹。
+
+## 10. 未决风险与下一步
 
 1. **30d 未真正跑完**: 本报告只覆盖已运行样本; 装置会在无人值守下继续累积, 每日看 `soak.py daily`。
 2. **自愈延时基线 90–120s**: watchdog 的 2-of-3 确认是固有延时(见 §6 耗时分布), 已作为架构修复的对照基线交给 Lead。

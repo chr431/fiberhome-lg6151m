@@ -50,7 +50,7 @@ fi
 # 出现在 harness 自己的 cmdline 里 —— 否则 svc_lib.alive() 的 pgrep -f 回退分支会把
 # harness 当成"守护还活着", 测出来的自愈结论是假的(2026-11-01 00:05 实弹)。
 RUNNER = r"""
-DEF=/tmp/inj_def
+DEF="$1"
 [ -r "$DEF" ] || { echo "RESULT id=NO_DEF verdict=FAIL"; exit 0; }
 . "$DEF"
 rm -f "$DEF"
@@ -122,6 +122,7 @@ DAEMONS = [
     ("K18", "atcid",          "atcid",            "AT 通道守护"),
     ("K19", "hostapd",        "/var/wlan/hap_",   "我方 hostapd(WiFi WPA 层)"),
     ("K20", "radvd",          "radvd",            "LAN v6 路由通告"),
+    ("K22", "wan_agg.sh",     "wan_agg[.]sh",     "双上行聚合 supervisor(策略路由/NAT 所有者)"),
 ]
 
 CAMPAIGN = []
@@ -291,10 +292,11 @@ def run_one(dev, c, dry=False):
         ("HDR=%s" + NL) % q(HDR),
         ("DRILL_HDR=%s" + NL) % q(DRILL_HDR),
     ])
-    cmd = "sh -c " + q(RUNNER) + " _"
+    defpath = "/tmp/inj_def_%s" % c["id"]
+    cmd = "sh -c " + q(RUNNER) + " _ " + q(defpath)
     if dry:
         return "DRY", 0.0
-    dev.put_text("/tmp/inj_def", defs)
+    dev.put_text(defpath, defs)
     t0 = time.time()
     rc, out = dev.run(cmd, timeout=c["maxw"] + 120)
     el = time.time() - t0
@@ -310,6 +312,8 @@ def main():
     ap.add_argument("--only", default=None)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--sleep", type=int, default=8)
+    ap.add_argument("--parallel", type=int, default=1,
+                    help="并发注入数(每组 N 个互不相关的目标同时 kill, 各自独立测量)")
     a = ap.parse_args()
 
     if a.list:

@@ -56,7 +56,7 @@ try:
 except Exception:
     pass
 
-VERSION = "1.2"
+VERSION = "1.3"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_EVIDENCE = os.path.abspath(os.path.join(
     REPO, "..", "_local", "evidence", "svc_probe"))
@@ -631,7 +631,7 @@ def device_pull(evidence_dir, quiet=True):
     os.makedirs(ddir, exist_ok=True)
     files = {
         "reboots.tsv": "/data/gw/logs/reboots.log",
-        "boot_attempts.tsv": "/data/gw/logs/boot_attempts.tsv",
+        "boot_attempts.tsv": "/data/gw/boot_attempts.tsv",   # rc.extend 写在 /data/gw（不是 logs/）
         "avail_edges.tsv": "/data/gw/logs/avail_edges.tsv",
         "ne_events_tail.tsv": "/data/gw/logs/ne_events.tsv",
         "svc_outages.tsv": "/data/gw/logs/svc_outages.tsv",

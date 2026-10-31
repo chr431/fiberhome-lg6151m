@@ -53,10 +53,11 @@ RL_NOW=1000 rl_ok selftest; chk "E3 第3次" 0 "$?"
 RL_NOW=1000 rl_ok selftest; chk "E4 预算耗尽后立即重试被限流" 1 "$?"
 RL_NOW=1060 rl_ok selftest; chk "E5 60s 后慢重试放行(不再永久放弃)" 0 "$?"
 RL_NOW=1090 rl_ok selftest; chk "E6 30s 后仍被限流" 1 "$?"
-_t=1060
-for _i in 1 2 3 4 5 6 7 8 9; do _t=$((_t+60)); RL_NOW=$_t rl_ok selftest >/dev/null 2>&1; done
-RL_NOW=$((_t+60)) rl_ok selftest; chk "E7 第11次慢重试仍放行(永不静默停止)" 0 "$?"
-RL_NOW=$((_t+60+3601)) rl_ok selftest; chk "E8 小时窗滚过快预算复位" 0 "$?"
+# 注意: ash 无 local —— rl_ok 会写 _t/_n/_l/_s/_f/_now, 测试自己的累加变量必须另起名
+_tn=1060
+for _i in 1 2 3 4 5 6 7 8 9; do _tn=$((_tn+60)); RL_NOW=$_tn rl_ok selftest >/dev/null 2>&1; done
+RL_NOW=$((_tn+60)) rl_ok selftest; chk "E7 第11次慢重试仍放行(永不静默停止)" 0 "$?"
+RL_NOW=$((_tn+60+3601)) rl_ok selftest; chk "E8 小时窗滚过快预算复位" 0 "$?"
 
 # ---- F. 旧 2 字段 .rec 兼容 ----
 echo "2 5000" > /tmp/watchdog_svc_selftest_legacy.rec

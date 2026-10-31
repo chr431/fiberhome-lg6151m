@@ -85,9 +85,9 @@ if [ -x /data/gw/core_meta.sh ]; then
     esac
 fi
 
-# --- v2.0(P2/L-7): session tokens cleared at boot -- /tmp is not tmpfs, stale
-# tokens survive reboots (bad after password rotation); v3httpd/rc19 start
-# after this script, ordering is safe.
+# --- v2.0(P2/L-7): session tokens cleared at boot. 历史注记: 当时假设 /tmp 非 tmpfs,
+# 2026-11-01 实测为 tmpfs(mount: tmpfs on /tmp, 848MB, 重启即清) —— 保留 rm 是防御性动作
+# (多实例/未来若改持久挂载时仍需要); v3httpd/rc19 start after this script, ordering is safe.
 rm -f /tmp/gui_tokens/* 2>/dev/null
 # --- v3.5 (时间源统一轮): per-boot 运行态失效 — 同一根因(/tmp 跨重启存活),
 #     下列文件的上一 boot 残值会伪装成新鲜状态:

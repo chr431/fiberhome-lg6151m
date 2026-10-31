@@ -131,8 +131,13 @@ def audit_text(ledger_text, seal_text, now=None):
         res["errors"].append("SEV1 被裁剪过 %d 行（R1.6：SEV1 永不自动删除）" % seal["rm1"])
     oldest_any = min((r["ts"] for r in rows), default=0)
     ledger_age = max(0, now - oldest_any)
+    # pre_sync 行（写于 NTP 首同步前 / 时钟=固件构建日）日期不可信：
+    # 单列统计，**不参与"最老龄"**，否则留存证据会被假日期顶高（2026-11-01 实弹：
+    # 10 行 mdscan/pfcanary 带构建日 ts，把最老 SEV1 顶成 52.6 天）。
+    presync_rows = [r for r in rows if "pre_sync=1" in r["detail"]]
+    res["presync_n"] = len(presync_rows)
     for sev in ("SEV1", "SEV2", "SEV3"):
-        sub = [r for r in rows if r["sev"] == sev]
+        sub = [r for r in rows if r["sev"] == sev and "pre_sync=1" not in r["detail"]]
         if not sub:
             res["tiers"][sev] = {"rows": 0, "bytes": 0, "oldest_ts": 0,
                                  "age_days": 0.0, "verdict": "NODATA",
@@ -236,8 +241,8 @@ def run_device(no_report=False):
               % (sev, t["rows"], t["bytes"], t["age_days"], t["contract_days"],
                  t["target_days"], t["verdict"]))
     print("oldest_sev1_attest=%s" % res["oldest_sev1_attest"])
-    print("quality: drill_rows=%d presync_rows=%d backfill_rows=%d"
-          % (res["drill_rows"], res["presync_rows"], res["backfill_rows"]))
+    print("quality: drill_rows=%d presync_rows=%d backfill_rows=%d presync_excluded_from_oldest=%d"
+          % (res["drill_rows"], res["presync_rows"], res["backfill_rows"], res["presync_n"]))
     for w in res["warnings"]:
         print("  ~ %s" % w)
     for e in res["errors"]:

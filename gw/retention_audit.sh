@@ -134,10 +134,19 @@ integrity() {
 # ② 每 tier 统计
 # =====================================================================
 # 输出 "<rows> <bytes> <oldest_ts>"
-tier_stat() { # $1=SEVx
+tier_stat() { # $1=SEVx —— pre_sync 行单列，不参与"最老龄"（日期不可信）
     awk -F'\t' -v s="$1" '
-        $2==s { n++; b+=length($0)+1; if (mn==0 || $1+0 < mn) mn=$1+0 }
+        $2==s {
+            if (index($7, "pre_sync=1") > 0) next
+            n++; b+=length($0)+1
+            if (mn==0 || $1+0 < mn) mn=$1+0
+        }
         END { printf "%d %d %d\n", n+0, b+0, mn+0 }' "$LEDGER" 2>/dev/null
+}
+presync_stat() { # 单独统计 pre_sync 行（ts 不可信，只能计入"已如实标注"）
+    awk -F'\t' '
+        index($7, "pre_sync=1") > 0 { n++; b+=length($0)+1 }
+        END { printf "%d %d\n", n+0, b+0 }' "$LEDGER" 2>/dev/null
 }
 oldest_row_md5() { # $1=SEVx -> md5 of the oldest row of that tier
     _ln=$(awk -F'\t' -v s="$1" 'BEGIN{ln=0}
@@ -191,6 +200,9 @@ run_audit() {
     integrity
     quality
     _hb=$(hb_age)
+    _ps=$(presync_stat)
+    PS_N=$(printf '%s' "$_ps" | cut -d' ' -f1); PS_N=$(num0 "$PS_N")
+    PS_B=$(printf '%s' "$_ps" | cut -d' ' -f2); PS_B=$(num0 "$PS_B")
     _s1=$(tier_stat SEV1); _s2=$(tier_stat SEV2); _s3=$(tier_stat SEV3)
     R1=$(printf '%s' "$_s1" | cut -d' ' -f1); R1=$(num0 "$R1")
     B1=$(printf '%s' "$_s1" | cut -d' ' -f2); B1=$(num0 "$B1")
@@ -257,6 +269,7 @@ run_audit() {
         echo "CONTRACT sev1_met=$M1 sev1_oldest_age_days=$(days "$_a1") sev1_floor_days=$C_SEV1 sev2_met=$M2 sev2_oldest_age_days=$(days "$_a2") sev2_floor_days=$C_SEV2 sev3_met=$M3 sev3_oldest_age_days=$(days "$_a3") sev3_floor_days=$C_SEV3"
         echo "OLDEST_SEV1 attested_since_ts=$IL_S1_ATTEST_TS seal_line=$IL_S1_ATTEST_LINE row_md5=$_m1"
         echo "QUALITY presync_rows=$IL_PRESYNC backfill_rows=$IL_BACKFILL drill_tagged_rows=$IL_DRILLROWS ledger_hb_age_s=$_hb"
+        echo "PRESYNC rows=$PS_N bytes=$PS_B counted_in_oldest=no note=写于NTP首同步前(或时钟=固件构建日), ts已按入账时刻计, 原值在src_ts"
         echo "SOURCE_HEALTH malformed_ne=$(sed -n 's/^malformed_ne=//p' "$STATUSF" 2>/dev/null) source_gaps=$(sed -n 's/^gaps=//p' "$STATUSF" 2>/dev/null) lines_read=$(sed -n 's/^lines_read=//p' "$STATUSF" 2>/dev/null) pending=$(sed -n 's/^pending=//p' "$STATUSF" 2>/dev/null) presync_now=$(sed -n 's/^presync=//p' "$STATUSF" 2>/dev/null) data_free_kb=$(sed -n 's/^data_free_kb=//p' "$STATUSF" 2>/dev/null)"
         # 演练窗口（Lead v1.2：排除必须可审计，不能是黑箱）
         _dn=0

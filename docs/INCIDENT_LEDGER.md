@@ -52,7 +52,20 @@
 | SEV3 | degraded 迁移、一般事件、计划重启、单次网络修复、时钟跳变 |
 
 实现是 shell 里一个 case 表（gw/incident_ledger.sh 的 sev_of），**唯一实现**，
---classify 可单独调用，--selftest 24 例表驱动断言（设备侧可直接跑）。
+--classify 可单独调用，--selftest 27 例表驱动断言（设备侧可直接跑）。
+
+### 3.1 两套时长口径（必须分清，否则 SEV1 会被噪声淹没）
+
+| 来源 | 时长分辨率 | 阈值 |
+|---|---|---|
+| svc_outage（avail_edges，2s 边缘侦测） | 2s | 合同字面：>20s=SEV1，5–20s=SEV2，<5s=SEV3 |
+| svc_fail（watchdog FAIL/OK 配对） | **30s**（监督周期） | 按分辨率标定：>300s=SEV1，61–300s=SEV2，≤60s=SEV3 |
+
+理由（实弹）：dp5g 一次丢包 = 一个 30–40s 的 FAIL 窗。若把 30s 分辨率直接套 20s 阈值，
+单次探针抖动就是 SEV1 —— 而 SEV1 是要保留 90 天的最高档，会被噪声瞬间淹没。
+合同 R1.2 的 20s 阈值建立在 M3 的 ≤1s 采样上（R3.1 定义"连续失败≥2 次"），
+所以"真正的服务中断"由 svc_outage 按字面判 SEV1；watchdog 侧的降级窗用放大后的阈值，
+且长窗（>5min）仍然升到 SEV1。
 
 为什么不用 awk 打分表：busybox awk 的运行期数组在 1.36.1 上有约 1% SIGSEGV
 （docs/SIGSEGV_ANALYSIS.md §11），分级器是热路径，不能踩这个坑。

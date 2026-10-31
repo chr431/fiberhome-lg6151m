@@ -455,3 +455,42 @@ avail_sampler 的边缘收割字段位置假设与生产方日志格式不匹配
 - 若重启后 /tmp/fast_watch.exit.tsv 不再增长且 /proc/pid/fd 无 pipe:[...] → 根因 = **手工重启
   watchdog 的父环境**；修复 = 运维纪律（重启必须 setsid 且不留管道）+ spawn 关闭继承 fd。
 - 若仍增长 → 根因在 fast_watch 自身；下一步用 `sh -x` 环形日志 + 逐命令 rc 记账定位。
+### 11.9 P0 结案：根因 = busybox ash 前导零八进制（2026-11-01 03:05，svc-probe 定位）
+
+**真因**：/tmp/fast_watch.out 里有 /data/gw/fast_watch.sh: line 108: arithmetic syntax error。
+busybox ash 把**前导 0 的数字当八进制**；/proc/uptime 的小数前两位为 **08 / 09** 时
+（每 100 秒命中 2 次），CS=$(( _fw_i * 100 + _fw_f )) 直接算术语法错误，**ash 让整个脚本以状态 2 退出**。
+
+- 完全解释今天全部「神秘退出」：~50s 一次、EXIT rc=2、无信号、无 NE、无 dmesg、STEP 随机；
+- 也解释了为何 02:55 那次重启后变成**崩溃循环**：重启后才加载到含该缺陷的版本；
+- **11.8 里的「继承管道 fd」线索不是本因**（该条作废，但手工重启 watchdog 会继承 SSH 管道 fd
+  本身仍是独立运维隐患，保留在 11.8 作为改进项）。
+
+**修复（10# 强制十进制 + 空值兜底）**：
+
+| 文件 | 版本 | 位置 |
+|---|---|---|
+| gw/fast_watch.sh | **v2.1** | now_cs: CS=$(( _fw_i * 100 + 10#${_fw_f:-0} )) |
+| gw/led_mgr.sh | **v4.4** | bus_fresh / now_ms 两处 |
+| gw/www/api_state.sh | **v1.3** | beat_read |
+
+**回归护栏**：tools/selftest.py **v2.73** 新增 t_arith_octal —— 反例（不加 10#）必须报错、
+正例（08/09/空）必须算对、三个生产文件必须带 10#。这条断言把「陷阱真实存在」也钉住，
+防止将来被优化回去。
+
+**修复后实测（T0 03:05:58 → T1 03:12:20，6.4 分钟静默观察）**：
+
+| 指标 | T0 | T1 | 判决 |
+|---|---|---|---|
+| /tmp/fast_watch.exit.tsv 行数 | 3 | **3** | 不再增长 ✅ |
+| /tmp/fast_watch.out 字节 / arithmetic 次数 | 0 / 0 | **0 / 0** | 无算术错误 ✅ |
+| fast_facts.tsv 行数 | 2704 | **2802** | 1s 循环活着 ✅ |
+| /data/gw/run/svc_cursor（M3 消费游标） | 2676 | **2788** | 恢复前进 ✅ |
+| fast_watch pid | 29839 | **29839** | 同一实例，无重启 ✅ |
+| led_mgr pid | 2617 | **2617** | 同上 ✅ |
+
+基线留证：/data/gw/logs/fast_watch.exit.baseline.tsv（3 行，全部 EXIT rc=2，均为 03:00 修复前）。
+
+**同类陷阱全仓扫描**：core_trap.sh 已有 num() 去前导零助手（早已踩过）；soak_checkpoint.sh
+用 awk（十进制）；fast_watch 的 [ 0405 -ge 357 ] 实测 busybox test 按十进制比较（GE，rc=0），
+**不受影响**。仅上述 3 个文件有 $(( )) 直接吃小数片段的路径，已全部改掉。

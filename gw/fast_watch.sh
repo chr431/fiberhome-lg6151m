@@ -237,15 +237,13 @@ probe_tcp80() {
     now_cs; FL_tcp80=$(( (CS - _fw_c0) * 10 ))
 }
 probe_dns() {
-    # 判据 = DNS 服务器真的应答(不是进程在): busybox nslookup 对不存在域名回 NXDOMAIN 时
-    # 也先打印 Server:/Address: —— 命中本地应答即证明 dnsmasq 在服务(不依赖上游);
-    # 上游可达时也能拿真实应答。只有"完全无应答"才判失败。
+    # 判据 = DNS 服务接受连接(L2)。v1.9(实弹定位): 原实现每两拍嵌套两层 busybox
+    # (timeout + nslookup)。实测周期性 exit=2 退出全部落在奇数拍(31/37/69), 而奇数拍恰好
+    # 就是 probe_dns 的拍; v1.8 的 STEP 台账定位到 step=sample。现改用与 tcp80 同款的静态件
+    # tcpok(裸 TCP connect, 无嵌套 busybox、无信号)。判据降为 L2(接受连接); 真实 DNS
+    # 应答仍由 watchdog 的 dnssvc 键(30s, 已入窗口收割)覆盖 —— 分工与 gui 的 tcp80/http200 同款。
     _fw_c0=$CS
-    _fw_o=$("$BB" timeout -s KILL 1 "$BB" nslookup -type=a fw-probe.invalid "$GUI_IP" 2>&1)
-    case "$_fw_o" in
-        *"Server:"*|*"Address:"*) F_dns=1 ;;
-        *) F_dns=0 ;;
-    esac
+    if "$TCP" "$GUI_IP" 53 400 >/dev/null 2>&1; then F_dns=1; else F_dns=0; fi
     now_cs; FL_dns=$(( (CS - _fw_c0) * 10 )); AGE_dns=0
 }
 probe_icmp() {

@@ -164,7 +164,8 @@ def audit_text(ledger_text, seal_text, now=None):
     res["oldest_sev1_attest"] = "-"
     if s1:
         o = min(s1, key=lambda r: r["ts"])
-        m = hashlib.md5(rowline(o).encode()).hexdigest()
+        # 与设备侧 seal 的计算口径一致：行内容 + 行尾换行（sed -n Np | md5sum）
+        m = hashlib.md5((rowline(o) + NL).encode()).hexdigest()
         res["oldest_sev1_md5"] = m
         a = seal["attest"].get(m)
         res["oldest_sev1_attest"] = ("ts=%s seal_line=%s" % a) if a else "未在 seal 中见证"

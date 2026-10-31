@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
-"""deploy.py v2.38 -- single source of truth for PC<->CPE deployment + drift guard.
+"""deploy.py v2.40 -- single source of truth for PC<->CPE deployment + drift guard.
 
+v2.40 (M1 台账轮): MANIFEST +gw/incident_ledger.sh(事故台账归一+分级留存 seal; 由
+  log_keeper 5min 块 fork, 无新守护) +gw/retention_audit.sh(留存审计: 完整性/seq
+  缺口对账/各 tier 最老龄 vs 合同阈值, 只读可反复跑)。
+v2.39 (M2 状态真值总线轮): MANIFEST +gw/fast_watch.sh(唯一 1s 高频循环) +gw/state_edge_lib.sh
+  (边缘台账契约单一实现: 字段位置+id 常量+解析/写入) +gw/www/api_state.sh(state/render/lag/state_ev);
+  -gw/avail_watch.sh(被取代。实测: 其边缘行格式与 sampler 的字段位置假设不匹配, 防假绿机制静默失效)。
 v2.38 (M3 服务中断轮): MANIFEST +gw/svc_outage.sh(设备侧服务中断台账消费者: 读
   fast_facts.tsv 1s 事实流 -> svc_outages.tsv/svc_daily.tsv; 不采样、非常驻)。
 v2.37 (M4 soak 轮): MANIFEST +gw/soak_checkpoint.sh(30d soak 每日 checkpoint; 由
@@ -103,7 +109,8 @@ MANIFEST = [
     ("gw/v3_rc10.extend.sh", "/data/gw/rc19.sh"),         # rc19v2: br-lan+wifi+wan stack
     ("gw/usb_mgr.sh", "/data/gw/usb_mgr.sh"),             # USB-C device-mode service mgr (rndis0->br-lan + switches)
     ("gw/avail_sampler.sh", "/data/gw/avail_sampler.sh"), # component availability sampler (log_keeper-driven; avail round)
-    ("gw/avail_watch.sh", "/data/gw/avail_watch.sh"),   # heuristic edge watcher (2s loop; avail audit round)
+    ("gw/fast_watch.sh", "/data/gw/fast_watch.sh"),     # 1s state-truth bus (M2 sensor / M3 facts / GUI+LED source)
+    ("gw/state_edge_lib.sh", "/data/gw/state_edge_lib.sh"), # edge ledger contract (single impl shared by producer+consumer)
     ("gw/bin/tcpok", "/data/gw/bin/tcpok"),             # connect-only liveness probe (avail_watch gui.serve; log-free)
     ("gw/wifi_macplan.sh", "/data/gw/wifi_macplan.sh"),  # factory MAC plan (wifi_up BSSIDs + api uplink native-MAC restore; v1.29 split)
     ("gw/wifi_autoch.sh", "/data/gw/wifi_autoch.sh"),    # auto-channel scanner (wifi_up CH=0 path; v1.29 split)
@@ -148,6 +155,7 @@ MANIFEST = [
     ("gw/www/api_sms.sh", "/data/gw/www/api_sms.sh"),   # API sms-domain module (lazy-loaded; v2.75 split)
     ("gw/www/api_usb.sh", "/data/gw/www/api_usb.sh"),   # API usb-domain module (USB-C device-mode switches; USB round)
     ("gw/www/api_avail.sh", "/data/gw/www/api_avail.sh"), # API avail-domain module (90d bars/incidents/coverage; avail round)
+    ("gw/www/api_state.sh", "/data/gw/www/api_state.sh"), # API state-bus module (state/render/lag/state_ev; M2 round)
     ("gw/www/api_v6.sh", "/data/gw/www/api_v6.sh"),   # API IPv6 LAN module (v6 status/v6_set; LAN v6 round)
     ("gw/www/api.sh", "/data/gw/www/api.sh"),        # JSON endpoints (core router; sources domain modules)
     ("gw/www/index.html", "/data/gw/www/index.html"),    # console page
@@ -174,6 +182,8 @@ MANIFEST = [
     ("gw/log_keeper.sh", "/data/gw/log_keeper.sh"),  # log persistence daemon (syslog/dmesg mirror + /tmp snapshots)
     ("gw/soak_checkpoint.sh", "/data/gw/soak_checkpoint.sh"),  # 30d soak 每日 checkpoint + 开机台账 (R4.2/R4.3; log_keeper fork-driven, 非常驻)
     ("gw/svc_outage.sh", "/data/gw/svc_outage.sh"),  # 服务中断台账消费者 (M3/R3.3-R3.5; 读 fast_facts.tsv, 不采样非常驻)
+    ("gw/incident_ledger.sh", "/data/gw/incident_ledger.sh"),  # 事故台账归一+分级留存 (M1/R1.1-R1.6; log_keeper 5min fork, 无新守护)
+    ("gw/retention_audit.sh", "/data/gw/retention_audit.sh"),  # 留存审计/证明 (M1/R1.3-R1.5; 只读, 一条命令可反复跑)
     ("gw/core_trap.sh", "/data/gw/core_trap.sh"),  # daily user-space core capture window (P3)
     ("gw/diag_dump.sh", "/data/gw/diag_dump.sh"),  # one-shot redacted diagnostics bundle
     ("gw/zz_data_hook", "/data/build/rootfs/etc/init.d/zz_data_hook"),     # hook-slot watchdog (stethoscope)

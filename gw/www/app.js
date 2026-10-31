@@ -1,4 +1,7 @@
-/* app.js v3.57 (质量轮: 4 个无 body 写调用 logout/wifi_restart/diag_gen/sys_reboot
+/* app.js v3.58 (M2 状态真值总线轮): +状态总线页(#/state, 判据分级表/新鲜度/lag 审计) +
+   状态页顶部"设备状态真值"条; 状态类元素独立 1s 节拍(/api/state, 与重端点轮询解耦);
+   陈旧>3s 显示"陈旧/未知"而不是绿; 每次渲染新版本回传 /api/render{v,age_ms} 落 lag_audit。
+   -- v3.57 (质量轮: 4 个无 body 写调用 logout/wifi_restart/diag_gen/sys_reboot
    改带 body 走 POST — api.sh v2.82 起写端点强制 POST; 头注自 v3.55 起追平台账)
    -- app.js v3.56/v3.55 见 tools/VERSIONS.tsv -- v3.54 (LAN v6 轮: 状态页 IPv6 卡片改读 api v6 实况 — 原为硬编码
    "ULA fd42:9ac1:7e50::/64 / 自动分配 + NAT 兼容", v6 全挂时照样报绿; 系统页
@@ -135,6 +138,7 @@ let timer = null;
 /* ================ 状态 ================ */
 PAGES.status = {
     html: `<div class="grid">
+      ${card('设备状态真值 <span class="tag" id="sb-fresh">--</span>', '<div id="sb-strip"></div><div class="dim" id="sb-meta">读 fast_watch 状态总线（1s 刷新）</div>', 1)}
       ${card("系统", kv("运行时间", "up-up") + kv("负载", "up-load") + kv("内存", "up-mem") + kv("LAN", "up-lan"))}
       ${card("上网线路 · 蜂窝（5G/4G） " + tag("tg-5g", "已连接", "未连接"),
         kv("接口", "w5-if") + kv("IPv4", "w5-ip", 1) + kv("IPv6", "w5-v6", 1) + kv("线路状态", "w5-dp") +
@@ -211,6 +215,92 @@ PAGES.status = {
     }
 };
 let lastCounters = null, lastTs = 0;
+
+/* ================ 状态真值总线 (M2; R2.1/R2.3/R2.5) ================
+   单一状态源 = /data/gw/run/state.json(fast_watch 发布); 本模块只渲染, 不判断任何状态。
+   刷新节拍 1s(状态类元素); 数据年龄来自设备侧心跳(与 PC 时钟无关, 见 api_state.sh 头注)。
+   每次渲染新版本时向 /api/render 回传 {ver, age_ms} → 设备落 lag_audit(gui 阶段) —— 这是
+   "呈现滞后"的唯一可复核证据(R2.5)。 */
+let SB = { rendered: 0, age: 0, stale: 0, ver: 0 };
+const SB_LV = {
+    ok:      { c: "sb-ok",   t: "正常", d: "●" },
+    deg:     { c: "sb-deg",  t: "降级", d: "▲" },
+    down:    { c: "sb-down", t: "故障", d: "✕" },
+    unknown: { c: "sb-unk",  t: "未知", d: "?" },
+    off:     { c: "sb-off",  t: "停用", d: "—" },
+    maintenance: { c: "sb-mai", t: "维护", d: "◷" }
+};
+const sbAgeTxt = ms => (ms == null || ms >= 999999) ? "无数据" : (ms < 1000 ? ms + " ms" : (ms / 1000).toFixed(1) + " s");
+const sbLv = lv => SB_LV[lv] || SB_LV.unknown;
+/* L1-only 组件不得显示为绿(R2.6): crit=L1 且 level=ok 时降级为"仅存在性"黄色 */
+function sbCellClass(c) {
+    if (c.lv === "ok" && c.crit === "L1") return "sb-l1";
+    return sbLv(c.lv).c;
+}
+function sbCellText(c) {
+    if (c.lv === "ok" && c.crit === "L1") return "仅存在性";
+    return sbLv(c.lv).t;
+}
+function sbFreshTag(id, j) {
+    const e = $(id); if (!e) return;
+    const stale = j.stale ? 1 : (j.age_ms > 3000 ? 1 : 0);
+    const txt = stale ? "陈旧/未知 " + sbAgeTxt(j.age_ms) : "新鲜 " + sbAgeTxt(j.age_ms);
+    if (e.textContent !== txt) { e.textContent = txt; e.className = "tag " + (stale ? "off" : "on"); }
+}
+function sbRenderStrip(st, j) {
+    const rows = (st.comps || []).map(c => {
+        const cls = sbCellClass(c);
+        return `<span class="sb-chip ${cls}" title="${esc(c.id)} · 判据 ${esc(c.crit)} · ${esc(c.ev || "")}"><i>${sbLv(c.lv).d}</i>${esc(c.n)}<b>${esc(sbCellText(c))}</b></span>`;
+    }).join("");
+    const ovr = sbLv(st.overall);
+    H("sb-strip", `<div class="sb-ovr ${ovr.c}">总体：${esc(ovr.t)}${st.maint ? "（维护窗）" : ""}${st.boot ? "（启动中）" : ""}${st.drill ? "（演练中）" : ""}</div>` + rows);
+    T("sb-meta", `版本 ${st.ver} · tick ${j.tick || "-"} · 数据年龄 ${sbAgeTxt(j.age_ms)}${j.stale ? " · 状态总线已陈旧，按未知显示" : ""}`);
+    sbFreshTag("sb-fresh", j);
+}
+function sbRenderFull(st, j) {
+    const groups = {};
+    for (const c of (st.comps || [])) { (groups[c.g] = groups[c.g] || []).push(c); }
+    let html = "";
+    for (const g in groups) {
+        html += `<div class="sb-grp">${esc(g)}</div>`;
+        for (const c of groups[g]) {
+            const cls = sbCellClass(c);
+            const since = c.since ? new Date(c.since * 1000) : null;
+            const sinceTxt = since ? `${String(since.getHours()).padStart(2, "0")}:${String(since.getMinutes()).padStart(2, "0")}:${String(since.getSeconds()).padStart(2, "0")}` : "--";
+            html += `<div class="sb-row"><span class="sb-dot ${cls}">${sbLv(c.lv).d}</span><span class="sb-id mono">${esc(c.id)}</span><span class="sb-nm">${esc(c.n)}</span><span class="sb-lv ${cls}">${esc(sbCellText(c))}</span><span class="sb-crit mono" title="判据级别: L1=存在性 L2=协议应答 L2+=协议应答+深度 L3=端到端结果">${esc(c.crit)}</span><span class="sb-since mono">${sinceTxt}</span><span class="sb-det dim mono" title="检测机制">${esc(c.det || "-")}</span><span class="sb-ev dim mono" title="证据">${esc(c.ev || "-")}</span></div>`;
+        }
+    }
+    H("sb-full", html);
+    T("sb-meta2", `版本 ${st.ver} · 数据年龄 ${sbAgeTxt(j.age_ms)} · 总体 ${sbLv(st.overall).t}${st.maint ? " · 维护窗" : ""}${st.boot ? " · 启动中" : ""}${st.drill ? " · 演练中" : ""}`);
+    sbFreshTag("sb-fresh2", j);
+}
+/* 1s 节拍: 只拉 /api/state(轻), 不碰重端点; 仅当本页存在状态槽位时启动 */
+let sbTimer = null;
+async function sbTick() {
+    if (!TOKEN) return;
+    if (!$("sb-strip") && !$("sb-full")) return;
+    let j;
+    try { j = await api("state"); } catch (e) { return; }
+    if (!j || !j.ok) return;
+    SB.age = j.age_ms; SB.stale = j.stale ? 1 : 0;
+    const st = j.st;
+    if (!st) { sbFreshTag("sb-fresh", j); sbFreshTag("sb-fresh2", j); return; }
+    SB.ver = st.ver;
+    if ($("sb-strip")) sbRenderStrip(st, j);
+    if ($("sb-full")) sbRenderFull(st, j);
+    /* 渲染完成后回传版本与数据年龄(R2.5); 只在版本变化时发, 避免每秒一次写 */
+    if (st.ver !== SB.rendered) {
+        SB.rendered = st.ver;
+        api("render", "v=" + encodeURIComponent(st.ver) + "&a=" + encodeURIComponent(j.age_ms)).catch(() => {});
+    }
+}
+function sbStart() {
+    if (sbTimer) clearInterval(sbTimer);
+    sbTimer = null;
+    if (!$("sb-strip") && !$("sb-full")) return;
+    sbTick();
+    sbTimer = setInterval(sbTick, 1000);   // R2.3: 状态元素刷新 <=1s
+}
 
 /* ================ 终端 ================ */
 PAGES.clients = {
@@ -1334,6 +1424,33 @@ window.syRebootGo = async () => {
 };
 
 
+/* v3.58: 状态总线页 (M2, R2.1-R2.6) — 判据分级表 + 数据新鲜度 + 呈现时延审计。
+   数据全部来自 /api/state(fast_watch 的 state.json) 与 /api/lag(lag_audit.tsv), 页面不判断状态。 */
+PAGES.state = {
+  html: `<div class="grid">
+    <div class="card wide"><h3>状态真值总线 <span class="tag" id="sb-fresh2">--</span></h3>
+      <div id="sb-full">…</div><div class="dim" id="sb-meta2"></div></div>
+    ${card('呈现时延审计 (lag_audit.tsv)', '<div id="sb-lag">…</div>', 1)}
+    ${card('最近迁移 (state_events.tsv)', '<div id="sb-ev">…</div>', 1)}
+    <div class="av-foot">口径：状态源 = /data/gw/run/state.json（fast_watch 1s 发布，GUI/LED/API 同源）· 判据级别 L1=存在性 L2=协议应答 L3=端到端结果，L1-only 组件不显示为绿 · 数据年龄取设备侧心跳（与 PC 时钟无关）· 呈现滞后 = 每次迁移的"检测→发布→GUI 渲染/LED 写入"实测 · 陈旧>3s 一律按未知显示</div>
+  </div>`,
+  async tick() {
+    const lag = await api("lag").catch(() => null);
+    if (lag && lag.ok) {
+      const nm = { detect: "检测 (状态改变→采样命中)", publish: "发布 (→state.json)", gui: "GUI 渲染", led: "LED 写入+读回" };
+      const rows = (lag.stages || []).slice().sort((a, b) => (a.s < b.s ? -1 : 1)).map(s =>
+        `<div class="kv"><span>${nm[s.s] || s.s}</span><b class="mono">p50 ${s.p50} ms · p99 ${s.p99} ms · max ${s.max} ms · n=${s.n}</b></div>`).join("");
+      H("sb-lag", (rows || "（尚无迁移样本）") + `<div class="dim">累计 ${lag.rows} 行</div>`);
+    }
+    const ev = await api("state_ev").catch(() => null);
+    if (ev && ev.ok) {
+      const list = (ev.ev || []).map(e =>
+        `<div class="av-iev"><span class="mono">${esc(e.iso)}</span>　<span class="mono">${esc(e.c)}</span> ${esc(e.f)} → ${esc(e.t)} <span class="dim">(${esc(e.crit)}${e.fl && e.fl !== "-" ? " · " + esc(e.fl) : ""})</span></div>`).join("");
+      H("sb-ev", list || "（尚无迁移记录）");
+    }
+  }
+};
+
 /* v3.53: 可用性页 (P1) — 判据/口径见 docs/AVAILABILITY_DESIGN.md;
    90 天条从左(旧)到右(今), 今日条实时; warming=采样器首采未到。 */
 PAGES.avail = {
@@ -1424,6 +1541,7 @@ function route() {
     });
     run();
     timer = setInterval(run, p === "status" ? 3000 : 8000);
+    sbStart();   // v3.58: 状态类元素走独立 1s 节拍(R2.3); 无状态槽位的页面自动空转
 }
 window.route = route;
 window.addEventListener("hashchange", route);

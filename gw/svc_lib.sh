@@ -298,6 +298,9 @@ svc_repairs_1h() {
 
 # ---- declarative script-daemon table ------------------------------------
 # Columns: name|pgrep-pattern|lock-token|recipe|heartbeat|max-hb-age|env
+# v1.17 (2026-11-01 M2 状态真值总线轮): avail_watch -> fast_watch —— 全局唯一的高频(1s)循环,
+#   同时是 M2 传感器 / M3 数据源 / GUI+LED 状态源; 旧 2s 边缘侦测器已删除(避免双份高频采样)。
+#   心跳上限 60s(1s 循环, 15 拍写一次 hb)。
 # env is optional and is passed to "env" before the shell (dial_keeper needs
 # the FH library/PATH environment when restarted by the supervisor).
 # v1.3: 表内不得出现注释行(会被当成守护名传给 svc_supervise) —— 停用项的说明
@@ -315,5 +318,5 @@ healthdog|healthdog[.]sh|healthdog.sh|sh /data/gw/healthdog.sh|/tmp/healthdog.hb
 dial_keeper|dial_keeper[.]sh|dial_keeper.sh|sh /data/gw/dial_keeper.sh|/tmp/dial_keeper.hb|90|LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib PATH=/data/gw/sbin:/data/gw/bin:/usr/sbin:/usr/bin:/sbin:/bin:/fhrom/bin:/fhrom/fhshell
 usb_mgr|usb_mgr[.]sh|usb_mgr.sh|sh /data/gw/usb_mgr.sh daemon|/tmp/usb_mgr.hb|180|
 nerepair|nerepair|bin/nerepair|sh /data/gw/nerepair_launch.sh|/tmp/nerepair.hb|180|
-avail_watch|avail_watch[.]sh|avail_watch.sh|sh /data/gw/avail_watch.sh|/tmp/avail_watch.hb|120|
+fast_watch|fast_watch[.]sh|fast_watch.sh|sh /data/gw/fast_watch.sh|/tmp/fast_watch.hb|60|
 '

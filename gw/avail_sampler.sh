@@ -1,5 +1,6 @@
 #!/bin/sh
-# avail_sampler.sh v1.13 -- 组件可用性采样器 (AVAILABILITY_DESIGN §3, 防假绿轮)
+# v1.16(2026-11-01 M2 状态真值总线轮): ⑤ 秒级边缘收割改由 gw/state_edge_lib.sh 单一契约实现 —— 原 awk 硬编码字段位置与生产方日志格式不匹配, 该防假绿机制静默失效(实测 6/8 行 NOMATCH)
+# avail_sampler.sh v1.16 -- 组件可用性采样器 (AVAILABILITY_DESIGN §3, 防假绿轮)
 # v1.13 (2026-10-31 内核看门狗轮): sys.kernel 重定义 — 标签"内核/修复栈"→
 #   "内核看门狗", 判据从固定 off(旧栈退役后悬空)改为 healthdog 三层判
 #   (模块在/守护活/hb 新鲜); KEYS_OF 接 watchdog 的 healthdog 键。id 不改
@@ -121,42 +122,67 @@ new_lines "$DIR/netcfg_repairs.tsv" "$oRL" "$RL" > "$WINT.rl"
 new_lines /tmp/api.log "$oAL" "$AL"            > "$WINT.al"
 new_lines "$DIR/dmesg.log" "$oDL" "$DL"        > "$WINT.dl"
 
-# ⑤ 秒级边缘事件(v1.14, avail_watch.sh 2s 轮询 4s 磁滞): 窗口收割 →
-#    ① 组件窗口降级(down 边缘>0 → 至少 deg, 快照假绿根治)
-#    ② 合成事件表行(down@T1 + up@T2 → "down->up edge Xs" 带精确时长;
+# ⑤ 秒级边缘事件: 窗口收割 —— 解析器与 id 映射改由 gw/state_edge_lib.sh **单一提供**。
+#   v1.16(2026-11-01 M2 状态真值总线轮, 实测缺陷根治): 原 awk 硬编码 "ts=$1; id=$3; ev=$4",
+#   而生产方 avail_watch 的日志格式是 "epoch <日期> <时刻> <id> <ev>" -> $3=时刻、$4=id,
+#   映射恒 NOMATCH。实测 /data/gw/logs/avail_edges.tsv 全文 8 行按该 awk 回放: 6 行 NOMATCH,
+#   仅 2 行(历史遗留 "x gui.serve" 格式)命中 —— 即"秒级边缘→窗口降级"这条防假绿机制自
+#   日志格式改动起**静默失效**。现在字段位置/id 常量/id→组件映射只在 state_edge_lib.sh 写一份,
+#   生产方(fast_watch.sh)与本消费方共用; edge_parse_line 还做字段/事件名校验, 坏行计数落
+#   logs/edge_parse_bad.log(契约漂移不再无声)。
+#   ① 组件窗口降级(down 边缘>0 → 至少 deg, 快照假绿根治)
+#   ② 合成事件表行(down@T1 + up@T2 → "down->up edge Xs" 带精确时长;
 #      未配对 down → "up->down edge open")—— GUI 事件表零改动直显。
-#    首采/保留位游标为 0 时不回灌历史文件。
+# 首采/保留位游标为 0 时不回灌历史文件。
 EDGES=$DIR/avail_edges.tsv
+. /data/gw/state_edge_lib.sh
 EL=$(lc "$EDGES")
 oEL=$(sed -n '8p' "$SESS" 2>/dev/null)
 case "$oEL" in ''|0) oEL=$EL ;; esac
 new_lines "$EDGES" "$oEL" "$EL" > "$WINT.el"
 : > "$WINT.edg"
 if [ -s "$WINT.el" ] && [ "$PRESYNC" != 1 ]; then
-    # v1.15(实弹): 映射改 if/else 链 —— busybox awk 对表达式内的反斜杠续行
-    #   报 Unexpected token(字符串内才允许), 三元链续行版整块静默失败。
-    awk '
-    {
-      ts=$1; id=$3; ev=$4; comp=""
-      if (id=="gui.serve") comp="sys.gui"
-      else if (id=="ssh.banner") comp="sys.ssh"
-      else if (id=="dns.pids" || id=="br.up") comp="lan.bridge"
-      else if (id=="wpa.ra0") comp="lan.wifi2g"
-      else if (id=="wpa.rai0") comp="lan.wifi5g"
-      else if (id=="eth.carrier") comp="wan.ethernet"
-      if (comp=="") next
-      if (ev=="edge_down") { dn[comp]++; if (!open[comp]) open[comp]=ts }
-      else if (ev=="edge_up" && open[comp]) {
-          printf "%s\t%s\tdown->up\tedge %ds\n", ts, comp, ts-open[comp]
-          open[comp]=0
-      }
-    }
-    END {
-      for (c in dn) print c "|" dn[c] > "'"$WINT.edg"'"
-      for (c in open) if (open[c]) printf "%s\t%s\tup->down\tedge open\n", open[c], c
-    }' "$WINT.el" >> "$TF"
+    _ew_dir=$WINT.ewd
+    rm -rf "$_ew_dir" 2>/dev/null; mkdir -p "$_ew_dir" 2>/dev/null
+    _ew_n=0; _ew_bad=0
+    while IFS= read -r _ew_line; do
+        [ -n "$_ew_line" ] || continue
+        if ! edge_parse_line "$_ew_line"; then _ew_bad=$((_ew_bad + 1)); continue; fi
+        _ew_c=$(edge_comp_of "$EDGE_ID")
+        [ -n "$_ew_c" ] || continue
+        _ew_n=$((_ew_n + 1))
+        case "$EDGE_EV" in
+        edge_down)
+            printf '%s\n' "$EDGE_TS" >> "$_ew_dir/$_ew_c.dn"
+            [ -f "$_ew_dir/$_ew_c.open" ] || printf '%s\n' "$EDGE_TS" > "$_ew_dir/$_ew_c.open" ;;
+        edge_up)
+            if [ -f "$_ew_dir/$_ew_c.open" ]; then
+                _ew_o=$(cat "$_ew_dir/$_ew_c.open" 2>/dev/null)
+                case "$_ew_o" in ''|*[!0-9]*) _ew_o=0 ;; esac
+                if [ "$_ew_o" -gt 0 ]; then
+                    printf '%s\t%s\tdown->up\tedge %ds\n' "$EDGE_TS" "$_ew_c" "$(( EDGE_TS - _ew_o ))" >> "$TF"
+                fi
+                rm -f "$_ew_dir/$_ew_c.open"
+            fi ;;
+        esac
+    done < "$WINT.el"
+    for _ew_f in "$_ew_dir"/*.open; do
+        [ -f "$_ew_f" ] || continue
+        _ew_c=${_ew_f##*/}; _ew_c=${_ew_c%.open}
+        printf '%s\t%s\tup->down\tedge open\n' "$(cat "$_ew_f" 2>/dev/null)" "$_ew_c" >> "$TF"
+    done
+    for _ew_f in "$_ew_dir"/*.dn; do
+        [ -f "$_ew_f" ] || continue
+        _ew_c=${_ew_f##*/}; _ew_c=${_ew_c%.dn}
+        _ew_k=$(wc -l < "$_ew_f" 2>/dev/null)
+        case "$_ew_k" in ''|*[!0-9]*) _ew_k=0 ;; esac
+        [ "$_ew_k" -gt 0 ] && printf '%s|%s\n' "$_ew_c" "$_ew_k" >> "$WINT.edg"
+    done
+    rm -rf "$_ew_dir" 2>/dev/null
+    if [ "$_ew_bad" -gt 0 ]; then
+        printf '%s\tbad=%s\tparsed=%s\n' "$(date +%s)" "$_ew_bad" "$_ew_n" >> "$DIR/edge_parse_bad.log"
+    fi
 fi
-
 # ① 窗口 FAIL 迁移: 采样间隔内发生过又自愈的故障, 快照已回绿, 此处记账
 sed -n 's/.*FAIL detail \([a-z0-9_]*\).*/\1/p' "$WINT.wl" | sort -u > "$WINT.fk"
 

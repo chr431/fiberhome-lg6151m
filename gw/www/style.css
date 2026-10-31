@@ -99,3 +99,33 @@ input.dirty, select.dirty { border-color: var(--acc); }
 .av-inc { width: 2rem; color: #f1c40f; font-size: .8rem; }
 .av-iev { padding: .18rem 0; font-size: .85rem; }
 .av-foot { color: var(--dim); font-size: .74rem; padding: .8rem .2rem .2rem; line-height: 1.6; }
+
+/* ---- 状态真值总线 (v3.58 / M2): 颜色语义与可用性页一致; L1 组件用蓝灰, 永不为绿 ---- */
+.sb-ovr { font-size: .95rem; padding: .3rem .2rem .5rem; font-weight: 600; }
+.sb-ovr.sb-ok { color: var(--ok); } .sb-ovr.sb-deg { color: #f1c40f; }
+.sb-ovr.sb-down { color: var(--bad); } .sb-ovr.sb-unk, .sb-ovr.sb-off, .sb-ovr.sb-mai { color: var(--dim); }
+.sb-chip { display: inline-flex; align-items: center; gap: .3rem; margin: .15rem .3rem .15rem 0;
+  padding: .18rem .5rem; border-radius: 10px; background: #0c2233; font-size: .78rem; }
+.sb-chip i { font-style: normal; }
+.sb-chip b { font-weight: 600; font-size: .74rem; }
+.sb-chip.sb-ok { color: var(--ok); } .sb-chip.sb-ok b { color: var(--ok); }
+.sb-chip.sb-deg { color: #f1c40f; } .sb-chip.sb-deg b { color: #f1c40f; }
+.sb-chip.sb-down { color: var(--bad); background: #2a1414; } .sb-chip.sb-down b { color: var(--bad); }
+.sb-chip.sb-unk, .sb-chip.sb-off, .sb-chip.sb-mai { color: var(--dim); }
+.sb-chip.sb-l1 { color: #6fa8c8; background: #10222e; } .sb-chip.sb-l1 b { color: #6fa8c8; }
+.sb-grp { color: var(--dim); font-size: .76rem; padding: .55rem 0 .18rem; border-bottom: 1px solid #12303f; margin-top: .3rem; }
+.sb-row { display: flex; align-items: center; gap: .45rem; padding: .2rem 0; font-size: .82rem; }
+.sb-dot { width: 1rem; text-align: center; font-style: normal; }
+.sb-dot.sb-ok { color: var(--ok); } .sb-dot.sb-deg { color: #f1c40f; }
+.sb-dot.sb-down { color: var(--bad); } .sb-dot.sb-unk, .sb-dot.sb-off, .sb-dot.sb-mai { color: var(--dim); }
+.sb-dot.sb-l1 { color: #6fa8c8; }
+.sb-id { width: 9.5rem; font-size: .76rem; }
+.sb-nm { width: 7.5rem; }
+.sb-lv { width: 4.5rem; font-size: .78rem; }
+.sb-lv.sb-ok { color: var(--ok); } .sb-lv.sb-deg { color: #f1c40f; }
+.sb-lv.sb-down { color: var(--bad); } .sb-lv.sb-unk, .sb-lv.sb-off, .sb-lv.sb-mai { color: var(--dim); }
+.sb-lv.sb-l1 { color: #6fa8c8; }
+.sb-crit { width: 2.4rem; color: var(--dim); font-size: .74rem; }
+.sb-since { width: 4rem; color: var(--dim); font-size: .74rem; }
+.sb-det { flex: 1.2; font-size: .7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-ev { flex: 1.6; font-size: .7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

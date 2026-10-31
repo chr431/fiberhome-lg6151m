@@ -1,4 +1,7 @@
 #!/bin/sh
+# api.sh v2.83 (M2 状态真值总线轮): +state/render/lag/state_ev 四个域端点(api_state.sh) —
+#   状态页/GUI 只读 fast_watch 的 state.json(单一状态源), render 端点收 GUI 回传的"渲染版本+
+#   数据年龄"落 lag_audit(gui 阶段); 端点只转发不计算, 禁止第二套判据。
 # api.sh v2.82 (质量轮: 写端点统一 need_write=POST+token — 原 GET?token= 可触发
 #   写操作, 头注的 GET=read/POST=write 约定自此成为强制; cell_set 补控制字符
 #   一票否决, 与 gw_set 对称)。v2.81, 2026-10-28 LAN v6 修复: +v6/v6_set 域模块(api_v6.sh, IPv6
@@ -238,6 +241,11 @@ case "$EP" in
     v6_set)     need_write; . $APID/api_v6.sh; apply_v6 ;;
     # avail 域 (可用性评定; v2.79)
     avail)      need_tok; . $APID/api_avail.sh; get_avail ;;
+    # 状态总线域 (M2; v2.83): 只转发 fast_watch 的 state.json, 不计算状态
+    state)      need_tok; . $APID/api_state.sh; get_state ;;
+    render)     need_tok; . $APID/api_state.sh; apply_render ;;    # GUI 回传渲染版本+数据年龄(R2.5)
+    lag)        need_tok; . $APID/api_state.sh; get_lag ;;         # lag_audit p50/p99
+    state_ev)   need_tok; . $APID/api_state.sh; get_events ;;      # 最近迁移
     # wifi 域
     wifi)       need_tok; . $APID/api_wifi.sh; get_wifi ;;
     wifi_set)   need_write; . $APID/api_wifi.sh; apply_wifi ;;

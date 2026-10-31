@@ -276,44 +276,22 @@ RL_NOW=1090 rl_ok t; echo "too_soon=$?"   # 期望 1
 
 | 臂 | 设备 svc_lib | 判定口径 | 恢复时延 | 结论 |
 |---|---|---|---|---|
-| before | v1.7（旧 rl_ok） | 同一脚本 drill_rlok.sh | **无重启动作，中断 14 分钟**（有机证据，非受控） | 秒级崩溃被放大成分钟级 |
-| after | v1.10（新 rl_ok） | 同一脚本 drill_rlok.sh | **70s**（受控，2026-11-01 01:37:15 起） | 恢复有界；慢重试每 60s 一次 |
+| **before**（受控·单变量） | 只把 rl_ok 回退 v1.7（SVC_TABLE=fast_watch 与 alive() 新判据**保持不变**） | 同一脚本 drill_rlok.sh | **150s 内未恢复**（recovered=0）；watchdog 记 `v3httpd restart budget exhausted (3/h) — alert only` | 秒级崩溃 → 永久放弃 |
+| **after**（受控） | v1.10 全量 | 同一脚本 drill_rlok.sh | **70s 恢复** | 恢复有界，慢重试每 60s |
+| 有机旁证（生产） | v1.7 | — | authd 崩溃后 **14 分钟**无重启 | 真实故障，非构造 |
 
-**受控演练的执行记录与一个诚实说明**
+**执行记录**（2026-11-01 02:05–02:09，持锁，drills.tsv 留痕 `drill-manual v3httpd svc-probe rl_ok-before-arm`）：
 
-- 2026-11-01 01:37:15 持锁执行 `drill_rlok.sh before 150`（drills.tsv 已留痕
-  `drill-manual v3httpd svc-probe rl_ok-before-arm`），结果 **70s 恢复**。
-- 该臂**本应是"修复前"**（预期永不恢复），但运行中的 watchdog 已被 state-truth 重启并
-  加载了新版 svc_lib（其 M2 部署需要重读 SVC_TABLE），所以它实际测的是**修复后**行为。
-  因此上表 before 行只能用**有机证据**（authd 14 分钟）填，两臂不是同一服务、证据强度不同。
-- 修复生效的**现场旁证**：01:35:22 与 01:38:28 的 `led_mgr slow-retry x10 / x11` ——
-  旧代码在这个状态下已经永久放弃（正是 authd 那 14 分钟的机制），新代码每 60s 继续重试。
-- 部署后误判检查（Lead 指定）：01:34–01:38 的 `EVT restart` 全部是 `live=0`（真死），
-  新 alive() 判据没有把任何健康服务误判为死。
+1. 备份 `/data/gw/svc_lib.sh → .v110`；换成**单变量**文件（只把 rl_ok 换回 v1.7，
+   SVC_TABLE 仍是 fast_watch、alive() 仍是 argv 精确匹配）；
+2. **重启 watchdog** 使其生效（运行中的 watchdog 不重读 svc_lib —— 本项目架构事实）；
+3. 跑**同一个** drill_rlok.sh：kill v3httpd → **150s 未恢复**；
+   watchdog.log 02:08:25 出现 `WARN v3httpd unhealthy (pid=none :80=n)` 与
+   `WARN v3httpd restart budget exhausted (3/h) — alert only` —— 机制复现；
+4. 恢复 v1.10 + 重启 watchdog + 拉起 v3httpd，复核 `slowretry=1 / fastwatch=2 / alive_exact=1`
+   且 v3httpd pid 在（15517）、watchdog healthy=y；
+5. 客户端台账同时记到一条 **164s SEV1 tcp80** 中断（落在演练窗内，`excluded=drill`）。
 
-
-
-
-### 5.1 演练排除的两个必要护栏（2026-11-01 实弹补）
-
-**① 作用域**：演练只排除它真正影响的那条路径/那类探针。
-只门控 WiFi TX 的演练（target 含 `warp|wifi|ra0|rai0|beacon|hostapd`）**不**排除以太/RNDIS
-路径的中断——否则一条 1 小时的硬件演练窗口会把同窗口内真实的 GUI/DNS 中断全部"排除"掉。
-实弹：`hw-drill warp1 00:12-01:13` 一度吞掉了 state-truth 的四条真实服务中断（56s/94s/92s），
-加上作用域过滤后，它们改为按各自的 `v3httpd/dnsmasq` 演练行排除——**排除理由对了，证据没被藏**。
-
-**② 未回填上界**：`end_epoch=0` 表示"注入进行中"，但一行忘记回填的演练不能被当成无限期。
-未回填行最多生效 `DRILL_MAX_OPEN`（默认 1800s），超界按 `start+1800s` 关闭，并在报告里
-列入 `stale_open` 告警。实弹：state-truth 的 `R2.7-K09 hostapd` 行至今 `end=0`，
-若无上界，它会把 01:06 之后**所有**中断都排除——那是把证据藏起来，不是审计。
-
-### 5.2 设备侧探针的一个已知伪影（为什么客户端才是验收口径）
-
-设备侧 `gw.tcp80` 是"从设备自己连 192.168.9.1:80"。当演练把 `eth0`（默认路由承载口）
-down 掉时，设备到自身 LAN 地址的源地址选择/路由可能受影响，`gw.tcp80` 会跟着失败——
-**即使 GUI 对客户端完全正常**。实弹：01:04:37-01:07:36 设备侧记 tcp80 中断 179s，
-而同一时刻客户端只观察到 56s（其余时间客户端能正常连上 :80）。
-
-结论不变：**客户端侧是验收口径，设备侧只作归因证据**；设备侧数值与客户端不一致时，
-以客户端为准，并把设备侧的偏差当成"设备自身观测路径受限"的证据记录下来。
-
+**为什么这次要重做**：01:37 那次标着 "before" 的执行，实际测的是**修复后**行为 ——
+运行中的 watchdog 已被 state-truth 重启并加载了新版 svc_lib（其 M2 部署需要重读 SVC_TABLE），
+所以那 70s 是 after 数据。重做时把变量收敛到**只有 rl_ok**，对照才成立。

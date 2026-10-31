@@ -318,6 +318,13 @@ detect() {
 
     # --- 5) 只观测不修(dnsmasq 关键运行配置) ---
     #     重启 dnsmasq 属 watchdog 的职责, 本脚本不越界; 但漂移必须可见。
+    # 归一: DET/OBS 由 "DET=\"$DET x\"" 累加而成, 首个元素带前导空格。而 pending 用
+    #   "read _pu _pd" 读回(IFS 会把连续空白折叠), 带前导空格的 DET 与读回的 _pd 永不相等
+    #   -> 跨拍确认永远不成立(2026-11-01 02:04 演练 D7 实弹抓出: 60s 内只反复记 SUSPECT)。
+    #   这里统一去掉前导空格, 让"写入/读回"两种表示一致。
+    [ -n "$DET" ] && DET=$(printf '%s' "$DET" | sed 's/^ *//')
+    [ -n "$OBS" ] && OBS=$(printf '%s' "$OBS" | sed 's/^ *//')
+
     _dp=$(pidof dnsmasq 2>/dev/null | cut -d' ' -f1)
     if [ -n "$_dp" ] && [ -r /proc/$_dp/cmdline ]; then
         _cl=$(tr '\0' ' ' < /proc/$_dp/cmdline 2>/dev/null)

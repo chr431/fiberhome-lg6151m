@@ -1,6 +1,6 @@
 # 可靠性验收报告 (M4 自持性 + 汇总口径)
 
-> 生成时刻: 2026-11-01 04:10:55 (UTC+8)  生成器: `tools/acceptance/report.py`
+> 生成时刻: 2026-11-01 04:32:47 (UTC+8)  生成器: `tools/acceptance/report.py`
 > 合同: `docs/RELIABILITY_SPEC.md` v1.0  证据: 设备 `/data/gw/logs/*`(可复核) + 本机归档
 > 原则: 每个判定都指向一个设备侧文件与时间窗; 数据缺失记 **unknown**, 不记 0。
 
@@ -10,7 +10,7 @@
 |---|---|---|
 | R4.1 守护覆盖审计 | PASS | 覆盖表 + 17 条注入实测, 见 §2/§6 |
 | R4.2 资源不泄漏 | PASS | 每日 checkpoint 趋势 + 轮转上界, 见 §3 |
-| R4.3 30d soak 装置 | PASS | 装置在位并已产生 2 条样本, 见 §4 |
+| R4.3 30d soak 装置 | PASS | 装置在位并已产生 4 条样本, 见 §4 |
 | R4.4 故障注入 >=30 | FAIL | 有效 16 条: 16 条自愈(100%), 0 条失败, 1 条中止/跳过, 见 §6 |
 | R4.5 无人干预声明 | PASS | 人工动作清单已列全并逐条处置, 见 §7 |
 
@@ -18,7 +18,7 @@
 
 ## 1. 时间窗与证据清单
 
-- 重启台账覆盖: 2026-09-09 09:42:08 .. 2026-11-01 04:00:57 (pstore 可回溯范围)
+- 重启台账覆盖: 2026-09-09 09:42:08 .. 2026-11-01 04:13:29 (pstore 可回溯范围)
 - 设备侧证据: `/data/gw/logs/{soak_daily,soak_boots,soak_alerts,fault_inject,drills,reboots.log,ne_events}`
 - PC 侧归档: `_local/evidence/soak/<UTC>/` (`tools/acceptance/soak.py pull`)
 - 重启归因原始证据: `/data/gw/logs/pstore/console-ramoops.*` + `/data/gw/healthdog.armlog`
@@ -54,13 +54,13 @@
 
 | 维度 | 现值 | 上界/机制 | 判定 |
 |---|---|---|---|
-| /data 剩余 | 1542420 KB (used 34%) | 阈值 102400KB | PASS |
-| /tmp 剩余 | 867376 KB | tmpfs 重启即清 | PASS |
-| 进程数 | 257 | 基线 ~250 | PASS |
-| 僵尸 |  | 阈值 20 | FAIL |
+| /data 剩余 | 1516992 KB (used 35%) | 阈值 102400KB | PASS |
+| /tmp 剩余 | 867480 KB | tmpfs 重启即清 | PASS |
+| 进程数 | 259 | 基线 ~250 | PASS |
+| 僵尸 | 0 | 阈值 20 | PASS |
 | 全局 fd | 512 / 173554 | 阈值 90% | PASS |
-| 可用内存 | 1326088 KB / 1738184 KB | 阈值 200000KB | PASS |
-| 日志总量 | 99168 KB | 见 §3.1 | PASS |
+| 可用内存 | 1334492 KB / 1738184 KB | 阈值 200000KB | PASS |
+| 日志总量 | 103652 KB | 见 §3.1 | PASS |
 
 ### 3.1 日志轮转上界(静态核对 gw/log_keeper.sh)
 
@@ -84,20 +84,22 @@
 |---|---|---|---|---|---|---|---|---|
 | 2026-10-31 | 18893 | 1554668 KB | 512 | 0 | 12 | 1 (0/1) | 0 | **DEGRADED** |
 | 2026-11-01 | 20504 | 1542420 KB | 512 |  | 12 | 1 (0/1) | 0 | **DEGRADED** |
+| 2026-11-01 | 402 | 1517896 KB | 512 | 0 | 16 | 4 (0/4) | 0 | **FAIL** |
+| 2026-11-01 | 1111 | 1516992 KB | 512 | 0 | 16 | 4 (0/4) | 0 | **DEGRADED** |
 
 ### 4.1 重启归因(设备侧可复核证据)
 
 > 由 `tools/acceptance/boot_audit.py` 从 pstore/reboots.log/healthdog.armlog 生成。
 
-- 启动总数(pstore 台账): **85**
+- 启动总数(pstore 台账): **86**
 - scheduled: 10
-- clean: 34
+- clean: 35
 - sysrq: 8
 - crash: 23
 - unknown: 10
 - reboots.log 计划触发 12 条, 其中 10 条能在 pstore 匹配到启动
 - **台账覆盖缺口**: 以下触发行没有对应 pstore 记录(启动台账不完整, 已由 soak_boots.tsv 闭环): 2026-10-19 04:00:16, 2026-10-20 04:00:22
-- 达到 stable-healthy 的启动: 63 (占 74%)
+- 达到 stable-healthy 的启动: 65 (占 76%)
 
 <details><summary>逐次启动归因表(点开)</summary>
 
@@ -188,6 +190,7 @@
 | 2026-10-31 18:44:31 | clean | procd/reboot |
 | 2026-11-01 02:55:48 | experiment-kernel-oops | attrib=crash-root rmmod mtk_wed: fault @ mtk_wed base+0x54, lr=__handl |
 | 2026-11-01 04:00:57 | scheduled | reboots.log(+32s) |
+| 2026-11-01 04:13:29 | clean | procd/reboot |
 
 </details>
 
@@ -227,13 +230,12 @@
 
 > 契约: `drills.tsv`(Lead v1.2) 是唯一演练标记文件; 消费方(svc-probe/state-truth/obs-ledger)按窗口打 excluded。
 
-- 窗口行总数: 78 (批级 59 / 逐条 19)
+- 窗口行总数: 79 (批级 60 / 逐条 19)
 - 残留 end_epoch=0 的行: **0** (无残留)
-- 演练总时长: 7848 s
+- 演练总时长: 8748 s
 
 | start | end | kind | target | owner |
 |---|---|---|---|---|
-| 1793469291 | 1793469334 | fault-injection | batch-K22 | soak-qa |
 | 1793469291 | 1793469373 | fault-injection | batch-K12 | soak-qa |
 | 1793469291 | 1793469373 | fault-injection | batch-K05 | soak-qa |
 | 1793469292 | 1793469373 | fault-injection | batch-K06 | soak-qa |
@@ -273,6 +275,7 @@
 | 1793470751 | 1793470824 | drill-manual | fan_mgr | state-truth |
 | 1793470827 | 1793470901 | drill-manual | led_mgr | state-truth |
 | 1793470904 | 1793470942 | drill-manual | LED_NIGHT=1 | state-truth |
+| 1793477575 | 1793478475 | maintenance-reboot | lead-approved-validation | state-truth |
 
 ## 9. 假状态演练记录(判据类改动的实弹)
 

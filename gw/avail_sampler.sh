@@ -1,6 +1,9 @@
 #!/bin/sh
-# avail_sampler.sh v1.12 -- 组件可用性采样器 (AVAILABILITY_DESIGN §3, 防假绿轮)
-# v1.12 (2026-10-31 时间源统一轮): FRESH 判据的 cycle 键改 uptime 比较(watchdog
+# avail_sampler.sh v1.13 -- 组件可用性采样器 (AVAILABILITY_DESIGN §3, 防假绿轮)
+# v1.13 (2026-10-31 内核看门狗轮): sys.kernel 重定义 — 标签"内核/修复栈"→
+#   "内核看门狗", 判据从固定 off(旧栈退役后悬空)改为 healthdog 三层判
+#   (模块在/守护活/hb 新鲜); KEYS_OF 接 watchdog 的 healthdog 键。id 不改
+#   (台账历史连续)。v1.12 (2026-10-31 时间源统一轮): FRESH 判据的 cycle 键改 uptime 比较(watchdog
 #   v1.40 起发布 uptime 时基)。v1.11 见台账。
 # v1.11 (SIGSEGV fix): +sys.nerepair(记录修复 supervisor) —— pid 在 + /tmp/nerepair.hb
 #   新鲜度(<=180s) 判 op/deg/down; watchdog SVC_TABLE nerepair 项负责拉起。
@@ -211,7 +214,7 @@ fi
 # ---- 组件表 (id|显示名|组|判据) — 单点维护, api 侧 roster 与此同源 ----
 TABLE='
 sys.boot|启动链|系统|K:bootgate+boot
-sys.kernel|内核/修复栈|系统|s:kernel
+sys.kernel|内核看门狗|系统|s:kernel
 sys.supervisor|监督层|系统|s:supervisor
 sys.nerepair|记录修复|系统|s:nerepair
 sys.netlock|网络写锁|系统|s:netlock
@@ -242,7 +245,7 @@ qual.coverage|观测覆盖|数据质量|s:coverage
 KEYS_OF() {
     case "$1" in
     sys.boot)       echo "bootgate boot" ;;
-    sys.kernel)     echo "" ;;
+    sys.kernel)     echo "healthdog" ;;
     sys.supervisor) echo "" ;;
     sys.netlock)    echo "netlock" ;;
     sys.logging)    echo "log_keeper" ;;
@@ -272,9 +275,21 @@ KEYS_OF() {
 level_of() { # $1=判据串 → 级别 (op/deg/down/nodata/off)
     case "$1" in
     s:kernel)
-        # v1.7 (SIGSEGV §8.13): 旧内核修复栈已整体退役 —— 该组件已无可判的加载
-        #   体, 固定判 off(不冒充绿, 也不产生降级事件)。新方案落地时在此重建判据。
-        echo off
+        # v1.13 (内核看门狗轮): 组件重定义做实 —— 原"内核/修复栈"自 §8.13 旧栈
+        #   退役后固定 off 悬空占位; 其实际残存职能(healthdog 事件归属)与继任
+        #   防线语义在此对齐。组件 id 保留 sys.kernel 不变(90 天台账按 id 键控,
+        #   改 id 断历史), 只换标签与判据。
+        #   判据三层: /proc/healthdog 在位 + healthdog.sh 守护活 + hb(uptime 基,
+        #   SVC_TABLE 同源)新鲜。手工 disarmed(/data/gw/healthdog.disarmed)不影
+        #   响 —— 守护 disarmed 态仍喂 hb(armed 只关内核侧咬门)。
+        if ! pgrep -f '/data/gw/healthdog[.]sh' >/dev/null 2>&1; then echo down; return; fi
+        [ -e /proc/healthdog ] || { echo down; return; }
+        _kh=$(cat /tmp/healthdog.hb 2>/dev/null)
+        _ku=$(cut -d. -f1 /proc/uptime)
+        case "$_kh" in
+        ''|*[!0-9]*) echo deg ;;
+        *) [ $((_ku - _kh)) -le 180 ] && echo op || echo deg ;;
+        esac
         ;;
     s:supervisor)
         [ "$FRESH" = 1 ] && echo op || echo down

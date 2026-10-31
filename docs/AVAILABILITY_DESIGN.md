@@ -251,7 +251,7 @@ v1.5）：NE 匹配降级为 cause 注记; 置态权只留给**故障后果证�
 | wan.agg | 规则在(L1)+**双路全死→down**(L3) | L3 | 单路死由对应组件记 deg |
 | wan.auth | authd(L1)+**authd_state 会话态**(L3) | L3 | — |
 | sys.logging | 守护(L1)+**metrics 停更**(L2) | L2 | — |
-| sys.kernel | 模块在(L1)+**sweep 计数前进**(L2) | L2 | KE 由 pstore/boot 守卫另覆盖 |
+| sys.kernel | /proc/healthdog 在位(L1)+守护活+**hb 新鲜**(L2) | L2 | v1.13 重定义为**内核看门狗**(healthdog); 手工 disarmed 不影响(守护仍喂 hb); id 沿用 sys.kernel 保台账连续 |
 | lan.wifi2g/5g | 活套接字+链路(L2)+**guard 告警/reason=3 风暴窗**(L3) | L2+ | 信标物理停发依赖 wifi_guard 告警泛化, 无独立接收者 |
 | feat.sms | mipc(L1)+**api.log 发送失败窗**(L3) | L2+ | — |
 | sys.ssh | port22(L1) | **L1-only, 已知盲区** | dropbear accept-EOF 卡死类不可探测; 每日 SSH 实连即事实演练 |

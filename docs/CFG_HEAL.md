@@ -300,6 +300,20 @@ Lead 01:00 裁决: **gw/wan_agg.sh 归本任务**(原本无主), 授权加 --rea
 | D2 mangle(C02) | **首轮假绿**, 修判据后: 检出 DRIFT split wanagg -> 修复 -> 链恢复三件 -> OK rc=0 | 台账 agg/wan_agg/repair/ok/50 |
 | 锁 | 全程 /tmp/netcfg_lock_timeouts = **0**, netcfg.log 无 WARN | 修复耗时 50ms; cfg_heal 不持锁 |
 
+**第二轮实弹(02:02-02:07, 正式窗口, 生产 tick 路径)**:
+
+| 用例 | 结果 | 证据 |
+|---|---|---|
+| D1 NAT(**async tick**) | 注入 -> **11.1s** 重建 -> 客户端 tcp22/80/dns 全 1 | 台账 agg/wan_agg/repair/ok/**330** |
+| D4 br-lan eth1(L01) | 注入 -> **16.0s** 重建 -> 客户端三探针恢复 | 台账 br/bridge/repair/ok/20; drills.tsv 已标窗口 |
+| D7 反例(负向) | /tmp/wan_mode 置陈旧 + 真删 MARK -> **20s 内不动手** | 台账只记 observe/suspect, 无 repair 行 |
+| D7 反例(正向) | 恢复来源后自动修复: **修 bug 前未通过**; 修后未单独重跑 | 同一机制已由 D1/D4 的 async 路径实测通过 |
+| D0 baseline(30min) | 346 采样, drift_samples=0, 台账 0 新增, repairs 0 新增 | _local/evidence/cfg_heal/20261101-013506_drill.tsv |
+
+> **第二个真 bug(重要)**: 跨拍 2-of-2 确认**永不成立** —— DET 首元素带前导空格, 而 pending 用
+> `read _pu _pd` 读回时 IFS 会折叠连续空白, 两者永不相等 -> 只反复记 SUSPECT 不修复。
+> 修法: detect() 末尾归一(去掉前导空格)。教训: **跨进程传递的字符串必须归一**。
+>
 > **D2 抓出的真 bug(重要)**: v1.0 用整表 `iptables -t mangle -S` 文本查打标, 而本机 mangle 表里
 > 有厂商 QoS 链(qos_Default / qos_Default_ct)满载 `--set-xmark` 与 `CONNMARK --save-mark` ——
 > 删掉 WANAGG 的打标后**仍判绿**, 与 watchdog 的 `grep -q MARK` 是同一类错误。

@@ -1,5 +1,5 @@
 #!/bin/sh
-# soak_checkpoint.sh v1.0 -- 30d soak 装置: 每日资源 checkpoint + 每次开机记账 + 漂移告警
+# soak_checkpoint.sh v1.1 -- 30d soak 装置: 每日资源 checkpoint + 每次开机记账 + 漂移告警
 # (RELIABILITY_SPEC M4 R4.2/R4.3; 验收口径见 docs/ACCEPTANCE.md)
 #
 # 为什么是"被 fork 驱动"而不是常驻守护:
@@ -26,9 +26,13 @@
 #   sh soak_checkpoint.sh --status   # 打印最近台账(排障用)
 #   sh soak_checkpoint.sh --version
 #
+# v1.1 (2026-11-01 冷启动前修根): 数值列归一 —— busybox awk 偶发返回空串,
+#   zombies 列被写成空 -> 后续 [ "" -gt 20 ] 报 out of range 且台账出现空列。
+#   现在所有参与比较的量都过 num_or 兜底(实测证据: 00:35 那条 2026-11-01 行)。
+#
 # 退出码: 0=正常(含跳过), 非 0 只表示参数错误。运行期异常不得影响调用方。
 
-VER=1.0
+VER=1.1
 DIR=/data/gw/logs
 DAILY=$DIR/soak_daily.tsv
 BOOTS=$DIR/soak_boots.tsv
@@ -184,6 +188,15 @@ do_daily() {
         _s2=$(awk -v t="$_y" '$1>=t && $2=="SEV2"{c++} END{print c+0}' "$DIR/incidents.tsv" 2>/dev/null)
         _s3=$(awk -v t="$_y" '$1>=t && $2=="SEV3"{c++} END{print c+0}' "$DIR/incidents.tsv" 2>/dev/null)
     fi
+    # 数值归一: busybox awk 偶发返回空串(实测 2026-11-01 00:35 zombies 列写空 ->
+    # 后续 [ "" -gt 20 ] 报 "out of range", 台账出现空列)。所有参与比较的量
+    # 在这里一次性兜底, 保证台账每一列都有确定值。
+    _zo=$(num_or "$_zo" 0); _pr=$(num_or "$_pr" 0)
+    _bsched=$(num_or "$_bsched" 0); _bunp=$(num_or "$_bunp" 0)
+    _crash24=$(num_or "$_crash24" 0); _b24=$(num_or "$_b24" -1)
+    _s1=$(num_or "$_s1" -1); _s2=$(num_or "$_s2" -1); _s3=$(num_or "$_s3" -1)
+    _l5=$(num_or "$_l5" -1); _m5=$(num_or "$_m5" -1); _g5=$(num_or "$_g5" -1)
+    _ne24=$(num_or "$_ne24" -1); _rep24=$(num_or "$_rep24" -1)
     _v=PASS; _notes=
     if [ "$_df" -ge 0 ] && [ "$_df" -lt "$TH_DATA_FREE_KB" ]; then _v=FAIL; alert data_free "$_df KB"; fi
     if [ "$_fu" -ge 0 ] && [ "$_fm" -gt 0 ] && [ $(( _fu * 100 / _fm )) -ge "$TH_FD_PCT" ]; then _v=FAIL; alert fd_exhaust "$_fu/$_fm"; fi

@@ -494,3 +494,49 @@ busybox ash 把**前导 0 的数字当八进制**；/proc/uptime 的小数前两
 **同类陷阱全仓扫描**：core_trap.sh 已有 num() 去前导零助手（早已踩过）；soak_checkpoint.sh
 用 awk（十进制）；fast_watch 的 [ 0405 -ge 357 ] 实测 busybox test 按十进制比较（GE，rc=0），
 **不受影响**。仅上述 3 个文件有 $(( )) 直接吃小数片段的路径，已全部改掉。
+### 11.10 04:00 冷启动验收实弹（2026-11-01 04:00 定时重启 + 04:13 验证重启）
+
+**① 开机链修复（rc19 v2.39，已实测验证）**
+
+事故：04:00 重启后 **4.5 分钟没有状态总线**（watchdog 的 svc_supervise 有 UP<240s 的 boot grace，
+240s 后才判活并用 tier-A 拉起），期间 GUI 读到的是 /data 上**跨重启保留的上一轮 state.json**。
+
+修法（两件事成对，都在 gw/v3_rc10.extend.sh，部署为 /data/gw/rc19.sh）：
+1. 在 **br-lan 配好 IP 之后、wifi 等待之前** 启动 fast_watch（位置很关键：太早则 tcp80/dns 探针全红、
+   开机刷一堆假 down；太晚则被 wifi 等待阻塞）；
+2. 启动前 rm -f /data/gw/run/state.json 与 state.led → 首个新版本发布前 /api/state 返回 warming
+   （GUI 显「采集中/启动中」），LED 侧 BUS_STALE → 全灭，不再显示上一轮结论。
+
+**实测**（/data/gw/logs/fast_watch.boot.tsv 最后一行）：
+
+| 场景 | fast_watch 启动时的 uptime |
+|---|---|
+| 04:02 那次（无开机链，watchdog tier-A 兜底） | **271 s** |
+| 04:05 那次（同上） | **326 s** |
+| **04:13 验证重启（rc19 v2.39）** | **69 s** |
+
+69s 的构成：rc19 在 br-lan 之前要跑完模块加载 + FH 驱动链 + 网络设备枚举 ≈60s，加上到插入点 9s。
+**要 <30s 只有两条路**：把启动点提前到 br-lan 之前（会违背"避免开机假 down"的约束），或把总线拆成
+「早期最小探针版 + 完整版」（工程量大）。当前 69s 已达成"开机即有总线"的实质目的。
+
+**重启后四项判据**：pid 19996 ≠ 重启前 27827 ✅ · beat 新鲜 ✅ · state.json 新 ver 且带 boot:1 ✅ ·
+fast_facts 在长且 /tmp/fast_watch.exit.tsv 不存在（零退出）✅ —— **P0 修复在冷启动上被证实**。
+
+**② maint / drill 标志永久粘住（v2.3 修）**
+
+state.json 只在**迁移**时发布，而 maint/boot/drill 是标志不是级别 —— 标志变化不触发发布，
+于是 maint 过了 04:10 仍显示维护、drill 窗口关闭后仍显示演练中。修法：flags_upd 里比较新旧 FLAGS，
+变化即置 DIRTY 强制重发布。实测：04:11 maint 由 1→0 且 state.json 随之重新发布（ver 1793477170）。
+
+**③ drills.tsv 悬挂行自动闭合（v2.3）**
+
+end=0 且超 **1h** 的窗口按 start+3600 关闭并记 drills_autoclose.log。取 1h 而非 30min：
+soak-qa 的批量注入窗口最长 35min，30min 会误闭合法窗口（反而藏证据）；1h 仍能保证不会永久粘住。
+
+**④ sys.gui 假红（v2.3 修）**
+
+04:04 实测 sys.gui=down 而证据串是 tcp80=0,l80=1,http200=1 —— **设备连自己 LAN IP 的探针瞬断**，
+而同一时刻真实 HTTP 200 成功、监听也在。判据改为证据层级：
+l80==0 判 down / 无新鲜 http200 判 unknown / http200==1 判 ok / tcp80==1 判 deg / 否则 down。
+原理：**HTTP 200 蕴含 TCP 接受连接**，所以 http200 成功时 tcp80 失败只能是探针自骗，不能反判 down；
+tcp80 探针保留作 1s 快速失败信号。

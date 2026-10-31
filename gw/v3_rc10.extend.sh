@@ -62,16 +62,6 @@ progress() { echo "$(date +%s) $(cut -d. -f1 /proc/uptime) $*" >> /tmp/boot.prog
 progress "rc19 start v2.34"
 pgrep -f boot_gate[.]sh >/dev/null || nohup sh /data/gw/boot_gate.sh >/tmp/boot_gate.out 2>&1 &
 
-# --- 状态真值总线(M2) 开机即起 + 清掉上一轮残留状态 (2026-11-01 04:00 冷启动实弹)
-#   事故: 缺这一块 -> 开机后 **4.5 分钟没有状态总线**(watchdog 的 svc_supervise 有 UP<240s
-#   的 boot grace, 240s 后才判活并用 tier-A 拉起)。期间 GUI 读到的是 /data 上**跨重启保留的
-#   上一轮 state.json**(overall=ok/down 都是假状态, 只能靠 age 判"陈旧")。
-#   两件事必须成对: ① 先删旧 state.json/state.led, 让 GUI 在首个新版本发布前显示"启动中/未知";
-#   ② 立刻拉起 fast_watch, 让新状态尽早出现(它是 GUI/LED/API 的唯一状态源)。
-mkdir -p /data/gw/run 2>/dev/null
-rm -f /data/gw/run/state.json /data/gw/run/state.led 2>/dev/null
-pgrep -f fast_watch[.]sh >/dev/null || nohup sh /data/gw/fast_watch.sh >/tmp/fast_watch.out 2>&1 &
-
 
 
 # --- auto_adapt: embedded DHCP client -> bridge ops -> FH br deadlock
@@ -131,6 +121,19 @@ ip link show br-lan >/dev/null 2>&1 || {
 }
 ip link set br-lan up 2>/dev/null
 ip addr add 192.168.9.1/24 dev br-lan 2>/dev/null
+
+# --- 状态真值总线(M2) 开机即起 + 清掉上一轮残留状态 (2026-11-01 04:00 冷启动实弹)
+#   事故: 缺这一块 -> 开机后 **4.5 分钟没有状态总线**(watchdog 的 svc_supervise 有 UP<240s
+#   的 boot grace, 240s 后才判活并用 tier-A 拉起)。期间 GUI 读到的是 /data 上**跨重启保留的
+#   上一轮 state.json**(overall=ok/down 都是假状态, 只能靠 age 判"陈旧")。
+#   两件事必须成对: ① 先删旧 state.json/state.led, 让 GUI 在首个新版本发布前显示"启动中/未知";
+#   ② 立刻拉起 fast_watch, 让新状态尽早出现(它是 GUI/LED/API 的唯一状态源)。
+#   位置: **必须在 br-lan 有 IP 之后**(否则 tcp80/dns 探针全红, 开机就刷一堆 down);
+#        在 wifi 等待之前(那是本脚本最长的阻塞点, 放在它后面会白白推迟总线)。
+mkdir -p /data/gw/run 2>/dev/null
+rm -f /data/gw/run/state.json /data/gw/run/state.led 2>/dev/null
+pgrep -f fast_watch[.]sh >/dev/null || nohup sh /data/gw/fast_watch.sh >/tmp/fast_watch.out 2>&1 &
+
 # v2.5 (2026-10-03): role swap per case silkscreen -- eth0 (丝印 LAN1/WAN 口)
 #     = WAN role for wan_policy2; eth1 (2.5G-designed PHY) = LAN bridge member.
 #     Legacy (<=v2.4): eth0 was LAN, eth1 was the (never-carriered) WAN probe.

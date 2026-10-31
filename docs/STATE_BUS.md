@@ -366,3 +366,20 @@ lgssh "cat /tmp/led_mgr.verify; grep -c READBACK-FAIL /tmp/led_mgr.log"
 avail_sampler 的边缘收割字段位置假设与生产方日志格式不匹配 → "秒级边缘→窗口降级"防假绿机制
 **静默失效**（实测 8 行台账 6 行 NOMATCH）。已抽出 gw/state_edge_lib.sh 作唯一契约实现，
 生产方（fast_watch）与消费方（avail_sampler）共用，并有 --selftest 往返断言（ids=7 parsed=14）。
+### 11.5 收尾实测（v1.9 之后）
+
+| 指标 | 数值 | 说明 |
+|---|---|---|
+| detect 滞后 | p50 **1000 ms** · p99 **3020 ms** · max 3050 ms（n=26） | 文件/监听类 1 拍内；网络探针 2 拍确认 |
+| publish 滞后 | 与 detect 同（同一拍内发布） | — |
+| gui 渲染滞后 | 1760 ms（n=1） | 等价客户端 gui_client.py（走同一 /api/state + /api/render 路径） |
+| led 写入滞后 | 1510 ms（n=1） | 写完 + 读回校验通过的时刻 |
+| 迁移样本 | 31 行（含 01:23 真实蜂窝承载丢失 wan.cellular ok→deg→down→deg） | 证明总线非演练时也在工作 |
+| fast_facts | 694 行，NF!=5 = 0 | — |
+| 稳定性 | v1.9 上线后 **8.9 min 无退出**（此前均值 ~2 min，且期间跑完一轮完整 selftest） | v1.8 STEP 台账定位到 step=sample + 奇数拍 ⇒ probe_dns 的 nslookup；v1.9 改 tcpok:53 后消失 |
+
+**已知测试腐化（4 条 selftest 断言）**：`WiFi AP 服务真实在线` / `5G 指示灯反映数据面` /
+`WAN 指示灯反映家宽数据面` / `数据面判活不落入白名单陷阱` —— 这四条检查的是 led_mgr **旧实现**的内部行为
+（日志里的 `bss=`、直接消费 wan_alive、引用 watchdog 的 WAN 键）。v4.1 把判据移交给状态总线后必然变红，
+**需要随架构更新断言**（本轮未改，因为只被授权改 `t_avail` 一处）。部署前基线 102 pass/1 fail，
+部署后 98 pass/5 fail：其中 t_avail 由红转绿，其余 4 条即上述腐化 + 1 条 watchdog 启动 PATH（已修）。

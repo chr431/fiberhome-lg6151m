@@ -74,7 +74,7 @@ bus_fresh() {
     _ld_f=${_ld_t%%[!0-9]*}
     case "$_ld_f" in ??) ;; ?) _ld_f=${_ld_f}0 ;; *) _ld_f=00 ;; esac
     case "$_ld_i" in ''|*[!0-9]*) return 1 ;; esac
-    _ld_now=$(( _ld_i * 100 + _ld_f ))
+    _ld_now=$(( _ld_i * 100 + 10#${_ld_f:-0} ))   # P0: 10# 防 08/09 被当八进制
     _ld_age=$(( (_ld_now - _ld_bcs) * 10 ))
     [ "$_ld_age" -lt 0 ] && return 1
     [ "$_ld_age" -le 3000 ] || return 1
@@ -143,7 +143,7 @@ now_ms() {
     _ld_f=${_ld_t%%[!0-9]*}
     case "$_ld_f" in ??) ;; ?) _ld_f=${_ld_f}0 ;; *) _ld_f=00 ;; esac
     case "$_ld_i" in ''|*[!0-9]*) _ld_i=0 ;; esac
-    _ld_cs=$(( _ld_i * 100 + _ld_f ))
+    _ld_cs=$(( _ld_i * 100 + 10#${_ld_f:-0} ))   # P0: 10# 防 08/09 被当八进制
     _ld_s=$(date +%s)
     _ld_ms=$(( _ld_s * 1000 + (_ld_cs % 100) * 10 ))
 }

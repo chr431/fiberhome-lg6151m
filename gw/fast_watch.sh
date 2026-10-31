@@ -104,7 +104,11 @@ now_cs() {
     _fw_f=${_fw_t%%[!0-9]*}
     case "$_fw_f" in ??) ;; ?) _fw_f=${_fw_f}0 ;; *) _fw_f=00 ;; esac
     case "$_fw_i" in ''|*[!0-9]*) _fw_i=0 ;; esac
-    CS=$(( _fw_i * 100 + _fw_f ))
+    # ⚠ P0 根因(2026-11-01 03:05, svc-probe 实弹定位): busybox ash 把**前导 0 的数当八进制**。
+    #   uptime 小数前两位为 08/09 时 $(( )) 报 arithmetic syntax error 并让整个脚本退出(2),
+    #   每 100s 命中 2 次(实测 ~50s 一次) —— 这就是 M2 P0 全部「神秘退出」的真因。
+    #   修法: 进 $(( )) 一律 10# 强制十进制 + 空值兜底。
+    CS=$(( _fw_i * 100 + 10#${_fw_f:-0} ))
     UPS=$_fw_i
 }
 ep_ms() { _fw_ms=$(( EP * 1000 + ( $1 - EP_CS ) * 10 )); }

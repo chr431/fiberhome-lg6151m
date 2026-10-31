@@ -2413,8 +2413,17 @@ def t_avail_ne_drill():
     #   导致用例在每次重启后假红。
     sup = dev("tail -n +%d /data/gw/logs/avail_transitions.tsv 2>/dev/null | "
               "grep -c 'sys.supervisor.*op->deg'" % (int(pretr) + 1)).strip()
-    lv = dev("grep '^sys.supervisor|' /tmp/avail_last 2>/dev/null | "
-             "cut -d'|' -f4").strip()
+    # v2.75(2026-11-01 冷启动验收): /tmp 是 tmpfs, 重启后空白 —— 采样器首轮落盘前
+    #   读 lv 会得到空串(实测 04:16 那轮 level= 空, 而设备侧 04:24 写的是 op)。
+    #   不是断言弱化: 仍要求 lv == "op", 只是先给采样器最多 60s 落盘。
+    lv = ""
+    for _w in range(12):
+        lv = dev("grep '^sys.supervisor|' /tmp/avail_last 2>/dev/null | "
+                 "cut -d'|' -f4").strip()
+        if lv:
+            break
+        import time as _t
+        _t.sleep(5)
     # cleanup: 伪行删除 + 游标钉回真实行数(防下一窗重扫全史)
     dev("sed -i '$d' /data/gw/logs/ne_events.tsv; "
         "_n=$(wc -l < /data/gw/logs/ne_events.tsv); sed -i \"4s/.*/$_n\" /tmp/avail_sess")

@@ -635,20 +635,20 @@ sample_all() {
     AGE_http=$(( AGE_http + 1 )); AGE_ssh2=$(( AGE_ssh2 + 1 ))
 }
 # ---- 主循环(绝对对齐 1s 边界; 超拍留痕) --------------------------------
-DRY=0; TICK=0; OVRUN=0
+DRY=0; TICK=0; OVRUN=0; STEP=init
 run_loop() {
     while :; do
         TICK=$(( TICK + 1 ))
         now_cs; _rl_t0=$CS
         if [ $(( TICK % 10 )) -eq 1 ]; then now_ep; fi
-        sample_all
-        flags_upd
-        compute_levels
-        compute_led
-        if [ "$DIRTY" = 1 ]; then publish; DIRTY=0; fi
-        emit_facts
-        emit_edges
-        emit_beat
+        STEP=sample; sample_all
+        STEP=flags; flags_upd
+        STEP=levels; compute_levels
+        STEP=led; compute_led
+        if [ "$DIRTY" = 1 ]; then STEP=publish; publish; DIRTY=0; fi
+        STEP=facts; emit_facts
+        STEP=edges; emit_edges
+        STEP=beat; emit_beat
         # M3 消费者 tick(幂等, 测试钩子: 文件不存在则不调)
         if [ $(( TICK % 60 )) -eq 0 ] && [ -r "$D/svc_outage.sh" ]; then
             "$BB" timeout -s KILL 5 sh "$D/svc_outage.sh" tick >/dev/null 2>&1 || true
@@ -665,10 +665,11 @@ run_loop() {
             ep_ms "$CS"
             printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$_fw_ms" "$VER" "-" beat "$_fw_ms" "$_fw_ms" "beat" >> "$LAG"
         fi
-        if [ $(( TICK % 15 )) -eq 0 ]; then svc_hb fast_watch; fi
-        if [ $(( TICK % 300 )) -eq 0 ]; then rotate_all; fi
+        if [ $(( TICK % 15 )) -eq 0 ]; then STEP=hb; svc_hb fast_watch; fi
+        if [ $(( TICK % 300 )) -eq 0 ]; then STEP=rotate; rotate_all; fi
         now_cs
         _rl_used=$(( CS - _rl_t0 ))
+        STEP=sleep
         if [ "$_rl_used" -lt "$INT" ]; then
             "$BB" usleep $(( (INT - _rl_used) * 10000 ))
         else
@@ -747,6 +748,7 @@ case "${1:-}" in
         emit_facts
         now_cs
         _rl_used=$(( CS - _rl_t0 ))
+        STEP=sleep
         if [ "$_rl_used" -lt "$INT" ]; then "$BB" usleep $(( (INT - _rl_used) * 10000 )); fi
         BASE=0
     done
@@ -769,7 +771,7 @@ touch "$EVT" "$LAG" "$FACTS" "$EDGES" 2>/dev/null
 now_cs; now_ep; VER=$EP
 # v1.7(实弹取证): 记下每一次退出的原因 —— 实测 01:00:50 左右有一次无记录退出(无 NE 无 dmesg),
 # 而 SIGKILL 拿不到 trap —— 因此有这行台账就能区分「被 SIGKILL」与「自己退出」，不再靠猜。
-trap 'printf "%s\texit=%s\ttick=%s\tup=%s\n" "$(date +%s)" "$?" "$TICK" "$(cut -d. -f1 /proc/uptime)" >> /tmp/fast_watch.exit.tsv 2>/dev/null' EXIT TERM INT HUP
+trap 'printf "%s\texit=%s\ttick=%s\tstep=%s\tup=%s\n" "$(date +%s)" "$?" "$TICK" "$STEP" "$(cut -d. -f1 /proc/uptime)" >> /tmp/fast_watch.exit.tsv 2>/dev/null' EXIT TERM INT HUP
 BASE=1; DIRTY=1
 printf '%s\t%s\t%s\n' "$EP" "boot" "ver=$VER up=$UPS" >> "$LOGD/fast_watch.boot.tsv" 2>/dev/null
 run_loop

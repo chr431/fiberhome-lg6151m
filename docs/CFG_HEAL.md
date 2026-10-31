@@ -311,6 +311,13 @@ Lead 01:00 裁决: **gw/wan_agg.sh 归本任务**(原本无主), 授权加 --rea
 | D0 baseline(30min) #1 | 346 采样, drift_samples=0, 台账 0 新增, repairs 0 新增 | _local/evidence/cfg_heal/20261101-013506_drill.tsv |
 | D0 baseline(30min) #2 | 同上(346 采样, 0 漂移, 0 重建) —— **跑在 state-truth 的 R2.7 20 次注入窗口内** | _local/evidence/cfg_heal/20261101-023543_drill.tsv |
 
+> **一次被推翻的结论(留档, 不删)**: 我曾在报告里把 san_up() 定性为"冷启动杀手修复", 依据是
+> `gw/rc.extend.sh` 第 88 行注释 "v2.0(P2/L-7): ... /tmp is not tmpfs"。Lead 实测推翻:
+> `mount` = `tmpfs on /tmp type tmpfs`, `/tmp` 最老文件 = 本次 boot 时刻, `find` 零结果;
+> `AGENTS.md` 陷阱表也写的是 "/tmp 文件消失 | tmpfs 重启即清"。**结论: rc.extend.sh 第 88 行注释
+> 与实测不符(疑似早期配置遗留), 我引用它而未自己验证 —— 这是反猜测方法论的反面教材。**
+> san_up() 代码保留(无害且覆盖 uptime 回绕等情形), 但定性改为"防御性加固"。
+>
 > **D0 #2 的意义**: 第二段 30min baseline 与 state-truth 的 20 次故障注入(R2.7)重叠。
 > 也就是说: 设备在被人反复杀服务/断链路的时候, 本自愈器**一次误判都没有**
 > (346 采样 0 漂移、台账 0 新增)。这是"不误伤"最强的形态 —— 不是空闲时安静, 而是噪声中不误动。
@@ -349,5 +356,5 @@ passed / conn / ledger / note)。
 | 5 | 承载口在 --reapply 期间刚好漂移 -> 可能短暂双写 | 两者都持同一把 netcfg 锁, 串行 | 观测; 若出现则让 --reapply 复用主环循的 W1_IF 缓存 |
 | 6 | 后台 worker 是短命进程, 但若施加器卡死它最长占 8s(硬超时) | mto 兜底 + netlock 60s TTL | 有界; 不新增长驻进程 |
 | 7 | 演练窗口只有 15min(排队), 30min baseline 需跨窗 | 两段各 30min 均 PASS | baseline 只读, 可跨窗; 注入类必须持锁 |
-| 8 | **重启后 /tmp 残值致自愈器静默瘫掉**(tick 永久节流/冷却/预算耗尽) | **已修**(commit 9ed93d7): 所有读出的 uptime 过 san_up() 归一, 覆盖 4 处 + 4 条 selftest | 04:00 冷启动后必须复核 beat/cnt 在走 |
+| 8 | ~~重启后 /tmp 残值致自愈器静默瘫掉~~ —— **前提不成立, 已更正**: 实测 `mount` 显示 `tmpfs on /tmp`, `ls -lat /tmp` 最老文件 = 本次开机时刻, **/tmp 重启即清** | san_up() 归一**保留但降级为"防御性加固"**(理由: uptime 回绕 / 未来若改持久挂载 / 多实例怪值), 不是修 bug | 不再作为验收依据; 引用出处见下 |
 | 9 | 一次锁纪律违规: acquire 返回 BUSY 时 push 仍执行(在他人锁窗口内写了 15s 的一个文件) | 已向 Lead/state-truth 报告并认领 | 流程改正: acquire 与后续写操作串成一条命令并检查退出码 |

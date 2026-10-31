@@ -60,6 +60,7 @@ STATEF=$DIR/.inc_state
 CNTF=$DIR/.inc_counters
 STATUSF=$DIR/incident_ledger.status
 DRILLF=$DIR/drills.tsv
+BOOTATT=$IL_BOOTATT; [ -n "$BOOTATT" ] || BOOTATT=/data/gw/boot_attempts.tsv
 LOGF=/tmp/incident_ledger.log
 HB=/tmp/incident_ledger.hb
 DRYRUN=$IL_DRYRUN; [ -n "$DRYRUN" ] || DRYRUN=0
@@ -433,8 +434,10 @@ IL_PLANNED=""
 load_planned() {
     IL_PLANNED=$(tail -n 20 "$DIR/reboots.log" 2>/dev/null | while IFS= read -r L; do
         case "$L" in *REBOOT*) ;; *) continue ;; esac
-        _d=$(printf '%s' "$L" | cut -d' ' -f1)
-        _e=$(date -d "$_d 00:00:00" +%s 2>/dev/null)
+        # 行首是 "YYYY-MM-DD HH:MM:SS"（含时刻！只取日期会落到午夜，
+        # ±900s 匹配必然失败 -> 计划重启被误判成非计划重启）
+        _dt=$(printf '%s' "$L" | cut -c1-19)
+        _e=$(date -d "$_dt" +%s 2>/dev/null)
         case "$_e" in ''|*[!0-9]*) continue ;; esac
         echo "$_e"
     done | tr '\n' ' ')
@@ -451,8 +454,8 @@ h_reboot() {
     while IFS= read -r L; do
         case "$L" in *REBOOT*) ;; *) continue ;; esac
         mkref
-        _d=$(printf '%s' "$L" | cut -d' ' -f1)
-        _e=$(date -d "$_d 00:00:00" +%s 2>/dev/null)
+        _dt=$(printf '%s' "$L" | cut -c1-19)
+        _e=$(date -d "$_dt" +%s 2>/dev/null)
         case "$_e" in ''|*[!0-9]*) _e=$NOW ;; esac
         _up=$(printf '%s' "$L" | sed -n 's/.*uptime=\([0-9]*\)s.*/\1/p' | head -1)
         _up=$(num0 "$_up")
@@ -472,11 +475,11 @@ h_bootatt() {
         if planned_near "$_e"; then _why=planned; else _why=unplanned; fi
         if [ "$_res" != healthy ]; then
             emit boot_fail - - "$_ref" "result=$_res death_reason=$_why boot_id=$(san "$_bid") raw=$(san "$L")" "$_e"
+        elif [ "$_why" = unplanned ]; then
+            # 一次开机只落一行：非计划重启（boot 健康但 reboots.log 无匹配）= SEV2
+            emit reboot_unplanned - - "$_ref" "boot_ok result=$_res death_reason=unplanned (no reboots.log match +/-900s) boot_id=$(san "$_bid") epoch=$_e" "$_e"
         else
-            emit reboot_planned - - "$_ref" "boot_ok result=$_res death_reason=$_why boot_id=$(san "$_bid")" "$_e"
-            if [ "$_why" = unplanned ]; then
-                emit reboot_unplanned - - "$_ref" "no reboots.log match +/-900s boot_id=$(san "$_bid") epoch=$_e" "$_e"
-            fi
+            emit boot_ok - - "$_ref" "result=$_res death_reason=planned boot_id=$(san "$_bid")" "$_e"
         fi
     done
 }
@@ -1038,7 +1041,7 @@ if [ "$PRESYNC" = 1 ]; then
     ingest wdlog   "$DIR/tmp/watchdog.log"      "$DIR/tmp.prev/watchdog.log" h_wdlog
     ingest ne      "$DIR/ne_events.tsv"         -                            h_ne
     ingest reboot  "$DIR/reboots.log"           -                            h_reboot
-    ingest bootatt /data/gw/boot_attempts.tsv   -                            h_bootatt
+    ingest bootatt "$BOOTATT"                   -                            h_bootatt
     ingest netcfg  "$DIR/netcfg_repairs.tsv"    -                            h_netcfg
     ingest edges   "$DIR/avail_edges.tsv"       -                            h_edges
     ingest trans   "$DIR/avail_transitions.tsv" -                            h_trans
@@ -1062,7 +1065,7 @@ flush_pending
 ingest wdlog   "$DIR/tmp/watchdog.log"      "$DIR/tmp.prev/watchdog.log" h_wdlog
 ingest ne      "$DIR/ne_events.tsv"         -                            h_ne
 ingest reboot  "$DIR/reboots.log"           -                            h_reboot
-ingest bootatt /data/gw/boot_attempts.tsv   -                            h_bootatt
+ingest bootatt "$BOOTATT"                   -                            h_bootatt
 ingest netcfg  "$DIR/netcfg_repairs.tsv"    -                            h_netcfg
 ingest edges   "$DIR/avail_edges.tsv"       -                            h_edges
 ingest trans   "$DIR/avail_transitions.tsv" -                            h_trans

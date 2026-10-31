@@ -96,7 +96,12 @@ c_det()  { case "$1" in
 # 中间用 uptime 差值内插(NTP 跳变 10s 内自愈; 跨源对齐仍需共同锚点, 见 STATE_BUS.md)
 CS=0; EP=0; EP_CS=0; UPS=0
 now_cs() {
-    IFS=. read -r _fw_i _fw_f < /proc/uptime
+    # /proc/uptime 形如 18512.69 66330.05 —— 必须只取小数部分前两位;
+    # 直接 IFS=. read 会把第二字段读成 "69 66330"(含负载值), 厘秒算错(自查实弹抓获)。
+    IFS= read -r _fw_raw < /proc/uptime
+    _fw_i=${_fw_raw%%.*}
+    _fw_t=${_fw_raw#*.}
+    _fw_f=${_fw_t%%[!0-9]*}
     case "$_fw_f" in ??) ;; ?) _fw_f=${_fw_f}0 ;; *) _fw_f=00 ;; esac
     case "$_fw_i" in ''|*[!0-9]*) _fw_i=0 ;; esac
     CS=$(( _fw_i * 100 + _fw_f ))

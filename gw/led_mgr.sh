@@ -68,7 +68,10 @@ bus_fresh() {
     _ld_bcs=0
     IFS=' ' read -r _ld_bu _ld_bcs _ld_bep _ld_bv _ld_bt < "$BEAT" 2>/dev/null
     case "$_ld_bcs" in ''|*[!0-9]*) return 1 ;; esac
-    IFS=. read -r _ld_i _ld_f < /proc/uptime
+    IFS= read -r _ld_raw < /proc/uptime
+    _ld_i=${_ld_raw%%.*}
+    _ld_t=${_ld_raw#*.}
+    _ld_f=${_ld_t%%[!0-9]*}
     case "$_ld_f" in ??) ;; ?) _ld_f=${_ld_f}0 ;; *) _ld_f=00 ;; esac
     case "$_ld_i" in ''|*[!0-9]*) return 1 ;; esac
     _ld_now=$(( _ld_i * 100 + _ld_f ))
@@ -134,7 +137,10 @@ apply() {  # $1=wifi $2=cell $3=wan
 }
 # 发布时间(ms): 与 fast_watch 同源口径(uptime 厘秒 + epoch 秒)
 now_ms() {
-    IFS=. read -r _ld_i _ld_f < /proc/uptime
+    IFS= read -r _ld_raw < /proc/uptime
+    _ld_i=${_ld_raw%%.*}
+    _ld_t=${_ld_raw#*.}
+    _ld_f=${_ld_t%%[!0-9]*}
     case "$_ld_f" in ??) ;; ?) _ld_f=${_ld_f}0 ;; *) _ld_f=00 ;; esac
     case "$_ld_i" in ''|*[!0-9]*) _ld_i=0 ;; esac
     _ld_cs=$(( _ld_i * 100 + _ld_f ))

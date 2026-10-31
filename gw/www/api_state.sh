@@ -26,7 +26,10 @@ beat_read() {
     case "$BCS" in ''|*[!0-9]*) BCS=0 ;; esac
     case "$BV" in ''|*[!0-9]*) BV=0 ;; esac
     case "$BT" in ''|*[!0-9]*) BT=0 ;; esac
-    IFS=. read -r _i _f < /proc/uptime
+    IFS= read -r _raw < /proc/uptime
+    _i=${_raw%%.*}
+    _t=${_raw#*.}
+    _f=${_t%%[!0-9]*}
     case "$_f" in ??) ;; ?) _f=${_f}0 ;; *) _f=00 ;; esac
     case "$_i" in ''|*[!0-9]*) _i=0 ;; esac
     _nowcs=$(( _i * 100 + _f ))

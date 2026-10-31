@@ -1,6 +1,6 @@
 # 可靠性验收报告 (M4 自持性 + 汇总口径)
 
-> 生成时刻: 2026-11-01 04:09:02 (UTC+8)  生成器: `tools/acceptance/report.py`
+> 生成时刻: 2026-11-01 04:10:17 (UTC+8)  生成器: `tools/acceptance/report.py`
 > 合同: `docs/RELIABILITY_SPEC.md` v1.0  证据: 设备 `/data/gw/logs/*`(可复核) + 本机归档
 > 原则: 每个判定都指向一个设备侧文件与时间窗; 数据缺失记 **unknown**, 不记 0。
 

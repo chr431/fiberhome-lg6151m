@@ -1,0 +1,314 @@
+# 状态真值总线（STATE BUS）v1.0 · 2026-11-01
+
+> 本文是 M2「监测诚实性」的**实现契约**：状态怎么产生、怎么发布、谁读、读不到时显示什么。
+> 验收合同见 docs/RELIABILITY_SPEC.md §M2（R2.1–R2.7）；病理史见 docs/AVAILABILITY_DESIGN.md §8。
+> 一句话：**设备真实状态 → GUI/指示灯 的链路，检测 ≤1s、呈现 ≤1s，且永不显示假绿。**
+
+---
+
+## 0. 为什么重构（一句话病理）
+
+旧链路最坏滞后是分钟级：`watchdog 30s 周期判据 → /tmp/watchdog_state（迁移式快照）→
+avail_sampler 10min → avail_watch 2s 边缘 → GUI 3s/8s 轮询 → led_mgr 2s 但输入陈旧`。
+
+四次「账面全绿而实际已死」的共同根因两条（AVAILABILITY_DESIGN §8.1）：
+1. **存在性判据冒充结果判据**（进程在/端口在 ⇒ 显示绿）；
+2. **迁移式快照 + 稀疏采样**：采样间隔内死过又自愈，采样时快照已回绿 ⇒ 账面恒绿。
+
+结论：**<3s 的难点不在 GUI 轮询，而在检测本身**。所以先把检测压到 1s，再谈呈现。
+
+---
+
+## 1. 架构（单一状态源 + 单一高频循环）
+
+```
+                ┌──────────────────────────────────────────────┐
+                │ gw/fast_watch.sh  (1s 节拍, 全局唯一高频循环) │
+                │  · 廉价事实: 单次 awk 扫 4 个 /proc           │
+                │    (hostapd 活套接字/默认路由/监听位/accept队列)│
+                │    + 免 fork 的 sysfs flags 与 /tmp/*.hb 读取  │
+                │  · 网络探针(错峰): tcp80@1s dns@2s icmp@6s    │
+                │    http200@10s ssh_banner@300s                │
+                │  · 判据分级 L1/L2/L2+/L3 随状态一起发布        │
+                └───────────────┬──────────────────────────────┘
+                                │ 原子 rename 发布（唯一写入方）
+     ┌──────────────────────────┼─────────────────────────────────────┐
+     ▼                          ▼                                     ▼
+/data/gw/run/state.json   /data/gw/run/state.led           /tmp/fast_watch.beat
+（状态真值, 迁移时写）      （LED 投影, 同一次发布）          （每拍心跳, tmpfs）
+     │                          │                                     │
+     ▼                          ▼                                     ▼
+ /api/state（api_state.sh）  led_mgr.sh（只执行不判断）       新鲜度判据（GUI/LED）
+     │                          └─ 写 GPIO 后**读回校验** → /tmp/led_mgr.verify
+     ▼
+ gw/www/app.js（状态页真值条 + #/state 页, 1s 节拍）
+     └─ 渲染新版本后回传 /api/render?v=&a=  → lag_audit.tsv(gui 阶段)
+
+持久台账（全部 /data/gw/logs/）:
+  state_events.tsv   迁移流（每次迁移一行）
+  lag_audit.tsv      时延审计（detect/publish/gui/led 四阶段 + beat 心跳）
+  fast_facts.tsv     每拍每探针判定（M3 数据源, schema 见 §4）
+  avail_edges.tsv    边缘行（avail_sampler 窗口收割, 契约见 §5）
+```
+
+**铁律**：state.json 只有一个写入方（fast_watch）。GUI/LED/API/采样器**只读**，
+任何一方不得「再算一遍」（禁止第二套判据 —— 这正是历史上 GUI 与灯不一致的结构性来源）。
+
+---
+
+## 2. 文件格式契约
+
+### 2.1 /data/gw/run/state.json（状态真值；原子 rename；**迁移时**写 + 启动时写）
+
+```json
+{"schema":1,"ver":1793461960,"ms":1793461960123,"ts":1793461960,"tick":4512,
+ "overall":"ok","maint":0,"boot":0,"drill":0,
+ "led":{"wifi":1,"cell":1,"wan":1,"night":0},
+ "comps":[
+   {"id":"sys.gui","n":"网关 GUI","g":"系统","lv":"ok","crit":"L2+",
+    "since":1793461900,"det":"tcp80@1s+l80listen@1s+http200@10s",
+    "ev":"tcp80=1,l80=1,http200=1,http_age=3t,ms=2"}
+ ]}
+```
+
+- `ver`：版本号，**每次迁移 +1**；启动时用启动 epoch 起跳（跨重启全局单调，GUI 不会把
+  「重启后的小版本号」当旧数据）。GUI/LED 都以 `ver` 判断「要不要重画」。
+- `lv ∈ {ok, deg, down, unknown, off, maintenance}`；`crit ∈ {L1, L2, L2+, L3}`。
+- `since`：本级别起始 epoch（秒）。
+- `det`：该组件的**检测机制声明**（R2.2 要求「每个组件声明 detect 机制」）。
+- `ev`：本次判定的可复核证据（键=值，全部是数字/短串，不含引号与空格）。
+- `maint`：04:00 计划重启窗（03:57–04:10）为 1；`boot`：uptime<180s 或 boot.healthy 缺失；
+  `drill`：与 /data/gw/logs/drills.tsv 的演练窗口重叠（lead v1.2 契约）。
+  **这三个标志只影响验收统计口径，不改变实时显示的颜色**（演练期间该红还是红）。
+
+### 2.2 /data/gw/run/state.led（LED 投影；与 state.json 同一次发布）
+
+```
+ver=1793461960
+ms=1793461960123
+wifi=1     # WiFi 灯：任一频段「活控制套接字 + 链路 UP」
+cell=1     # 5G 灯：ccmni 有默认路由 + wan_alive 新鲜(≤30s) + cell=1
+wan=1      # WAN 灯：eth0 载波 + wan_alive 新鲜(≤30s) + home=1
+night=0
+overall=ok
+ts=1793461960
+```
+
+LED 语义保持原厂：绿=数据面在服务；**没有新鲜 L3 证据就不亮**（宁可灭灯，不谎报已连接）。
+
+### 2.3 /data/gw/logs/state_events.tsv（迁移流，append-only）
+
+```
+epoch <ISO 日期 时刻> ver comp from to crit flags evidence
+1793461960  2026-11-01 00:32:40  1793461960  sys.gui  ok  down  L2+  -  tcp80=0,l80=0,http200=1,http_age=3t,ms=400
+```
+`flags` 取 `-` / `boot` / `maint` / `drill`（可组合，逗号分隔）。
+
+### 2.4 /data/gw/logs/lag_audit.tsv（时延审计，append-only）
+
+```
+ts_ms  ver  comp  stage  t_ref_ms  t_ms  note
+```
+- `stage=detect`：`t_ref_ms` = **最后一次采样仍正常**的时刻（真实变化必然发生在此之后），
+  `t_ms` = **首次采到异常**的时刻 ⇒ `detect_lag = t_ms - t_ref_ms` 是检测时延的**上界**（≈1 拍）。
+- `stage=publish`：`t_ms` = state.json 发布时刻 ⇒ 发布时延。
+- `stage=gui`：`t_ms` = GUI 渲染时刻（= 发布时刻 + GUI 回传的**数据年龄**）。
+- `stage=led`：`t_ms` = LED 写完并读回校验通过的时刻。
+- `stage=beat`：每 30 拍一行审计心跳（**不带** lag_ms=，故不进 p50/p99）——
+  用于区分「没有迁移」与「审计管道坏了」。
+
+> **磁滞只延后「宣告」，不延后「检测」**：文件/监听类事实确定性，1 拍即认；网络探针 2 拍确认
+> （滤单包抖动）。两者在 lag_audit 里是两行，绝不混为一谈。
+
+**p50/p99 统计命令（PC 侧，任意时刻可复核）**：
+
+```bash
+cd lg6151m-public && MSYS_NO_PATHCONV=1 python tools/lgssh.py "awk -F'\t' \
+  '{n[\$4]++; a[\$4,n[\$4]]=\$6-\$5} END{for(s in n){c=n[s]; \
+  for(i=2;i<=c;i++){k=a[s,i];j=i-1;while(j>0&&a[s,j]>k){a[s,j+1]=a[s,j];j--}a[s,j+1]=k} \
+  printf \"%s n=%d p50=%dms p99=%dms max=%dms\n\", s, c, a[s,int((c+1)/2)], a[s,int(c*99/100)], a[s,c]}}' \
+  /data/gw/logs/lag_audit.tsv"
+```
+
+GUI 侧同口径：**状态总线页 → 呈现时延审计**（/api/lag）。
+
+---
+
+## 3. 判据分级制（R2.6 交付物）
+
+- **L1 存在性**：进程活/端口监听/IP 在/规则在 —— 只证明「配置意图仍在」。
+- **L2 服务级**：协议真实应答（HTTP 200 / DNS 应答 / 活控制套接字 + 链路）。
+- **L2+**：L2 之上再加一个深度/结果信号（如真实 GET、banner、beacon 事件）。
+- **L3 结果级**：端到端数据面（多目标探活结论 / GPIO 读回校验 / 会话态）。
+
+**规则：crit=L1 且 lv=ok 的组件，GUI 一律渲染为「仅存在性」（蓝灰），不显示为绿。**
+GUI 与 API 都按这条渲染/暴露，不依赖前端自觉（crit 随状态发布）。
+
+| 组件 | 判据 | 级别 | 检测机制 | 残余盲区 |
+|---|---|---|---|---|
+| sys.supervisor | watchdog.beat 龄 ≤90s | L2 | watchdog.beat@1s | — |
+| sys.observability | avail_sampler.hb 龄 ≤600s | L2 | 心跳@1s | 采样器自身崩需等下一窗 |
+| sys.boot | boot.healthy + bootgate 键 | L2 | 文件/键@5s | — |
+| sys.gui | :80 监听 + TCP accept + 真实 GET 200 | L2+ | tcp80@1s / http200@10s | 页面级功能错误需 api.log |
+| sys.ssh | :22 监听 + banner(协议应答) | L2 | 监听@1s / banner@300s | banner 过期(>900s) 判 unknown 而非绿 |
+| lan.bridge | br-lan UP + :53 监听 + DNS 真实应答 | L2 | 1s / 2s | 单客户端 DHCP 失败需客户端侧 |
+| lan.wifi2g / wifi5g | hostapd **活**控制套接字 + 链路 UP | L2+ | 1s | 信标物理停发需独立接收者（已知盲区） |
+| wan.ethernet | eth0 载波 + wan_agg 的 L3 结论（新鲜度门） | L3 | 1s | wan_alive 过期 ⇒ unknown |
+| wan.cellular | ccmni 默认路由 + wan_agg cell 结论 | L3 | 1s | 同上 |
+| feat.led | led_mgr 心跳 + **GPIO 读回校验** | L3 | 1s | 灯珠物理损坏不可判 |
+| feat.fan | fan_mgr 心跳 | **L1** | 1s | 无温度结果判据 ⇒ 显示「仅存在性」 |
+| feat.usb | usb_mgr 心跳 | **L1** | 1s | 同上 |
+| feat.ntp | /tmp/ntp_synced + ntp_keeper 心跳 | L2 | 1s | 未对时前判 unknown（时间不可信） |
+| sys.netlock | watchdog_state 的 netlock 键 | L2 | 5s | 锁泄漏由 watchdog 轮转兜底 |
+| sys.logging | log_keeper 心跳 | L2 | 1s | logc 帧前进需 metrics 交叉验证 |
+
+---
+
+## 4. fast_facts.tsv schema（**冻结**；M3 唯一数据源）
+
+```
+epoch_ms <TAB> probe_id <TAB> ok <TAB> latency_ms <TAB> extra
+```
+| 列 | 含义 |
+|---|---|
+| 1 | epoch_ms：13 位毫秒。设备无 RTC：/tmp/ntp_synced 缺失时行照写，但 extra 带 pre=1 |
+| 2 | probe_id：稳定可枚举，**永不复用**（见下表） |
+| 3 | ok：1=通过 0=失败 |
+| 4 | latency_ms：整数毫秒（10ms 分辨率，源 /proc/uptime 两位小数） |
+| 5 | extra：k=v 逗号分隔无空格；无则 - |
+
+**写盘策略（决定 M3 的时长精度，勿改）**
+1. ok 值**变化**即写一行；
+2. 每个探针另有 **60s 心跳行**（ok 不变也写）—— 证明「采样连续、无缺口」；
+3. **服务探针（gw.* / wan.*）失败期间每拍（1s）都写一行** —— 中断起止可到 1s 精度；
+4. 事实类（net.*）只在变化 + 心跳写（永久为 0 是正常态，不该刷屏）；
+5. 轮转：60000 行 → 保留尾部 30000 行（消费者须至少每 1min 消费一次）。
+
+| probe_id | 判据 | 节拍 | extra |
+|---|---|---|---|
+| gw.tcp80 | tcpok 192.168.9.1:80 400ms（裸连接，服务端零日志） | 1s | - |
+| gw.tcp22 | /proc/net/tcp :22 监听位 | 1s | bl=<accept 队列非零数> |
+| gw.dns | 192.168.9.1:53 真实应答（NXDOMAIN 也算应答） | 2s | - |
+| gw.http200 | 真实 GET http://192.168.9.1/ | 10s | - |
+| gw.ssh_l2 | SSH banner（协议级） | 300s | - |
+| wan.icmp | 上行下一跳 ICMP（**归因用，非组件判据**） | 6s | - |
+| wan.alive | wan_agg 结论新鲜度 | 1s | home=,cell=,age= |
+| net.eth0 / net.brlan / net.ra0 / net.rai0 | 载波/链路 UP | 1s | - |
+| net.hostapd2g / net.hostapd5g | hostapd 活控制套接字 | 1s | - |
+| net.ccmni | ccmni 有默认路由（≈ 有 IPv4 承载） | 1s | - |
+
+**诚实边界**：设备侧**无法**按 path=lan|wifi|rndis 分路探测 —— br-lan 成员实测为
+eth1 ra0 rai0 rndis0，三条接入路径在设备内部是**同一个桥**，对网关自身的探测没有路径差异。
+按路径的验收口径只能来自客户端侧（tools/svc_probe.py，spec R3.2 亦定客户端侧为验收口径）。
+
+---
+
+## 5. avail_edges.tsv 契约（生产方与消费方**共用一份实现**）
+
+> 这一节记录一次**真实事故**：字段位置假设被写死在两个文件里各一份，导致「防假绿」机制静默失效。
+
+**事故**（2026-11-01 实测）：avail_sampler 的窗口收割按 `ts=$1; id=$3; ev=$4` 解析，
+而生产方 avail_watch 的日志格式是 `epoch <YYYY-MM-DD> <HH:MM:SS> <id> <ev>` ⇒
+`$3` 是时刻、`$4` 是 id，映射恒 NOMATCH。实测 /data/gw/logs/avail_edges.tsv 全文 8 行，
+按该 awk 逐行回放：**6 行 NOMATCH**，仅 2 行（历史遗留 `x gui.serve` 格式）命中。
+即「秒级边缘 → 窗口降级」这条防假绿机制自日志格式改动起就**静默失效**，
+采样器看到的窗口里从来没有边缘降级记录。
+
+**根治**：gw/state_edge_lib.sh 是唯一事实源 —— 字段顺序、id 常量、id→组件映射、
+edge_parse_line()（解析）、edge_emit()（写入）都只写一份，生产方（fast_watch）与
+消费方（avail_sampler）共用；坏行计数落 logs/edge_parse_bad.log（契约漂移不再无声）。
+
+格式（TAB 分隔，append-only，4000 行轮转）：
+
+```
+$1 epoch(秒)   $2 ISO8601(**带 T、不含空格**)   $3 id   $4 edge_down|edge_up   $5 flags
+```
+> $2 不得含空格 —— 含空格会把字段位置整体右移一格，正是上面那次失效的直接原因。
+
+id 常量：gui.serve / ssh.banner / dns.pids / br.up / wpa.ra0 / wpa.rai0 / eth.carrier
+（→ 组件 sys.gui / sys.ssh / lan.bridge / lan.bridge / lan.wifi2g / lan.wifi5g / wan.ethernet）
+
+**往返自检**（lead v1.2 要求）：
+
+```bash
+cd lg6151m-public && MSYS_NO_PATHCONV=1 python tools/lgssh.py "sh /data/gw/fast_watch.sh --selftest"
+# 期望: SELFTEST OK: edge_roundtrip ids=7 parsed=14 facts_nf5=1
+```
+
+---
+
+## 6. GUI 呈现规则（R2.3 / R2.5）
+
+1. **状态类元素独立 1s 节拍**：sbTick() 只拉 /api/state（轻），与 status/cellular/v6
+   等重端点的 3s/8s 轮询解耦 —— 避免把 1s 节拍放大成 3 倍请求量。
+2. **数据年龄取设备侧口径**：/api/state 返回 age_ms（= 设备当前时刻 − 心跳时刻），
+   GUI 直接显示，**不用 PC 本地时钟做差**（设备无 RTC、PC 与设备可能差几分钟）。
+3. **陈旧 >3s 一律显示「陈旧/未知」**，标签转红；组件级别不因陈旧而变绿。
+4. **每次渲染新版本后回传** /api/render?v=<ver>&a=<age_ms>（只在版本变化时发），
+   设备据此把 t_publish + a 记为 t_render 落 lag_audit（gui 阶段）—— 这是「呈现滞后」的
+   唯一可复核证据。传**年龄**而不是客户端时刻，是刻意的跨源时钟免疫设计。
+5. 页面：状态页顶部「设备状态真值」条（总览 + 每组件 chip）；#/state 页给出完整判据表、
+   证据、新鲜度与 lag p50/p99。
+
+## 7. LED 规则（R2.4）
+
+1. led_mgr **只执行不判断**：读 state.led → 绝对电平写入 → **读回校验**；
+2. 校验不符 ⇒ READBACK-FAIL 记 led_mgr.log 并发布 /tmp/led_mgr.verify（ok=0），
+   状态总线据此把 feat.led 判为 deg；
+3. 状态总线陈旧（>3s）或缺失 ⇒ 全灭（状态未知，绝不显示可能已不成立的绿）；
+4. 每轮无条件重写「应为值」（外部写方抢写最多 1 拍即被纠正）；
+5. 每次版本切换落 lag_audit 的 led 阶段（写完 + 读回通过的时刻）。
+
+---
+
+## 8. 假状态演练（R2.7，判据改动必须附）
+
+**判据**：注入真实状态变更 → GUI 与 LED 在 3s 内变红 → 恢复 → 3s 内回绿，且全部落账。
+
+**建议注入集**（20 次：杀服务 12 / 断链路 4 / 改配置 4）：
+v3httpd(sys.gui) · dnsmasq(lan.bridge) · hostapd(lan.wifi2g/5g) · dropbear(sys.ssh) ·
+led_mgr(feat.led) · fan_mgr(feat.fan) · ntp_keeper(feat.ntp) · log_keeper(sys.logging) ·
+**fast_watch 自身**（必须：新守护不能成为新单点）· `ip link set eth0 down/up`(wan.ethernet) ·
+`ip link set ra0 down/up`(lan.wifi2g) · 改 settings.conf 的 LED_NIGHT（LED 夜间模式切换）。
+
+**断言方式**（可复核，不靠肉眼）：
+
+```bash
+# 1) 迁移是否落账（含检测时延）
+lgssh "tail -3 /data/gw/logs/state_events.tsv; tail -6 /data/gw/logs/lag_audit.tsv"
+# 2) GUI 侧是否真的渲染了（gui 阶段行 = 浏览器回传）
+lgssh "awk -F'\t' '\$4==\"gui\"' /data/gw/logs/lag_audit.tsv | tail -3"
+# 3) LED 是否真的写了并读回通过
+lgssh "cat /tmp/led_mgr.verify; grep -c READBACK-FAIL /tmp/led_mgr.log"
+```
+
+---
+
+## 9. 运维要点
+
+- **部署**：deploy.py push fast_watch.sh state_edge_lib.sh api_state.sh api.sh app.js index.html
+  style.css led_mgr.sh avail_sampler.sh svc_lib.sh → chmod 755 三个新脚本 → deploy.py doctor。
+- **监督**：SVC_TABLE 有一行 fast_watch（hb 上限 60s）；avail_watch 行已删除，
+  文件保留一个冷启动周期（.bak）后删除。**fast_watch 是 M3 记账的驱动点**：每 60 拍调用
+  `sh /data/gw/svc_outage.sh tick`（5s 超时 + `|| true`，失败不影响主循环）。
+  > 注：调用点用 `[ -r ... ]` 而不是 `[ -x ... ]` —— deploy.py push/put 不保证 exec 位
+  > （AGENTS 陷阱表「put 后脚本不可执行」），而 `sh script` 本就不需要 exec 位；
+  > 用 `-x` 会在文件落到 644 时**静默不跑**，正是本项目栽过的坑。
+- **重载**：改完脚本直接 `kill $(cat /tmp/fast_watch.lock)`，watchdog ≤60s 拉回。
+- **自检**：`sh /data/gw/fast_watch.sh --selftest`（边缘契约往返 + fast_facts 列数）；
+  `--dry N`（**零副作用**：不写任何文件，可安全在生产上跑）；`--once`（打印一次完整状态 JSON）。
+- **排障顺序**：/tmp/fast_watch.beat 是否新鲜 → /data/gw/run/state.json 是否在更新
+  → /tmp/fast_watch.out（启动输出）→ /data/gw/logs/fast_watch.boot.tsv（每次启动一行）
+  → /data/gw/logs/fast_watch.overrun.tsv（超拍记录，>0 说明单拍工作超 1s）。
+
+## 10. 已知盲区（诚实边界）
+
+1. **设备自观测**：设备死亡期间不存在「全绿」——beat 陈旧 ⇒ GUI 显示「陈旧/未知」，
+   不是绿；断电重启窗记 boot 标志。
+2. **信标物理停发**：hostapd 控制面正常而信标停发（mwctl no_bcn）无独立接收者不可判，
+   靠 wifi_guard 告警与 led_mgr 的 dmesg 权威事件兜底。
+3. **亚秒级瞬断**：1s 拍之间发生又自愈的事件，只能靠「检测时延上界=1 拍」的统计口径承认，
+   不能声称「零发生」。
+4. **sys.ssh 的 L2 证据每 300s 一次**：两次之间的服务级故障只有 L1（监听位）可见；
+   banner 证据过期（>900s）时判 unknown，绝不判绿。
+5. **feat.fan / feat.usb 只有 L1 心跳**：GUI 显式渲染为「仅存在性」。

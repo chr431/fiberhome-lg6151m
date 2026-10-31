@@ -100,6 +100,7 @@ MANIFEST = [
     ("gw/usb_mgr.sh", "/data/gw/usb_mgr.sh"),             # USB-C device-mode service mgr (rndis0->br-lan + switches)
     ("gw/avail_sampler.sh", "/data/gw/avail_sampler.sh"), # component availability sampler (log_keeper-driven; avail round)
     ("gw/avail_watch.sh", "/data/gw/avail_watch.sh"),   # heuristic edge watcher (2s loop; avail audit round)
+    ("gw/bin/tcpok", "/data/gw/bin/tcpok"),             # connect-only liveness probe (avail_watch gui.serve; log-free)
     ("gw/wifi_macplan.sh", "/data/gw/wifi_macplan.sh"),  # factory MAC plan (wifi_up BSSIDs + api uplink native-MAC restore; v1.29 split)
     ("gw/wifi_autoch.sh", "/data/gw/wifi_autoch.sh"),    # auto-channel scanner (wifi_up CH=0 path; v1.29 split)
     ("gw/wifi_up.sh", "/data/gw/wifi_up.sh"),      # AP bring-up (factory recipe)

@@ -11,12 +11,15 @@
 # 启发式取舍(性能优先):
 #   - 每轮仅 /proc//sys 小文件读 + 2 个 grep(CPU 可忽略; 2s 节拍折中"秒级
 #     可见性"与"零意义轮询");
-#   - 真实 HTTP GET 30s 一次(静态路径, 不触发 CGI fork), 顺带轮转 v3httpd.log;
+#   - gui.serve 用 tcpok 裸 TCP connect 探测(每轮 2s; v1.1 曾用 30s 一次的
+#     真实 GET —— 对 6s 级故障只有 20% 采样命中率, 实弹打空后改)。裸连接
+#     在 v3httpd 侧零日志(handle_conn 对无请求对端提前返回);"服务内容正确"
+#     的深度校验由 watchdog http200(30s, 已入窗口收割)承担, 分工不重叠;
 #   - SSH banner 600s 一次(dropbear 每次会记 authpriv 行, 高频=日志污染);
 #   - 边缘台账 4000 行上限轮转(采样器游标对收缩已有 head 近似分支)。
 #
 # 事实集 → 组件映射(采样器侧 EDGE_COMPS 同源):
-#   gui.serve   GET / = 200            → sys.gui
+#   gui.serve   :80 TCP 可连(2s)        → sys.gui    (深度=http200 归 watchdog)
 #   ssh.banner  :22 banner 可读         → sys.ssh    (关闭 2026-10-31 前的
 #                                                "仅监听不可验证"盲区)
 #   dns.pids    dnsmasq 进程在          → lan.bridge
@@ -54,7 +57,8 @@ edge() { # $1=id $2=event $3=detail
 }
 
 # ---- 事实读取(全部有界、只读) ----
-r_gui() { $BB wget -q -O /dev/null -T 3 http://127.0.0.1/ && echo 1 || echo 0; }
+TCP=/data/gw/bin/tcpok
+r_gui() { $TCP 127.0.0.1 80 1500 >/dev/null 2>&1 && echo 1 || echo 0; }
 r_ssh() { _b=$($BB timeout 3 $BB nc 127.0.0.1 22 </dev/null 2>/dev/null | head -c 4)
           case "$_b" in SSH-*) echo 1 ;; *) echo 0 ;; esac; }
 r_dns() { [ -n "$($BB pidof dnsmasq 2>/dev/null)" ] && echo 1 || echo 0; }
@@ -89,19 +93,18 @@ update() {
 
 BOOT_UNTIL=$(($(cut -d. -f1 /proc/uptime) + 120))
 i=0
-gui_v=1; ssh_v=1
+ssh_v=1
 while :; do
     i=$((i + 1))
     [ $((i % 15)) -eq 1 ] && svc_hb avail_watch
-    # 高成本事实降频(30s / 600s), 间拍沿用上次值
-    [ $((i % 15)) -eq 1 ] && gui_v=$(r_gui)
+    # 高成本事实降频(600s), 间拍沿用上次值; gui.serve 走 2s tcpok(见头注)
     [ $((i % 300)) -eq 1 ] && ssh_v=$(r_ssh)
     if [ "$(cut -d. -f1 /proc/uptime)" -lt "$BOOT_UNTIL" ]; then
         # boot 窗: 只建基线
-        st_gui=$gui_v st_ssh=$ssh_v st_dns=$(r_dns) st_wpa2=$(r_wpa2)
+        st_gui=$(r_gui) st_ssh=$ssh_v st_dns=$(r_dns) st_wpa2=$(r_wpa2)
         st_wpa5=$(r_wpa5) st_eth=$(r_eth) st_br=$(r_br)
     else
-        update gui "$gui_v"
+        update gui "$(r_gui)"
         update ssh  "$ssh_v"
         update dns  "$(r_dns)"
         update wpa2 "$(r_wpa2)"

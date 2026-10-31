@@ -133,13 +133,17 @@ case "$oEL" in ''|0) oEL=$EL ;; esac
 new_lines "$EDGES" "$oEL" "$EL" > "$WINT.el"
 : > "$WINT.edg"
 if [ -s "$WINT.el" ] && [ "$PRESYNC" != 1 ]; then
+    # v1.15(实弹): 映射改 if/else 链 —— busybox awk 对表达式内的反斜杠续行
+    #   报 Unexpected token(字符串内才允许), 三元链续行版整块静默失败。
     awk '
     {
-      ts=$1; id=$3; ev=$4
-      comp = id=="gui.serve"?"sys.gui": id=="ssh.banner"?"sys.ssh": \
-             (id=="dns.pids"||id=="br.up")?"lan.bridge": \
-             id=="wpa.ra0"?"lan.wifi2g": id=="wpa.rai0"?"lan.wifi5g": \
-             id=="eth.carrier"?"wan.ethernet":""
+      ts=$1; id=$3; ev=$4; comp=""
+      if (id=="gui.serve") comp="sys.gui"
+      else if (id=="ssh.banner") comp="sys.ssh"
+      else if (id=="dns.pids" || id=="br.up") comp="lan.bridge"
+      else if (id=="wpa.ra0") comp="lan.wifi2g"
+      else if (id=="wpa.rai0") comp="lan.wifi5g"
+      else if (id=="eth.carrier") comp="wan.ethernet"
       if (comp=="") next
       if (ev=="edge_down") { dn[comp]++; if (!open[comp]) open[comp]=ts }
       else if (ev=="edge_up" && open[comp]) {

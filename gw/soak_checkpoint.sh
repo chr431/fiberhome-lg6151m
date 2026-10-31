@@ -1,5 +1,5 @@
 #!/bin/sh
-# soak_checkpoint.sh v1.1 -- 30d soak 装置: 每日资源 checkpoint + 每次开机记账 + 漂移告警
+# soak_checkpoint.sh v1.2 -- 30d soak 装置: 每日资源 checkpoint + 每次开机记账 + 漂移告警
 # (RELIABILITY_SPEC M4 R4.2/R4.3; 验收口径见 docs/ACCEPTANCE.md)
 #
 # 为什么是"被 fork 驱动"而不是常驻守护:
@@ -29,10 +29,12 @@
 # v1.1 (2026-11-01 冷启动前修根): 数值列归一 —— busybox awk 偶发返回空串,
 #   zombies 列被写成空 -> 后续 [ "" -gt 20 ] 报 out of range 且台账出现空列。
 #   现在所有参与比较的量都过 num_or 兜底(实测证据: 00:35 那条 2026-11-01 行)。
+# v1.2 (2026-11-01 演练轮): 阈值改环境变量可覆盖 —— 判据类改动必须有假状态演练,
+#   没有覆盖入口就没法演练(制造故障->判据变红->恢复->回绿)。
 #
 # 退出码: 0=正常(含跳过), 非 0 只表示参数错误。运行期异常不得影响调用方。
 
-VER=1.1
+VER=1.2
 DIR=/data/gw/logs
 DAILY=$DIR/soak_daily.tsv
 BOOTS=$DIR/soak_boots.tsv
@@ -41,11 +43,14 @@ REBOOTS=$DIR/reboots.log
 PSTORE=$DIR/pstore
 LOCKDIR=/tmp/soak_checkpoint.lock
 # 漂移阈值(集中一处)
-TH_DATA_FREE_KB=102400
-TH_FD_PCT=90
-TH_ZOMBIES=20
-TH_UP_MIN=600
-TH_CRASH=1
+# v1.2: 阈值可用环境变量覆盖 —— 这是假状态演练(制造故障->判据必须变红)的唯一入口。
+#   例: TH_DATA_FREE_KB=99999999 sh soak_checkpoint.sh --once --force -> 必须 FAIL
+#   正常运行不设这些变量, 走下面缺省值。
+TH_DATA_FREE_KB=${TH_DATA_FREE_KB:-102400}
+TH_FD_PCT=${TH_FD_PCT:-90}
+TH_ZOMBIES=${TH_ZOMBIES:-20}
+TH_UP_MIN=${TH_UP_MIN:-600}
+TH_CRASH=${TH_CRASH:-1}
 
 DAILY_HDR='day	epoch	up_s	boot_id	boot_epoch	boots_24h	boots_sched_24h	boots_unplanned_24h	scheduled_missed	data_used_kb	data_free_kb	data_used_pct	tmp_free_kb	logs_kb	procs	zombies	fd_used	fd_max	mem_avail_kb	mem_total_kb	load1	ne_24h	ne_total	repairs_24h	svc_lt5_24h	svc_5_20_24h	svc_gt20_24h	incidents_24h	sev1_24h	sev2_24h	sev3_24h	verdict	notes'
 BOOTS_HDR='epoch	iso	boot_id	btime	up_at_record_s	prev_boot_id	cause	cause_evidence'

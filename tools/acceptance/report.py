@@ -60,10 +60,18 @@ def fetch(offline):
         _, out["census"] = d.run(BA.CENSUS_CMD, timeout=180)
     return out
 
-def tsv_rows(text):
+CANON = {'fault_inject': 'epoch\tiso\tid\tclass\ttarget\tpre_ok\trecovered\tdur_s\tmaxw_s\trebooted\tverdict\tevidence', 'drills': 'start_epoch\tend_epoch\tkind\ttarget\towner\tnote', 'soak_daily': 'day\tepoch\tup_s\tboot_id\tboot_epoch\tboots_24h\tboots_sched_24h\tboots_unplanned_24h\tscheduled_missed\tdata_used_kb\tdata_free_kb\tdata_used_pct\ttmp_free_kb\tlogs_kb\tprocs\tzombies\tfd_used\tfd_max\tmem_avail_kb\tmem_total_kb\tload1\tne_24h\tne_total\trepairs_24h\tsvc_lt5_24h\tsvc_5_20_24h\tsvc_gt20_24h\tincidents_24h\tsev1_24h\tsev2_24h\tsev3_24h\tverdict\tnotes', 'soak_boots': 'epoch\tiso\tboot_id\tbtime\tup_at_record_s\tprev_boot_id\tcause\tcause_evidence'}
+
+def tsv_rows(text, canon=None):
     lines = [l for l in text.splitlines() if l.strip()]
     if not lines:
         return []
+    # v1.0 注入器没把表头变量带进 runner, 落成了空行 -> 首行是数据行。
+    # 这里用规范表头兜底, 保证旧台账也能读(而不是整份读成 None)。
+    _f0 = lines[0].split(chr(9))[0]
+    if canon and (chr(9) not in lines[0] or _f0.isdigit()):
+        lines.insert(0, canon)
+    lines[0] = lines[0].replace(chr(92) + "t", chr(9))  # 兼容 v1.0 注入器写的字面 backslash-t 表头
     hdr = lines[0].split("\t")
     rows = []
     for l in lines[1:]:
@@ -92,10 +100,10 @@ def main():
 
     D = fetch(a.offline)
     now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
-    daily = tsv_rows(D.get("soak_daily", ""))
-    boots = tsv_rows(D.get("soak_boots", ""))
-    inj = tsv_rows(D.get("fault_inject", ""))
-    drills = tsv_rows(D.get("drills", ""))
+    daily = tsv_rows(D.get("soak_daily", ""), CANON["soak_daily"])
+    boots = tsv_rows(D.get("soak_boots", ""), CANON["soak_boots"])
+    inj = tsv_rows(D.get("fault_inject", ""), CANON["fault_inject"])
+    drills = tsv_rows(D.get("drills", ""), CANON["drills"])
     incidents = tsv_rows(D.get("incidents", ""))
     svc = tsv_rows(D.get("svc_daily", ""))
     ne = tsv_rows(D.get("ne", ""))
@@ -104,9 +112,13 @@ def main():
 
     n_inj = len(inj)
     vc = Counter(r.get("verdict", "?") for r in inj)
-    fails = [r for r in inj if r.get("verdict") == "FAIL"]
-    passes = [r for r in inj if str(r.get("verdict", "")).startswith("PASS")]
-    durs = sorted(int(r["dur_s"]) for r in inj if str(r.get("dur_s", "")).isdigit())
+    # 中止/跳过的条目既不算通过也不算失败: 它们没有产生有效的自愈观测。
+    # 把它们混进通过率会同时高估或低估 R4.4, 所以单列。
+    aborted = [r for r in inj if str(r.get("verdict", "")).startswith(("ABORTED", "SKIP"))]
+    valid = [r for r in inj if r not in aborted]
+    fails = [r for r in valid if r.get("verdict") == "FAIL"]
+    passes = [r for r in valid if str(r.get("verdict", "")).startswith("PASS")]
+    durs = sorted(int(r["dur_s"]) for r in passes if str(r.get("dur_s", "")).isdigit())
 
     def pct(p):
         if not durs:
@@ -142,9 +154,10 @@ def main():
       verdict(len(daily) > 0, unknown=(len(daily) == 0)))
     A("| R4.3 30d soak 装置 | %s | 装置在位并已产生 %d 条样本, 见 §4 |" %
       (verdict(len(daily) > 0, unknown=(len(daily) == 0)), len(daily)))
-    A("| R4.4 故障注入 >=30 | %s | %d/%d 条自愈(通过率 %.0f%%), 见 §6 |" %
-      (verdict(n_inj >= 30 and not fails, unknown=(n_inj == 0)), len(passes), n_inj,
-       100.0 * len(passes) / n_inj if n_inj else 0.0))
+    A("| R4.4 故障注入 >=30 | %s | 有效 %d 条: %d 条自愈(%.0f%%), %d 条失败, %d 条中止/跳过, 见 §6 |" %
+      (verdict(len(valid) >= 30 and not fails, unknown=(len(valid) == 0)), len(valid),
+       len(passes), 100.0 * len(passes) / len(valid) if valid else 0.0,
+       len(fails), len(aborted)))
     A("| R4.5 无人干预声明 | PASS | 人工动作清单已列全并逐条处置, 见 §7 |")
     A("")
     A("**本报告不宣称 30 天已跑完**: 30d 不可在一个会话内等待, 交付物是"
@@ -282,9 +295,10 @@ def main():
       c("/data/gw/logs/fault_inject.tsv"))
     A("")
     if inj:
-        A("- 注入总数: **%d** (要求 >=30)" % n_inj)
+        A("- 注入条目总数: **%d** (要求 >=30 条有效注入)" % n_inj)
+        A("- 有效 %d 条 / 中止或跳过 %d 条(不计入通过率)" % (len(valid), len(aborted)))
         A("- 判定分布: %s" % dict(vc))
-        A("- 通过率: %.0f%%" % (100.0 * len(passes) / n_inj))
+        A("- 通过率(仅有效): %.0f%%" % (100.0 * len(passes) / len(valid) if valid else 0.0))
         A("- 自愈耗时: min=%ss p50=%s p90=%s max=%ss" %
           (durs[0] if durs else "?", pct(0.5), pct(0.9), durs[-1] if durs else "?"))
         A("")

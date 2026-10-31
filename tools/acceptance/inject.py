@@ -25,9 +25,9 @@ sys.path.insert(0, HERE)
 from sshx import Dev  # noqa: E402
 
 LOG = "/data/gw/logs/fault_inject.tsv"
-HDR = "epoch\tiso\tid\tclass\ttarget\tpre_ok\trecovered\tdur_s\tmaxw_s\trebooted\tverdict\tevidence"
+HDR = "epoch	iso	id	class	target	pre_ok	recovered	dur_s	maxw_s	rebooted	verdict	evidence"
 # Lead 裁决 v1.2: drills.tsv 是唯一演练标记文件(跨流契约), 见文件头注
-DRILL_HDR = "start_epoch\tend_epoch\tkind\ttarget\towner\tnote"
+DRILL_HDR = "start_epoch	end_epoch	kind	target	owner	note"
 
 MARK = r"""
 KIND="$1"; TGT="$2"; NOTE="$3"; PHASE="$4"; S0="$5"
@@ -112,7 +112,9 @@ DAEMONS = [
     ("K08", "usb_mgr.sh",     "usb_mgr[.]sh",     "USB-C supervisor"),
     ("K09", "wan_eth.sh",     "wan_eth[.]sh",     "有线 WAN keeper"),
     ("K10", "dial_keeper.sh", "dial_keeper[.]sh", "5G 拨号 keeper"),
-    ("K11", "avail_watch.sh", "avail_watch[.]sh", "秒级边缘侦测器"),
+    # K11 avail_watch.sh 已删: state-truth 的 fast_watch 取代它(SVC_TABLE 换行),
+    # 杀一个"已被删掉的服务"只会得到 SKIP_NOPRE, 不构成覆盖证据。
+    # fast_watch 的注入改由 K21(batch C) 承担 —— 判据是"杀掉后 GUI 必须显陈旧/未知"。
     ("K12", "nerepair",       "/data/gw/bin/nerepair", "SIGSEGV 缓解 supervisor"),
     ("K15", "authd",          "/data/gw/authd",   "上行认证守护"),
     ("K16", "v3httpd",        "v3httpd",          "GUI httpd(:80)"),
@@ -286,6 +288,8 @@ def run_one(dev, c, dry=False):
         ("MAXW=%s" + NL) % q(str(c["maxw"])),
         ("RB=%s" + NL) % q(c["rollback"]),
         ("NOTE=%s" + NL) % q(c.get("note", "")),
+        ("HDR=%s" + NL) % q(HDR),
+        ("DRILL_HDR=%s" + NL) % q(DRILL_HDR),
     ])
     cmd = "sh -c " + q(RUNNER) + " _"
     if dry:

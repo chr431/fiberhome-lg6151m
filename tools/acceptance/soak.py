@@ -89,6 +89,7 @@ def load_tsv(path):
         lines = [l.rstrip("\n") for l in f if l.strip()]
     if not lines:
         return [], []
+    lines[0] = lines[0].replace(chr(92) + "t", chr(9))  # 兼容 v1.0 注入器写的字面 backslash-t 表头
     hdr = lines[0].split("\t")
     for l in lines[1:]:
         p = l.split("\t")

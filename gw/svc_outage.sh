@@ -77,9 +77,12 @@ classify() { # $1=probe $2=start $3=end
                       # end=0 = 注入进行中; 但忘记回填的行不能变成无限期排除(会藏掉真中断),
                       # 上界 DRILL_MAX_OPEN(默认 1800s), 超界按 start+上界关闭。
                       if (en==0) { en=now; if (en > st+maxopen) en=st+maxopen }
-                      if (a <= en+30 && b >= st-30) { print st"-"en"("$4")"; exit } }' "$DRILLS")
+                      if (a <= en+30 && b >= st-30) { print st"-"en"("$3":"$4")"; exit } }' "$DRILLS")
         if [ -n "$_c_d" ]; then
-            _c_attr=drill; _c_ex=1; _c_why=drill; _c_ev="drills:$_c_d"
+            # 排除理由如实区分：维护性重启(maintenance) vs 故障注入/演练(drill)
+            _c_why=drill
+            case "$_c_d" in *maintenance*) _c_why=maintenance ;; esac
+            _c_attr=$_c_why; _c_ex=1; _c_ev="drills:$_c_d"
         fi
     fi
     # ② boot 窗（本 boot 起始时刻 = now - uptime；窗 -300s..+300s）

@@ -56,7 +56,7 @@ try:
 except Exception:
     pass
 
-VERSION = "1.5"
+VERSION = "1.6"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_EVIDENCE = os.path.abspath(os.path.join(
     REPO, "..", "_local", "evidence", "svc_probe"))
@@ -782,8 +782,13 @@ def attribute(inc, ev):
         dend = d["end"] if d["end"] else min(now_ms() // 1000,
                                              d["start"] + DRILL_MAX_OPEN_S)
         if t0 <= dend + 30 and t1 >= d["start"] - 30:
-            return ("drill/%s" % (d["target"] or d["kind"]),
-                    "drills.tsv:%d-%d" % (d["start"], d["end"]), 1, "drill")
+            # 排除理由要如实反映"为什么不算"：维护性重启(Lead 裁决 v1.3)记
+            # maintenance，故障注入/演练记 drill。两者都不进验收三档，但审计时
+            # 必须能区分"我们自己重启设备"和"我们杀服务做演练"。
+            _k = (d.get("kind") or "").lower()
+            _why = "maintenance" if "maintenance" in _k else "drill"
+            return ("%s/%s" % (_why, d["target"] or d["kind"]),
+                    "drills.tsv:%d-%d" % (d["start"], d["end"]), 1, _why)
     # 1) planned reboot window (reboots.log entry -2min .. +4min)
     for rb in ev["reboots"]:
         if rb["ts"] - 120 <= t0 <= rb["ts"] + 240:

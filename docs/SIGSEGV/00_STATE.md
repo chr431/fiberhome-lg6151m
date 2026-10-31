@@ -137,6 +137,8 @@ B 臂 8 min 即 246 命中（P(0)=e^-246）→ **后续机制 A/B 只需 5–10 
 
 **证据**：`_local/evidence/crash-root/hwtx_*.jsonl`（主机侧）；设备 `/data/repro/h4_*.bin`（334→1243）；
 `docs/SIGSEGV/07_LEVER.md` §6；`tools/oneoff/sigsegv/hwtx_gate.sh`（门控脚本，status/off/on/verify）。
-**下一实验**：02:17–02:42 —— P1 WARP_DBG_INF + TX ring cell dump（形状比对）→ P2 rmmod/insmod 往返 → P3 rmmod 10min A/B。
+**下一实验（本轮未执行）**：原定 P1 WARP_DBG_INF 诊断 + rmmod mtk_wed/hw_nat A/B，因排程压缩（02:37→02:50→取消）**未执行**。
+所需条件：**P1 需 5 min**（仅改 log level）；**rmmod 需 20 min**（5 s 往返演练 + 8 min 观察 + 1.5 min 恢复 + hw_nat 臂），
+前提 = 独占 device_lock + WiFi 客户端在线（数据面守卫）+ 模块 .ko 在位（`/lib/modules/5.15.134/{mtk_wed,hw_nat}.ko` 已确认）。
 
 

@@ -110,7 +110,7 @@ head -2 /proc/warp_ctrl/warp1/ctrl
 - 回滚：`echo 0 1 > ctrl` 已执行并 `cat` 确认 **HW_TX_EN: TRUE**；4 个 canary 已 kill（count=0）；锁已 release。
 - `/data/gw/logs/drills.tsv` 已写 `kind=hw-drill, owner=crash-root, target=warp1`（epoch 1793463169–1793466829）。
 
-## 9. 下一步（按 Lead 批准的 02:17–02:42 槽位）
+## 9. 下一步（**本轮未执行**：排程压缩，02:37→02:50→取消；见 00_STATE §10）
 
 | 步骤 | 内容 | 判据 |
 |---|---|---|

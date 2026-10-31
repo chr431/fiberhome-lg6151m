@@ -435,3 +435,23 @@ avail_sampler 的边缘收割字段位置假设与生产方日志格式不匹配
 
 待办：用 v1.8 的 STEP 台账 + 下一步的 pid/ppid 列定位根因（怀疑 busybox ash 长驻循环在特定外部
 写入（sysfs GPIO 竞争写 / dmesg 并发）下的异常退出，需对照实验验证，不做猜测结论）。
+### 11.8 P0 排查记录（02:40–02:53，5 条假设证伪 + 1 条新线索）
+
+| # | 假设 | 判决 | 证据 |
+|---|---|---|---|
+| 1 | 被信号杀（TERM/INT/HUP） | **证伪** | v2.0 分信号 trap：三次退出全为 `EXIT rc=2`，零条 SIGTERM/INT/HUP |
+| 2 | ash 语法/展开错误 | **证伪** | /tmp/fast_watch.out（spawn 的 stdout+stderr）恒 0 字节 |
+| 3 | 子调用钩子（cfg_heal / svc_outage） | **证伪** | 两脚本临时改名做 3min A/B，期间仍退出 2 次（pid 31747→27649，台账 29→31） |
+| 4 | 会话/进程组被 dropbear 连带杀 | **证伪** | 实测 watchdog 原 pgrp=sid=9645（dropbear 会话）；`busybox setsid` 重启后三进程 sid=16063 独立会话，**仍继续退出** |
+| 5 | errexit / fd 泄漏 / svc_lock 竞争 | **证伪** | errexit=off；实例 fd 恒 5、ulimit 1024；退出时 tick=55/85/120>0（主实例） |
+
+**新线索（唯一未排除的实物证据）**：fast_watch 进程持有**继承来的陌生管道 fd**
+（`fd 37 -> pipe:[15633]`，另 0=/dev/null、1/2=out、10=脚本本体）。它不是 fast_watch 自己打开的 ——
+**watchdog 是被 SSH 命令（且带管道）手工重启的**，管道 fd 被 watchdog 继承并传给所有子守护。
+这类"继承自 SSH 会话的陈旧 fd"是长驻守护的典型隐患（写该 fd 触发 SIGPIPE；部分 ash 在 fd 异常时
+内建命令静默返回 2）。
+
+**可证伪预测（04:00 冷启动即判决）**：冷启动时 watchdog 由 rc19 在干净上下文启动，不再继承该管道。
+- 若重启后 /tmp/fast_watch.exit.tsv 不再增长且 /proc/pid/fd 无 pipe:[...] → 根因 = **手工重启
+  watchdog 的父环境**；修复 = 运维纪律（重启必须 setsid 且不留管道）+ spawn 关闭继承 fd。
+- 若仍增长 → 根因在 fast_watch 自身；下一步用 `sh -x` 环形日志 + 逐命令 rc 记账定位。

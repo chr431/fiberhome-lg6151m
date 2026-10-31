@@ -56,7 +56,7 @@ try:
 except Exception:
     pass
 
-VERSION = "1.0"
+VERSION = "1.1"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_EVIDENCE = os.path.abspath(os.path.join(
     REPO, "..", "_local", "evidence", "svc_probe"))
@@ -851,6 +851,13 @@ def build_report(evidence_dir, days=7, pull=False):
                    "excluded_incidents": [i for i in incidents
                                           if i["excl_reason"] == "drill"]},
         "incidents": incidents,
+        # R3.2 双端测量：设备侧台账必须也有数据。这里给出设备侧中断条数与
+        # 最近几条，供验收报告与客户端口径交叉核对（客户端仍是验收口径）。
+        "device_side": {"outages": len(ev["dev_outages"]),
+                        "recent": ev["dev_outages"][-5:],
+                        "note": ("device-side ledger present" if ev["dev_outages"]
+                                 else "device-side ledger empty/missing (fast_facts "
+                                      "not yet wired or no outage observed)")},
         "device_evidence": {"reboots": len(ev["reboots"]), "ne": len(ev["ne"]),
                             "edges": len(ev["edges"]),
                             "device_outages": len(ev["dev_outages"])},
@@ -866,6 +873,8 @@ def print_report(o):
         _p("  coverage[%s]: %.2f%% measured (%ds of %ds)"
            % (p, o["coverage"]["pct"][p], o["coverage"]["measured_s"][p],
               o["coverage"]["window_s"]))
+    ds = o["device_side"]
+    _p("device-side ledger: %d outage(s)  [%s]" % (ds["outages"], ds["note"]))
     _p("")
     _p("%-8s %6s %8s %8s %s" % ("tier", "count", "limit", "rate", "verdict"))
     for k in ("lt5", "5to20", "gt20"):
@@ -984,10 +993,13 @@ def main(argv=None):
                     inc = {"path": p, "start": m["start"], "end": m["end"],
                            "dur_s": m["dur_s"], "probes": m["probes"]}
                     a, ref, exc, why = attribute(inc, ev)
-                    f.write("%d\t%d\t%.3f\t%s\t%s\t%s\t%s\t%d\t%s\t%s\tclient\n" % (
+                    # flags: tcp22 是 60s 节拍，必须自曝其最小可判时长，
+                    # 否则会被误读成 1s 口径（见 SVC_MEASUREMENT.md 1.2）
+                    fl = "cadence=60" if "tcp22" in m["probes"] else ""
+                    f.write("%d\t%d\t%.3f\t%s\t%s\t%s\t%s\t%d\t%s\t%s\tclient\t%s\n" % (
                         m["start"] // 1000, int((m["end"] or now_ms()) // 1000),
                         m["dur_s"] or 0.0, p, ",".join(m["probes"]),
-                        severity_of(m["dur_s"]), a, exc, why, ref))
+                        severity_of(m["dur_s"]), a, exc, why, ref, fl))
                     n += 1
         if not ns.quiet:
             _p("derived %d episodes from %d samples -> %s" % (n, len(rows), out))

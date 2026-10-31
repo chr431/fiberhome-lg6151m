@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""deploy.py v2.37 -- single source of truth for PC<->CPE deployment + drift guard.
+"""deploy.py v2.38 -- single source of truth for PC<->CPE deployment + drift guard.
 
+v2.38 (M3 服务中断轮): MANIFEST +gw/svc_outage.sh(设备侧服务中断台账消费者: 读
+  fast_facts.tsv 1s 事实流 -> svc_outages.tsv/svc_daily.tsv; 不采样、非常驻)。
 v2.37 (M4 soak 轮): MANIFEST +gw/soak_checkpoint.sh(30d soak 每日 checkpoint; 由
   log_keeper 5min 块 fork 驱动, 非常驻守护)。
 v2.36 (判据审计轮): MANIFEST +gw/avail_watch.sh(秒级边缘侦测器)。
@@ -171,6 +173,7 @@ MANIFEST = [
     ("gw/watchdog.sh", "/data/gw/watchdog.sh"),  # L13: continuous invariant monitor
     ("gw/log_keeper.sh", "/data/gw/log_keeper.sh"),  # log persistence daemon (syslog/dmesg mirror + /tmp snapshots)
     ("gw/soak_checkpoint.sh", "/data/gw/soak_checkpoint.sh"),  # 30d soak 每日 checkpoint + 开机台账 (R4.2/R4.3; log_keeper fork-driven, 非常驻)
+    ("gw/svc_outage.sh", "/data/gw/svc_outage.sh"),  # 服务中断台账消费者 (M3/R3.3-R3.5; 读 fast_facts.tsv, 不采样非常驻)
     ("gw/core_trap.sh", "/data/gw/core_trap.sh"),  # daily user-space core capture window (P3)
     ("gw/diag_dump.sh", "/data/gw/diag_dump.sh"),  # one-shot redacted diagnostics bundle
     ("gw/zz_data_hook", "/data/build/rootfs/etc/init.d/zz_data_hook"),     # hook-slot watchdog (stethoscope)

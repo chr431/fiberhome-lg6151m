@@ -113,9 +113,13 @@ up_ms() {
     echo $((_c * 10))
 }
 
-# /tmp 跨重启可能留残值(rc.extend v3.5 实证: /tmp 非 tmpfs, ntp_synced/wan_alive 等会跨 boot
-#   残留)。本脚本把 uptime 存进 /tmp 做节流/预算/跨拍确认 —— 重启后这些值**大于**当前 uptime,
-#   若不清理会导致: tick 永久节流 / 同类永久冷却 / 预算永久耗尽 = 自愈器"开机即瘫"。
+# uptime 归一(防御性加固, 不是修 bug)。
+#   本脚本把 uptime 存进 /tmp 做节流/预算/跨拍确认。当前设备 /tmp 是 tmpfs(实测 mount:
+#   tmpfs on /tmp, 重启即清), 所以"跨 boot 残值"在本机**不会发生** —— 早前引用的
+#   "rc.extend v3.5: /tmp 非 tmpfs" 那句注释与实测不符, 已由 Lead 实测推翻, 见 docs/CFG_HEAL.md §9。
+#   保留归一仍有三条正当理由: ① uptime 计数器回绕; ② 若未来 /tmp 改成持久挂载或脚本被指向
+#   持久目录, 残值会让 tick 永久节流/同类永久冷却/预算永久耗尽(静默瘫掉); ③ 多实例/时钟跳变
+#   下读到的怪值。成本 = 一次比较, 收益 = 该类故障不可达。
 #   统一入口: 任何读出的 uptime 若 >= 当前值, 一律当 0(无效)。
 san_up() {
     case "$1" in ''|*[!0-9]*) echo 0; return ;; esac

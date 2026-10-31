@@ -313,13 +313,17 @@ def t_wifi_ap_service():
     lib = dev("grep -c '/proc/net/unix' /data/gw/svc_lib.sh 2>/dev/null").strip()
     pidof = dev("grep -c 'pidof hostapd' /data/gw/svc_lib.sh 2>/dev/null").strip()
     gui = dev("grep -c '/proc/net/unix' /data/gw/www/api_wifi.sh 2>/dev/null").strip()
-    led = dev("grep -c 'svc_bss_count' /data/gw/led_mgr.sh 2>/dev/null").strip()
+    # v2.72(M2 状态总线轮): WiFi 灯的活控制套接字判据随架构从 led_mgr 迁到 fast_watch
+    #   (led_mgr v4.1 只执行 state.led)。断言强度不变: 该判据必须仍在生产路径里(两处任一命中)。
+    led = dev("grep -c 'proc/net/unix' /data/gw/fast_watch.sh 2>/dev/null").strip()
+    led_old = dev("grep -c 'svc_bss_count' /data/gw/led_mgr.sh 2>/dev/null").strip()
     ok = (live == ["1", "1"] and ours.isdigit() and cli == ["1", "1"]
           and int(lib or 0) > 0 and pidof == "0"
-          and int(gui or 0) > 0 and int(led or 0) > 0)
+          and int(gui or 0) > 0
+          and (int(led or 0) > 0 or int(led_old or 0) > 0))
     record(t_wifi_ap_service._test_name, "wifi", ok,
-           "live=%s ours=%s cli=%s lib_unix=%s pidof=%s gui_unix=%s led_bss=%s"
-           % (live, ours or "-", cli, lib, pidof, gui, led))
+           "live=%s ours=%s cli=%s lib_unix=%s pidof=%s gui_unix=%s fw_sock=%s led_bss_old=%s"
+           % (live, ours or "-", cli, lib, pidof, gui, led, led_old))
 
 
 @test("访客 BSS 配置/隔离防火墙一致 (guest_fw)")
@@ -1734,7 +1738,10 @@ def t_wan_alive_guard():
     home = home or "?"
     expect = "1" if reach > 0 else "0"
     # v2.29 (api v2.75 拆分): api.sh 的 wan_alive 消费代码随 status 迁入 api_sys.sh
-    cons = [dev(f"grep -c 'wan_alive' /data/gw/{f} 2>/dev/null").strip() for f in ("led_mgr.sh", "www/api_sys.sh")]
+    # v2.72: wan_alive 的消费方随架构变更 —— led_mgr v4.1 不再直接读,
+    # 改为 fast_watch(状态总线)消费并发布到 state.led/state.json; 断言强度不变:
+    # 必须有且只有一个状态源消费方 + GUI API 消费方。
+    cons = [dev(f"grep -c 'wan_alive' /data/gw/{f} 2>/dev/null").strip() for f in ("fast_watch.sh", "www/api_sys.sh")]
     ok = (len(targets) >= 3 and not bad and fresh and home == expect
           and all(c not in ("", "0") for c in cons))
     record(t_wan_alive_guard._test_name, "system", ok,

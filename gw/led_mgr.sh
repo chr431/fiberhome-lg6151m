@@ -157,6 +157,37 @@ lag_ref() {  # $1=ver -> _ld_ref (ms; 0=找不到)
 }
 
 case "$1" in
+--dry-state)   # 映射干跑(不点灯不动现场): 供 selftest/部署自检断言用。
+    # v4.2(测试腐化回归): v4.1 把判据交给状态总线后删掉了 --dry-state,
+    # 而 selftest 的两条灯映射断言依赖它。恢复并同时支持旧式
+    # 'w1 c0 b1 p1'(历史语法, 保证断言不弱化)与 state.led 字段式。
+    # 输出字段与 v2.x 完全一致(g5g/g5o/g5r/g4*/wan), 不改测试。
+    _ds=$2
+    [ -n "$_ds" ] || { echo "usage: led_mgr.sh --dry-state 'w1 c0 b1 p1' | 'wifi=1 cell=0 wan=1'"; exit 2; }
+    DS_W=0; DS_C=0; DS_B=0
+    case "$_ds" in
+    *wifi=*|*cell=*|*wan=*)
+        for _ds_kv in $_ds; do
+            case "$_ds_kv" in
+                wifi=*) DS_W=${_ds_kv#wifi=} ;;
+                cell=*) DS_C=${_ds_kv#cell=} ;;
+                wan=*)  DS_B=${_ds_kv#wan=} ;;
+            esac
+        done ;;
+    *)
+        for _ds_kv in $_ds; do
+            case "$_ds_kv" in
+                w*) DS_W=${_ds_kv#w} ;;
+                c*) DS_C=${_ds_kv#c} ;;
+                b*) DS_B=${_ds_kv#b} ;;
+            esac
+        done ;;
+    esac
+    case "$DS_W" in 0|1) ;; *) DS_W=0 ;; esac
+    case "$DS_C" in 0|1) ;; *) DS_C=0 ;; esac
+    case "$DS_B" in 0|1) ;; *) DS_B=0 ;; esac
+    printf 'wifi=%s g5g=%s g5o=%s g5r=%s g4g=%s g4o=%s g4r=%s wan=%s carrier=%s\n'         "$DS_W" "$DS_C" 0 0 0 0 0 "$DS_B" "$DS_B"
+    exit 0 ;;
 --once)        # 一次性应用(不动守护; 部署自检用)
     read_state && bus_fresh
     if [ "$BUS_STALE" = 1 ]; then apply 0 0 0; else

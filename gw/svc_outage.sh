@@ -1,5 +1,5 @@
 #!/bin/sh
-# svc_outage.sh v1.0 -- 设备侧服务中断台账（M3/R3.2-R3.5 消费端，非采样端）
+# svc_outage.sh v1.1 -- 设备侧服务中断台账（M3/R3.2-R3.5 消费端，非采样端）
 #
 # 设计约束（Lead 裁决 v1.1）：**全设备只允许一个 1s 循环**（state-truth 的
 #   gw/fast_watch.sh）。本脚本不采样、不起循环，只消费：
@@ -91,7 +91,21 @@ classify() { # $1=probe $2=start $3=end
             fi
         fi
     fi
-    # ③ 归因：probe -> 组件映射 + 设备侧证据链（NE / 边缘）
+    # ③ 上游供应商断网排除（R3.4 第二条）：仅 dns 探针失败、且窗口内
+    #    fast_facts 的 wan.alive 显示 home=0 且 cell=0（两条上行全断）= 上游断网,
+    #    不是固件问题。注意 icmp→网关 天然免疫上游断网（网关就是设备本身）。
+    if [ "$_c_ex" = 0 ] && [ "$_c_p" = dns ] && [ -r "$FF" ]; then
+        _c_wan=$(awk -v a="$(( _c_a * 1000 ))" -v b="$(( _c_b * 1000 ))" '
+            $2 == "wan.alive" && $1+0 >= a-5000 && $1+0 <= b+5000 {
+                seen++
+                if (index($5,"home=1") > 0 || index($5,"cell=1") > 0) up=1
+            }
+            END { if (seen > 0 && up != 1) print "1"; else print "0" }' "$FF" 2>/dev/null)
+        if [ "$_c_wan" = 1 ]; then
+            _c_attr=upstream; _c_ex=1; _c_why=upstream; _c_ev="wan.alive down in window"
+        fi
+    fi
+    # ④ 归因：probe -> 组件映射 + 设备侧证据链（NE / 边缘）
     if [ "$_c_ex" = 0 ] && [ "$_c_attr" = unknown ]; then
         case "$_c_p" in
         tcp80) _c_attr="sys.gui/v3httpd"; _c_pat=v3httpd ;;

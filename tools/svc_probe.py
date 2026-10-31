@@ -56,7 +56,7 @@ try:
 except Exception:
     pass
 
-VERSION = "1.1"
+VERSION = "1.2"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_EVIDENCE = os.path.abspath(os.path.join(
     REPO, "..", "_local", "evidence", "svc_probe"))
@@ -652,7 +652,7 @@ def device_pull(evidence_dir, quiet=True):
 def load_device_evidence(evidence_dir):
     ddir = os.path.join(evidence_dir, "device")
     ev = {"reboots": [], "boots": [], "ne": [], "edges": [], "dev_outages": [],
-          "drills": []}
+          "drills": [], "wan_alive": []}
 
     def lines(name):
         p = os.path.join(ddir, name)
@@ -713,6 +713,13 @@ def load_device_evidence(evidence_dir):
                                  "target": p[3] if len(p) > 3 else "",
                                  "owner": p[4] if len(p) > 4 else "",
                                  "note": p[5] if len(p) > 5 else ""})
+    # fast_facts wan.alive rows (upstream state, for the R3.4 upstream exclusion):
+    # "epoch_ms<TAB>wan.alive<TAB>ok<TAB>lat<TAB>home=1,cell=0,age=3"
+    for l in lines("fast_facts_tail.tsv"):
+        p = l.split("\t")
+        if len(p) >= 5 and p[1] == "wan.alive" and p[0].isdigit():
+            ev["wan_alive"].append((int(p[0]),
+                                    ("home=1" in p[4]) or ("cell=1" in p[4])))
     # device-side outage ledger (present once fast_facts lands)
     for l in lines("svc_outages.tsv"):
         if l.startswith("#"):
@@ -761,6 +768,15 @@ def attribute(inc, ev):
     for bt in ev["boots"]:
         if bt["ts"] - 60 <= t0 <= bt["ts"] + 300:
             return "reboot(unplanned)", "boot_attempts:" + bt["line"][:40], 0, ""
+    # 2.5) upstream supplier outage (R3.4): only the resolver probe failed AND the
+    #      device reported both uplinks down in the same window. The gateway ICMP
+    #      probe is inherently immune (the gateway IS the device), so this rule can
+    #      only ever apply to forwarding-type probes such as dns.
+    if set(inc["probes"]) <= {"dns"} and ev.get("wan_alive"):
+        pts = [up for (t, up) in ev["wan_alive"]
+               if t0 * 1000 - 5000 <= t <= t1 * 1000 + 5000]
+        if pts and not any(pts):
+            return "upstream", "wan.alive:both-uplinks-down@window", 1, "upstream"
     # 3) device-side edges of the same component inside the window
     refs = []
     comps = []

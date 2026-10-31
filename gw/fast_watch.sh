@@ -288,13 +288,28 @@ scan_drill() {
     DRILL=0
     [ -r "$LOGD/drills.tsv" ] || return 0
     _fw_now=$(date +%s)
+    _dr_need=0
     while IFS="$TAB" read -r _fw_s _fw_e _fw_k _fw_t _fw_o _fw_n; do
         case "$_fw_s" in ''|*[!0-9]*) continue ;; esac
         case "$_fw_e" in ''|*[!0-9]*) _fw_e=0 ;; esac
+        # 自动闭合护栏(lead 2026-11-01): end=0 且超 1h 的窗口一律按 start+3600 关闭。
+        #   取 1h 而不是 30min: soak-qa 的批量注入窗口最长 35min, 30min 会误闭合法窗口(反而藏证据);
+        #   1h 仍远小于"永久", 足以保证"忘记回填"不会让状态总线永久带 drill 标志。
+        if [ "$_fw_e" -eq 0 ] && [ $(( _fw_now - _fw_s )) -gt 3600 ]; then
+            _dr_need=1
+            continue
+        fi
         if [ "$_fw_now" -ge "$_fw_s" ]; then
             if [ "$_fw_e" -eq 0 ] || [ "$_fw_now" -le "$_fw_e" ]; then DRILL=1; fi
         fi
     done < "$LOGD/drills.tsv"
+    if [ "$_dr_need" = 1 ] && [ "$DRY" != 1 ]; then
+        "$BB" awk -F"$TAB" -v n="$_fw_now" 'BEGIN{OFS="\t"} { if ($2==0 && $1+0>0 && n-$1>3600) $2=$1+3600; print }' \
+            "$LOGD/drills.tsv" > "$LOGD/drills.tsv.tmp" 2>/dev/null \
+            && mv -f "$LOGD/drills.tsv.tmp" "$LOGD/drills.tsv"
+        printf '%s\tautoclose\tend=0 older than 3600s -> start+3600\n' "$_fw_now" >> "$LOGD/drills_autoclose.log"
+        DRILL=0
+    fi
 }
 
 # ---- 状态机 -------------------------------------------------------------
@@ -400,11 +415,16 @@ compute_levels() {
     elif [ "$F_bootgate" = 0 ]; then _lg_c=ok
     else _lg_c=down; fi
     setlvl boot "$_lg_c" 1
-    # 网关 GUI(L2+): tcp80 每拍(接受连接) + http200 每 10 拍(真实应答)
-    if [ "$F_tcp80" = 0 ] || [ "$F_l80" = 0 ]; then _lg_c=down
-    elif [ "$AGE_http" -gt 300 ]; then _lg_c=deg
-    elif [ "$AGE_http" -le 30 ] && [ "$F_http" = 0 ]; then _lg_c=deg
-    else _lg_c=ok; fi
+    # 证据层级(2026-11-01 04:00 冷启动实弹): tcp80 探针瞬断而 l80/http200 都正常 -> 被误判 down(假红)。
+    #   原理: **HTTP 200 蕴含 TCP 接受连接** —— 一个完成的 HTTP 请求同时证明了"监听在"与"服务在服务"。
+    #   所以 http200 成功时, tcp80 失败只可能是探针自身问题(设备连自己 LAN IP 的瞬态), 不能反判 down;
+    #   反向(tcp80 通但 http200 不通)= 在接受但不应答 -> deg。tcp80 探针**保留**: 它是 1s 节拍的
+    #   快速失败信号, 只是没有能力覆盖更强的证据。
+    if [ "$F_l80" = 0 ]; then _lg_c=down
+    elif [ "$AGE_http" -gt 300 ]; then _lg_c=unknown
+    elif [ "$F_http" = 1 ]; then _lg_c=ok
+    elif [ "$F_tcp80" = 1 ]; then _lg_c=deg
+    else _lg_c=down; fi
     setlvl gui "$_lg_c" 1
     # SSH(L2): 监听位 1s + banner 300s; 无新鲜 L2 证据时判 unknown, 不显示绿(R2.6)
     if [ "$F_l22" = 0 ]; then _lg_c=down
@@ -605,6 +625,11 @@ flags_upd() {
         if [ -z "$FLAGS" ]; then FLAGS=drill; else FLAGS="$FLAGS,drill"; fi
     fi
     [ -z "$FLAGS" ] && FLAGS="-"
+    # 实弹(04:00 冷启动): state.json 只在迁移时发布, 而 maint/drill 是标志不是级别——
+    #   标志变化不触发发布, 于是 maint 过了 04:10 仍显示维护、drill 关闭后仍显示演练中(永久粘住)。
+    #   标志变化必须重新发布。
+    [ "$FLAGS" != "$_fw_prev_flags" ] && DIRTY=1
+    _fw_prev_flags=$FLAGS
 }
 rotate_all() {
     [ "$DRY" = 1 ] && return 0

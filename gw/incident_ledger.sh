@@ -546,8 +546,20 @@ h_svcout() {
 # 输入源 9: syslog.log（KE/panic/OOM 的持久面；4MB 轮转到 .1）
 # =====================================================================
 syslog_epoch() { # "Sat Oct 31 18:44:31 2026 user.err : ..." -> epoch
-    _d=$(printf '%s' "$1" | cut -c1-24)
-    _e=$(date -d "$_d" +%s 2>/dev/null) || return 1
+    # busybox date -d 不认 "EEE MMM DD HH:MM:SS YYYY"（设备实测 invalid date），
+    # 必须先把月名换成数字再交给 date -d。
+    _mon=$(printf '%s' "$1" | cut -c5-7)
+    _dd=$(printf '%s' "$1" | cut -c9-10)
+    _hms=$(printf '%s' "$1" | cut -c12-19)
+    _yr=$(printf '%s' "$1" | cut -c21-24)
+    case "$_mon" in
+    Jan) _m=01 ;; Feb) _m=02 ;; Mar) _m=03 ;; Apr) _m=04 ;;
+    May) _m=05 ;; Jun) _m=06 ;; Jul) _m=07 ;; Aug) _m=08 ;;
+    Sep) _m=09 ;; Oct) _m=10 ;; Nov) _m=11 ;; Dec) _m=12 ;;
+    *) return 1 ;;
+    esac
+    case "$_dd$_yr" in ''|*[!0-9]*) return 1 ;; esac
+    _e=$(date -d "$_yr-$_m-$_dd $_hms" +%s 2>/dev/null) || return 1
     case "$_e" in ''|*[!0-9]*) return 1 ;; esac
     echo "$_e"
 }

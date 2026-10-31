@@ -308,7 +308,12 @@ Lead 01:00 裁决: **gw/wan_agg.sh 归本任务**(原本无主), 授权加 --rea
 | D4 br-lan eth1(L01) | 注入 -> **16.0s** 重建 -> 客户端三探针恢复 | 台账 br/bridge/repair/ok/20; drills.tsv 已标窗口 |
 | D7 反例(负向) | /tmp/wan_mode 置陈旧 + 真删 MARK -> **20s 内不动手** | 台账只记 observe/suspect, 无 repair 行 |
 | D7 反例(正向) | 恢复来源后自动修复: **修 bug 前未通过**; 修后未单独重跑 | 同一机制已由 D1/D4 的 async 路径实测通过 |
-| D0 baseline(30min) | 346 采样, drift_samples=0, 台账 0 新增, repairs 0 新增 | _local/evidence/cfg_heal/20261101-013506_drill.tsv |
+| D0 baseline(30min) #1 | 346 采样, drift_samples=0, 台账 0 新增, repairs 0 新增 | _local/evidence/cfg_heal/20261101-013506_drill.tsv |
+| D0 baseline(30min) #2 | 同上(346 采样, 0 漂移, 0 重建) —— **跑在 state-truth 的 R2.7 20 次注入窗口内** | _local/evidence/cfg_heal/20261101-023543_drill.tsv |
+
+> **D0 #2 的意义**: 第二段 30min baseline 与 state-truth 的 20 次故障注入(R2.7)重叠。
+> 也就是说: 设备在被人反复杀服务/断链路的时候, 本自愈器**一次误判都没有**
+> (346 采样 0 漂移、台账 0 新增)。这是"不误伤"最强的形态 —— 不是空闲时安静, 而是噪声中不误动。
 
 > **第二个真 bug(重要)**: 跨拍 2-of-2 确认**永不成立** —— DET 首元素带前导空格, 而 pending 用
 > `read _pu _pd` 读回时 IFS 会折叠连续空白, 两者永不相等 -> 只反复记 SUSPECT 不修复。
@@ -343,4 +348,6 @@ passed / conn / ledger / note)。
 | 4 | vendor 引擎(内核模块分流)下 mangle 面不适用 | 已加引擎闸门, 不判 | 引擎切换时本器自动跟随 /tmp/wan_engine |
 | 5 | 承载口在 --reapply 期间刚好漂移 -> 可能短暂双写 | 两者都持同一把 netcfg 锁, 串行 | 观测; 若出现则让 --reapply 复用主环循的 W1_IF 缓存 |
 | 6 | 后台 worker 是短命进程, 但若施加器卡死它最长占 8s(硬超时) | mto 兜底 + netlock 60s TTL | 有界; 不新增长驻进程 |
-| 7 | 演练窗口只有 15min(排队), 30min baseline 需跨窗 | 见 §8 D0 | baseline 只读, 可在别人窗口内跑; 注入类必须持锁 |
+| 7 | 演练窗口只有 15min(排队), 30min baseline 需跨窗 | 两段各 30min 均 PASS | baseline 只读, 可跨窗; 注入类必须持锁 |
+| 8 | **重启后 /tmp 残值致自愈器静默瘫掉**(tick 永久节流/冷却/预算耗尽) | **已修**(commit 9ed93d7): 所有读出的 uptime 过 san_up() 归一, 覆盖 4 处 + 4 条 selftest | 04:00 冷启动后必须复核 beat/cnt 在走 |
+| 9 | 一次锁纪律违规: acquire 返回 BUSY 时 push 仍执行(在他人锁窗口内写了 15s 的一个文件) | 已向 Lead/state-truth 报告并认领 | 流程改正: acquire 与后续写操作串成一条命令并检查退出码 |

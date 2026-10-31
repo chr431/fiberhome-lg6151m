@@ -383,6 +383,11 @@ def do_negative(d, c, rows):
             break
     pos_ok = fixed is not None
     lat = round(fixed - t1, 1) if fixed else None
+    if not pos_ok:
+        print("   !! 恢复来源后仍未修好 -> 执行安全网 restore")
+        d.run(c["restore"])
+        time.sleep(2)
+        pos_ok = d.ok(raw) is True
     n1 = ledger_count(d)
     r1 = len(ledger_repairs(d))
     ok = neg_ok and pos_ok
@@ -439,6 +444,9 @@ def do_case(d, c, max_wait, rows):
             lost += 1
     lat = round((repaired - t0), 1) if repaired else None
 
+    # 桥口/链路恢复后客户端可能还要重新 ARP, 给 2s 收敛再探(避免把收敛期判成失败)
+    if repaired and c.get("conn_required"):
+        time.sleep(2.0)
     conn = client_probe()
     n1 = ledger_count(d)
     r1 = len(ledger_repairs(d))
@@ -485,6 +493,8 @@ def main():
     ap.add_argument("--secs", type=int, default=60)
     ap.add_argument("--max-wait", type=int, default=90)
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--no-lock", action="store_true",
+                    help="只读子命令(baseline)免锁: 不写设备, 可跨他人窗口长跑")
     a = ap.parse_args()
 
     if a.cmd == "plan":
@@ -507,7 +517,8 @@ def main():
             d.close()
         return 0
 
-    if not require_lock(force=a.force):
+    readonly = a.cmd == "baseline" and a.no_lock
+    if not readonly and not require_lock(force=a.force):
         return 2
 
     rows = []

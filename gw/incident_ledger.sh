@@ -654,7 +654,7 @@ build_epoch() {
     esac
     case "$_dd" in ''|*[!0-9]*) return 1 ;; esac
     _dl=$(printf '%s' "$_dd" | wc -c)
-    [ "$_dl" -eq 2 ] && _dd=0$_dd
+    [ "$_dl" -eq 1 ] && _dd=0$_dd   # 只有 1 位数才补零（2 位数补零会变成 015）
     case "$_hms" in ''|*[!0-9:]*) return 1 ;; esac
     _e=$(date -d "$_yr-$_m-$_dd $_hms" +%s 2>/dev/null) || return 1
     case "$_e" in ''|*[!0-9]*) return 1 ;; esac

@@ -148,8 +148,27 @@ B 臂 8 min 即 246 命中（P(0)=e^-246）→ **后续机制 A/B 只需 5–10 
 `{PA_lo, ctrl, PA_hi, 0}`（如 `00 a8 94 a4 | 48 40 4c 80 | 60 40 20 a4 | 00 00 00 00`），**不含 len/src_ip**
 → **32B 记录不是 WPDMA TX 环条目**。
 
-**下一实验（本轮未执行）**：rmmod mtk_wed（P1 已判"路径未激活"→按 Lead 指令跳过 hw_nat 臂）。
-所需条件：**20 min**（2 min 基线 + 5 s 往返演练 + 12 min 观察 + 2 min 恢复），
-前提 = 独占 device_lock + WiFi 客户端在线（数据面守卫，防"WiFi 死了所以没 TX"假阴性）+ `.ko` 在位（已确认）。
+**rmmod mtk_wed：已执行并导致内核 Oops + 自动重启** → 见 §11（C-155）；A/B 数据未取得，**未做 rmmod hw_nat**。
+
+## 11. rmmod mtk_wed 触发内核 Oops（2026-11-01 02:55:16，C-155）
+
+**事件**：02:55:16 `rmmod mtk_wed` → RC=0；同一秒 SSH 断开，ping 3/3 丢失，设备**自动重启**（02:56 恢复）。本轮唯一非计划重启。
+
+**pstore 证据**（`/sys/fs/pstore/console-ramoops-0`，262,132 B；副本 `_local/evidence/crash-root/pstore_oops_2026-11-01.txt`）：
+行 2082 `Unable to handle kernel paging request at virtual address ffffffc001535054`；行 2085 `EC = 0x21: IABT`；
+行 2088 `FSC = 0x07: level 3 translation fault`；行 2091 `Oops: 86000007 [#1]`；行 2100 `pc : 0xffffffc001535054`；
+行 2101 `lr : __handle_irq_event_percpu+0x58/0x120`。
+
+**判读**：rmmod 前 `/proc/modules` 记 `mtk_wed … Live 0xffffffc001535000` → 故障地址 = **mtk_wed 基址 + 0x54**，
+落在刚卸载的模块映像内；pte=0 表示已 unmap。**中断核心调用了指向已卸载模块的 handler** →
+**mtk_wed 退出路径不安全（IRQ action 未注销 / 硬件中断未静默），可复现 1/1**。
+
+**口径（必须分开写）**：这证明 **WED teardown 路径不安全 + WED 硬件在卸载后仍在产生中断**（H-STALE 同源，第一份直接实证）；
+**不证明** WED 是 32B 记录的写入者（写入者仍未点名）。
+
+**后果**：**rmmod 系杠杆全部不可用**（会打崩设备）；FIX.md R3「关 WED offload」不能靠运行期 rmmod 实现；
+不要再重复 rmmod mtk_wed（每次都是非计划重启，污染 M3/M1 数据）。若要测只能用"重启后不加载模块"。
+
+
 
 

@@ -125,6 +125,51 @@ head -2 /proc/warp_ctrl/warp1/ctrl
 （`WED_GLO_CFG=0x40000045`，bit0=TX DMA enable）。可用 `echo 0 1 0x208 0x40000044 > /proc/warp_ctrl/warp1/cr` 直接写。
 **代价**：停 WED TX DMA 很可能同时停掉 WiFi 数据面 → 与 rmmod 同样的假阴性风险。
 
+## 10. rmmod mtk_wed 触发内核 Oops（2026-11-01 02:55:16）——**可复现的 teardown UAF**
+
+### 10.1 触发与现象
+- 02:55:16 执行 `rmmod mtk_wed` → **RC=0**（卸载成功）。
+- 同一秒 SSH 被强制关闭（10054）；`ping 192.168.9.1` **3/3 丢失**、ARP 无条目、dropbear 不响应 banner。
+- 设备**自动重启**（02:56 恢复，uptime 归零）。本轮唯一一次非计划重启。
+
+### 10.2 pstore 原始证据
+`/sys/fs/pstore/console-ramoops-0`（262,132 B，mtime 02:55）；主机副本 `_local/evidence/crash-root/pstore_oops_2026-11-01.txt`
+
+| 行号 | 原文（节选） |
+|---|---|
+| 2082 | `Unable to handle kernel paging request at virtual address ffffffc001535054` |
+| 2085 | `EC = 0x21: IABT (current EL), IL = 32 bits` |
+| 2088 | `FSC = 0x07: level 3 translation fault` |
+| 2090 | `[ffffffc001535054] … pte=0000000000000000` |
+| 2091 | `Internal error: Oops: 86000007 [#1] SMP` |
+| 2093 | `[<18446743798853881940>] invalid pc` |
+| 2100 | `pc : 0xffffffc001535054` |
+| 2101 | `lr : __handle_irq_event_percpu+0x58/0x120` |
+| 2115–2127 | `Call trace: dump_backtrace … die_kernel_fault → __do_kernel_fault …` |
+
+### 10.3 判读（地址算术是硬证据）
+- rmmod **前**（02:53 `/proc/modules`）：`mtk_wed 20480 0 - Live 0xffffffc001535000`。
+- 故障地址 `0xffffffc001535054` = **mtk_wed 基址 + 0x54** → 落在**刚卸载的模块映像内**。
+- `EC=0x21 IABT` + `FSC=0x07 level 3 translation fault` + `pte=0` → 模块页**已取消映射**（确已卸载）。
+- `lr = __handle_irq_event_percpu+0x58` → **中断核心正在调用指向已卸载模块的 handler 指针**。
+
+**结论 A（E3 级，新）**：**mtk_wed 退出路径不安全** —— 卸载后 IRQ action 未注销 / 硬件中断未静默，
+下一次 WED 中断跳进已 unmap 的模块地址 → Oops → panic → 自动重启。**可复现性 1/1**。
+
+**结论 B（必须与 A 分开写）**：这证明"WED 硬件在驱动 teardown 后仍在运行/产生中断"，
+与 00_STATE §8 的 H-STALE「释放环后硬件仍在写」**同源**，是其**第一份直接实证**；
+但**不证明** WED 是 32B 记录的写入者 —— 写入者仍未点名。
+
+### 10.4 对可部署性的影响
+- **rmmod 系杠杆全部不可用**：卸 mtk_wed 直接把设备打崩，不是"代价 X%"而是"直接不可用"。
+  FIX.md 的 R3「关 WED offload」**不能**用运行期 rmmod 实现。
+- **不要重复 rmmod mtk_wed**：每次都是非计划重启，污染 M3 可用性计数与 M1 台账。
+- 若要测，唯一安全形态是**整机重启后不加载 mtk_wed**（改 `/etc/modules.d`，重启生效），不是运行期 rmmod。
+
+### 10.5 本次未取得的 A/B 数据
+基线仅 1 分钟（h4 1248→1252，4 次命中）即进入往返演练，随后崩溃。
+**未做 rmmod hw_nat**（P1 判 tuple 路径未激活 → 按 Lead 指令跳过）。
+
 
 ## 7. 证据文件
 

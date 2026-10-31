@@ -63,13 +63,29 @@ port_listen() { # $1=port
 }
 # Lock-first liveness: the pid lock is authoritative (exact pid + cmdline
 # verification); pgrep -f is only the legacy fallback.
+# v1.9 (M3 P1 假绿修复, soak-qa 实弹): 原回退分支 pgrep -f "/data/gw/$3" 是
+#   **全命令行子串**匹配 —— 任何 cmdline 里提到该路径的进程都能冒充守护本体。
+#   实弹 2026-11-01 00:05: 注入 harness 的 argv 里带了 rollback 配方(含
+#   "/data/gw/ntp_keeper.sh"), 真 ntp_keeper 被杀后 pgrep 命中的是 harness 自己,
+#   watchdog 连续两轮 TICK 报 ntp_keeper=0(健康), 而实际已死 153s。
+#   同一缺陷对任何手工排障 shell 成立: ssh 上去跑 sh -c 'tail -f /data/gw/led_mgr.sh'
+#   就能让 watchdog 对该服务永久失明。
+#   现语义: 两条分支都要求 **argv token 精确匹配**(不是子串) ——
+#     锁分支: /proc/<pid>/cmdline 按 NUL 切分后某一行 == "/data/gw/<token>";
+#     回退分支: 锚定正则, 只认 "[(env VAR=.. )*][/path/]sh|ash|busybox <path>" 或
+#               "<path>" 作 argv[0]; sh -c 包装/grep|awk 参数/tail -f 提及一律不算。
+#   负样本回归: docs/SVC_MEASUREMENT.md §10.3(设备侧脚本实测)。
 alive() { # $1=pgrep pattern  $2=lock name  $3=cmdline token
     [ -n "$3" ] || return 1
     _ap=$(cat /tmp/$2.lock 2>/dev/null)
-    [ -n "$_ap" ] && kill -0 "$_ap" 2>/dev/null && \
-        ! grep -q '^State:.*Z' /proc/$_ap/status 2>/dev/null && \
-        [ -n "$3" ] && grep -qa "/data/gw/$3" /proc/$_ap/cmdline 2>/dev/null && return 0
-    pgrep -f "/data/gw/$3" >/dev/null 2>&1 && return 0
+    if [ -n "$_ap" ] && kill -0 "$_ap" 2>/dev/null \
+       && ! grep -q '^State:.*Z' /proc/$_ap/status 2>/dev/null \
+       && tr '\0' '\n' < /proc/$_ap/cmdline 2>/dev/null | grep -qx -- "/data/gw/$3"; then
+        return 0
+    fi
+    # 回退: argv 锚定(禁止全命令行子串冒充); env 前缀配方也要认(spawn 的 env 分支)
+    pgrep -f "^(env( +[^ ]+)* +)?(/[^ ]*/)?(sh|ash|busybox) /data/gw/$3( |\$)" >/dev/null 2>&1 && return 0
+    pgrep -f "^/data/gw/$3( |\$)" >/dev/null 2>&1 && return 0
     return 1
 }
 # 2-of-3 sample confirmation: 3-character history ("1"=failure, "0"=pass).

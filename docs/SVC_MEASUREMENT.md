@@ -208,3 +208,63 @@ sh /data/gw/svc_outage.sh status    # 自检：源/游标/行数/最近一条
    `run.tsv` 并在报告 `coverage` 里体现，**不得**当作"零中断"。
 5. **`http200` 深度探针不在本指标内**：GUI 能连但返回 500 属于"降级"，由 watchdog 的
    30s `http200` 与 M2 状态总线负责；本指标只判"客户端能不能用上"。
+
+---
+
+## 10. 已修复根因（R3.6）
+
+### 10.1 「重启预算耗尽 → 放弃重启」把秒级崩溃放大成分钟级中断
+
+**症状**：服务被 NE（SIGSEGV）或人为 kill 打死一次，正常应 ≤2 个 watchdog 周期恢复；
+实际观察到大段"服务已死但账面上没有事件"的窗口。
+
+**证据**（设备 `/tmp/watchdog.log`，2026-10-31 当 boot，共 717 行）：
+
+| 时刻 | 行内容 |
+|---|---|
+| 22:28:27 / 22:29:46 / 22:31:06 | `EVT restart authd` ×3（2m39s 内用光 3 次/1h 预算） |
+| 22:32:26 → 22:46:18 | `WARN authd restart budget exhausted (3/h) — alert only` ×11（每 80s 一行） |
+| 23:17:31 | `EVT restart authd (recipe=[/data/gw/authd eth0])` ← 直到预算窗滚过才恢复 |
+| 23:11:43 / 23:13:02 | 同型再犯一次（~6 分钟后 23:17:31 恢复） |
+
+即：**authd 实际中断 ≈14 分钟**，而根因只是三次瞬时崩溃。同一 boot 内
+`budget exhausted` 共 16 行。
+
+**机制**：`gw/svc_lib.sh` 的 `rl_ok()` 原实现 = 3 次/滚动 1h，用光后 `return 1`，
+watchdog 的 `svc_supervise` 走 "alert only" 分支 —— **永久放弃，直到窗口滚过**。
+`v3httpd` / `dnsmasq` / `hostapd` 走同一条代码路径，一旦命中就是
+>20s 的 SEV1 客户端中断（直接违反 §1.4 的 gt20 档）。
+
+**修复**（svc_lib v1.8，只改 `rl_ok()`，不动 SVC_TABLE）：
+预算耗尽后**降级为慢重试**（`RL_SLOW` 默认 60s/次），
+
+- 恢复上界有界（回到 R4.1 要求的 ≤60s 量级），不再是"等窗口滚过"；
+- 仍防重启风暴：1 次/分钟 ≪ watchdog 30s 节拍；
+- **永不静默停止**：连续慢重试 ≥10 次落一行 `WARN … slow-retry x10` 告警但继续重试
+  （静默停止 = 账面上"无事件"的又一种假绿）；
+- `.rec` 升级为 4 字段（n / 窗口起点 / 上次尝试 / 慢重试计数），**旧 2 字段文件自动兼容**。
+
+**单测**（14 条，离线可跑，无需设备）：
+
+```sh
+cd lg6151m-public
+log() { echo "[log] $*"; }; . ./gw/svc_lib.sh
+rm -f /tmp/watchdog_svc_t.rec
+RL_NOW=1000 rl_ok t; RL_NOW=1000 rl_ok t; RL_NOW=1000 rl_ok t   # 3 次快重启
+RL_NOW=1000 rl_ok t; echo "4th=$?"        # 期望 1（限流）
+RL_NOW=1060 rl_ok t; echo "slow1=$?"      # 期望 0（慢重试）
+RL_NOW=1090 rl_ok t; echo "too_soon=$?"   # 期望 1
+```
+
+完整 14 条覆盖：快预算、慢重试限流、永不静默停止（第 11 次仍返回 0）、
+小时窗滚动恢复、旧 2 字段 `.rec` 兼容、`rl_refund` 与新格式共存。
+
+### 10.2 演练记录
+
+> 演练契约：Lead 裁决 v1.2 —— 演练必须在 `/data/gw/logs/drills.tsv` 留痕，
+> 脚本 `_local/evidence/svc_probe/drill_rlok.sh`（两臂同一脚本、同一判定口径）。
+> 方法：把 `/tmp/watchdog_svc_v3httpd.rec` 预置成"预算已耗尽"态（等价于 3 次快速
+> 重启用光，但只需 1 次 kill，人为中断更少），然后 `kill -9 v3httpd`，每 10s 轮询恢复。
+
+（结果在演练执行后回填本节。）
+

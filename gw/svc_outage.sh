@@ -177,20 +177,29 @@ consume_ff() { # $1=tick|derive
     if [ "$_mode" = tick ] && [ -r "$CUR" ]; then _cur=$(num0 "$(cat "$CUR" 2>/dev/null)"); fi
     _total=$(num0 "$(wc -l < "$FF" 2>/dev/null)")
     [ "$_total" -gt 0 ] || return 0
+    # 源文件按日轮转(fast_facts.<YYYYMMDD>.tsv): 新文件行数可能小于旧游标 ——
+    # 此时必须把游标归零, 否则会永久卡住(游标 > 行数 -> 每拍直接 return)。
+    [ "$_cur" -gt "$_total" ] && _cur=0
     [ "$_cur" -ge "$_total" ] && return 0
     : > "$RUN/svc_ep.tmp"
     : > "$RUN/svc_st.tmp"
     awk -v cur="$_cur" -v statef="$STATE" -v epf="$RUN/svc_ep.tmp" -v stf="$RUN/svc_st.tmp" '
       BEGIN {
+        wm = 0
         while ((getline ln < statef) > 0) {
           n = split(ln, a, "|")
-          if (n >= 4) { fails[a[1]] = a[2]+0; start[a[1]] = a[3]+0; last[a[1]] = a[4]+0 }
+          if (n >= 4) {
+            fails[a[1]] = a[2]+0; start[a[1]] = a[3]+0; last[a[1]] = a[4]+0
+            if (last[a[1]] > wm) wm = last[a[1]]
+          }
         }
         close(statef)
       }
-      NR <= cur { next }
+      # 轮转后游标归零会重扫旧行 —— 用时间水位线(已处理过的最大 ts)挡住重复计入
+      { ts = $1+0 }
+      ts <= wm || NR <= cur { next }
       {
-        ts = $1+0; p = $2; ok = $3+0
+        p = $2; ok = $3+0
         q = ""
         if (p == "gw.tcp80") q = "tcp80"
         else if (p == "gw.tcp22") q = "tcp22"
@@ -227,6 +236,8 @@ consume_edges() { # $1=tick|derive
     if [ "$_mode" = tick ] && [ -r "$CUR" ]; then _cur=$(num0 "$(cat "$CUR" 2>/dev/null)"); fi
     _total=$(num0 "$(wc -l < "$EDGES" 2>/dev/null)")
     [ "$_total" -gt 0 ] || return 0
+    # avail_edges 4000 行轮转收缩(tail 2000) 时游标会大于行数 -> 归零重扫
+    [ "$_cur" -gt "$_total" ] && _cur=0
     [ "$_cur" -ge "$_total" ] && return 0
     _epf=$RUN/svc_ep.tmp
     _stf=$RUN/svc_edst

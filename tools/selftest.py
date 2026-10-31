@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# v2.71(2026-11-01 M2 状态总线轮): t_avail 护栏换目标 avail_watch->fast_watch(进程/hb≤60s/fast_facts 5 列/edges≤4000 行) + 新增 state.json crit 字段与 lag_audit 60s 内新行两条 M2 自证断言
 """selftest.py -- assertion-based functional test suite for the LG6151M gateway.
 v2.70 (2026-10-31 判据审计轮): t_avail +avail_watch 护栏(进程/hb≤120s/
   边缘台账在位且≤4000 行)。
@@ -2327,24 +2328,34 @@ def t_avail():
     tf = dev("test -f /data/gw/logs/avail_transitions.tsv; echo $?").strip()
     syn = dev("sh -n /data/gw/avail_sampler.sh 2>&1 && sh -n /data/gw/www/api_avail.sh 2>&1; echo $?").strip()
     rte = dev("grep -c '^    avail)' /data/gw/www/api.sh 2>/dev/null").strip()
-    # v2.70(判据审计轮): 秒级边缘侦测器在位(进程+心跳+台账+轮转上限)
-    aw = dev("pgrep -f 'avail_watch[.]sh' >/dev/null && echo 1 || echo 0; "
-             "test -f /data/gw/logs/avail_edges.tsv && echo 1 || echo 0; "
-             "wc -l < /data/gw/logs/avail_edges.tsv 2>/dev/null || echo 0").split()
-    aw_hb = dev("up=$(cut -d. -f1 /proc/uptime); hb=$(cat /tmp/avail_watch.hb 2>/dev/null); "
+    # v2.71(M2 状态真值总线轮): 秒级高频循环由 avail_watch(2s) 换成 fast_watch(1s)。
+    #   同一护栏语义(进程在 / 心跳新鲜 / 台账轮转上限)换目标, 断言强度不降; 另补两条 M2 自证:
+    #   ① state.json 组件带 crit 字段(判据分级制在跑, R2.6);
+    #   ② lag_audit.tsv 60s 内有新行(时延审计真的在记账, R2.5; fast_watch 每 30 拍写
+    #   stage=beat 心跳, 不带 lag_ms= 故不进 p50/p99 统计)。
+    fw = dev("pgrep -f 'fast_watch[.]sh' >/dev/null && echo 1 || echo 0; "
+             "test -f /data/gw/logs/fast_facts.tsv && echo 1 || echo 0; "
+             "awk -F'\t' 'NF!=5{b++} END{print b+0}' /data/gw/logs/fast_facts.tsv 2>/dev/null || echo 0").split()
+    fw_hb = dev("up=$(cut -d. -f1 /proc/uptime); hb=$(cat /tmp/fast_watch.hb 2>/dev/null); "
                 "[ -n \"$hb\" ] && echo $((up - hb)) || echo -1").strip()
+    fw_edges = dev("wc -l < /data/gw/logs/avail_edges.tsv 2>/dev/null || echo 0").strip()
+    st_crit = dev("tr ',' '\n' < /data/gw/run/state.json 2>/dev/null | grep -c crit || echo 0").strip()
+    lag_new = dev("n=$(date +%s); awk -F'\t' -v n=$n '$1 ~ /^[0-9]+$/ && n*1000 - $1 <= 60000 {c++} END{print c+0}' /data/gw/logs/lag_audit.tsv 2>/dev/null || echo 0").strip()
     ok = (gap.lstrip("-").isdigit() and 0 <= int(gap) <= 1500
           and roster.isdigit() and int(roster) >= 24
           and len(keys) == 8 and all(x == "1" for x in keys)
           and hf == "0" and tf == "0" and syn == "0" and rte == "1"
-          and len(aw) == 3 and aw[0] == "1" and aw[1] == "1"
-          and aw[2].isdigit() and int(aw[2]) <= 4000
-          and aw_hb.lstrip("-").isdigit() and 0 <= int(aw_hb) <= 120)
+          and len(fw) == 3 and fw[0] == "1" and fw[1] == "1"
+          and fw[2].isdigit() and int(fw[2]) == 0
+          and fw_hb.lstrip("-").isdigit() and 0 <= int(fw_hb) <= 60
+          and fw_edges.isdigit() and int(fw_edges) <= 4000
+          and st_crit.isdigit() and int(st_crit) >= 10
+          and lag_new.isdigit() and int(lag_new) >= 1)
     record(t_avail._test_name, "system", ok,
-           "hb_gap=%s roster=%s keys=%s hf=%s tf=%s syntax=%s route=%s watch=%s/%s edges=%s whb=%s"
+           "hb_gap=%s roster=%s keys=%s hf=%s tf=%s syntax=%s route=%s fw=%s/%s nf5bad=%s fwhb=%s edges=%s crit=%s lag60=%s"
            % (gap, roster, "".join(keys), hf, tf, syn, rte,
-              aw[0] if aw else "?", aw[1] if len(aw) > 1 else "?",
-              aw[2] if len(aw) > 2 else "?", aw_hb))
+              fw[0] if fw else "?", fw[1] if len(fw) > 1 else "?",
+              fw[2] if len(fw) > 2 else "?", fw_hb, fw_edges, st_crit, lag_new))
 
 @test("avail: NE 假归因演练 (v1.5: 死者≠活实例不得置 deg)")
 def t_avail_ne_drill():

@@ -1,5 +1,7 @@
 #!/bin/sh
-# fast_watch.sh v1.0 -- 1s 状态真值总线 (M2 传感器 / M3 数据源 / GUI+LED 状态源)
+# fast_watch.sh v1.1 -- 1s 状态真值总线 (M2 传感器 / M3 数据源 / GUI+LED 状态源)
+# v1.1: ① 每 60 拍限时驱动 M3 消费者 svc_outage.sh tick(单次带 tail 增量游标, 幂等; 没这个调用点设备侧 svc_outages.tsv 永不产生);
+#   ② 每 30 拍往 lag_audit.tsv 写一行 stage=beat 心跳(不带 lag_ms= 故不进 p50/p99) —— 审计管道自证在记账, 否则「没有迁移」与「审计坏了」无法区分
 #
 # 为什么存在(RELIABILITY_SPEC R2.1-R2.7, AVAILABILITY_DESIGN §8.1 病理):
 #   旧链路最坏滞后是分钟级: watchdog 30s 周期判据 -> /tmp/watchdog_state(迁移式快照)
@@ -636,6 +638,15 @@ run_loop() {
         emit_facts
         emit_edges
         emit_beat
+        # M3 消费者 tick(幂等, 测试钩子: 文件不存在则不调)
+        if [ $(( TICK % 60 )) -eq 0 ] && [ -r "$D/svc_outage.sh" ]; then
+            "$BB" timeout -s KILL 5 sh "$D/svc_outage.sh" tick >/dev/null 2>&1 || true
+        fi
+        # 审计心跳: 证明 lag_audit 在写(不带 lag_ms=, 不污染 p50/p99)
+        if [ $(( TICK % 30 )) -eq 0 ]; then
+            ep_ms "$CS"
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$_fw_ms" "$VER" "-" beat "$_fw_ms" "$_fw_ms" "beat" >> "$LAG"
+        fi
         if [ $(( TICK % 15 )) -eq 0 ]; then svc_hb fast_watch; fi
         if [ $(( TICK % 300 )) -eq 0 ]; then rotate_all; fi
         now_cs

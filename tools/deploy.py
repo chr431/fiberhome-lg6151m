@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""deploy.py v2.35 -- single source of truth for PC<->CPE deployment + drift guard.
+"""deploy.py v2.37 -- single source of truth for PC<->CPE deployment + drift guard.
 
+v2.37 (M4 soak 轮): MANIFEST +gw/soak_checkpoint.sh(30d soak 每日 checkpoint; 由
+  log_keeper 5min 块 fork 驱动, 非常驻守护)。
 v2.36 (判据审计轮): MANIFEST +gw/avail_watch.sh(秒级边缘侦测器)。
 v2.35 (vaguard 退役轮): +ssh_write_file 分块写(900KB/块, 首块 cat> 后续 cat>>),
      push/put 两通道同换 —— busybox 级 1.6MB 大件免疫 dropbear >1.2MB 单次
@@ -168,6 +170,7 @@ MANIFEST = [
     ("gw/defaults.conf", "/data/gw/defaults.conf"),
     ("gw/watchdog.sh", "/data/gw/watchdog.sh"),  # L13: continuous invariant monitor
     ("gw/log_keeper.sh", "/data/gw/log_keeper.sh"),  # log persistence daemon (syslog/dmesg mirror + /tmp snapshots)
+    ("gw/soak_checkpoint.sh", "/data/gw/soak_checkpoint.sh"),  # 30d soak 每日 checkpoint + 开机台账 (R4.2/R4.3; log_keeper fork-driven, 非常驻)
     ("gw/core_trap.sh", "/data/gw/core_trap.sh"),  # daily user-space core capture window (P3)
     ("gw/diag_dump.sh", "/data/gw/diag_dump.sh"),  # one-shot redacted diagnostics bundle
     ("gw/zz_data_hook", "/data/build/rootfs/etc/init.d/zz_data_hook"),     # hook-slot watchdog (stethoscope)

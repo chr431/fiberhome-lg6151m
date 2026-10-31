@@ -767,6 +767,9 @@ fi
 touch "$EVT" "$LAG" "$FACTS" "$EDGES" 2>/dev/null
 # VER 用启动 epoch 起跳: 跨重启全局单调, GUI 不会把"重启后的小版本号"当成旧数据
 now_cs; now_ep; VER=$EP
+# v1.7(实弹取证): 记下每一次退出的原因 —— 实测 01:00:50 左右有一次无记录退出(无 NE 无 dmesg),
+# 而 SIGKILL 拿不到 trap —— 因此有这行台账就能区分「被 SIGKILL」与「自己退出」，不再靠猜。
+trap 'printf "%s\texit=%s\ttick=%s\tup=%s\n" "$(date +%s)" "$?" "$TICK" "$(cut -d. -f1 /proc/uptime)" >> /tmp/fast_watch.exit.tsv 2>/dev/null' EXIT TERM INT HUP
 BASE=1; DIRTY=1
 printf '%s\t%s\t%s\n' "$EP" "boot" "ver=$VER up=$UPS" >> "$LOGD/fast_watch.boot.tsv" 2>/dev/null
 run_loop

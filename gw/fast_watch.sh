@@ -579,6 +579,10 @@ emit_edges() {
 emit_beat() { [ "$DRY" = 1 ] && return 0; printf '%s %s %s %s %s\n' "$UPS" "$CS" "$EP" "$VER" "$TICK" > "$BEAT"; }
 # ---- 标志位(boot/maint/drill) ------------------------------------------
 flags_upd() {
+    # v1.6(实弹): F_healthy 在这里重算—— 原来 flags_upd 跑在 compute_levels 之前,
+    # 首拍读到的是初值 0, 于是首个 state.json 永远带 boot=1; 而 publish 只在迁移时写,
+    # 稳定设备上 GUI 会一直显示「启动中」—— 这是一种假状态(实测 00:55 首包 boot=1 而 设备已跑 6h)。
+    F_healthy=0; [ -f "$D/boot.healthy" ] && F_healthy=1
     BOOTFLAG=0
     if [ "$UPS" -lt 180 ] || [ "$F_healthy" = 0 ]; then BOOTFLAG=1; fi
     if [ $(( TICK % 30 )) -eq 1 ]; then

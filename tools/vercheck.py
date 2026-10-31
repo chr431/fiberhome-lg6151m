@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """vercheck.py -- 版本注册表机制（唯一事实源 tools/VERSIONS.tsv）。
+v1.7 (vaguard 退役轮): +注记-版本一致性护栏(注记最高 vX.Y 不得高于版本列) —
+  实弹 a0e0192 的 bump 只改注记忘写版本列, 该漂移此后只能靠人眼。
 v1.6 (质量轮, 审计): device() 二进制行补字节级比对(BYTES-DIFFER, 原读出
   dmd5 从不使用, 版本号未 bump 的内容漂移全漏检); git ls-files 失败不再被吞
   (第 7 链在无 git 元数据环境拒绝给全绿假信号)。
@@ -121,6 +123,15 @@ def check(fail=True):
     for name, ver, kind, target, note in reg:
         if not os.path.isfile(os.path.join(REPO, name)):
             errs.append("文件不存在: %s" % name)
+        # v1.7(注记-版本一致性): 注记里出现的最高 vX.Y 不得高于版本列 —— 实弹:
+        #   a0e0192 的 bump 脚本只改了注记忘了写版本列(注记说 v2.34、版本列停
+        #   2.33), 该形态此后只能靠人眼发现。低于版本列的历史 vX.Y 合法(惯例是
+        #   注记保留历代小注), 只拦"注记超前"这一确定错误。
+        _vs = [tuple(int(x) for x in m.split(".")) for m in
+               re.findall(r"v(\d+\.\d+)", note or "")]
+        if _vs and max(_vs) > tuple(int(x) for x in ver.split(".")):
+            errs.append("注记版本超前于登记列: %s 登记=%s 注记最高=v%s"
+                        % (name, ver, ".".join(map(str, max(_vs)))))
         if kind == "src":
             prod = target
             prow = by_name.get(prod)

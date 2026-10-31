@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
-"""deploy.py v2.33 -- single source of truth for PC<->CPE deployment + drift guard.
+"""deploy.py v2.35 -- single source of truth for PC<->CPE deployment + drift guard.
 
+v2.35 (vaguard 退役轮): +ssh_write_file 分块写(900KB/块, 首块 cat> 后续 cat>>),
+     push/put 两通道同换 —— busybox 级 1.6MB 大件免疫 dropbear >1.2MB 单次
+     stdin 写入杀会话陷阱(AGENTS 陷阱表, 1.03MB 实测可过)。
+v2.34 (时间源统一轮): EXTRA_KEEP +logs(doctor 对 rc.extend 引用 /data/gw/logs
+     目录的误报)。[台账追平: 当时 bump 脚本漏写版本列, 注记先行版本列停在
+     2.33 —— vercheck v1.7 的注记-版本一致性护栏即为此类而设]
 v2.33 (质量轮, 审计 P0/P1): (1) push() REFUSED/MD5-MISMATCH 计入退出码 —— 原实现
      部分失败甚至全部拒送仍 exit 0, CI 把失败部署判成功(正是本工具要消灭的
      "fix experiments silently never run" 形态); (2) post-deploy selftest 超时

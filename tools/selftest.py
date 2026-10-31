@@ -2322,6 +2322,26 @@ def t_fixstack():
 
 
 
+@test("算术无前导零八进制陷阱 (P0 复现, 2026-11-01)")
+def t_arith_octal():
+    # 实弹: busybox ash 把前导 0 的数字当八进制。uptime 小数前两位为 08/09 时
+    #   $(( i*100 + f )) 报 "arithmetic syntax error" 并让整个脚本退出(状态 2)。
+    #   每 100 秒命中 2 次 => ~50s 必死一次, 表现为"守护周期性静默退出"(M2 P0)。
+    # 断言: ① 反例(不加 10#)必须报错 —— 证明陷阱真实存在, 防止将来被"优化"回去;
+    #       ② 正例(10#)必须算对; ③ 三个生产文件的相关计算都必须带 10#。
+    neg = dev("sh -c 'f=08; v=$(( 7*100 + f )); echo ok' 2>&1").strip()
+    pos1 = dev("sh -c 'f=08; echo $(( 7*100 + 10#$f ))' 2>&1").strip()
+    pos2 = dev("sh -c 'f=09; echo $(( 7*100 + 10#$f ))' 2>&1").strip()
+    pos3 = dev("sh -c 'f=; echo $(( 7*100 + 10#${f:-0} ))' 2>&1").strip()
+    src = [dev("grep -c '10#' /data/gw/%s 2>/dev/null" % f).strip()
+           for f in ("fast_watch.sh", "led_mgr.sh", "www/api_state.sh")]
+    neg_bad = ("arithmetic" in neg) or ("syntax" in neg)
+    ok = (neg_bad and pos1 == "708" and pos2 == "709" and pos3 == "700"
+          and all(c.isdigit() and int(c) >= 1 for c in src))
+    record(t_arith_octal._test_name, "system", ok,
+           "neg=%s pos=%s/%s/%s files10#=%s" % (neg.replace("\n", " ")[:40], pos1, pos2, pos3, src))
+
+
 @test("avail: 可用性采样器/数据文件/API 域在位 (P1)")
 def t_avail():
     # AVAILABILITY_DESIGN P1: sampler 由 log_keeper v2.9 10min 驱动(CYC=1 首采),

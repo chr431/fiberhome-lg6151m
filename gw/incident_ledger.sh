@@ -504,10 +504,13 @@ h_bootatt() {
 h_netcfg() {
     while IFS= read -r L; do
         [ -n "$L" ] || continue
-        _e=$(printf '%s' "$L" | cut -f1)
+        # 实测格式是**空格分隔**: "<epoch> <reason 可含空格> rc=N verified=X [pre=1]"
+        # （用 cut -f1 按 TAB 取会拿到整行 -> 非数字 -> 整源静默丢光，2026-11-01 实弹）
+        _norm=$(printf '%s' "$L" | tr -s ' 	' ' ')
+        _e=$(printf '%s' "$_norm" | cut -d' ' -f1)
         case "$_e" in ''|*[!0-9]*) continue ;; esac
         mkref
-        _why=$(printf '%s' "$L" | cut -f2)
+        _why=$(printf '%s' "$_norm" | cut -d' ' -f2-)
         _pre=""
         case "$L" in *pre=1*) _pre=1 ;; esac
         cnt_add repairs_seen 1

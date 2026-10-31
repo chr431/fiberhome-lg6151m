@@ -77,7 +77,9 @@ def scan_tree(hits):
                     continue
                 scan_text(os.path.relpath(p, REPO).replace("\\", "/"),
                           open(p, encoding="utf-8", errors="replace").read(), hits)
-            except OSError:
+            except (OSError, ValueError):
+                # v2.4: Windows 保留设备名(nul/con 等, shell 重定向残渣)会让
+                # relpath/open 抛 ValueError(不同 mount)——跳过, 门禁不得崩
                 continue
 
 

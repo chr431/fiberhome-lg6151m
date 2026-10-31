@@ -621,9 +621,11 @@ sample_all() {
     if [ $(( TICK % 30 )) -eq 1 ]; then scan_night; fi
     if [ $(( TICK % 600 )) -eq 1 ]; then nexthop; fi
     probe_tcp80
-    if [ $(( TICK % 2 )) -eq 0 ]; then probe_dns; fi
-    if [ $(( TICK % 6 )) -eq 0 ]; then probe_icmp; fi
-    if [ $(( TICK % 10 )) -eq 0 ]; then probe_http; fi
+    # 首拍(TICK=1)就把所有探针跑一次: 否则启动后头 10s 内 http200 证据缺失,
+    # gui 会被 AGE_http>300 规则误判为 deg(假红), 且基线晚 10s。
+    if [ $(( TICK % 2 )) -eq 1 ]; then probe_dns; fi
+    if [ $(( TICK % 6 )) -eq 1 ]; then probe_icmp; fi
+    if [ $(( TICK % 10 )) -eq 1 ]; then probe_http; fi
     if [ $(( TICK % 300 )) -eq 1 ]; then probe_ssh2; fi
     AGE_dns=$(( AGE_dns + 1 )); AGE_icmp=$(( AGE_icmp + 1 ))
     AGE_http=$(( AGE_http + 1 )); AGE_ssh2=$(( AGE_ssh2 + 1 ))

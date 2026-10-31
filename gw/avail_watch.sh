@@ -43,6 +43,7 @@ if [ "$_rc" != 0 ]; then
     [ "$_rc" = 1 ] && echo "avail_watch: already running" >&2 || echo "avail_watch: lost lock race" >&2
     exit 0
 fi
+touch "$EDGES" 2>/dev/null   # 健康态(零翻转)也要让台账在位(采样器游标/selftest 护栏)
 
 logf() { echo "$(date +%s) $(date '+%F %T') $*" >> "$EDGES"; }
 edge() { # $1=id $2=event $3=detail

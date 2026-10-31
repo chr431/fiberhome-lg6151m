@@ -1,5 +1,8 @@
 #!/bin/sh
-# build_static_ip.sh v1.0 -- static aarch64 iproute2 6.3.0 (vendor version).
+# build_static_ip.sh v1.3 -- static aarch64 iproute2 6.3.0 (vendor version).
+# v1.3 (2026-10-31 vaguard 退役轮): 摘除预留的 vaguard.o 链接位 —— v1.1 曾声明
+#   链接闸门但产物从未带闸门(实装二进制无 vaguard 残留, 注册表注释陈旧),
+#   本轮一并订正; 防务由 nerepair 单层承担。
 #
 # Why not busybox's ip applet: its route output uses different spacing
 # ("dev eth0  metric 200" with two spaces) and it has no "link add ... type
@@ -20,7 +23,6 @@ SHA=dfb2a98db96e7a653cffc6693335a1a466e29a34b6ac528be48f35e1d2766732
 WORK=${IPROUTE2_BUILD_DIR:-$D/../_local/build}
 SRC=$WORK/iproute2-$VER
 OUT=$D/gw/bin/ip
-GUARD=${GUARD:-$D/../_local/build/vaguard.o}
 
 if [ -n "${OS:-}" ] && [ "$OS" = "Windows_NT" ]; then
     PATH=/c/msys64/usr/bin:$PATH
@@ -93,7 +95,7 @@ run_make() {
 run_make -C lib -j4 libnetlink.a libutil.a \
     CC="$CC" AR="$AR" "CFLAGS=$CF" "ADDLIB=$ADDLIB"
 run_make -C ip -j4 ip \
-    CC="$CC" AR="$AR" "CFLAGS=$CF" "LDFLAGS=-static -s $GUARD" \
+    CC="$CC" AR="$AR" "CFLAGS=$CF" "LDFLAGS=-static -s" \
     "LIBNETLINK=$LIBS"
 
 cp ip/ip "$OUT"

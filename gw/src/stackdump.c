@@ -1,4 +1,5 @@
-/* stackdump.c -- fault-time stack window snapshot for core_meta.sh.
+/* stackdump.c v1.1 -- fault-time stack window snapshot for core_meta.sh.
+ * v1.1 (2026-10-31 vaguard 退役轮): 摘除闸门链接重建, 无功能变化。
  *
  * Usage: stackdump <pid> <out> [pages]
  *

@@ -47,18 +47,18 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/bin/busybox` | **v1.1** | manifest | `/data/gw/bin/busybox` | 静态 aarch64 busybox 1.36.1(Alpine busybox-static 1.36.1-r31, 与厂商同版本); P2 崩溃家族工具链静态化；⟦收口 §22⟧ 工具链自主权载体，对崩溃零改善(§16.7/§22.1); v1.1(SIGSEGV §18): 用 musl-cross 在 WSL 重建并链接 va_list 闸门 v2(build: make CROSS_COMPILE=aarch64-linux-musl- + trylink 补丁; 备份 busybox.pre-vfguard) |
 | `gw/bin/fhstub.so` | **v1.0** | manifest | `/data/gw/fhstub.so` | FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径) |
 | `gw/bin/healthdog.ko` | **v1.0** | manifest | `/data/gw/healthdog.ko` | 取证看门狗内核模块(forensic=1) |
-| `gw/bin/ip` | **v1.1** | manifest | `/data/gw/bin/ip` | 静态 aarch64 iproute2 6.3.0(与厂商 ip -V 同版本, zig cc musl 重建); 输出与厂商逐字节一致, 保留 link add type bridge; v1.1(SIGSEGV §18): 链接 vfprintf va_list 闸门 v2(输出与旧版逐字节一致) |
+| `gw/bin/ip` | **v1.1** | manifest | `/data/gw/bin/ip` | 静态 aarch64 iproute2 6.3.0(与厂商 ip -V 同版本, zig cc musl 重建); 输出与厂商逐字节一致, 保留 link add type bridge; v1.1: 注册表注订正(2026-10-31 审计轮) — v1.1 声称链接闸门但产物从未带闸门(实装二进制无残留, 待 Linux 主机重建未发生) |
 | `gw/bin/logc` | **v1.5** | manifest | `/data/gw/bin/logc` | 静态日志采集器; v1.2(P1-2): 信号面包屑(/tmp/logc.crash: 帧偏移/长度)+--dump-raw 原始流+--selftest+ubus 缓冲移出栈+stack-protector; v1.1(batch1): socket/oneshot 超时; 历史见git; v1.3(batch3): --fuzz 确定性变异 + ASAN 构建入口; v1.4(SIGSEGV 轮, ⟦收口 §22⟧ 非家族根因: 摘除最高频污染解引用点): 记录路径彻底去 printf/strftime — 手写 ctime 格式(表+有界整数)与整行拼装, 静态不再链入 strftime/`%0*lld`(在 musl vfprintf 内崩溃); 超长消息跳过而非中止整轮(原 rc=1 截断); v1.5(SIGSEGV Phase 0): on_crash 面包屑后解屏蔽+SIG_DFL+raise 重新触发, 经 core_pattern 管道进 ne_events |
 | `gw/bin/logcut` | **v1.0** | manifest | `/data/gw/bin/logcut` | 静态锚点截取器: 输出文件中最后一次精确匹配锚行之后的全部内容; 单遍扫描+单行缓冲, 无数组/无printf/无locale; 取代 log_keeper delta() 的 busybox awk(其运行期数组退出清理约 1% SIGSEGV)；⟦收口 §22⟧ awk 缺陷说未证实且不再必要(§16.3)；保留理由=少 spawn/无数组 |
-| `gw/bin/mipc_cellular` | **v0.18** | manifest | `/data/gw/mipc_cellular` | 蜂窝MIPC直连CLI; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘; v0.18(SIGSEGV §18): 链接 vfprintf va_list 闸门 v2 |
+| `gw/bin/mipc_cellular` | **v0.19** | manifest | `/data/gw/mipc_cellular` | v0.19(vaguard 退役轮): 摘除闸门链接重建, 无功能变化; 蜂窝MIPC直连CLI; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘; v0.18(SIGSEGV §18): 链接 vfprintf va_list 闸门 v2 |
 | `gw/bin/multiwan_ctl` | **v1.1** | manifest | `/data/gw/multiwan_ctl` | 原厂multiwan引擎ioctl控制器(zig动态链libfhdrv_net_api,36B结构体) |
-| `gw/bin/nerepair` | **v1.5** | manifest | `/data/gw/bin/nerepair` | v1.5(巡检轮): attach 等待加 3s 截止(WNOHANG 轮询+超时 DETACH) — 顽固 tracee 可令 v1.4 的 EINTR 重试无界自冻结(07:05-07:08 hb 断流 234s 被看门狗重启实弹); 监督者活性优先于单 pid 覆盖; v1.4(质量轮): attach_pid waitpid EINTR 复位+失败 PTRACE_DETACH(v1.3 无 SA_RESTART 后告警可中断 attach, 弃管则 tracee 永久 group-stop=冻死 dropbear 级事故)/logev 长度钳位(防格式串增长越界)/sigaction 阴影变量/版本串集中/注释风格对齐 gw/src; 源码归位 gw/src/nerepair.c; 32B 记录 SIGSEGV 修复 supervisor(ptrace 修复 va_list 故障; 排除 vsurv4 canary); v1.1: 结构化 TSV 日志(epoch/iso/pid/comm/event/detail)+1MB 轮转+20行/秒限流+60s STAT 心跳+SIGTERM/SIGINT EXIT; v1.2: /tmp/nerepair.hb 心跳(60s) 供 watchdog svc_supervise 判活; v1.3: SIGALRM 用 sigaction(无 SA_RESTART) 修 waitpid 重启导致心跳/STAT 不刷新 |
+| `gw/bin/nerepair` | **v1.6** | manifest | `/data/gw/bin/nerepair` | v1.6(vaguard 退役轮): 摘除闸门链接重建 — nerepair 是唯一防线, 零仓外构建依赖; v1.5(巡检轮): attach 等待加 3s 截止(WNOHANG 轮询+超时 DETACH) — 顽固 tracee 可令 v1.4 的 EINTR 重试无界自冻结(07:05-07:08 hb 断流 234s 被看门狗重启实弹); 监督者活性优先于单 pid 覆盖; v1.4(质量轮): attach_pid waitpid EINTR 复位+失败 PTRACE_DETACH(v1.3 无 SA_RESTART 后告警可中断 attach, 弃管则 tracee 永久 group-stop=冻死 dropbear 级事故)/logev 长度钳位(防格式串增长越界)/sigaction 阴影变量/版本串集中/注释风格对齐 gw/src; 源码归位 gw/src/nerepair.c; 32B 记录 SIGSEGV 修复 supervisor(ptrace 修复 va_list 故障; 排除 vsurv4 canary); v1.1: 结构化 TSV 日志(epoch/iso/pid/comm/event/detail)+1MB 轮转+20行/秒限流+60s STAT 心跳+SIGTERM/SIGINT EXIT; v1.2: /tmp/nerepair.hb 心跳(60s) 供 watchdog svc_supervise 判活; v1.3: SIGALRM 用 sigaction(无 SA_RESTART) 修 waitpid 重启导致心跳/STAT 不刷新 |
 | `gw/bin/procmatch` | **v1.0** | manifest | `/data/gw/bin/procmatch` | 静态 pidof/pgrep 替代: /proc 扫描 + ERE, 有界手写输出(无 printf/无 locale); 覆盖 busybox pidof(~2.7 次/天崩溃面)与 pgrep(-x 语义修正)；⟦收口 §22⟧ 崩溃面收益=主机制缓解；独立价值=pgrep -x 语义修正 |
 | `gw/bin/shmsnap` | **v1.0** | manifest | `/data/gw/shmsnap` | cfgmgr树共享内存快照工具(save/load 16MB原始字节, gzip后127KB, 开机恢复锁定状态) |
-| `gw/bin/stackdump` | **v1.0** | manifest | `/data/gw/bin/stackdump` | 故障时栈窗口快照(core_meta v1.7+ 运行时依赖; 原手工推送=部署不可重现点, v2.32 质量轮转正式件) |
+| `gw/bin/stackdump` | **v1.1** | manifest | `/data/gw/bin/stackdump` | v1.1(vaguard 退役轮): 摘除闸门链接重建, 无功能变化; 故障时栈窗口快照(core_meta v1.7+ 运行时依赖; 原手工推送=部署不可重现点, v2.32 质量轮转正式件) |
 | `gw/bin/v3_fix.ko` | **v1.2** | manifest | `/data/gw/v3_fix.ko` | TTL伪装/PPE解绑内核模块(wan_if/ttl_mode/unhook); v1.2(24h 日志轮): 重建产物 — 旧文件 ELF 节表错位 1B 致每次开机 insmod 静默失败(type 768), 实测 rc=0/TTL/RX 解绑在位 |
 | `gw/bin/v3_steth.ko` | **v1.0** | manifest | `/data/gw/v3_steth.ko` | hook槽位听诊器(bias/interval) |
-| `gw/bin/v3httpd` | **v2.9** | manifest | `/data/gw/v3httpd` | 网关GUI HTTP服务; v2.6(P2): 静态面拒*.sh(免认证源码泄露)+Host头校验(根治DNS rebinding); v2.7(SIGSEGV §18): 链接 vfprintf va_list 闸门 v2(写入不再打死进程); v2.8(闸门覆盖轮): CGI 解释器改自建 busybox 的 sh(装 vfprintf 闸门), 自建件缺失回退 /bin/sh |
+| `gw/bin/v3httpd` | **v2.10** | manifest | `/data/gw/v3httpd` | v2.10(vaguard 退役轮): 摘除闸门链接重建; CGI 选自建 busybox 的动机改为 1.36.1 工具链一致性(原为闸门); 网关GUI HTTP服务; v2.6(P2): 静态面拒*.sh(免认证源码泄露)+Host头校验(根治DNS rebinding); v2.7(SIGSEGV §18): 链接 vfprintf va_list 闸门 v2(写入不再打死进程); v2.8(闸门覆盖轮): CGI 解释器改自建 busybox 的 sh(装 vfprintf 闸门), 自建件缺失回退 /bin/sh |
 | `gw/bin/wpapmk` | **v1.0** | manifest | `/data/gw/wpapmk` | WPA口令转PMK(纯C PBKDF2-SHA1; fh魔改hostapd只吃wpa_psk) |
 | `gw/boot_gate.sh` | **v1.4** | manifest | `/data/gw/boot_gate.sh` | v1.4(时间源统一轮): c_wanalive 改 wa_age(); c_authd 负龄钳位(跨 boot 残值不再伪装新鲜); 启动健康门禁(P0-2); v1.2: 不写 watchdog.beat(避免污染数字心跳); v1.1: GUI 判据加 HTTP 200; v1.0: 关键链门禁+boot.healthy+TRY_A 读回+10min 稳定窗; v1.3(batch3): svc_lib 锁 + BSS/lo 最小解析 |
 | `gw/capture_ubus.sh` | **v1.1** | manifest | `/data/gw/capture_ubus.sh` | stock拨号一次性捕获(ubus monitor+ccmni采样) |
@@ -123,30 +123,29 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/src/healthdog.c` | **v1.0** | src | `gw/bin/healthdog.ko` | 看门狗模块源码(版本随产物) |
 | `gw/src/logc.c` | **v1.5** | src | `gw/bin/logc` | logc 源码(同产物; 面包屑/dump-raw/selftest/防栈溢出); v1.3: --fuzz; v1.4: printf-free 记录路径; v1.5(SIGSEGV Phase 0): 崩溃改回默认动作可记账(同上产物) |
 | `gw/src/logcut.c` | **v1.0** | src | `gw/bin/logcut` | logcut 源码(同产物; --selftest) |
-| `gw/src/mipc_cellular.c` | **v0.18** | src | `gw/bin/mipc_cellular` | 蜂窝MIPC直连CLI源码; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘 |
+| `gw/src/mipc_cellular.c` | **v0.19** | src | `gw/bin/mipc_cellular` | v0.19: 同产物; 蜂窝MIPC直连CLI源码; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘 |
 | `gw/src/multiwan_ctl.c` | **v1.1** | src | `gw/bin/multiwan_ctl` | multiwan控制器源码(随产物1.1) |
-| `gw/src/nerepair.c` | **v1.5** | src | `gw/bin/nerepair` | v1.5: attach 截止修复源码(随产物); 32B 记录 SIGSEGV 修复 supervisor 源码(随产物 1.4; 自 tools/oneoff/sigsegv/ 归位 — 生产二进制源码不得滞留 oneoff) |
+| `gw/src/nerepair.c` | **v1.6** | src | `gw/bin/nerepair` | v1.6: 单层学说头注(随产物); v1.5: attach 截止修复源码(随产物); 32B 记录 SIGSEGV 修复 supervisor 源码(随产物 1.4; 自 tools/oneoff/sigsegv/ 归位 — 生产二进制源码不得滞留 oneoff) |
 | `gw/src/procmatch.c` | **v1.0** | src | `gw/bin/procmatch` | procmatch 源码(同产物) |
 | `gw/src/shmsnap.c` | **v1.0** | src | `gw/bin/shmsnap` | cfgmgr快照源码 |
-| `gw/src/stackdump.c` | **v1.0** | src | `gw/bin/stackdump` | 故障时栈窗口快照源码(随产物; 自 tools/oneoff/sigsegv/ 归位) |
+| `gw/src/stackdump.c` | **v1.1** | src | `gw/bin/stackdump` | v1.1: 版本随产物(闸门退役重建); 故障时栈窗口快照源码(随产物; 自 tools/oneoff/sigsegv/ 归位) |
 | `gw/src/v3_fix.c` | **v1.2** | src | `gw/bin/v3_fix.ko` | TTL/解绑模块源码(版本随产物); v1.2 随产物重建 |
 | `gw/src/v3_steth.c` | **v1.0** | src | `gw/bin/v3_steth.ko` | 听诊器模块源码(版本随产物) |
-| `gw/src/v3httpd.c` | **v2.9** | src | `gw/bin/v3httpd` | GUI HTTP服务源码; v2.6: 同产物 |
+| `gw/src/v3httpd.c` | **v2.10** | src | `gw/bin/v3httpd` | v2.10: 同产物(注释随学说更新); GUI HTTP服务源码; v2.6: 同产物 |
 | `gw/src/wpapmk.c` | **v1.0** | src | `gw/bin/wpapmk` | WPA PMK转换源码(纯C PBKDF2) |
 | `install/run.sh` | **v1.1** | tool | `-` | raw shell自驱脚本(v1.1: 分区次设备号从/proc/partitions动态解析成布局门禁, RP102/RP103通用; v1.0硬编码259:7等) |
 | `tools/agg_pins.conf.example` | **v1.1** | tool | `-` | MAC钉死表模板(真实表设备侧自管, 含个人MAC不入库) |
-| `tools/build_busybox_wsl.sh` | **v1.0** | tool | `-` | WSL2/Linux 下用 musl.cc 交叉工具链重建 busybox 1.36.1(静态+va_list 闸门); 自动拉工具链/busybox/musl 源码, 打 trylink 补丁, 产物 1.6MB 402 applet |
+| `tools/build_busybox_wsl.sh` | **v2.0** | tool | `-` | v2.0(vaguard 退役轮): 去闸门重建 — busybox 重新定性为纯工具链(402 applet/1.36.1 基线), 不再承担防务; 断言反转为必须无 vaguard 残留; 检出 v1.1 补丁污染树自动重解压; WSL2/Linux 下用 musl.cc 交叉工具链重建 busybox 1.36.1(静态+va_list 闸门); 自动拉工具链/busybox/musl 源码, 打 trylink 补丁, 产物 1.6MB 402 applet |
 | `tools/build_healthdog.sh` | **v1.0** | tool | `-` | healthdog.ko内核模块构建(内核树) |
 | `tools/build_logc.sh` | **v1.2** | tool | `-` | logc 静态构建(zig cc aarch64-linux-musl; v1.1: -fstack-protector-all); v1.2(batch3): --asan 主机 ASAN/UBSAN 构建 |
-| `tools/build_mipc_cellular.sh` | **v1.2** | tool | `-` | mipc_cellular构建(zig cc aarch64-musl 静态); v1.1: 移除 libqlril 链接(v0.12+ 零 RIL 依赖); v1.2(SIGSEGV §18): 链接 vaguard.o |
-| `tools/build_nerepair.sh` | **v1.0** | tool | `-` | nerepair 构建(zig cc aarch64-linux-musl 静态+vaguard, 同 v3httpd 链) |
+| `tools/build_mipc_cellular.sh` | **v1.3** | tool | `-` | v1.3(vaguard 退役轮): 去 vaguard.o; mipc_cellular构建(zig cc aarch64-musl 静态); v1.1: 移除 libqlril 链接(v0.12+ 零 RIL 依赖); v1.2(SIGSEGV §18): 链接 vaguard.o |
+| `tools/build_nerepair.sh` | **v1.2** | tool | `-` | v1.2(vaguard 退役轮): 去 vaguard.o, 零仓外依赖; nerepair 构建(zig cc aarch64-linux-musl 静态+vaguard, 同 v3httpd 链) |
 | `tools/build_procmatch.sh` | **v1.0** | tool | `-` | procmatch 静态构建(zig cc aarch64-linux-musl) |
-| `tools/build_stackdump.sh` | **v1.0** | tool | `-` | stackdump 构建(同上链) |
-| `tools/build_static_ip.sh` | **v1.2** | tool | `-` | iproute2 6.3.0 静态构建(zig cc aarch64-linux-musl, 与厂商同版本); v1.1(SIGSEGV §18): 预留 vaguard.o 链接位 + 下载路径/CC 可覆盖(本机 Windows 上 zig-under-make 受限, 产物待 Linux 主机重建); v1.2: MSYS 下改用 tools/zigcc.py 启动 zig(修 AppDataDirUnavailable) |
+| `tools/build_stackdump.sh` | **v1.2** | tool | `-` | v1.2(vaguard 退役轮): 去 vaguard.o; stackdump 构建(同上链) |
+| `tools/build_static_ip.sh` | **v1.3** | tool | `-` | v1.3(vaguard 退役轮): 摘除预留闸门链接位 — v1.1 声称链接但产物从未带闸门(实装无残留), 注释订正; iproute2 6.3.0 静态构建(zig cc aarch64-linux-musl, 与厂商同版本); v1.1(SIGSEGV §18): 预留 vaguard.o 链接位 + 下载路径/CC 可覆盖(本机 Windows 上 zig-under-make 受限, 产物待 Linux 主机重建); v1.2: MSYS 下改用 tools/zigcc.py 启动 zig(修 AppDataDirUnavailable) |
 | `tools/build_steth.sh` | **v1.0** | tool | `-` | v3_steth.ko构建 |
 | `tools/build_v3fix.sh` | **v1.1** | tool | `-` | v3_fix.ko构建; v1.1: 路径修正当前布局 + uapi/asm junction 失效改就地复制 + 记录产物错位事故 |
-| `tools/build_v3httpd.sh` | **v1.1** | tool | `-` | v3httpd构建(zig cc aarch64-linux-musl全静态, 同mipc_cellular链); v1.1(SIGSEGV §18): 链接 vaguard.o(va_list 闸门) |
-| `tools/build_vaguard.sh` | **v1.0** | tool | `-` | 编译 gw/src/vfprintf_guard.c 为可链接对象(须在 libc 之前链接) |
+| `tools/build_v3httpd.sh` | **v1.2** | tool | `-` | v1.2(vaguard 退役轮): 去 vaguard.o; v3httpd构建(zig cc aarch64-linux-musl全静态, 同mipc_cellular链); v1.1(SIGSEGV §18): 链接 vaguard.o(va_list 闸门) |
 | `tools/deploy.py` | **v2.33** | tool | `-` | v2.34(时间源统一轮): EXTRA_KEEP +logs(rc.extend 引用 /data/gw/logs 目录, doctor 误报 UNKNOWN); v2.33(2026-10-31 质量轮): push 部分失败计入退出码(原全拒送仍 exit 0)/selftest 超时 120s→900s 且捕获/push_serial 目标侧 tmp+mv 原子化/指纹失配立即中止不再吞成 no-mgmt-path/put+attic 注入面收口/MANIFEST +stackdump -死件×3; 部署/漂移守卫; v2.30(可用性轮): MANIFEST +avail_sampler/api_avail; v2.29: +usb_mgr/api_usb; v2.27/2.28: +dpquar/dpclamp; 历史见git; v2.31(SIGSEGV Phase 2 退役): MANIFEST -dpquar.ko -dpclamp.ko; v2.32(LAN v6): MANIFEST +v6_reconcile/api_v6 |
 | `tools/device_local.py.example` | **v1.0** | tool | `-` | 凭证模板(真件gitignored) |
 | `tools/doc_audit.py` | **v1.2** | tool | `-` | 台账↔文档内联标记双向审计; v1.2: 子进程显式 UTF-8(gbk 环境不再中断 deploy 文档门禁); 历史见git |
@@ -173,7 +172,6 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/stock_gui.py` | **v1.0** | tool | `-` | 原厂固件 web GUI 客户端(fh_api RSA→AES 握手; reboot=do_cmd_web REBOOT_WEB; 凭证经 device_local, RSA 私钥经 _local/secrets/stock_web_rsa.pem; 注意: GUI 重启是优雅复位, LK console 线程不启动, 不可用于弹幕抓捕) |
 | `tools/tail_audit.py` | **v1.0** | tool | `-` | 页尾暴露审计: 列出落在页内 0xfc0..0xfff 的全局对象(配合 TAILSAFE 规则) |
 | `tools/upgrade_slot.py` | **v1.1** | tool | `-` | v1.1(质量轮 P0): 修复占位符替换链残留 __ 致 md5-gate 恒 FAIL(工具自 v1.0 起不可用); --img/--md5 入参校验; 失败路径清理临时文件; SSH整槽升级器(P3第一档: vercheck/槽位/空间预检→md5门禁→dd备份旧p26→写新镜像→挂载sanity断言(toor/rcS/#v3:/procd)→失败自动整槽还原不重启→清TRY_A→reboot; PC侧轮询日志+回连终检; --dry-run) |
-| `tools/vaguard/vfprintf_guard.c` | **v1.0** | tool | `-` | musl vfprintf + va_list 闸门 v2(写入不再打死进程; §18); 命中写 /data/gw/logs/vaguard.tsv |
 | `tools/vercheck.py` | **v1.6** | tool | `-` | v1.6(质量轮): device() 二进制行 BYTES-DIFFER 字节级比对(原 dmd5 读而不用)/git ls-files 失败拒绝静默跳过; 版本注册表校验/渲染/设备比对(v1.3: device()随deploy基座迁/data/gw; v1.2性质分区双向强制+全跟踪文件可归类; v1.1 image类md5钉死) |
 | `tools/verify_v4.py` | **v1.0** | tool | `-` | v4刷后落地验证器(串口toor登录; 身份/钩子/数据/网络/进程巡检; 口令走argv不落盘) |
 | `tools/verify_v4_services.py` | **v1.0** | tool | `-` | v4服务巡检器(监听端口/GUI/WiFi双频/5G WAN实网ping) |

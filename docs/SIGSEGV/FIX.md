@@ -96,6 +96,12 @@
 - 回滚：umount /bin/busybox；
 - 持久化：rc.extend.sh 加 mount --bind 块（带门禁与冒烟），失败自动跳过。
 
-### 4.4 建议
-- 保持现状：nerepair 负责全进程覆盖；vaguard 负责静态二进制（已拦 49 次，零稳态开销）；
+### 4.4 建议（2026-10-31 vaguard 退役轮修订）
+- **单层防御（现行）**：nerepair 独扛全进程覆盖。vaguard（vfprintf 闸门）已彻底退役
+  ——理由：①故障家族的底层污染源自内核修复栈退役后已消失（连续多日 repaired=0，
+  闸门拦截也归零）；②闸门是编译期防线，拦截会塑造 NE 自然普查口径，不利归因；
+  ③它让静态构建依赖仓外对象（_local/build/vaguard.o），破坏可重现性。历史战绩
+  （49 次拦截）见 git 存档。
+- 自建 busybox 保留，但自本轮起定性为**纯工具链**（402 applet 全集 + 1.36.1 语义
+  基线；7 个守护脚本依赖 PATH 型 timeout、~900 处 PATH 型工具调用），不承担防务；
 - 不动原厂 busybox：替换的收益（少量 ptrace 开销）远小于风险（lock/netmsg 缺失、setuid 面扩大、init 兼容性）。

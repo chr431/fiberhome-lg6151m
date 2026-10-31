@@ -1,4 +1,6 @@
-/* v3httpd.c v2.9 (main 里显式 setenv PATH=/data/gw/sbin:… —— CGI 子进程的 applet 一律
+/* v3httpd.c v2.10 (vaguard 退役轮: 摘除闸门链接, 防务由 nerepair 单层承担;
+ *   CGI 选自建 busybox 的动机自本轮起是 1.36.1 工具链一致性而非闸门) --
+ *   v2.9 (main 里显式 setenv PATH=/data/gw/sbin:… —— CGI 子进程的 applet 一律
  *   解析到自建 busybox 的符号链接, 不依赖启动者环境) -- v2.8 (API 域改用自建 busybox 的 sh — 装 vfprintf 闸门; 厂商 /bin/sh
  *   未装闸门, 2026-10-29 实测 API 链上 sh/awk/grep/sed 的崩溃全落在它上面; 自建件
  *   缺失时回退 /bin/sh, 不因缺件拒绝服务) -- v2.6 (P2: 静态面拒绝 *.sh 下载(原 GET /api.sh 直出全部服务端逻辑);
@@ -128,7 +130,9 @@ static void send_json(int c, const char *body, int n)
 /* CGI: fork + execv, no shell anywhere in the path.
  * v2.1: CGI 子进程独立进程组 + 45s 看门狗(超时杀组) — 曾被 daemon 型 CGI
  * 的孙进程持有 stdout 管道导致串行循环永久挂死(整个 GUI 无响应)。 */
-/* v2.8: 选 CGI 解释器 —— 优先自建 busybox(带闸门)的 sh, 缺失则回退厂商 /bin/sh。
+/* v2.8: 选 CGI 解释器 —— 优先自建 busybox 的 sh, 缺失则回退厂商 /bin/sh。
+ *   (v2.10: 当年的选择动机是闸门; 闸门已退役, 现选自建件为 1.36.1 工具链
+ *   一致性 —— 崩溃防护由 nerepair 统一承担, 与解释器归属无关。)
  *   argv 形态: {busybox, "sh", api.sh, ep} vs {/bin/sh, api.sh, ep}。 */
 static const char *cgi_shell(void)
 {
@@ -346,7 +350,7 @@ static void proxy_tunnel(int c, char *req, int n, const char *path)
 int main(void)
 {
     /* v2.9: 显式钉死 PATH —— CGI 子进程的 applet(awk/sed/grep/ping/tail…)必须解析到
-     *   /data/gw/sbin 下指向自建 busybox(带闸门)的符号链接, 不能依赖启动者的环境
+     *   /data/gw/sbin 下指向自建 busybox 的符号链接, 不能依赖启动者的环境
      *   (2026-10-29 实测: 手工从 SSH 重启 v3httpd 时 PATH 丢掉 /data/gw/sbin,
      *    API 链上的 awk 立刻退回厂商 /bin/busybox)。 */
     setenv("PATH", "/data/gw/sbin:/data/gw/bin:/usr/sbin:/usr/bin:/sbin:/bin", 1);

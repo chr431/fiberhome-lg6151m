@@ -1,5 +1,7 @@
-/* mipc_cellular.c v0.17 -- 蜂窝 MIPC 直连工具（零 RIL 依赖）
+/* mipc_cellular.c v0.19 -- 蜂窝 MIPC 直连工具（零 RIL 依赖）
  *
+ * v0.19 (2026-10-31 vaguard 退役轮): 摘除 vfprintf 闸门链接重建 —— 防务由
+ *   nerepair 单层承担; 无功能变化。v0.18 见台账(闸门链接轮)。
  * v0.17 (2026-10-17 日志修正): 日志区分 primary/last 两次传输 — cells 命令
  *   先 0x0423(邻区, 可达数千字节) 再 0x044f(带宽, 136B); 旧行只记最后
  *   一次, 成功行 rlen=136 会让人误判 cells 载荷很小。现 plen/prc/pms +

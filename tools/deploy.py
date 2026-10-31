@@ -226,6 +226,25 @@ def ssh_cmd(c, cmd, timeout=25, stdin_data=None):
     return so.read().decode(errors="replace")
 
 
+def ssh_write_file(c, remote, data, chunk=900 * 1024):
+    """v2.35: 分块写入远端文件(首块 cat >, 后续 cat >>)。
+    >1.2MB 的单次 stdin 写入会杀 dropbear 会话(AGENTS 陷阱表, 1.03MB 实测可过)
+    —— busybox(1.6MB)级别的大件必须分块。返回 True=全部块写完。"""
+    off, first = 0, True
+    while off < len(data):
+        part = data[off:off + chunk]
+        cmd = ("cat > %s" if first else "cat >> %s") % remote
+        si, so, se = c.exec_command(cmd, timeout=300)
+        si.write(part)
+        si.flush()
+        si.channel.shutdown_write()
+        if so.channel.recv_exit_status() != 0:
+            return False
+        first = False
+        off += chunk
+    return True
+
+
 def remote_exists(c, path):
     return ssh_cmd(c, "[ -e %s ] && echo y" % path).strip() == "y"
 
@@ -371,7 +390,7 @@ def push(names=None):
             got = "ABSENT"
             for attempt in range(1, 4):
                 ssh_cmd(c, "rm -f %s" % tmp)
-                ssh_cmd(c, "cat > %s" % tmp, stdin_data=data)
+                ssh_write_file(c, tmp, data)   # v2.35: 分块写(大件免疫 dropbear 单写上限)
                 got_out = ssh_cmd(c, "md5sum %s 2>/dev/null" % tmp).split()
                 got = got_out[0] if got_out else "ABSENT"
                 if got == want:
@@ -521,11 +540,7 @@ def put():
         for attempt in range(1, 4):
             ssh_cmd(c, "rm -f %s" % tmp, timeout=10)
             try:
-                si, so, se = c.exec_command("cat > %s" % tmp, timeout=120)
-                si.write(data)
-                si.flush()
-                si.channel.shutdown_write()
-                rc = so.channel.recv_exit_status()
+                rc = 0 if ssh_write_file(c, tmp, data) else 1   # v2.35: 分块写(>1.2MB 单写杀 dropbear)
             except Exception as e:
                 print("  attempt %d: 通道异常 %r" % (attempt, e))
                 _t.sleep(1)

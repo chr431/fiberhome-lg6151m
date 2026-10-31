@@ -16,6 +16,11 @@
  * heartbeat, heartbeat file /tmp/nerepair.hb (uptime seconds, for the
  * watchdog SVC_TABLE liveness probe).
  *
+ * v1.6 (vaguard retirement round): single-layer doctrine -- the in-process
+ *   vfprintf guard is retired everywhere (source of the fault family is gone
+ *   since the kernel fixstack retirement; guard historically caught 49 hits).
+ *   nerepair is now the only defense; this build links no guard and depends
+ *   on nothing outside the repo.
  * v1.5 (patrol round): attach wait bounded to 3s (WNOHANG poll + deadline,
  *   detach on timeout) -- an un-stoppable tracee could block the v1.4 retry
  *   loop forever, freezing the supervisor (07:05-07:08 field incident:
@@ -39,8 +44,8 @@
  *   STAT + SIGTERM/SIGINT EXIT record.
  * v1.0: repair core (is_ldr_same/shape_ok/register rewrite).
  *
- * Build: sh tools/build_nerepair.sh   (zig cc aarch64-linux-musl, static,
- * vaguard linked like every other static binary -- see FIX.md §"保持现状".)
+ * Build: sh tools/build_nerepair.sh   (zig cc aarch64-linux-musl, static;
+ * v1.6 起 vaguard 退役, 本进程是唯一防线, 零闸门零仓外依赖 —— FIX.md §单层)
  */
 #define _GNU_SOURCE
 #include <stdio.h>
@@ -76,7 +81,7 @@
 #endif
 #define NT_PRSTATUS 1
 #define LOGPATH "/data/gw/logs/nerepair.log"
-#define NEREPAIR_VER "1.5"
+#define NEREPAIR_VER "1.6"
 
 struct regs64 { unsigned long regs[31]; unsigned long sp, pc, pstate; };
 static pid_t self_pid;

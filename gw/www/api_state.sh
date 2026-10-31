@@ -32,7 +32,8 @@ beat_read() {
     _f=${_t%%[!0-9]*}
     case "$_f" in ??) ;; ?) _f=${_f}0 ;; *) _f=00 ;; esac
     case "$_i" in ''|*[!0-9]*) _i=0 ;; esac
-    _nowcs=$(( _i * 100 + 10#${_f:-0} ))   # P0: 10# 防 08/09 被当八进制
+    _f=${_f#0}; [ -n "$_f" ] || _f=0   # P0: 去前导零(shell 无关)
+    _nowcs=$(( _i * 100 + _f ))
     if [ "$BCS" -gt 0 ]; then
         AGE_MS=$(( (_nowcs - BCS) * 10 ))
         [ "$AGE_MS" -lt 0 ] && AGE_MS=999999

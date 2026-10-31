@@ -32,6 +32,7 @@ cat > "$TMP/bin/iptables" <<EOF
 case "\$*" in
 "-t nat -S") awk -v n="@@NAT@@" '\$0==n{f=1;next} /^@@[A-Z]+@@\$/{if(f)exit} f' "$SNAPF" ;;
 "-t mangle -S") awk -v n="@@MGL@@" '\$0==n{f=1;next} /^@@[A-Z]+@@\$/{if(f)exit} f' "$SNAPF" ;;
+"-t mangle -S WANAGG") awk -v n="@@MGL@@" '\$0==n{f=1;next} /^@@[A-Z]+@@\$/{if(f)exit} f' "$SNAPF" | grep WANAGG ;;
 "-S") awk -v n="@@FLT@@" '\$0==n{f=1;next} /^@@[A-Z]+@@\$/{if(f)exit} f' "$SNAPF" ;;
 *) exit 0 ;;
 esac
@@ -85,9 +86,11 @@ echo "== 2) 删掉 ccmni2 的 MASQUERADE -> 期望报 nat:ccmni2"
 grep -v -- '-o ccmni2 -j MASQUERADE' "$SNAPF" > "$TMP/n"; cp "$TMP/n" "$SNAPF"
 ck 'nat:ccmni2' "检出 nat:ccmni2"
 
-echo "== 3) 删掉 mangle 的打标行 -> 期望报 split:wanagg"
-grep -v -- '--set-xmark' "$SNAPF" > "$TMP/n"; cp "$TMP/n" "$SNAPF"
-ck 'split:wanagg' "检出 split:wanagg"
+echo "== 3) 只删 WANAGG 的打标行(保留厂商 QoS 链的 --set-xmark) -> 期望报 split:wanagg"
+#   回归用例: v1.0 用整表文本判打标, 会被 qos_Default* 的 --set-xmark 骗成绿(演练 D2 实弹抓出)
+grep -v -E '^-A WANAGG .*--set-xmark' "$SNAPF" > "$TMP/n"; cp "$TMP/n" "$SNAPF"
+echo "   (整表仍剩 --set-xmark 行数: $(grep -c -- '--set-xmark' "$SNAPF"))"
+ck 'split:wanagg' "检出 split:wanagg(链内作用域)"
 
 echo "== 4) 把 eth1 从 br-lan 摘掉 -> 期望报 br:eth1  [SKIP: 判据含 [ -d /sys/class/net/eth1 ], PC 无 /sys]"
 echo "   SKIP (由实机演练 D4 覆盖)"

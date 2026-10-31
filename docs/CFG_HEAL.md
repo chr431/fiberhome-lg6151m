@@ -289,6 +289,23 @@ Lead 01:00 裁决: **gw/wan_agg.sh 归本任务**(原本无主), 授权加 --rea
 删 fwmark 检出 mark:w2 / wan_mode 陈旧时 split+mark **不判** / vendor 引擎下 split **不判**。
 (br:eth1 与 fw 两项的判据含 [ -d /sys/class/net/... ], PC 无 /sys, 由实机 D4/D5 覆盖。)
 
+**首轮实弹结果(2026-11-01 00:50-01:00, 设备侧, 窗口外空档)**:
+
+| 用例 | 结果 | 证据 |
+|---|---|---|
+| 正常态 | **--check => OK drift=0 rc=0**; tick 耗时 **140/200/140 ms** | 设备侧命令输出; 3s 预算的 15 倍余量 |
+| D6 幂等 | run1 delta vs before = **0 行**; run2 delta vs run1 = **0 行** => PASS | _local/evidence/cfg_heal/20261101-005028_drill.tsv |
+| D1 NAT(C01) | 删 ccmni2 MASQUERADE -> 检出 DRIFT nat ccmni2 rc=1 -> 修复 -> 规则回来 -> OK rc=0 | 台账 agg/wan_agg/repair/ok/50; netcfg_repairs cfg_heal:agg rc=0 verified=ok |
+| D5 fw 纵深 | 删 V4WANGUARDF 两条跳转 -> 检出 2 条 -> fw_apply 修复 -> OK rc=0 | 台账 fw/fw_apply/repair/ok/50 |
+| D2 mangle(C02) | **首轮假绿**, 修判据后: 检出 DRIFT split wanagg -> 修复 -> 链恢复三件 -> OK rc=0 | 台账 agg/wan_agg/repair/ok/50 |
+| 锁 | 全程 /tmp/netcfg_lock_timeouts = **0**, netcfg.log 无 WARN | 修复耗时 50ms; cfg_heal 不持锁 |
+
+> **D2 抓出的真 bug(重要)**: v1.0 用整表 `iptables -t mangle -S` 文本查打标, 而本机 mangle 表里
+> 有厂商 QoS 链(qos_Default / qos_Default_ct)满载 `--set-xmark` 与 `CONNMARK --save-mark` ——
+> 删掉 WANAGG 的打标后**仍判绿**, 与 watchdog 的 `grep -q MARK` 是同一类错误。
+> v1.1 起: 打标/存标/链存在性只看 **WANAGG 链内**文本(`-S WANAGG`), 跳转才看整表。
+> 教训: **检测判据必须作用域最小化**; 整表/全局 grep 一定会被无关对象骗。
+
 **验收断言**:
 
 1. D0: drift_samples == 0 且 repairs 增量 == 0 -> 证明不误伤;

@@ -621,11 +621,17 @@ once() {
     fi
     cnt_bump detects
     rm -f $PENDF
-    if [ "$NETLOCK_OK" = 1 ] && netcfg_busy; then
-        log "SKIP repair: netcfg write lock busy (holder=$(netcfg_holders 2>/dev/null))"
-        ledger misc netlock skip busy 0
-        printf '%s\n' "$(date +%s) drift=[$_D] skip=netlock-busy" > $LASTF
-        return 0
+    # 手工/演练路径是**一次性**的, 没有"下一拍重试", 因此对锁忙做 3 次有界重试
+    # (--tick 路径相反: 立刻跳过, 由下一拍重试, 绝不等待)
+    if [ "$NETLOCK_OK" = 1 ]; then
+        _try=0
+        while [ "$_try" -lt 3 ] && netcfg_busy; do sleep 1; _try=$((_try + 1)); done
+        if netcfg_busy; then
+            log "SKIP repair: netcfg write lock busy after $_try s (holder=$(netcfg_holders 2>/dev/null))"
+            ledger misc netlock skip busy 0
+            printf '%s\n' "$(date +%s) drift=[$_D] skip=netlock-busy" > $LASTF
+            return 0
+        fi
     fi
     log "DETECT drift [$_D] (sync --once)"
     do_repair "$_D"

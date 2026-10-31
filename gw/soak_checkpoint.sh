@@ -1,5 +1,5 @@
 #!/bin/sh
-# soak_checkpoint.sh v1.3 -- 30d soak 装置: 每日资源 checkpoint + 每次开机记账 + 漂移告警
+# soak_checkpoint.sh v1.4 -- 30d soak 装置: 每日资源 checkpoint + 每次开机记账 + 漂移告警
 # (RELIABILITY_SPEC M4 R4.2/R4.3; 验收口径见 docs/ACCEPTANCE.md)
 #
 # 为什么是"被 fork 驱动"而不是常驻守护:
@@ -36,7 +36,7 @@
 #
 # 退出码: 0=正常(含跳过), 非 0 只表示参数错误。运行期异常不得影响调用方。
 
-VER=1.3
+VER=1.4
 DIR=/data/gw/logs
 DAILY=$DIR/soak_daily.tsv
 BOOTS=$DIR/soak_boots.tsv
@@ -220,7 +220,14 @@ do_daily() {
     if [ "$_df" -ge 0 ] && [ "$_df" -lt "$TH_DATA_FREE_KB" ]; then _v=FAIL; alert data_free "$_df KB"; fi
     if [ "$_fu" -ge 0 ] && [ "$_fm" -gt 0 ] && [ $(( _fu * 100 / _fm )) -ge "$TH_FD_PCT" ]; then _v=FAIL; alert fd_exhaust "$_fu/$_fm"; fi
     if [ "$_zo" -gt "$TH_ZOMBIES" ]; then _v=FAIL; alert zombies "$_zo"; fi
-    if [ "$_u" -lt "$TH_UP_MIN" ]; then _v=FAIL; alert boot_loop "up $_u s"; fi
+    # v1.4: boot-loop 判据改「低 uptime 且 24h 内已 >=3 次开机」—— v1.3 只用低 uptime 判 FAIL,
+    # 结果 04:00 重启后第一条 post-reboot 行必然 FAIL = 每天假红一次(实弹: 2026-11-01 04:19
+    # up=402s verdict=FAIL)。假红与假绿一样是诚实性缺陷。
+    if [ "$_u" -lt "$TH_UP_MIN" ] && [ "$_b24" -ge 3 ]; then
+        _v=FAIL; alert boot_loop "up $_u s, boots24=$_b24"
+    elif [ "$_u" -lt "$TH_UP_MIN" ]; then
+        if [ -n "$_notes" ]; then _notes="$_notes,post_reboot"; else _notes=post_reboot; fi
+    fi
     if [ "$_crash24" -ge "$TH_CRASH" ]; then _v=FAIL; alert crash_reboot "$_crash24 in 24h"; fi
     if [ "$_sm" = 1 ]; then
         [ "$_v" = PASS ] && _v=DEGRADED

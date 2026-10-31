@@ -92,14 +92,38 @@ strike_clear() { # $1=key; records a PASS sample
 # v1.5: 窗口时基 epoch→uptime —— NTP 跳变不再误重置/误保留预算; 旧 .rec 文件里
 #   的 epoch 时间戳在新时基下必然超窗, 各服务预算一次性归零(一次性迁移, 可接受)。
 rl_ok() { # $1=name
-    _f=/tmp/watchdog_svc_$1.rec; _n=0; _t=0
-    [ -r "$_f" ] && read _n _t < "$_f"
-    _now=$(cut -d. -f1 /proc/uptime)
+    # v1.8 (M3 服务中断轮, 实弹定罪): 预算耗尽**不再永久放弃** —— 原实现在 3 次/1h
+    #   用光后 return 1, watchdog 走 "alert only" 分支直到窗口滚过: 一次偶发崩溃
+    #   (NE 打死进程) 被放大成 14~57 分钟中断。实测 /tmp/watchdog.log: authd 在
+    #   22:28:27/22:29:46/22:31:06 三次重启用光预算, 22:32:26→22:46:18 连续 11 行
+    #   "restart budget exhausted (3/h) — alert only", 直到 23:17:31 才恢复。
+    #   现语义: 预算耗尽后降级为**慢重试**(RL_SLOW, 默认 60s/次) —— 恢复上界有界
+    #   (R4.1 ≤60s), 同时仍防重启风暴(1 次/分钟 ≪ watchdog 30s 节拍)。
+    #   慢重试连续 ≥10 次仍失败 → 落一行 WARN 告警(watchdog 的 log())但**继续重试**,
+    #   永不静默停止(静默停止 = 账面上"无事件"的假绿)。
+    #   .rec 格式: "n t last slow" (v1.8 起 4 字段); 旧 2 字段文件自动兼容(缺项归 0)。
+    #   RL_NOW 仅为单测钩子(D2 工具自测); 生产环境不设置。
+    _f=/tmp/watchdog_svc_$1.rec; _n=0; _t=0; _l=0; _s=0
+    [ -r "$_f" ] && read _n _t _l _s < "$_f"
+    _now=${RL_NOW:-$(cut -d. -f1 /proc/uptime)}
     case "$_n" in ''|*[!0-9]*) _n=0 ;; esac
     case "$_t" in ''|*[!0-9]*) _t=$_now ;; esac
-    [ $((_now - _t)) -gt 3600 ] && { _n=0; _t=$_now; }
-    [ "$_n" -ge 3 ] && return 1
-    echo "$((_n + 1)) $_t" > "$_f"
+    case "$_l" in ''|*[!0-9]*) _l=0 ;; esac
+    case "$_s" in ''|*[!0-9]*) _s=0 ;; esac
+    if [ $((_now - _t)) -gt 3600 ]; then _n=0; _t=$_now; _s=0; fi
+    if [ "$_n" -ge 3 ]; then
+        # 预算耗尽 -> 慢重试(默认 60s/次); 每次尝试都写盘 = 每次都可见
+        if [ $((_now - _l)) -ge "${RL_SLOW:-60}" ]; then
+            _s=$((_s + 1))
+            echo "3 $_t $_now $_s" > "$_f"
+            if [ "$_s" -ge 10 ] && command -v log >/dev/null 2>&1; then
+                log "WARN  $1 slow-retry x$_s (fast budget exhausted; still retrying every ${RL_SLOW:-60}s)"
+            fi
+            return 0
+        fi
+        return 1
+    fi
+    echo "$((_n + 1)) $_t $_now $_s" > "$_f"
     return 0
 }
 

@@ -1,6 +1,6 @@
 # 可靠性验收报告 (M4 自持性 + 汇总口径)
 
-> 生成时刻: 2026-11-01 01:59:13 (UTC+8)  生成器: `tools/acceptance/report.py`
+> 生成时刻: 2026-11-01 04:08:12 (UTC+8)  生成器: `tools/acceptance/report.py`
 > 合同: `docs/RELIABILITY_SPEC.md` v1.0  证据: 设备 `/data/gw/logs/*`(可复核) + 本机归档
 > 原则: 每个判定都指向一个设备侧文件与时间窗; 数据缺失记 **unknown**, 不记 0。
 
@@ -18,7 +18,7 @@
 
 ## 1. 时间窗与证据清单
 
-- 重启台账覆盖: 2026-09-09 09:42:08 .. 2026-10-31 18:44:31 (pstore 可回溯范围)
+- 重启台账覆盖: 2026-09-09 09:42:08 .. 2026-11-01 04:00:57 (pstore 可回溯范围)
 - 设备侧证据: `/data/gw/logs/{soak_daily,soak_boots,soak_alerts,fault_inject,drills,reboots.log,ne_events}`
 - PC 侧归档: `_local/evidence/soak/<UTC>/` (`tools/acceptance/soak.py pull`)
 - 重启归因原始证据: `/data/gw/logs/pstore/console-ramoops.*` + `/data/gw/healthdog.armlog`
@@ -89,15 +89,15 @@
 
 > 由 `tools/acceptance/boot_audit.py` 从 pstore/reboots.log/healthdog.armlog 生成。
 
-- 启动总数(pstore 台账): **83**
-- scheduled: 9
+- 启动总数(pstore 台账): **85**
+- scheduled: 10
 - clean: 34
 - sysrq: 8
-- crash: 22
+- crash: 23
 - unknown: 10
-- reboots.log 计划触发 11 条, 其中 9 条能在 pstore 匹配到启动
+- reboots.log 计划触发 12 条, 其中 10 条能在 pstore 匹配到启动
 - **台账覆盖缺口**: 以下触发行没有对应 pstore 记录(启动台账不完整, 已由 soak_boots.tsv 闭环): 2026-10-19 04:00:16, 2026-10-20 04:00:22
-- 达到 stable-healthy 的启动: 62 (占 75%)
+- 达到 stable-healthy 的启动: 63 (占 74%)
 
 <details><summary>逐次启动归因表(点开)</summary>
 
@@ -186,6 +186,8 @@
 | 2026-10-31 12:16:37 | clean | procd/reboot |
 | 2026-10-31 18:11:33 | clean | procd/reboot |
 | 2026-10-31 18:44:31 | clean | procd/reboot |
+| 2026-11-01 02:55:48 | crash | Internal error: Oops: 86000007 [#1 |
+| 2026-11-01 04:00:57 | scheduled | reboots.log(+32s) |
 
 </details>
 
@@ -225,52 +227,12 @@
 
 > 契约: `drills.tsv`(Lead v1.2) 是唯一演练标记文件; 消费方(svc-probe/state-truth/obs-ledger)按窗口打 excluded。
 
-- 窗口行总数: 53 (批级 36 / 逐条 17)
+- 窗口行总数: 77 (批级 0 / 逐条 0)
 - 残留 end_epoch=0 的行: **0** (无残留)
-- 演练总时长: 7186 s
+- 演练总时长: 0 s
 
 | start | end | kind | target | owner |
 |---|---|---|---|---|
-| 1793466287 | 1793466297 | drill-manual | dnsmasq | state-truth |
-| 1793466300 | 1793466309 | drill-manual | led_mgr | state-truth |
-| 1793466312 | 1793466321 | drill-manual | fan_mgr | state-truth |
-| 1793466324 | 1793466333 | drill-manual | ntp_keeper | state-truth |
-| 1793466360 | 1793466369 | drill-manual | v3httpd | state-truth |
-| 1793466372 | 1793466381 | drill-manual | v3httpd | state-truth |
-| 1793466384 | 1793466393 | drill-manual | dnsmasq | state-truth |
-| 1793466397 | 1793467084 | drill-manual | hostapd | state-truth |
-| 1793466398 | 1793466411 | drill-manual | eth0 down | state-truth |
-| 1793466414 | 1793466427 | drill-manual | eth0 down | state-truth |
-| 1793466430 | 1793466442 | drill-manual | rai0 down | state-truth |
-| 1793466445 | 1793466457 | drill-manual | rai0 down | state-truth |
-| 1793466477 | 1793466488 | drill-manual | hostapd | state-truth |
-| 1793466491 | 1793466502 | drill-manual | fast_watch | state-truth |
-| 1793466505 | 1793466516 | drill-manual | fast_watch | state-truth |
-| 1793466519 | 1793466528 | drill-manual | v3httpd | state-truth |
-| 1793466531 | 1793466543 | drill-manual | hostapd | state-truth |
-| 1793468235 | 1793468311 | drill-manual | v3httpd | svc-probe |
-| 1793469230 | 1793469291 | fault-injection | batch-K16 | soak-qa |
-| 1793469230 | 1793469250 | fault-injection | batch-K19 | soak-qa |
-| 1793469230 | 1793469230 | fault-injection | batch-K15 | soak-qa |
-| 1793469230 | 1793469291 | fault-injection | K16:v3httpd | soak-qa |
-| 1793469230 | 1793469230 | fault-injection | K15:authd | soak-qa |
-| 1793469231 | 1793469250 | fault-injection | K19:hostapd | soak-qa |
-| 1793469291 | 1793469334 | fault-injection | batch-K22 | soak-qa |
-| 1793469291 | 1793469373 | fault-injection | batch-K12 | soak-qa |
-| 1793469291 | 1793469373 | fault-injection | batch-K05 | soak-qa |
-| 1793469292 | 1793469373 | fault-injection | batch-K06 | soak-qa |
-| 1793469292 | 1793469334 | fault-injection | K22:wan_agg.sh | soak-qa |
-| 1793469292 | 1793469373 | fault-injection | K12:nerepair | soak-qa |
-| 1793469292 | 1793469373 | fault-injection | K05:wifi_guard.sh | soak-qa |
-| 1793469292 | 1793469373 | fault-injection | K06:reboot_sched.sh | soak-qa |
-| 1793469374 | 1793469441 | fault-injection | batch-K07 | soak-qa |
-| 1793469374 | 1793469441 | fault-injection | batch-K08 | soak-qa |
-| 1793469374 | 1793469438 | fault-injection | batch-K09 | soak-qa |
-| 1793469374 | 1793469414 | fault-injection | batch-K18 | soak-qa |
-| 1793469374 | 1793469441 | fault-injection | K07:log_keeper.sh | soak-qa |
-| 1793469375 | 1793469441 | fault-injection | K08:usb_mgr.sh | soak-qa |
-| 1793469375 | 1793469438 | fault-injection | K09:wan_eth.sh | soak-qa |
-| 1793469375 | 1793469414 | fault-injection | K18:atcid | soak-qa |
 
 ## 9. 假状态演练记录(判据类改动的实弹)
 

@@ -47,22 +47,28 @@ def rowline(r):
 
 
 def parse_rows(text):
-    """TSV -> list of dict；坏行（列数不足/非数字 ts）单独计数。"""
-    rows, bad = [], 0
+    """TSV -> (有效行 dict 列表, 坏行计数, 全部行序号列表)。
+
+    坏行 = 列数不是 8 或 ts 非数字。坏行**仍计入行数**（它们确实在文件里），
+    且只要末列是数字就参与 seq 连续性判定 —— 否则会把"列数异常"误判成"丢行"。
+    已知坏行来源：pre-sync 补记路径的旧版本 bug（已在 incident_ledger 修，待推送）。
+    """
+    rows, bad, seqs = [], 0, []
     for line in text.split(NL):
         if not line:
             continue
         f = line.split(TAB)
-        if len(f) != 8:
+        seq = int(f[-1]) if f and f[-1].isdigit() else None
+        if len(f) == 8 and f[0].isdigit() and f[7].isdigit():
+            ts, sev, cat, comp, dur, ref, detail, sq = f
+            rows.append({"ts": int(ts), "sev": sev, "cat": cat, "comp": comp,
+                         "dur": dur, "ref": ref, "detail": detail, "seq": int(sq)})
+            seqs.append(int(sq))
+        else:
             bad += 1
-            continue
-        ts, sev, cat, comp, dur, ref, detail, seq = f
-        if not ts.isdigit() or not seq.isdigit():
-            bad += 1
-            continue
-        rows.append({"ts": int(ts), "sev": sev, "cat": cat, "comp": comp,
-                     "dur": dur, "ref": ref, "detail": detail, "seq": int(seq)})
-    return rows, bad
+            if seq is not None:
+                seqs.append(seq)
+    return rows, bad, seqs
 
 
 def parse_seal(text):
@@ -91,10 +97,16 @@ def parse_seal(text):
 def audit_text(ledger_text, seal_text, now=None):
     """纯函数：给定台账/seal 文本，返回审计结果 dict（可单测）。"""
     now = now or int(time.time())
-    rows, bad = parse_rows(ledger_text)
+    rows, bad, seqs_all = parse_rows(ledger_text)
     seal = parse_seal(seal_text)
-    res = {"ok": True, "errors": [], "warnings": [], "rows": len(rows), "bad_rows": bad,
+    total_rows = len(rows) + bad
+    res = {"ok": True, "errors": [], "warnings": [], "rows": total_rows,
+           "valid_rows": len(rows), "bad_rows": bad,
            "bytes": len(ledger_text.encode()), "tiers": {}, "seal": seal}
+    if bad:
+        res["warnings"].append(
+            "有 %d 行列数异常（TSV 契约应为 8 列）——已知为 pre-sync 补记旧版本 bug，"
+            "修复已提交待推送；这些行仍计入行数并用末列 seq 参与连续性判定" % bad)
     md5 = hashlib.md5(ledger_text.encode()).hexdigest()
     res["md5"] = md5
     last = seal["last"]
@@ -106,11 +118,11 @@ def audit_text(ledger_text, seal_text, now=None):
     else:
         if last.get("md5") != md5:
             res["errors"].append("md5 不符：台账内容与 seal 末行不一致（被改过/未记账的追加）")
-        if str(last.get("rows", "")) != str(len(rows)):
-            res["errors"].append("行数不符：文件 %d 行 vs seal %s" % (len(rows), last.get("rows")))
+        if str(last.get("rows", "")) != str(total_rows):
+            res["errors"].append("行数不符：文件 %d 行 vs seal %s" % (total_rows, last.get("rows")))
         if str(last.get("bytes", "")) != str(res["bytes"]):
             res["errors"].append("字节数不符：文件 %d vs seal %s" % (res["bytes"], last.get("bytes")))
-    seqs = [r["seq"] for r in rows]
+    seqs = seqs_all
     first = seqs[0] if seqs else 0
     mx = max(seqs) if seqs else 0
     interior_gap = 0
@@ -196,13 +208,30 @@ def fetch(c, path):
     return out.read()
 
 
+def fetch_consistent(c, tries=6, gap=2.0):
+    """取**一致快照**：台账正被 5min tick 追加，两次独立 cat 之间可能插进一次 append，
+    于是「台账行数 < seal 行数」「seq 缺口」这类假 FAIL 会凭空出现（2026-11-01 04:10 实弹：
+    PC 侧读到 1982 行 vs seal 1996 行，误报丢 20 行）。
+    做法：先取 seal 再取台账，用 seal 末行的 md5 校验台账快照；不一致就重取。
+    """
+    ledger_b = seal_b = b""
+    attempt = 0
+    for attempt in range(1, tries + 1):
+        seal_b = fetch(c, DEV_SEAL)
+        ledger_b = fetch(c, DEV_LEDGER)
+        last = parse_seal(seal_b.decode("utf-8", "replace"))["last"]
+        if last.get("md5") == hashlib.md5(ledger_b).hexdigest():
+            return ledger_b, seal_b, attempt
+        time.sleep(gap)
+    return ledger_b, seal_b, attempt
+
+
 def run_device(no_report=False):
     sys.path.insert(0, HERE)
     import lgssh
     c = lgssh.connect()
     try:
-        ledger_b = fetch(c, DEV_LEDGER)
-        seal_b = fetch(c, DEV_SEAL)
+        ledger_b, seal_b, snap_tries = fetch_consistent(c)
         status_b = fetch(c, DEV_STATUS)
         _, out, _ = c.exec_command("sh /data/gw/retention_audit.sh --json 2>/dev/null", timeout=180)
         dev_audit = out.read().decode("utf-8", "replace").strip()
@@ -218,6 +247,11 @@ def run_device(no_report=False):
                      seal_b.decode("utf-8", "replace"), now=now)
     res["dev_audit"] = dev_audit
     res["dev_time"] = devtime[1] if len(devtime) > 1 else "?"
+    res["snap_tries"] = snap_tries
+    if res["seal_md5"] != res["md5"]:
+        res["errors"].append(
+            "快照不一致：重试 %d 次后台账 md5 仍与 seal 末行不符（台账正在被追加？请在无写入窗口重跑）"
+            % snap_tries)
     res["status"] = status_b.decode("utf-8", "replace")
     ov = verdict_overall(res)
     if dev_audit:
@@ -231,8 +265,9 @@ def run_device(no_report=False):
             ov = "FAIL"
     print("incident_audit v1.0  设备时刻 %s" % res["dev_time"])
     print("ledger=%s rows=%d bytes=%d md5=%s" % (DEV_LEDGER, res["rows"], res["bytes"], res["md5"]))
-    print("seal: lines=%d rows=%s bytes=%s md5=%s" % (
-        res["seal"]["lines"], res["seal_rows"], res["seal_bytes"], res["seal_md5"]))
+    print("seal: lines=%d rows=%s bytes=%s md5=%s  (snapshot_attempts=%d)"
+          % (res["seal"]["lines"], res["seal_rows"], res["seal_bytes"],
+             res["seal_md5"], res.get("snap_tries", 0)))
     print("seq: first=%d last=%d interior_gaps=%d gone=%d recorded_removed=%d"
           % (res["first_seq"], res["last_seq"], res["gaps"], res["gone"],
              res["recorded_removed"]))

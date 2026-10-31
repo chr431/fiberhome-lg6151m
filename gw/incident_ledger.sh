@@ -926,12 +926,20 @@ flush_pending() {
     [ "$_n" -gt 0 ] || return 0
     _out=/tmp/il_pend.$$
     : > "$_out"
+    # 缓冲行 = key ts sev cat comp dur evref detail（8 段）。补记时必须**逐段重建**，
+    # 早期版本把 f3- 整段拼上去又追加了一次 detail -> 落出 9~11 列的坏行，
+    # 破坏 8 列 TSV 契约（2026-11-01 04:07 冷启动补记 14 行实弹）。
     while IFS= read -r R; do
         _k=$(printf '%s' "$R" | cut -f1)
         _ts=$(printf '%s' "$R" | cut -f2)
-        _rest=$(printf '%s' "$R" | cut -f3-)
-        _det=$(printf '%s' "$R" | cut -f8)
-        printf '%s\t%s\t%s\tpre_sync=1 src_ts=%s %s\n' "$_k" "$NOW" "$_rest" "$_ts" "$_det" >> "$_out"
+        _sev=$(printf '%s' "$R" | cut -f3)
+        _cat=$(printf '%s' "$R" | cut -f4)
+        _comp=$(printf '%s' "$R" | cut -f5)
+        _dur=$(printf '%s' "$R" | cut -f6)
+        _ref=$(printf '%s' "$R" | cut -f7)
+        _det=$(printf '%s' "$R" | cut -f8-)
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\tpre_sync=1 src_ts=%s %s\n' \
+            "$_k" "$NOW" "$_sev" "$_cat" "$_comp" "$_dur" "$_ref" "$_ts" "$_det" >> "$_out"
     done < "$PENDF"
     cat "$_out" >> "$BATCH"
     IL_PENDING=$_n

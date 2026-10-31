@@ -50,6 +50,27 @@ NOW=$IL_NOW
 case "$NOW" in ''|*[!0-9]*) NOW=$(date +%s) ;; esac
 case "$NOW" in ''|*[!0-9]*) NOW=0 ;; esac
 
+# ---- 一致性快照 ----------------------------------------------------------
+# 台账正被 5min tick 追加：若一边 md5sum 一边 wc -l，中间插进一次 append 就会
+# 报出"行数/字节不符"的**假 FAIL**（2026-11-01 04:10 实弹：PC 侧误报丢 20 行）。
+# 做法：先把台账 cp 到 /tmp 快照，再用快照做全部计算；并用 seal 末行 md5 校验
+# 快照一致性，不一致就重拍（最多 4 次）。
+SRC=$LEDGER
+SNAP=/tmp/ra_snap.$$
+SNAP_TRY=0
+SNAP_OK=no
+if [ -s "$SRC" ]; then
+    while [ "$SNAP_TRY" -lt 4 ]; do
+        SNAP_TRY=$((SNAP_TRY + 1))
+        cp "$SRC" "$SNAP" 2>/dev/null || break
+        _sm=$(md5sum "$SNAP" 2>/dev/null | cut -d' ' -f1)
+        _lm=$(tail -n 1 "$SEAL" 2>/dev/null | sed -n 's/.* md5=\([0-9a-f]*\).*/\1/p')
+        if [ -n "$_sm" ] && [ "$_sm" = "$_lm" ]; then SNAP_OK=yes; break; fi
+        sleep 2
+    done
+    LEDGER=$SNAP
+fi
+
 # 合同下限（RELIABILITY_SPEC R1.3：合同 7d/1d；本项目内部目标 90d/30d/7d）
 C_SEV1=7;  C_SEV2=1;  C_SEV3=1
 T_SEV1=90; T_SEV2=30; T_SEV3=7
@@ -256,10 +277,12 @@ run_audit() {
     [ "$IL_OK_MD5" = yes ] || OVERALL=FAIL
     [ "$IL_OK_ACC" = yes ] || OVERALL=FAIL
     [ "$IL_OK_SEV1" = yes ] || OVERALL=FAIL
+    [ "$SNAP_OK" = yes ] || OVERALL=FAIL
     # 输出
     {
         echo "retention_audit v1.0  ts=$NOW  ($(date '+%F %T %Z'))"
-        echo "ledger=$LEDGER rows=$IL_ROWS bytes=$IL_BYTES md5=$IL_MD5"
+        echo "ledger=$SRC rows=$IL_ROWS bytes=$IL_BYTES md5=$IL_MD5"
+        echo "SNAPSHOT consistent=$SNAP_OK attempts=$SNAP_TRY note=台账读取期可能被 tick 追加, 一致性快照后计算"
         echo "seal=$SEAL lines=$IL_SEAL_N last_rows=$IL_SROWS last_bytes=$IL_SBYTES last_md5=$IL_SMD5"
         echo "INTEGRITY rows_match=$IL_OK_ROWS bytes_match=$IL_OK_BYTES md5_match=$IL_OK_MD5 seq_contiguous=$IL_OK_SEQ gaps=$IL_GAPS gaps_accounted=$IL_OK_ACC removed_total=$(( IL_RM1 + IL_RM2 + IL_RM3 )) rm1=$IL_RM1 rm2=$IL_RM2 rm3=$IL_RM3 sev1_never_pruned=$IL_OK_SEV1"
         echo "TIER SEV1 rows=$R1 bytes=$B1 oldest_ts=$O1 oldest_age_days=$(days "$_a1") target_days=$T_SEV1 contract_days=$C_SEV1 verdict=$V1"
@@ -397,7 +420,7 @@ case "$1" in
     echo "retention_audit ts=$NOW overall=$OVERALL sev1_days=$(sed -n 's/^TIER SEV1 .*oldest_age_days=\([0-9.]*\).*/\1/p' "$REPORT" 2>/dev/null) report=$REPORT"
     ;;
 --json)
-    echo "ts=$NOW overall=$OVERALL rows=$IL_ROWS md5_ok=$IL_OK_MD5 rows_ok=$IL_OK_ROWS gaps=$IL_GAPS gaps_accounted=$IL_OK_ACC sev1_never_pruned=$IL_OK_SEV1 presync=$IL_PRESYNC backfill=$IL_BACKFILL drill=$IL_DRILLROWS hb_age=$_hb"
+    echo "ts=$NOW overall=$OVERALL rows=$IL_ROWS md5_ok=$IL_OK_MD5 rows_ok=$IL_OK_ROWS gaps=$IL_GAPS gaps_accounted=$IL_OK_ACC sev1_never_pruned=$IL_OK_SEV1 presync=$IL_PRESYNC backfill=$IL_BACKFILL drill=$IL_DRILLROWS hb_age=$_hb snap_ok=$SNAP_OK snap_tries=$SNAP_TRY"
     ;;
 *)
     cat "$REPORT" 2>/dev/null

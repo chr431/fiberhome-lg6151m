@@ -1,5 +1,13 @@
 #!/bin/sh
-# watchdog.sh v1.41 -- on-device continuous invariant monitor.
+# watchdog.sh v1.44 -- on-device continuous invariant monitor.
+# v1.44 (2026-10-31 authd 首崩断网轮): authd 自愈配方修复 — _acmd 原以 sed
+#   字面量提取, 引号(api_agg v2.51 '...' 落盘格式)未求值, spawn sh -c 把
+#   "'/data/gw/authd eth0'" 当单个命令名 → ENOENT 静默失败(>/dev/null 吞错);
+#   22:27 authd vfprintf 首崩后 3 次拉活全灭 + 预算 3/h 耗尽 → 全网断 2.5h
+#   (检测链无辜: 17s WARN/57s 首拉, 检测/记录/决策全对, 唯执行链断裂)。
+#   改 subshell `. conf` 求值(与 rc10/api_agg 同配方); 判活/kill 改 argv0
+#   basename(通用插座); spawn 输出留 /tmp/watchdog_authd.out + 1s 后校验,
+#   失败即 FAIL 行(不再可能无声空转到人工)。
 # v1.41 (2026-10-31 巡检轮): authd 判定恢复"无信号不判"守卫 — authd_state
 #   非原子覆盖写与本守护 30s 周期偶发撕读, v1.40 曾把空读当极旧判死(假 FAIL)。
 # v1.40 (2026-10-31 时间源统一轮): 新鲜度/预算窗口时基 epoch→uptime ——
@@ -500,10 +508,19 @@ run_cycle() {
     fi
 
     # ---- uplink auth (generic AUTHD_CMD; no private syntax here) ----
-    _aen=$(sed -n 's/^ENABLE=//p' /data/gw/uplink.conf 2>/dev/null | tail -1)
-    _acmd=$(sed -n 's/^AUTHD_CMD=//p' /data/gw/uplink.conf 2>/dev/null | tail -1)
+    # v1.44(authd 首崩断网轮): _acmd/_aen 提取改 subshell `. conf` 求值 — 原 sed
+    #   字面量保留 AUTHD_CMD 的引号(api_agg v2.51 落盘格式 '...'), spawn sh -c
+    #   "'/data/gw/authd eth0'" 把带空格整串当单个命令名 → ENOENT 且 >/dev/null
+    #   吞错 = 静默拉活失败。2026-10-31 22:27 authd vfprintf 首崩(NE 史唯一)后
+    #   3 次拉活全灭 + 预算 3/h 耗尽 → 断网 2.5h; 检测链无辜(17s WARN/57s 首拉,
+    #   实弹时间轴 22:27:47..22:31:06)。与 rc10 `. conf` / api_agg source 同配方,
+    #   引号由 shell 求值掉, 其余敏感变量留在 subshell 不外泄。进程判活与 pidof
+    #   kill 同步改 argv0 basename(通用插座: AUTHD_CMD 换任意二进制均成立)。
+    _aen=$( (. /data/gw/uplink.conf 2>/dev/null; echo "${ENABLE:-}" ) )
+    _acmd=$( (. /data/gw/uplink.conf 2>/dev/null; echo "${AUTHD_CMD:-}" ) )
     if [ "$_aen" = "1" ] && [ -n "$_acmd" ]; then
-        _apid=$(pidof authd 2>/dev/null | awk '{print $1}')
+        _abin=$(basename "${_acmd%% *}" 2>/dev/null)
+        _apid=$(pidof "${_abin:-authd}" 2>/dev/null | awk '{print $1}')
         _ast=$(awk '{print $2}' /tmp/authd_state 2>/dev/null)
         case "$_ast" in ''|*[!0-9]*) _ast="" ;; esac
         # v1.40: authd_state 的 ts 是 epoch 契约(私有 authd 写); 同 boot 内差值
@@ -535,8 +552,14 @@ run_cycle() {
             if strike authd; then
                 if rl_ok authd; then
                     [ -n "$_apid" ] && kill -9 "$_apid" 2>/dev/null
-                    log "EVT restart authd"
-                    spawn authd /dev/null sh -c "$_acmd"
+                    log "EVT restart authd (recipe=[$_acmd])"
+                    spawn authd /tmp/watchdog_authd.out sh -c "$_acmd"
+                    # v1.44: 拉起后校验 — 旧版 spawn 失败(引号/路径/权限)无声,
+                    #   预算耗尽后空转到人工。输出留 /tmp 落证据, 1s 后进程不在
+                    #   即 FAIL 行(下次轮询 strike 链自然续拉)。
+                    sleep 1
+                    pidof "${_abin:-authd}" >/dev/null 2>&1 || \
+                        log "FAIL  authd restart did not come up (see /tmp/watchdog_authd.out)"
                 else
                     log "WARN  authd restart budget exhausted (3/h) — alert only"
                 fi
@@ -906,7 +929,7 @@ if [ "$_rc" != 0 ]; then
     exit 0
 fi
 # v1.42: 启动横幅改用 VER 单一来源(此前字面量停在 v1.38, 识别/syslog 断言被骗)
-VER=1.42
+VER=1.44
 log "===== watchdog v$VER start (svc_lib primitives + minimal parsers + batch3 metrics; avail keys + outcome probes + bearer-follow dp; alert LED 5G orange) ====="
 logger -t watchdog "watchdog v$VER start"
 # initialize state to current (suppress initial alarms)

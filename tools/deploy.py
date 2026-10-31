@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """deploy.py v2.35 -- single source of truth for PC<->CPE deployment + drift guard.
 
+v2.36 (判据审计轮): MANIFEST +gw/avail_watch.sh(秒级边缘侦测器)。
 v2.35 (vaguard 退役轮): +ssh_write_file 分块写(900KB/块, 首块 cat> 后续 cat>>),
      push/put 两通道同换 —— busybox 级 1.6MB 大件免疫 dropbear >1.2MB 单次
      stdin 写入杀会话陷阱(AGENTS 陷阱表, 1.03MB 实测可过)。
@@ -98,6 +99,7 @@ MANIFEST = [
     ("gw/v3_rc10.extend.sh", "/data/gw/rc19.sh"),         # rc19v2: br-lan+wifi+wan stack
     ("gw/usb_mgr.sh", "/data/gw/usb_mgr.sh"),             # USB-C device-mode service mgr (rndis0->br-lan + switches)
     ("gw/avail_sampler.sh", "/data/gw/avail_sampler.sh"), # component availability sampler (log_keeper-driven; avail round)
+    ("gw/avail_watch.sh", "/data/gw/avail_watch.sh"),   # heuristic edge watcher (2s loop; avail audit round)
     ("gw/wifi_macplan.sh", "/data/gw/wifi_macplan.sh"),  # factory MAC plan (wifi_up BSSIDs + api uplink native-MAC restore; v1.29 split)
     ("gw/wifi_autoch.sh", "/data/gw/wifi_autoch.sh"),    # auto-channel scanner (wifi_up CH=0 path; v1.29 split)
     ("gw/wifi_up.sh", "/data/gw/wifi_up.sh"),      # AP bring-up (factory recipe)

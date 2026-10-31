@@ -367,8 +367,11 @@ while :; do
             fi
         done < /data/gw/agg_pins.conf
     fi
-    # v2.24: 读取 authd 会话信号(每环循) — 新鲜度: up<=45s(重询问周期30s+余量),
-    # down<=60s(authd 30s 重试循环持续刷新); 过期视为无信号
+    # v2.24: 读取 authd 会话信号(每环循) — 新鲜度窗口 v3.9 校准: 原按"服务器
+    #   30s 重询问"假设取 up<=45s; 2026-10-31 实测服务端 Req-Identity 节奏为
+    #   ~180s(prv_authd v2.2 只认证层证据刷新), 45s 窗下协议信号几乎恒陈旧
+    #   =形同虚设。窗口放宽 up<=240s / down<=90s; 安全性不变 —— v2.26 起 "up"
+    #   本就只是非充分证据(须叠加数据面 ICMP), 放宽只影响提示可用性。
     AS=""; AST=0; ASAGE=999999
     if [ -r /tmp/authd_state ]; then
         set -- $(cat /tmp/authd_state 2>/dev/null)
@@ -382,8 +385,8 @@ while :; do
             ;; esac
     fi
     AUTHD_UP=0; AUTHD_DOWN=0
-    [ "$AS" = up ] && [ $ASAGE -le 45 ] && AUTHD_UP=1
-    [ "$AS" = down ] && [ $ASAGE -le 60 ] && AUTHD_DOWN=1
+    [ "$AS" = up ] && [ $ASAGE -le 240 ] && AUTHD_UP=1
+    [ "$AS" = down ] && [ $ASAGE -le 90 ] && AUTHD_DOWN=1
     # v3.2: 认证会话信号边沿留痕(up/down 切换是家宽判活的协议级证据)
     if [ "$AS" != "$AS_LAST" ]; then
         log "EVT authd signal ${AS_LAST:-none} -> ${AS:-none} (age=${ASAGE}s up=$AUTHD_UP down=$AUTHD_DOWN)"

@@ -1,5 +1,7 @@
 #!/bin/sh
-# svc_lib.sh v1.5 -- shared supervision, lock, heartbeat and minimal-parser library.
+# svc_lib.sh v1.6 -- shared supervision, lock, heartbeat and minimal-parser library.
+# v1.6 (2026-10-31 判据审计轮): SVC_TABLE +avail_watch(秒级边缘侦测器; hb 30s
+#   写一次, max-hb-age 120)。
 # v1.5 (2026-10-31 时间源统一轮): +wa_age() —— /tmp/wan_alive 新鲜度统一走
 #   uptime(hb= 优先, 免疫 NTP 跳变与跨 boot 残值; ts= 旧格式回退); rl_ok 重启
 #   预算窗口改 uptime 时基(原 epoch 窗在 NTP 跳变时会误重置/误保留预算)。
@@ -274,4 +276,5 @@ healthdog|healthdog[.]sh|healthdog.sh|sh /data/gw/healthdog.sh|/tmp/healthdog.hb
 dial_keeper|dial_keeper[.]sh|dial_keeper.sh|sh /data/gw/dial_keeper.sh|/tmp/dial_keeper.hb|90|LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib PATH=/data/gw/sbin:/data/gw/bin:/usr/sbin:/usr/bin:/sbin:/bin:/fhrom/bin:/fhrom/fhshell
 usb_mgr|usb_mgr[.]sh|usb_mgr.sh|sh /data/gw/usb_mgr.sh daemon|/tmp/usb_mgr.hb|180|
 nerepair|nerepair|bin/nerepair|sh /data/gw/nerepair_launch.sh|/tmp/nerepair.hb|180|
+avail_watch|avail_watch[.]sh|avail_watch.sh|sh /data/gw/avail_watch.sh|/tmp/avail_watch.hb|120|
 '

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """selftest.py -- assertion-based functional test suite for the LG6151M gateway.
+v2.70 (2026-10-31 判据审计轮): t_avail +avail_watch 护栏(进程/hb≤120s/
+  边缘台账在位且≤4000 行)。
 v2.68 (2026-10-31 质量轮): 类别名存在性校验(拼错=exit 1, 原 0 测试全绿);
   dev() timeout 形参透传到 lgssh.run(原恒 60s)。
 v2.67 (2026-10-26 SIGSEGV §8.13): 旧内核修复栈整体退役 -- t_fixstack 改为退役
@@ -2325,13 +2327,24 @@ def t_avail():
     tf = dev("test -f /data/gw/logs/avail_transitions.tsv; echo $?").strip()
     syn = dev("sh -n /data/gw/avail_sampler.sh 2>&1 && sh -n /data/gw/www/api_avail.sh 2>&1; echo $?").strip()
     rte = dev("grep -c '^    avail)' /data/gw/www/api.sh 2>/dev/null").strip()
+    # v2.70(判据审计轮): 秒级边缘侦测器在位(进程+心跳+台账+轮转上限)
+    aw = dev("pgrep -f 'avail_watch[.]sh' >/dev/null && echo 1 || echo 0; "
+             "test -f /data/gw/logs/avail_edges.tsv && echo 1 || echo 0; "
+             "wc -l < /data/gw/logs/avail_edges.tsv 2>/dev/null || echo 0").split()
+    aw_hb = dev("up=$(cut -d. -f1 /proc/uptime); hb=$(cat /tmp/avail_watch.hb 2>/dev/null); "
+                "[ -n \"$hb\" ] && echo $((up - hb)) || echo -1").strip()
     ok = (gap.lstrip("-").isdigit() and 0 <= int(gap) <= 1500
           and roster.isdigit() and int(roster) >= 24
           and len(keys) == 8 and all(x == "1" for x in keys)
-          and hf == "0" and tf == "0" and syn == "0" and rte == "1")
+          and hf == "0" and tf == "0" and syn == "0" and rte == "1"
+          and len(aw) == 3 and aw[0] == "1" and aw[1] == "1"
+          and aw[2].isdigit() and int(aw[2]) <= 4000
+          and aw_hb.lstrip("-").isdigit() and 0 <= int(aw_hb) <= 120)
     record(t_avail._test_name, "system", ok,
-           "hb_gap=%s roster=%s keys=%s hf=%s tf=%s syntax=%s route=%s"
-           % (gap, roster, keys, hf, tf, syn, rte))
+           "hb_gap=%s roster=%s keys=%s hf=%s tf=%s syntax=%s route=%s watch=%s/%s edges=%s whb=%s"
+           % (gap, roster, "".join(keys), hf, tf, syn, rte,
+              aw[0] if aw else "?", aw[1] if len(aw) > 1 else "?",
+              aw[2] if len(aw) > 2 else "?", aw_hb))
 
 @test("avail: NE 假归因演练 (v1.5: 死者≠活实例不得置 deg)")
 def t_avail_ne_drill():

@@ -121,6 +121,38 @@ new_lines "$DIR/netcfg_repairs.tsv" "$oRL" "$RL" > "$WINT.rl"
 new_lines /tmp/api.log "$oAL" "$AL"            > "$WINT.al"
 new_lines "$DIR/dmesg.log" "$oDL" "$DL"        > "$WINT.dl"
 
+# ⑤ 秒级边缘事件(v1.14, avail_watch.sh 2s 轮询 4s 磁滞): 窗口收割 →
+#    ① 组件窗口降级(down 边缘>0 → 至少 deg, 快照假绿根治)
+#    ② 合成事件表行(down@T1 + up@T2 → "down->up edge Xs" 带精确时长;
+#      未配对 down → "up->down edge open")—— GUI 事件表零改动直显。
+#    首采/保留位游标为 0 时不回灌历史文件。
+EDGES=$DIR/avail_edges.tsv
+EL=$(lc "$EDGES")
+oEL=$(sed -n '8p' "$SESS" 2>/dev/null)
+case "$oEL" in ''|0) oEL=$EL ;; esac
+new_lines "$EDGES" "$oEL" "$EL" > "$WINT.el"
+: > "$WINT.edg"
+if [ -s "$WINT.el" ] && [ "$PRESYNC" != 1 ]; then
+    awk '
+    {
+      ts=$1; id=$3; ev=$4
+      comp = id=="gui.serve"?"sys.gui": id=="ssh.banner"?"sys.ssh": \
+             (id=="dns.pids"||id=="br.up")?"lan.bridge": \
+             id=="wpa.ra0"?"lan.wifi2g": id=="wpa.rai0"?"lan.wifi5g": \
+             id=="eth.carrier"?"wan.ethernet":""
+      if (comp=="") next
+      if (ev=="edge_down") { dn[comp]++; if (!open[comp]) open[comp]=ts }
+      else if (ev=="edge_up" && open[comp]) {
+          printf "%s\t%s\tdown->up\tedge %ds\n", ts, comp, ts-open[comp]
+          open[comp]=0
+      }
+    }
+    END {
+      for (c in dn) print c "|" dn[c] > "'"$WINT.edg"'"
+      for (c in open) if (open[c]) printf "%s\t%s\tup->down\tedge open\n", open[c], c
+    }' "$WINT.el" >> "$TF"
+fi
+
 # ① 窗口 FAIL 迁移: 采样间隔内发生过又自愈的故障, 快照已回绿, 此处记账
 sed -n 's/.*FAIL detail \([a-z0-9_]*\).*/\1/p' "$WINT.wl" | sort -u > "$WINT.fk"
 
@@ -447,6 +479,13 @@ echo "$TABLE" | while IFS='|' read -r id name grp src; do
             [ "${WIFI_GUARD_WARN:-0}" -gt 0 ] && lv=deg
             [ "${DEAUTH_N:-0}" -gt 20 ] && lv=deg
         fi
+        # v1.14: 秒级边缘窗口命中(avail_watch) — 快照假绿根治: 窗口内出现过
+        #        down 边缘(哪怕 4s)的组件至少 deg, 时长细节在事件表的 edge 行
+        _edn=$(grep -m1 "^$id|" "$WINT.edg" 2>/dev/null | cut -d'|' -f2)
+        case "$_edn" in
+            ''|*[!0-9]*) ;;
+            *) lv=deg ;;
+        esac
     fi
     if [ "$MAI_WIN" = 1 ] && [ "$lv" != down ]; then lv=mai; fi
     [ "$PRESYNC" = 1 ] || bump "$id" "$lv"
@@ -462,16 +501,17 @@ echo "$TABLE" | while IFS='|' read -r id name grp src; do
         [ "$id" = feat.sms ] && [ "${SMS_FAIL:-0}" -gt 0 ] && cause="sms"
         { [ "$id" = lan.wifi2g ] || [ "$id" = lan.wifi5g ]; } && \
             { [ "${WIFI_GUARD_WARN:-0}" -gt 0 ] || [ "${DEAUTH_N:-0}" -gt 20 ]; } && cause="wifi"
+        [ "$cause" = "-" ] && grep -q "^$id|" "$WINT.edg" 2>/dev/null && cause="edge"
         [ "$lv" = mai ] || [ "$pv" = mai ] && cause="maint"
         echo "$NOW	$id	$pv->$lv	$cause" >> "$TF"
     fi
 done
 
-# ---- 会话态原子更新 (10 行: hour/wl/sl/ne/rl/last_ts/day/(保留位)apiCur/dmesgCur) ----
+# ---- 会话态原子更新 (10 行: hour/wl/sl/ne/rl/last_ts/day/edgesCur/apiCur/dmesgCur) ----
 S=/tmp/avail_sess.$$
 oDAY=$(sed -n '7p' "$SESS" 2>/dev/null)
 { echo "$HOUR"; echo "$WL"; echo "$SL"; echo "$NL"; echo "$RL"
-  echo "$NOW"; echo "$TODAY"; echo "0"; echo "$AL"; echo "$DL"; } > "$S"
+  echo "$NOW"; echo "$TODAY"; echo "$EL"; echo "$AL"; echo "$DL"; } > "$S"
 mv "$S" "$SESS"
 
 # ---- 跨日归并: 用更新前会话日, 从 HF 归并该日 → DF ----

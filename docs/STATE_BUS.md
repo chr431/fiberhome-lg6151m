@@ -312,3 +312,57 @@ lgssh "cat /tmp/led_mgr.verify; grep -c READBACK-FAIL /tmp/led_mgr.log"
 4. **sys.ssh 的 L2 证据每 300s 一次**：两次之间的服务级故障只有 L1（监听位）可见；
    banner 证据过期（>900s）时判 unknown，绝不判绿。
 5. **feat.fan / feat.usb 只有 L1 心跳**：GUI 显式渲染为「仅存在性」。
+---
+
+## 11. 实施记录（2026-11-01 上线，设备侧实测）
+
+### 11.1 部署结果（可复核）
+
+| 项 | 结果 | 证据 |
+|---|---|---|
+| state.json / state.led 发布 | 正常，16 组件全带 crit，overall=ok、boot=0 | /data/gw/run/state.json、/data/gw/run/state.led |
+| fast_facts.tsv | 5 列稳定（NF!=5 行数=0），心跳 60s、失败期 1s | /data/gw/logs/fast_facts.tsv |
+| lag_audit.tsv | detect/publish 双行 + 30s beat 心跳 | /data/gw/logs/lag_audit.tsv |
+| state_events.tsv | 真实迁移行（含 flags=drill 标注） | /data/gw/logs/state_events.tsv |
+| LED 读回校验 | ok=1（每轮写后读回） | /tmp/led_mgr.verify |
+| watchdog 监督 | `OK fast_watch (recovered)`、状态键 `fast_watch=0` | /tmp/watchdog.log、/tmp/watchdog_state |
+| watchdog 自愈 | kill -9 后 **48s** 被拉回（`EVT restart fast_watch (live=0 hb=48s)`） | /tmp/watchdog.log |
+| --dry N 零副作用 | 运行前后 /data/gw/run 目录 diff 为空 | 部署窗日志 A1.log |
+| t_avail 七条断言 | fw_proc=1 / nf5bad=0 / fw_hb=5s / edges=10 / crit=16 / lag60=2 全过 | 部署窗日志 A1.log |
+
+### 11.2 实测检测时延（R2.2）
+
+| 注入 | 组件 | 检测时延（lag_audit detect 行） |
+|---|---|---|
+| kill -9 v3httpd | sys.gui | **1010 ms** |
+| kill -9 dnsmasq | lan.bridge | **1990 ms**（2 拍确认） |
+| kill -9 hostapd | lan.wifi2g | **1000 ms** |
+| ip link set eth0 down | wan.ethernet | **10 ms**（同一拍内采到） |
+
+> 结论：文件/监听类事实 **1 拍（≈1s）内**检出；网络探针 2 拍确认。均 < 3s。
+
+### 11.3 未达标项与未决风险（必须如实记录）
+
+1. **fast_watch 存在未定位的周期性退出（exit=2）**：在 01:00–01:12 的部署+演练活跃窗口内退出 5 次
+   （间隔 83–204s），每次由 watchdog 在 30–90s 内拉回，期间状态总线出现 30–90s 盲窗。
+   实测：无 NE 记录、无 dmesg、无 stderr 输出；设备静默后同一实例稳定运行 >5min。
+   已加 v1.8 的 STEP 相位标记（/tmp/fast_watch.exit.tsv 记录 exit/tick/step/up），下一次发生即可定位相位。
+   **在根因定位前，R2.2/R2.3 的「持续 1s 监测」只能声明为"运行时满足、可用性待修"。**
+2. **演练覆盖不完整（R2.7）**：20 次注入中只有 4 次拿到可度量的红迁移；其余落在上述盲窗内，
+   或因判据阈值大于观察窗口而不可观测（fan_mgr hb 60s、ntp_keeper hb 4200s、log_keeper hb 180s）。
+   因此 **R2.7 未达标**（需要一次完整、无干扰的 20 次演练）。
+3. **浏览器渲染未经真实浏览器验证**：gui 阶段的 lag 行目前只有 1 条（来自等价客户端 gui_client.py），
+   led 阶段行为 0（led_mgr 的 ver 切换未赶上演练窗口）。R2.5 的"呈现滞后 p99"样本量不足。
+4. **设备侧自观测在 eth0 down 场景会自骗**（svc-probe 实测）：设备侧 gw.tcp80 红 179s，同刻客户端只见 56s。
+   根因是路由变化让设备连不上自己的 LAN IP。**建议**：sys.gui 判据在 wan.ethernet=down 时降为
+   unknown 而不是 down（或改用 unix socket / lo 判据），否则会制造假红。
+5. dropbear 未做 kill 演练（若 watchdog 未拉回则彻底失联，风险不可接受）——**如实标注未演练**。
+6. 运行中的 watchdog **不重读** svc_lib 的 SVC_TABLE：改表后必须重启 watchdog 才生效（本次已实测）。
+   04:00 冷启动会自然重读；**冷启动验收清单**：`grep '^fast_watch' /data/gw/svc_lib.sh` 有行、
+   `pgrep -f fast_watch` 有进程、/tmp/fast_watch.beat 新鲜、state.json 出现、fast_facts.tsv 增长。
+
+### 11.4 已修的上游缺陷（本次顺带根治）
+
+avail_sampler 的边缘收割字段位置假设与生产方日志格式不匹配 → "秒级边缘→窗口降级"防假绿机制
+**静默失效**（实测 8 行台账 6 行 NOMATCH）。已抽出 gw/state_edge_lib.sh 作唯一契约实现，
+生产方（fast_watch）与消费方（avail_sampler）共用，并有 --selftest 往返断言（ids=7 parsed=14）。

@@ -113,6 +113,15 @@ up_ms() {
     echo $((_c * 10))
 }
 
+# /tmp 跨重启可能留残值(rc.extend v3.5 实证: /tmp 非 tmpfs, ntp_synced/wan_alive 等会跨 boot
+#   残留)。本脚本把 uptime 存进 /tmp 做节流/预算/跨拍确认 —— 重启后这些值**大于**当前 uptime,
+#   若不清理会导致: tick 永久节流 / 同类永久冷却 / 预算永久耗尽 = 自愈器"开机即瘫"。
+#   统一入口: 任何读出的 uptime 若 >= 当前值, 一律当 0(无效)。
+san_up() {
+    case "$1" in ''|*[!0-9]*) echo 0; return ;; esac
+    if [ "$1" -lt "$UP_NOW" ]; then echo "$1"; else echo 0; fi
+}
+
 # ---------------- 纯逻辑(可自检; 全部只读) ----------------
 # /tmp/wan_mode 内容 -> "S1 S2"; 空=旁路/未知
 agg_ss() {
@@ -346,20 +355,20 @@ rl_put() { # $1=kind $2=up $3=count $4=win
 # 0=允许修复; 1=冷却中; 2=预算耗尽
 rl_check() { # $1=kind
     _r=$(rl_get "$1")
-    _lu=$(printf '%s' "$_r" | cut -d' ' -f1)
+    _lu=$(san_up "$(printf '%s' "$_r" | cut -d' ' -f1)")
     _ct=$(printf '%s' "$_r" | cut -d' ' -f2)
-    _wn=$(printf '%s' "$_r" | cut -d' ' -f3)
-    case "$_lu$_ct$_wn" in ''|*[!0-9]*) _lu=0; _ct=0; _wn=0 ;; esac
+    _wn=$(san_up "$(printf '%s' "$_r" | cut -d' ' -f3)")
+    case "$_ct" in ''|*[!0-9]*) _ct=0 ;; esac
     if [ "$_lu" -gt 0 ] && [ $(( UP_NOW - _lu )) -lt "$CFG_HEAL_CD" ]; then return 1; fi
     budget_ok "$_ct" "$_wn" "$UP_NOW" || return 2
     return 0
 }
 rl_record() { # $1=kind
     _r=$(rl_get "$1")
-    _lu=$(printf '%s' "$_r" | cut -d' ' -f1)
+    _lu=$(san_up "$(printf '%s' "$_r" | cut -d' ' -f1)")
     _ct=$(printf '%s' "$_r" | cut -d' ' -f2)
-    _wn=$(printf '%s' "$_r" | cut -d' ' -f3)
-    case "$_lu$_ct$_wn" in ''|*[!0-9]*) _lu=0; _ct=0; _wn=0 ;; esac
+    _wn=$(san_up "$(printf '%s' "$_r" | cut -d' ' -f3)")
+    case "$_ct" in ''|*[!0-9]*) _ct=0 ;; esac
     [ $(( UP_NOW - _wn )) -ge 3600 ] && { _ct=0; _wn=$UP_NOW; }
     [ "$_wn" = 0 ] && _wn=$UP_NOW
     rl_put "$1" "$UP_NOW" $((_ct + 1)) "$_wn"
@@ -558,7 +567,7 @@ tick() {
 
     _pu=0; _pd=""
     [ -s $PENDF ] && read _pu _pd < $PENDF
-    case "$_pu" in ''|*[!0-9]*) _pu=0 ;; esac
+    _pu=$(san_up "$_pu")
     if [ "$_pu" -gt 0 ] && [ "$_pd" = "$DET" ] && [ $(( UP_NOW - _pu )) -ge "$CFG_HEAL_CONFIRM" ]; then
         rm -f $PENDF
         cnt_bump detects
@@ -728,6 +737,11 @@ selftest() {
     budget_ok 0 0 1000;      _t 0 $? "budget fresh"
     budget_ok 3 500 1000;    _t 1 $? "budget exhausted"
     budget_ok 3 0 4000;      _t 0 $? "budget window rolled"
+    # 跨重启残值: 存下来的 uptime 若 >= 当前 uptime 必须判无效(否则开机即瘫)
+    _t 0 "$(san_up "")"                         "san_up empty"
+    _t 0 "$(san_up "abc")"                      "san_up nonnum"
+    _t 0 "$(san_up $((UP_NOW + 5000)))"         "san_up from-future (stale across reboot)"
+    _t $((UP_NOW - 100)) "$(san_up $((UP_NOW - 100)))" "san_up valid"
     is_subset "nat:eth0 br:eth1" "br:eth1";  _t 0 $? "is_subset yes"
     is_subset "nat:eth0" "br:eth1";          _t 1 $? "is_subset no"
     is_subset "nat:eth0 br:eth1" "";         _t 0 $? "is_subset empty"
@@ -778,8 +792,7 @@ case "$MODE" in
 --once)   once; exit 0 ;;
 --repair) worker "$2"; exit 0 ;;
 --tick)
-    _last=$(cat $STAMP 2>/dev/null)
-    case "$_last" in ''|*[!0-9]*) _last=0 ;; esac
+    _last=$(san_up "$(cat $STAMP 2>/dev/null)")
     if [ $(( UP_NOW - _last )) -lt "$CFG_HEAL_IVL" ]; then exit 0; fi
     echo "$UP_NOW" > $STAMP
     tick; exit 0 ;;

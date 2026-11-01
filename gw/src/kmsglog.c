@@ -1,4 +1,11 @@
-/* kmsglog.c v1.2 -- persistent /dev/kmsg mirror (A1 far-infra).
+/* kmsglog.c v1.3 -- persistent /dev/kmsg mirror (A1 far-infra).
+ *
+ * v1.3: two parser bugs found by measurement/unit test: (a) v1.2's digit
+ *   loop was missing i++ -> pure userspace infinite loop the moment rec_seq()
+ *   met a digit (device-measured: daemon R-state utime storm right after its
+ *   start marker); (b) the "second field" claim was itself wrong -- seq is
+ *   the first field after the FIRST comma (v1.2 parsed the timestamp).
+ *   Both covered by the host unit harness now.
  *
  * v1.2: rec_seq() parsed the FIRST prefix field as the sequence number, but
  *   the dev-kmsg ABI is "prio,seq,ts,[flags];text" (measured on device:
@@ -51,7 +58,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define KMSGLOG_VER "1.2"
+#define KMSGLOG_VER "1.3"
 #define DEV_KMSG    "/dev/kmsg"
 #define PIDFILE     "/tmp/kmsglog.pid"
 #define HBFILE      "/tmp/kmsglog.hb"
@@ -103,28 +110,25 @@ static void hb_write(void)
 }
 
 /* kmsg record prefix is "prio,seq,ts,[flags];text" (dev-kmsg ABI) -- the
- * SEQUENCE number is the SECOND field; the first is the syslog priority. */
+ * SEQUENCE number is the first field after the FIRST comma; the leading
+ * field is the syslog priority (host unit-tested: tmpfiles recseq harness). */
 static unsigned long long rec_seq(const char *rec, ssize_t len)
 {
     unsigned long long seq = 0;
     ssize_t i = 0;
-    int field = 0;
-    while (i < len) {
-        if (rec[i] == ',') {
-            field++;
-            if (field == 2) {          /* inside the seq field now */
-                i++;
-                {
-                    ssize_t start = i;
-                    while (i < len && rec[i] >= '0' && rec[i] <= '9')
-                        seq = seq * 10 + (unsigned long long)(rec[i] - '0');
-                    return (i > start && i < len && rec[i] == ',') ? seq : 0;
-                }
-            }
-        }
+    while (i < len && rec[i] != ',')   /* skip the prio field */
         i++;
+    if (i >= len)
+        return 0;
+    i++;                                /* first char of the seq field */
+    {
+        ssize_t start = i;
+        while (i < len && rec[i] >= '0' && rec[i] <= '9') {
+            seq = seq * 10 + (unsigned long long)(rec[i] - '0');
+            i++;
+        }
+        return (i > start && i < len && rec[i] == ',') ? seq : 0;
     }
-    return 0;
 }
 
 static long data_free_kb(void)

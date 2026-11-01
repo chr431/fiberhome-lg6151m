@@ -71,6 +71,12 @@ classify() { # $1=probe $2=start $3=end
             NF >= 2 {
                       # 演练作用域: WiFi TX/hostapd 域演练不影响网关服务判据(tcp80/dns),
                       # 直接跳过 —— 否则一条 1h 的 hw-drill warp1 会把同窗口内真实中断全排除。
+                      # 判据纪律(Lead 2026-11-01): 空行/CR 残片/碎片行一律跳过。
+                      # 实弹: drills.tsv 被写坏后第 1 行是 "\r\n\r\n", 旧判据把它
+                      # 当成「end=0 的未闭合窗口」-> 从 epoch 0 起排除一切。
+                      # 统一判据: NF>=5 且 $1/$2 都是纯数字。
+                      if (NF < 5) next
+                      if ($1 !~ /^[0-9]+$/ || $2 !~ /^[0-9]+$/) next
                       tgt = tolower($4)
                       if (tgt ~ /warp|wifi|ra0|rai0|beacon|hostapd/) next
                       st=$1+0; en=$2+0

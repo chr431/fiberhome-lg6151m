@@ -929,7 +929,7 @@ EOF
         _nto=$(cat /tmp/netcfg_lock_timeouts 2>/dev/null || echo 0)
         _bss=$(svc_bss_count)
         log "HEALTH epoch=$(date +%s) up=${UP}s load=$_load memfree=${_mf:-?}KB memavail=${_ma:-?}KB data_free=${_df:-?}KB tmp_free=${_tf:-?}KB procs=$_np zombies=$_nz bss=$_bss conntrack=${_ct:-n/a} cell_if=${CIF:-none} netdev=${CN:-0} qdisc=${CQ:-0} logc_bad=${_lcbad:-?} logc_resync=${_lcrs:-?} logc_io=${_lcio:-?} logc_crash=${_lccrash:-0} repairs_1h=${_rep:-0} netlock_to=${_nto:-0}"
-        [ "${_df:-0}" -lt 102400 ] 2>/dev/null && log "WARN /data free low: ${_df}KB (<100MB)"
+        # v1.51: 低盘告警已挪到 2s 快路径(_fp_disk: 分档 + 只在跨档时打一条), 这里不再重复告警
     fi
 
     # ---- visual alert ----
@@ -964,7 +964,7 @@ if [ "$_rc" != 0 ]; then
     exit 0
 fi
 # v1.42: 启动横幅改用 VER 单一来源(此前字面量停在 v1.38, 识别/syslog 断言被骗)
-VER=1.50
+VER=1.51
 log "===== watchdog v$VER start (svc_lib primitives + minimal parsers + batch3 metrics; avail keys + outcome probes + bearer-follow dp; alert LED 5G orange) ====="
 logger -t watchdog "watchdog v$VER start"
 # initialize state to current (suppress initial alarms)
@@ -993,6 +993,23 @@ _fp_restart() { # $1=name  $2=kind
     log "WARN  $1 fast-restart deferred (budget exhausted -> 60s slow retry path)"
     return 1
 }
+# v1.51(lead 2026-11-01): /data 低盘告警挪到 2s 快路径。
+#   事故: 原实现在 HEALTH 块(每 10 周期 ≈5min), 而实测满盘只持续 40-60s -> 一条都没打出来。
+#   设计: 每 2s 一次 df(2 fork, 可接受), **只在跨档时打一条**(防刷屏), 分工=watchdog 只告警,
+#   prune 由 incident_ledger 做(避免两个写方竞争)。
+#   档: ok(>=300MB) / warn(<300MB) / high(<200MB) / critical(<100MB)
+_fp_disk() {
+    _dk=$("$BB" df -k /data 2>/dev/null | "$BB" awk 'NR==2{print $4}')
+    case "$_dk" in ''|*[!0-9]*) return 0 ;; esac
+    if [ "$_dk" -lt 102400 ]; then _dt=critical
+    elif [ "$_dk" -lt 204800 ]; then _dt=high
+    elif [ "$_dk" -lt 307200 ]; then _dt=warn
+    else _dt=ok; fi
+    if [ "$_dt" != "$_fp_dt" ]; then
+        log "EVT /data free tier $_fp_dt->$_dt (${_dk}KB free)"
+        _fp_dt=$_dt
+    fi
+}
 _fastpass() {
     # v1.50: 开机守卫自己读 uptime($UP 来自上一轮 run_cycle, 最多滞后 30s)
     _fp_up=$(cut -d. -f1 /proc/uptime 2>/dev/null)
@@ -1000,6 +1017,7 @@ _fastpass() {
     [ "$_fp_up" -lt 240 ] && return 0
     port_listen 80 || _fp_restart v3httpd v3httpd
     port_listen 53 || _fp_restart dnsmasq dnsmasq
+    _fp_disk
 }
 _kickwait() {
     _kw=0

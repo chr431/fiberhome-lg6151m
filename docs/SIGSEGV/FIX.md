@@ -10,13 +10,24 @@
 
 ---
 
+---
+
+## 交付摘要（给用户看的 5 行）
+
+1. **覆盖两类崩溃**：pop 型（v1.7 起；行为级正/负对照 E3：自注入记录 SURVIVED rc=0、`kill -11` 仍 rc=139）＋ deref 型（v2.0 新增；判据函数 17 项 host 断言全过，E2）。
+2. **不停止写入**：写入者未点名，nerepair 只在「后果层」生效（C-149，E3）—— 崩溃少了，内存破坏面不变。
+3. **只覆盖这两类形态**：其余形态不修，仅记 `NEAR reason=insn` 计数（v1.9.2 起），规模由 G2b 门禁强制上报。
+4. **slotdrop 是诊断模式（默认关）**：给 faultwatch 造一个已被证明会被写的目标；抓到栈就删标记（§9.8）。
+5. **部署/回滚/LK 救砖**：见 §9（逐条命令，含 `killall nerepair` 回滚与串口救砖）。
+
 ## §0 一页纸（诚实版）
 
 ### 0.1 现在有什么
 
 | 防线 | 状态 | 一句话 |
 |---|---|---|
-| **nerepair**（ptrace 监督者） | **已部署在跑**（v1.7，`/data/gw/bin/nerepair`，`rc.extend v3.3` + `nerepair_launch.sh`） | **只对「pop 型」有效**：故障指令 `ldr Xt,[Xt]`（`rt==rn`）∧ `si_addr==Xt` ∧ x2 处 32 B 是本家族记录。**其余形态一律放行**（进程照死） |
+| **nerepair**（ptrace 监督者） | **v2.1 已交付、待 lab 部署**（`gw/bin/nerepair` 79,840 B，md5 `9ae78c4a52f108ecccc6fd69b5ea3394`）；设备**现役仍是 v1.7**，`rc.extend v3.3` + `nerepair_launch.sh` 拉起 | 两条判据路径：**pop 型**（故障指令 `ldr Xt,[Xt]` 且 `si_addr==Xt` 且 x2 处是本家族记录）与 **deref 型**（记录值被当指针继续用）。**其余形态一律放行**（进程照死） |
+| **本轮新增** | v2.0 / v2.1 | **deref 型覆盖**（记录证据是硬门槛，判据函数 17 项 host 断言全过）+ **slotdrop 诊断模式**（默认关，见 §9.7/§9.8） |
 | **观测：core_meta v1.9 + .stack** | 已部署 | 每次真死进程落 `.stack`（65,592 B = 48 B 头 + 位图 + 16 页）+ `ne_events.tsv` 台账 |
 | **观测：NEAR 计量器** | **已构建、未部署**（v1.9.2） | 记录在 x2 但指令形态不在射程内时记 `NEAR reason=insn` —— 把「已知不覆盖」量化的唯一手段 |
 | **补偿控制：pageguard** | **已构建、未上机** | 「RX 环缓冲页永不给用户匿名页」。**其前提（按 PA 写）正在被重审**（§2/§3） |
@@ -379,6 +390,7 @@ dmesg | tail -40                # 保留现场
 | R-9 | 自然 NE 口径受 nerepair 污染 | E2 | 停判定量必须先停 nerepair |
 | R-10 | **槽监视器是代理指标且未复核**（E1）：槽速率 ≠ 内存破坏；写入者可能改目标 | E1 | 必须与 canary/自然 NE 同窗同向，并排除 §5.4 三种假象 |
 | **R-11** | **nerepair 只在「后果层」生效：它把进程从崩溃里救回来，但写入本身仍在继续**（C-149） | **E3** | 内存破坏面不变；被救回的进程可能带着被污染的栈/数据继续运行；**不能把"NE 下降"当成"写入停止"** |
+| **R-12** | **transport 仍未判定**：VA 分支的两次实验（dropwatch / faultwatch）因「跨会话 + 页级归因」判为**无效**（C-182），PA 分支待最后一次测试 | **E0（无效实验）** | **不得写成「VA 已否证」** —— 那是把「实验无效」误当「假设被拒」。当前正确表述：VA 分支未被有效检验，PA 分支未测完 |
 
 ---
 
@@ -594,3 +606,18 @@ python tools/lgssh.py 'grep SLOTDROP /data/gw/logs/nerepair.log | tail -3; grep 
 
 **风险与回滚**：madvise 的是自己栈上 sp 之上的冷页；nerepair 若崩，launcher/watchdog 会拉起（覆盖暂时下降，属已知代价）。
 回滚 = 删标记 + killall nerepair（见上）。
+### 9.8 slotdrop 是**诊断模式**，不是常态配置
+
+> **用完就删标记文件。** `/tmp/nerepair.slotdrop` 存在 = slotdrop 开着；它是为了**抓写入者**而临时把 nerepair 自己栈上的热槽反复置为 missing。长期开着没有收益，只有代价：
+
+| 代价 | 说明 |
+|---|---|
+| 无谓的页抖动 | 每 200 ms 一次 `MADV_DONTNEED`，该页每次访问都要重新缺页（CPU 开销与 TLB 抖动） |
+| 覆盖下降风险 | 若 nerepair 因此崩溃，launcher/watchdog 拉起期间**所有进程短暂失去修复覆盖** |
+| 误读为「默认行为」 | 后来人看到 SLOTDROP 日志会以为这是产品特性 —— 它不是 |
+
+**收尾清单（抓到栈之后）**：
+1. `rm -f /tmp/nerepair.slotdrop`；
+2. `killall nerepair`（launcher/watchdog 自动拉起，无标记即普通模式）；
+3. 确认日志里不再出现新的 `SLOTDROP` 行，且 `STAT` 的 `sd=0/...`；
+4. 把抓到的内核栈与 `SLOTDROP va=…` 一起写进当轮 05_LOG。

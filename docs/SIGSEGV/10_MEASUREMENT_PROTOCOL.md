@@ -169,3 +169,11 @@ echo $ORIG_O > /proc/sys/kernel/panic_on_oops  ; cat …
 - **重启后立刻**：拉 `/sys/fs/pstore/console-ramoops-*` → **md5 落盘**（下次 panic 会覆盖）→ 用 `analysis/kern/kallsyms.txt` 反查地址。
 - **判读**：pstore 的 `CPU/PID/Comm` + 调用栈 = **写入者路径的直接证据（E3）**；仍按 §12.3 三分法归类（panic / hang→watchdog / 冷复位），**hang 不得写成 panic**。
 - **代次**：重启即新代次，跨代次不可比（本条不因"允许重启"而放松）。
+
+### 12.6 槽身份前置：槽必须是「写入者的槽」，不能是受害者自己的 syscall 输出缓冲（2026-11-01）
+任何用于判读的"槽"（记录出现的位置）在使用前必须过四条：
+1. **内容域**：wait4/read 之类 syscall 输出是 16 位状态值（≤0xffff，正常退出 ≡0 mod 256）；记录族 A 值是 40k–220k 且 mod 256 无集中；
+2. **变化宽度**：4–8 字节的 syscall 输出**不会**改到 32B 窗口的 `+0x10..+0x17`；若 len/ip 也在变 ⇒ 不是 4 字节输出；
+3. **偏移级归因**：faultwatch 一类仪器必须记录 **fault VA**，与槽的 `top−K` 逐字节比对——**页级归因不算**（同一页可能既有 status 缓冲又有记录槽）；
+4. **同会话**：内容统计与 fault 归因必须同一次会话内采集（跨会话不可比，§2）。
+**反例（2026-11-01）**：faultwatch 注册了 nerepair `top−0x3b0` 所在**页**，9 min 抓到 33,959 次缺页全部来自 `__do_sys_wait4` ⇒ 那是**页级**的 status 缓冲写入，不是该槽；该槽的内容域检验（q0 无一 ≡0 mod 256、89% 在记录 A 域、len/ip 也在变）证明它**不是** status 缓冲。

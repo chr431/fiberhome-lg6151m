@@ -34,3 +34,29 @@ canary：4× vsurv4（`/data/repro/vsurv4`），09:47 启动，全程未重启
 
 - 与上一轮"WED tuple 路径未激活"（P1）一致：两轮都指向 **WiFi TX 侧不成立**。
 - 与 Lead 侦察"记录源 IP 以 eth0 WAN 地址为主"一致：eth0 RX 正相关。
+
+## 附：真静默臂（v3 sampler，含 canary-CPU 归一）2026-11-01 10:00–10:12
+
+Lead 提醒 Q2 可能被我方 SSH 污染，故补跑自治采集：设备侧 10s 采样，**我方 8 分钟不发任何 SSH**。
+
+| 臂 | 时长 | 命中 | 命中率 | canary CPU | 折合核数 | **命中/CPU-s** | eth0 RX pps | eth1 RX pps | rai0 TX pps | WED IRQ/s | load |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 真静默（无 SSH） | 483s | 62 | **7.7/min** | 1701s | 3.52 | **0.036** | 1.4 | 17.9 | 0 | 59.3 | 12.7 |
+| 取数窗（有 SSH） | 107s | 4 | 2.2/min | 388.3s | 3.63 | 0.01 | 1.4 | 11.1 | 0 | 57.6 | 12.42 |
+
+**canary 调度是健康的**：4 实例合计 1701s CPU / 483s ≈ 3.52 核（每实例 ~88%），
+不存在"被饿死导致命中率失真"的问题——这一点先前的担心已排除。
+
+**关键读数**：真静默臂里 eth0 RX 仅 1.4 pps、rai0 TX **0** pps，命中仍有 **7.7/min**；
+同期唯一在跑的 RX 是 **eth1/br-lan 17.9 pps**（LAN，含其它流的 SSH）与 WED IRQ 59.3/s。
+→ 命中不依赖 eth0 或 WiFi，**在有线 LAN 侧 RX 存在时就能持续发生**。
+→ 换算：静默臂 ≈ 0.0072 命中/包；D 臂（eth0 ~500 pps）≈ 0.0013 命中/包
+（D 臂包率按 695 KB/s ÷ ~1400 B 估）。两者同数量级但静默臂更高 → **仍非严格"每包固定概率"**。
+
+**结论（本轮）**：写入者的必要条件在**有线端口的 RX 处理路径**（eth0 与 eth1 共用 EDMA RX 环），
+不在 WiFi TX、不在 eth0 专属路径。这是本轮能给出的最强收窄。
+
+### 仪器发现（可复用）
+- `echo edma dump ring_status|recycle_mode|free_count|flow_ctrl|rx_ring_max_dist > /proc/mtkfe/dbg_dma` 可用，输出走 **dmesg**。
+- `ring_status` 的 cidx/didx 是**死值**（RX 恒 511/0、TX 恒 0/0），5 MB/s 下载前后不变 → **不能当进度计数器**（想用它做线性回归的路已堵）。
+- `recycle_mode`：edma-0/1 均 "in rx recycle mode"，两环各 "0 free bufs, 0 recycle bufs"。

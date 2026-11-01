@@ -97,9 +97,13 @@ python tools/deploy.py attic      # 设备侧流浪脚本归档
 
 | 工具 | 作用 | 用法 |
 |---|---|---|
-| `_local/device_lock.py` | 单设备互斥锁（v2 心跳，STALE 30min） | `acquire/release/touch/run/hold` |
-| `_local/drill.py` | 演练窗口标记（**必须**，否则中断会被记成有机故障） | `start/stop/guard/status` |
-| `_local/devop.py` | **上面两个的合体（推荐）** | `devop.py --owner X --purpose "..." [--drill-target 服务名] -- <cmd>` |
+| `tools/device_lock.py` | 单设备互斥锁（心跳，STALE 30min） | `acquire/release/touch/run/hold` |
+| `tools/drill.py` | 演练窗口标记（**必须**，否则中断会被记成有机故障） | `start/stop/guard/status` |
+| `tools/devop.py` | **上面两个的合体（推荐）** | `devop.py --owner X --purpose "..." [--drill-target 服务名] -- <cmd>` |
+
+> **2026-11-01 迁入仓库**：三个工具本体在 `tools/`（登记在 VERSIONS.tsv，版本控制）；
+> **运行态仍写 `_local/`**（`device.lock/`、`drill.state.json`，不入仓），可用环境变量
+> `LG_LOCAL_DIR` 覆盖。旧路径 `_local/*.py` 已删除，**请改用 `tools/*.py`**。
 
 **规则**：
 1) **任何写设备或会中断服务的操作，必须经 `devop.py`**；裸 `lgssh.py` 只用于只读查询。

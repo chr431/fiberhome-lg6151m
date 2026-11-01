@@ -56,7 +56,7 @@ try:
 except Exception:
     pass
 
-VERSION = "2.1"
+VERSION = "2.2"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_EVIDENCE = os.path.abspath(os.path.join(
     REPO, "..", "_local", "evidence", "svc_probe"))
@@ -717,9 +717,11 @@ def device_pull(evidence_dir, quiet=True):
                % (remote, len(txt.splitlines()), want))
         return txt
 
+    # fast_facts 是 1s 事实流, 一天 1-2 万行; 恢复时间对齐需要更长的历史, 单独放宽上限
+    big = {"fast_facts_tail.tsv": 24000}
     got = {}
     for name, remote in files.items():
-        txt = pull_tail(remote)
+        txt = pull_tail(remote, max_lines=big.get(name, 4000))
         with open(os.path.join(ddir, name), "w", encoding="utf-8") as f:
             f.write(txt)
         got[name] = len(txt.splitlines())
@@ -974,6 +976,112 @@ def build_report(evidence_dir, days=7, pull=False):
     return out
 
 
+def _episodes_from_seq(seq, debounce=2):
+    """[(ms, ok)] -> [(start_ms, end_ms)] 连续 >=debounce 次失败为一集, 收尾于首次成功。"""
+    out = []
+    fails = 0
+    start = None
+    last = None
+    for ms, ok in seq:
+        if start is not None and last is not None and ms - last > 10000:
+            if fails >= debounce:
+                out.append((start, last))
+            start = None
+            fails = 0
+        last = ms
+        if ok == 0:
+            if start is None:
+                start = ms
+            fails += 1
+        else:
+            if start is not None and fails >= debounce:
+                out.append((start, ms))
+            start = None
+            fails = 0
+    if start is not None and fails >= debounce:
+        out.append((start, last))
+    return out
+
+
+def recovery_delta(evidence_dir, days=1, window=120, pull=False, out=None):
+    """设备侧恢复时刻 vs 客户端首次成功：**两个口径的差值**（Lead 第4轮任务）。
+
+    对每条客户端中断，找同探针、起点相差 <= window 的设备侧中断，输出：
+      client_start/end/dur  —— 客户端首次失败 / 首次成功
+      dev_start/end/dur     —— 设备侧首次失败 / 首次恢复
+      delta_start_s         —— 客户端看到失败比设备晚多少秒（正=客户端更晚发现）
+      delta_end_s           —— 客户端恢复比设备恢复晚多少秒（正=客户端更晚恢复）
+
+    用途：验证「设备侧自愈 ≤5s」是否等于「客户端可用 ≤5s」——两者可以差很多
+    （设备进程起来 ≠ 监听就绪 ≠ 客户端下一次探测命中）。
+    """
+    if pull:
+        device_pull(evidence_dir, quiet=True)
+    MAP = {"gw.tcp80": "tcp80", "gw.dns": "dns", "gw.tcp22": "tcp22"}
+    ddir = os.path.join(evidence_dir, "device")
+
+    dev = {}
+    p_ff = os.path.join(ddir, "fast_facts_tail.tsv")
+    if os.path.exists(p_ff):
+        for line in open(p_ff, encoding="utf-8", errors="replace"):
+            c = line.rstrip("\n").split("\t")
+            if len(c) < 3 or not c[0].isdigit():
+                continue
+            q = MAP.get(c[1])
+            if not q:
+                continue
+            try:
+                dev.setdefault(q, []).append((int(c[0]), int(c[2])))
+            except ValueError:
+                continue
+    dev_eps = {}
+    for q, seq in dev.items():
+        seq.sort()
+        dev_eps[q] = _episodes_from_seq(seq)
+
+    cutoff_ms = int((time.time() - days * 86400) * 1000)
+    rows = [r for r in read_samples(evidence_dir, days=days) if r["ms"] >= cutoff_ms]
+    lines = []
+    for path in sorted({r["path"] for r in rows}):
+        pr = [r for r in rows if r["path"] == path]
+        for q in ("icmp", "dns", "tcp80", "tcp22"):
+            seq = [(r["ms"], r[q]) for r in pr if r.get(q, -1) >= 0]
+            for cs, ce in _episodes_from_seq(seq):
+                best = None
+                for ds, de in dev_eps.get(q, []):
+                    if abs(ds - cs) <= window * 1000:
+                        if best is None or abs(ds - cs) < abs(best[0] - cs):
+                            best = (ds, de)
+                if best:
+                    lines.append("%s\t%d\t%d\t%.1f\t%d\t%d\t%.1f\t%.1f\t%.1f" % (
+                        q, cs, ce, (ce - cs) / 1000.0, best[0], best[1],
+                        (best[1] - best[0]) / 1000.0,
+                        (cs - best[0]) / 1000.0, (ce - best[1]) / 1000.0))
+                else:
+                    lines.append("%s\t%d\t%d\t%.1f\t\t\t\t\t" % (
+                        q, cs, ce, (ce - cs) / 1000.0))
+    hdr = ("#recovery_delta v1.0 | fields: probe client_start_ms client_end_ms client_dur_s "
+           "dev_start_ms dev_end_ms dev_dur_s delta_start_s delta_end_s")
+    dst = out or os.path.join(evidence_dir, "recovery_delta.tsv")
+    with open(dst, "w", encoding="utf-8") as f:
+        f.write(hdr + "\n" + "\n".join(lines) + ("\n" if lines else ""))
+    paired = [l for l in lines if l.count("\t") >= 8 and l.split("\t")[4]]
+    _p("设备侧 vs 客户端 恢复时间对齐（窗口 ±%ds, %dd）" % (window, days))
+    _p("  客户端中断 %d 条，其中能与设备侧对齐的 %d 条" % (len(lines), len(paired)))
+    if paired:
+        ds = [float(l.split("\t")[7]) for l in paired]
+        de = [float(l.split("\t")[8]) for l in paired]
+        ds.sort(); de.sort()
+        def _med(v):
+            n = len(v)
+            return v[n // 2] if n % 2 else (v[n // 2 - 1] + v[n // 2]) / 2.0
+        _p("  delta_start 中位数 %+.1fs（范围 %+.1f..%+.1f）" % (_med(ds), ds[0], ds[-1]))
+        _p("  delta_end   中位数 %+.1fs（范围 %+.1f..%+.1f） 正=客户端比设备晚恢复"
+           % (_med(de), de[0], de[-1]))
+    _p("  -> %s" % dst)
+    return {"client_episodes": len(lines), "paired": len(paired), "out": dst}
+
+
 def ne_correlate(evidence_dir, days=1, window=60, pull=False, out=None):
     """NE(设备侧 SIGSEGV 事件) × 客户端可见中断 的时序关联（正式证据，Lead 指定）。
 
@@ -1160,6 +1268,12 @@ def main(argv=None):
     pd.add_argument("--days", type=int, default=0)
     pd.add_argument("--quiet", action="store_true")
 
+    prc = sub.add_parser("recovery")
+    prc.add_argument("--days", type=int, default=1)
+    prc.add_argument("--window", type=int, default=120)
+    prc.add_argument("--pull", action="store_true")
+    prc.add_argument("--out", default=None)
+
     pn = sub.add_parser("necorr")
     pn.add_argument("--days", type=int, default=1)
     pn.add_argument("--window", type=int, default=60)
@@ -1241,6 +1355,10 @@ def main(argv=None):
                     n += 1
         if not ns.quiet:
             _p("derived %d episodes from %d samples -> %s" % (n, len(rows), out))
+        return 0
+
+    if ns.cmd == "recovery":
+        recovery_delta(ed, days=ns.days, window=ns.window, pull=ns.pull, out=ns.out)
         return 0
 
     if ns.cmd == "necorr":

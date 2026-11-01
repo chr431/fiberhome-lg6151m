@@ -326,9 +326,15 @@ scan_drill() {
     [ -r "$LOGD/drills.tsv" ] || return 0
     _fw_now=$(date +%s)
     _dr_need=0
+    _dr_warned="${_dr_warned:-}"
     while IFS="$TAB" read -r _fw_s _fw_e _fw_k _fw_t _fw_o _fw_n; do
+        # 消费方加固(lead 2026-11-01 10:10, 今天第四个"集合比目标大"实例):
+        #   空行 / CR 残片 / 碎片行一律跳过 —— 判据 = 至少 5 列 且 $1/$2 都是纯数字。
+        #   绝不能把"$2 非数字"默认成 0: 那会把 CR 残片当成"未闭合演练窗口",
+        #   误把整段时间标成 drill=1(排除真实故障), 也会阻塞 drill.py 开窗。
         case "$_fw_s" in ''|*[!0-9]*) continue ;; esac
-        case "$_fw_e" in ''|*[!0-9]*) _fw_e=0 ;; esac
+        case "$_fw_e" in ''|*[!0-9]*) continue ;; esac
+        [ -n "$_fw_o" ] || continue
         # ⚠ v2.7 (2026-11-01 10:09 P0 止血): **自动闭合功能已彻底移除**。
         #   事故: 该逻辑每 5 拍用 awk 重写整张 drills.tsv, 与其它流的并发追加竞争,
         #   把台账写坏(874 行空行, 全部历史演练窗口丢失, M3 排除层失效)。

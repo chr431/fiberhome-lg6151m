@@ -119,9 +119,23 @@ integrity() {
     _sl=$(tail -n 1 "$SEAL" 2>/dev/null)
     IL_SEAL_N=$(wc -l < "$SEAL" 2>/dev/null); IL_SEAL_N=$(num0 "$IL_SEAL_N")
     if [ -n "$_sl" ]; then
-        IL_SROWS=$(printf '%s' "$_sl" | sed -n 's/.* rows=\([0-9]*\).*/\1/p'); IL_SROWS=$(num0 "$IL_SROWS")
-        IL_SBYTES=$(printf '%s' "$_sl" | sed -n 's/.* bytes=\([0-9]*\).*/\1/p'); IL_SBYTES=$(num0 "$IL_SBYTES")
-        IL_SMD5=$(printf '%s' "$_sl" | sed -n 's/.* md5=\([0-9a-f]*\).*/\1/p'); [ -n "$IL_SMD5" ] || IL_SMD5=-
+        # **按字段名取第一个匹配**，不用贪婪 sed —— reason 里若出现 rows=/bytes= 字样
+        # （例如 reason=mark_clock_skew blocks=1 rows=3），贪婪 sed 会抓到 reason 里的值
+        # 而把 rows_ok 判成 no（2026-11-01 实弹）。
+        _sf=$(printf '%s' "$_sl" | awk '{
+            for (i = 1; i <= NF; i++) {
+                p = index($i, "=")
+                if (p == 0) continue
+                k = substr($i, 1, p - 1)
+                if (k == "rows" && r == "") r = substr($i, p + 1)
+                if (k == "bytes" && b == "") b = substr($i, p + 1)
+                if (k == "md5" && m == "") m = substr($i, p + 1)
+            }
+            print r" "b" "m
+        }')
+        IL_SROWS=$(printf '%s' "$_sf" | cut -d' ' -f1); IL_SROWS=$(num0 "$IL_SROWS")
+        IL_SBYTES=$(printf '%s' "$_sf" | cut -d' ' -f2); IL_SBYTES=$(num0 "$IL_SBYTES")
+        IL_SMD5=$(printf '%s' "$_sf" | cut -d' ' -f3); [ -n "$IL_SMD5" ] || IL_SMD5=-
         [ "$IL_ROWS" = "$IL_SROWS" ] && IL_OK_ROWS=yes
         [ "$IL_BYTES" = "$IL_SBYTES" ] && IL_OK_BYTES=yes
         [ "$IL_MD5" = "$IL_SMD5" ] && IL_OK_MD5=yes
@@ -326,6 +340,19 @@ run_audit() {
         echo "OLDEST_SEV1 attested_since_ts=$IL_S1_ATTEST_TS seal_line=$IL_S1_ATTEST_LINE row_md5=$_m1"
         echo "QUALITY presync_rows=$IL_PRESYNC backfill_rows=$IL_BACKFILL drill_tagged_rows=$IL_DRILLROWS ledger_hb_age_s=$_hb"
         echo "PRESYNC rows=$PS_N bytes=$PS_B counted_in_oldest=no note=写于NTP首同步前(或时钟=固件构建日), ts已按入账时刻计, 原值在src_ts"
+        # R1.6/M1 新失效模式：时钟跳变污染时间轴。审计只看 md5/行数/seq 是看不见的，
+        # 必须单列「有多少行时间戳不可信」。标注只加 detail，**不改 epoch**。
+        _cs=$(awk -F'\t' '
+            index($7, "clock_skew=1") > 0 {
+                n++
+                if (prev == 0) spans++
+                else if ($8 + 0 != prev + 1) spans++
+                prev = $8 + 0
+            }
+            END { printf "%d %d\n", n + 0, spans + 0 }' "$LEDGER" 2>/dev/null)
+        CS_N=$(printf '%s' "$_cs" | cut -d' ' -f1); CS_N=$(num0 "$CS_N")
+        CS_S=$(printf '%s' "$_cs" | cut -d' ' -f2); CS_S=$(num0 "$CS_S")
+        echo "CLOCK_SKEW rows=$CS_N spans=$CS_S note=时间戳受时钟跳变污染(epoch 未改, 仅 detail 标注); 该区间不可用于跨源对齐, 只能用客户端锚点校正"
         # R4-C: 各 category 的行数分布（新 category 必须能在 tier 统计里被正确归类；
         # 这里给出 category × severity 的交叉表，便于核对"活着但不服务"这类新来源）
         if [ -s "$SRC" ]; then
@@ -501,7 +528,7 @@ case "$1" in
     echo "retention_audit ts=$NOW overall=$OVERALL sev1_days=$(sed -n 's/^TIER SEV1 .*oldest_age_days=\([0-9.]*\).*/\1/p' "$REPORT" 2>/dev/null) report=$REPORT"
     ;;
 --json)
-    echo "ts=$NOW overall=$OVERALL rows=$IL_ROWS md5_ok=$IL_OK_MD5 rows_ok=$IL_OK_ROWS gaps=$IL_GAPS gaps_accounted=$IL_OK_ACC sev1_never_pruned=$IL_OK_SEV1 presync=$IL_PRESYNC backfill=$IL_BACKFILL drill=$IL_DRILLROWS hb_age=$_hb snap_ok=$SNAP_OK snap_tries=$SNAP_TRY"
+    echo "ts=$NOW overall=$OVERALL rows=$IL_ROWS md5_ok=$IL_OK_MD5 rows_ok=$IL_OK_ROWS gaps=$IL_GAPS gaps_accounted=$IL_OK_ACC sev1_never_pruned=$IL_OK_SEV1 presync=$IL_PRESYNC clock_skew=$CS_N backfill=$IL_BACKFILL drill=$IL_DRILLROWS hb_age=$_hb snap_ok=$SNAP_OK snap_tries=$SNAP_TRY"
     ;;
 *)
     cat "$REPORT" 2>/dev/null

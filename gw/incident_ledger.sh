@@ -1527,6 +1527,73 @@ if [ "$1" = "--flush-pending" ]; then
     rm -f "$BATCH"
     exit 0
 fi
+# ---- 时钟污染标注（--mark-clock-skew [--apply]）-----------------------------
+# 失效模式（2026-11-01 实弹，soak-qa B-CLK 注入）：设备时钟被跳变 ±1h，期间写入的
+# 所有 epoch 都偏移 → 台账时间轴与客户端锚点无法对齐。而审计只看 md5/行数/seq，
+# **看不见时间轴错误**。
+# 检测用数据驱动：按 seq 顺序扫，若某行 ts 比前一行**小 600s 以上**（向下跳），
+# 且其后若干行内 ts 又回到跳变前水平（±60s 内）→ 中间那段就是污染块。
+# 只标注（detail 追加 clock_skew=1），**不改 epoch**（保留原始痕迹）。
+mark_clock_skew() { # $1=apply(1|0)
+    _ap=$1
+    _blocks=/tmp/il_skew_blocks.$$
+    awk -F'\t' -v OFS='\t' '
+        {
+            ts = $1 + 0
+            if (state == 0) {
+                if (NR > 1 && ts <= prev - 600) { state = 1; start = NR; base = prev }
+            } else {
+                if (ts >= base - 60) { printf "%d %d\n", start, NR - 1; state = 0 }
+                else if (NR - start > 500) { state = 0 }
+            }
+            prev = ts
+        }' "$LEDGER" > "$_blocks" 2>/dev/null
+    _nb=$(wc -l < "$_blocks" 2>/dev/null); _nb=$(num0 "$_nb")
+    _nrows=0
+    if [ "$_nb" -gt 0 ]; then
+        _nrows=$(awk '{ n += $2 - $1 + 1 } END { print n + 0 }' "$_blocks")
+    fi
+    echo "# clock_skew blocks=$_nb rows=$_nrows apply=$_ap"
+    awk '{ printf "  block %s..%s\n", $1, $2 }' "$_blocks"
+    if [ "$_ap" != 1 ] || [ "$_nrows" = 0 ]; then
+        rm -f "$_blocks"; return 0
+    fi
+    # 逐块处理（每块一次全文扫描）：**不用 awk 数组** —— busybox awk 的运行期
+    # 数组在 1.36.1 上约 1% SIGSEGV（docs/SIGSEGV_ANALYSIS.md §11），块数很少，
+    # N 次扫描的代价远小于风险。
+    _out=/tmp/il_skew_out.$$
+    _in=$(wc -l < "$LEDGER" 2>/dev/null); _in=$(num0 "$_in")
+    _ok=1
+    while IFS=' ' read -r _bs _be; do
+        case "$_bs$_be" in ''|*[!0-9]*) continue ;; esac
+        awk -F'\t' -v OFS='\t' -v s="$_bs" -v e="$_be" '
+            { if (NR >= s && NR <= e && index($7, "clock_skew=") == 0) $7 = $7 " clock_skew=1"; print }
+        ' "$LEDGER" > "$_out" 2>/dev/null
+        _o=$(wc -l < "$_out" 2>/dev/null); _o=$(num0 "$_o")
+        if [ "$_o" = "$_in" ]; then
+            mv "$_out" "$LEDGER"
+        else
+            _ok=0; rm -f "$_out"; break
+        fi
+    done < "$_blocks"
+    if [ "$_ok" = 1 ]; then
+        seal_write repair "mark_clock_skew blocks=$_nb skew_rows=$_nrows" 0 0 0
+        echo "# clock_skew MARKED rows=$_nrows blocks=$_nb (epoch 未改)"
+    else
+        echo "# clock_skew ABORT line mismatch (no change)"
+    fi
+    rm -f "$_blocks"
+}
+
+if [ "$1" = "--mark-clock-skew" ]; then
+    _ap=0
+    [ "$2" = "--apply" ] && _ap=1
+    mkdir -p "$CURD" 2>/dev/null
+    touch "$LEDGER" "$SEAL" 2>/dev/null
+    mark_clock_skew "$_ap"
+    rm -f "$BATCH"
+    exit 0
+fi
 if [ "$1" = "--disk-guard" ]; then
     # 廉价模式：只查水位(+必要时裁剪)，不摄取。供 log_keeper 的 30s 周期调用
     # （R1.6 v2：分钟级 tick 扛不住 60s 填满，必须事件式/短周期）。

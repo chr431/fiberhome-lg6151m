@@ -873,6 +873,10 @@ ingest() {
         IL_BACKFILL=0
         if [ "$IL_PRESYNC_MODE" != 1 ]; then
             append_batch
+            if [ "$IL_WRITE_OK" != 1 ]; then
+                il "backfill $_nm: WRITE-FAIL -> cursor NOT advanced (retry next run)"
+                return 0
+            fi
             if [ "$IL_APPENDED" -gt 0 ]; then
                 seal_write append "backfill src=$_nm"
             fi
@@ -930,6 +934,10 @@ $_tail"
     # "游标已前移但行未落盘"的窗口丢数据（首轮回填 1359 行尤其不可接受）。
     if [ "$IL_PRESYNC_MODE" != 1 ]; then
         append_batch
+        if [ "$IL_WRITE_OK" != 1 ]; then
+            il "$_nm: WRITE-FAIL -> cursor NOT advanced (retry next run)"
+            return 0
+        fi
         if [ "$IL_APPENDED" -gt 0 ]; then
             seal_write append "src=$_nm"
         fi
@@ -966,7 +974,10 @@ seq_hw_bump() { # $1=刚分配到的最大 seq
 }
 append_batch() {
     IL_APPENDED=0
+    IL_WRITE_OK=1
     [ -s "$BATCH" ] || return 0
+    # 写前水位守卫（R1.6 v2）：低于阈值先裁再写，避免"写不进去"
+    prewrite_guard
     _existing=/tmp/il_keys.$$
     if [ -s "$LEDGER" ]; then
         tail -n 800 "$LEDGER" 2>/dev/null | awk -F'\t' '{ print $3 ":" $6 }' > "$_existing"
@@ -998,11 +1009,19 @@ append_batch() {
         printf '%s\t%s\n' "$_r" "$_sq" >> "$_rows"
         _sq=$(( _sq + 1 ))
     done < "$_keep"
+    _before=$(wc -l < "$LEDGER" 2>/dev/null); _before=$(num0 "$_before")
     if [ "$DRYRUN" = 1 ]; then
         echo "--- DRYRUN batch n=$_n ---"
         cat "$_rows"
     else
         cat "$_rows" >> "$LEDGER"
+    fi
+    # 写后校验：满盘时 cat >> 会静默失败（2>/dev/null 吞掉）→ 行数不增即判失败，
+    # 由 ingest 检查 IL_WRITE_OK 决定**不推进游标**（下一轮重试，行不丢）。
+    _after=$(wc -l < "$LEDGER" 2>/dev/null); _after=$(num0 "$_after")
+    if [ "$DRYRUN" != 1 ] && [ $(( _after - _before )) -ne "$_n" ]; then
+        IL_WRITE_OK=0
+        il "WRITE-FAIL free_kb=$(data_free_kb) expected=$_n wrote=$(( _after - _before ))"
     fi
     IL_APPENDED=$_n
     seq_hw_bump $(( _sq - 1 ))
@@ -1158,6 +1177,36 @@ data_free_kb() {
     case "$_v" in ''|*[!0-9]*) _v=999999999 ;; esac
     echo "$_v"
 }
+# ---- R1.6 v2 (2026-11-01): **写前守卫** -------------------------------------
+# 实弹：soak-qa 用 dd 以 ~25MB/s 把 /data 从 1470MB 填到 0 只花 60s，而旧守卫是
+# 5min tick 驱动 → 整段满盘期间一次都没触发。修法：每次**写台账之前**先查一次水位
+# （1 次 df），低于阈值就先裁再写 —— 在"写不进去"之前腾空间。
+# 自保事件直接落一行（不进 BATCH：本函数会在 append_batch 里被调用，避免重入）。
+prewrite_guard() {
+    _f=$(data_free_kb); IL_FREE=$_f
+    [ "$_f" -ge "$LOW_KB_T1" ] && return 0
+    _t=1
+    [ "$_f" -lt "$LOW_KB_T2" ] && _t=2
+    [ "$_f" -lt "$LOW_KB_T3" ] && _t=3
+    _r2=0; _r3=0
+    case "$_t" in
+    1) _r3=$(prune_tier SEV3 "$TTL_SEV3") ;;
+    2) _r3=$(prune_tier SEV3 "$TTL_SEV3"); _r2=$(prune_tier SEV2 "$TTL_SEV2") ;;
+    3) _r3=$(prune_tier SEV3 1); _r2=$(prune_tier SEV2 1) ;;
+    esac
+    _r2=$(num0 "$_r2"); _r3=$(num0 "$_r3")
+    [ "$DRYRUN" != 1 ] || return 0
+    _sq=$(next_seq)
+    printf '%s\t%s\tdisk_guard\t-\t-\tretention\ttier=%s free_kb=%s stage=prewrite pruned_sev2=%s pruned_sev3=%s pruned_sev1=0\t%s\n' \
+        "$NOW" "$(sev_of disk_guard - - "tier=$_t")" "$_t" "$_f" "$_r2" "$_r3" "$_sq" >> "$LEDGER"
+    seq_hw_bump "$_sq"
+    # **无条件**写 seal：这一行是绕过 append_batch 直接落盘的，若不写 seal，
+    # 台账 md5 会与 seal 末行脱钩（审计立刻报 md5_ok=no，2026-11-01 实弹）。
+    seal_write prune "prewrite tier=$_t free=$_f KB" 0 "$_r2" "$_r3"
+    il "prewrite guard tier=$_t free=$_f KB pruned r2=$_r2 r3=$_r3"
+    return 0
+}
+
 disk_guard() {
     _free=$(data_free_kb)
     IL_FREE=$_free
@@ -1475,6 +1524,16 @@ if [ "$1" = "--flush-pending" ]; then
     append_batch
     [ "$IL_APPENDED" -gt 0 ] && seal_write append manual_flush
     write_status
+    rm -f "$BATCH"
+    exit 0
+fi
+if [ "$1" = "--disk-guard" ]; then
+    # 廉价模式：只查水位(+必要时裁剪)，不摄取。供 log_keeper 的 30s 周期调用
+    # （R1.6 v2：分钟级 tick 扛不住 60s 填满，必须事件式/短周期）。
+    mkdir -p "$CURD" 2>/dev/null
+    touch "$LEDGER" "$SEAL" 2>/dev/null
+    prewrite_guard      # 已含裁剪 + 自保行 + seal（不要重复调 disk_guard）
+    echo "$UP" > "$HB" 2>/dev/null
     rm -f "$BATCH"
     exit 0
 fi

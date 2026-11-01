@@ -1,5 +1,9 @@
 #!/bin/sh
-# log_keeper.sh v2.12 -- 日志持久化守护（日志改善专项轮）
+# log_keeper.sh v2.13 -- 日志持久化守护（日志改善专项轮）
+#   v2.13 (R1.6 v2 磁盘守卫轮): 每轮(30s)做一次**磁盘水位事件式检查**（1 次 df），
+#     低于 300MB 就 fork incident_ledger --disk-guard（先裁后写）；低于 100MB 额外
+#     写 WARN。背景实弹：dd 25MB/s 把 /data 填满只用 60s，旧守卫挂在 5min tick 上
+#     整段没触发。最坏响应从 5min → 30s。
 #   v2.12 (M1/M4 台账轮): 5min 块新增两个 fork 触发点（**无新守护**，仍是单进程）：
 #     ① incident_ledger.sh — 事故台账归一台账 + 分级留存 seal（M1/R1.1-R1.6）；
 #     ② soak_checkpoint.sh --tick — M4 每日 checkpoint（脚本自节流，soak-qa 约定）。
@@ -312,6 +316,16 @@ while :; do
     done
     # -- 每 10 轮(5min)落一行汇总: 持久化规模 + 降噪丢弃量可观测(不静默) --
     CYC=$(( ${CYC:-0} + 1 ))
+    # -- v2.13 (R1.6 v2): 磁盘水位**事件式**检查（每轮 30s，1 次 df）--------
+    # 实弹：dd 以 25MB/s 把 /data 从 1470MB 填到 0 只用 60s，5min tick 的守卫
+    # 整段没落进窗口 → 一次都没触发。这里每 30s 查一次，低于阈值才 fork 台账的
+    # --disk-guard（先裁后写），把最坏响应从 5min 压到 30s。
+    _dfk=$(/data/gw/bin/busybox df -k /data 2>/dev/null | tail -1 | awk '{print $4}')
+    case "$_dfk" in ''|*[!0-9]*) _dfk=999999999 ;; esac
+    if [ "$_dfk" -lt 307200 ] && [ -x /data/gw/incident_ledger.sh ]; then
+        sh /data/gw/incident_ledger.sh --disk-guard >/dev/null 2>&1 || true
+        if [ "$_dfk" -lt 102400 ]; then lk "WARN /data free low: $_dfk KB (<100MB) disk-guard ran"; fi
+    fi
     if [ $((CYC % 10)) -eq 0 ] || [ "$CYC" = 1 ]; then
         # v2.9: 可用性采样器 (10min 节拍; 首采即时) — 无新守护的设计前提
         if [ $((CYC % 20)) -eq 0 ] || [ "$CYC" = 1 ]; then

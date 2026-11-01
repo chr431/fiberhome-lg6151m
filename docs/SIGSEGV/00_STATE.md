@@ -8,7 +8,7 @@
 **记录真实、来自进程外部、不是受害者自己生成的；它精确落在 fault-time va_list，目标随进程栈布局（top-x2 恒 0x390），固定 VA 与固定 PA 都已排除。**
 当前主问题：**VA-resolved 的写入是 uaccess 还是 GUP-DMA；写入者是否在 AP 可达范围。**
 
-**2026-11-01 更新（skeptic 审计修订）**：vsurv4 H4v1 普查 **82/112** 份 canary dump 含规范记录（73.2%，Wilson 95% CI **64.3–80.5%**；原 88/112 作废，C-161）；`top-x2=0x390` 在 **111/112** 恒定；记录有**两副本**（`x2` 82、`x2-0x240` 66，后者只出现在 x2 也命中的样本里），`x2-0x130` 的 18 份是 **ASCII 十进制数字伪影**（strict 判据 0/112）；32B stride 的全页扫描**结构性**找不到记录（dump 偏移恒 ≡16 mod 32，实测 0/112，C-162）。canary 作为记录探测器已被验证（C-137/C-139）；自然 NE 份额 **0/4**（3 自然 core + 1 自然 .stack），Wilson 95% 上界 **49.0%**（C-142）；不能用 canary 外推（C-140）。
+**2026-11-01 更新（skeptic 审计修订）**：vsurv4 H4v1 普查 **82/112** 份 canary dump 含规范记录（73.2%，Wilson 95% CI **64.3–80.5%**；原 88/112 作废，C-161）；`top-x2=0x390` 在 **111/112** 恒定；记录有**两副本**（`x2` 82、`x2-0x240` 66，后者只出现在 x2 也命中的样本里），`x2-0x130` 的 18 份是 **ASCII 十进制数字伪影**（strict 判据 0/112）；32B stride 的全页扫描**结构性**找不到记录（dump 偏移恒 ≡16 mod 32，实测 0/112，C-162）。canary 作为记录探测器已被验证（C-137/C-139）；**自然 NE `.stack` 4/4 含同族记录**（C-142 改判，旧 0/4 作废）；且**健康进程栈 2/12 也含记录**（C-173）⇒ 写入**普遍**、崩溃只看落点；不能用 canary 外推（C-140）。
 
 **判决（2026-11-01 13:00 重写，取代 C-145）**：**旧「Transport = PA/DMA（E2）+ 记录 = WED TXD」已作废**（C-138/C-145 → X）。
 当前口径（详见 [VERDICT.md](VERDICT.md) v2 与 [11_TRANSPORT_SCORECARD.md](11_TRANSPORT_SCORECARD.md)）：
@@ -62,7 +62,7 @@
 | C-006 | 0x780 暂存槽 vs ap2 是两个目标地址；71/32 的物理含义 | 暂存槽只活 ~10 条指令；固定写 ap2 产生不了 A0B2 | **vsurv5**：手写 va_copy 到不同暂存偏移；A0B2 跟暂存槽走/消失则 B-1 成立 |
 | C-009 | sh.core 的“bystander”是否安全 | sh.core 是装置 shell；记录两个零字可把指针槽清零 | 降 E1；补良性正对照 |
 | C-013/C-034 | 传输是 uaccess 还是 GUP-DMA | **判决 PA/DMA（E2，C-145）**；页级 kprobe 被 CONFIG_KPROBES=n 阻断（C-144） | 升 E3：重编内核开 KPROBES，或用户态 remap/RO 实验 |
-| C-025 | 自然 NE 中记录家族占比 | 3 份自然 core 0/3 record；95% 上界 63%；canary 88/112 验证探测器 | 自然 NE 栈普查；分层；不要用 canary 外推 |
+| C-025 | 自然 NE 中记录家族占比 | **改判 2026-11-01**：自然 NE `.stack` **4/4 含同族记录**（C-142）；健康栈 **2/12** 为基线（C-173）⇒ 占比须按同一 strict 判据重扫；canary 82/112 验证探测器 | 分层重扫三套语料；不要用 canary 外推 |
 | C-026/C-038 | GUP/stale 用户指针 | 内核有完整 zerocopy 栈；模块 0 GUP 导入；驱动 dma_map_page | 查 mtk_warp/mt_wifi 的 skb frag/zerocopy；ref/use-after-unpin |
 | C-035 | cth_cfu 正对照 Oops/重启 | 一次未复现；3 个候选机制 | 修 cth（递归守卫、去 dump_stack、默认关 c2u）后再跑 |
 | C-044..C-048 | ip 是页级写入的受害者；HIF-TXD/FOE 形状候选 | ip 全 .text 无写 filter.pfx；mtk_wed 32B 描述符 +0x10/+0x14；hw_nat FOE IP +0x10/+0x14 | **mtk_warp**（738KB，未扫）是真正 ring/DMA；mt_wifi fh_netlink_send_to_user |
@@ -120,7 +120,7 @@
 ## 9. 测量偏差（2026-10-31，vaguard / nerepair）
 
 - **vaguard**（自建 busybox/ip/logc/mipc_cellular/v3httpd 的 vfprintf 闸门）在自然进程里**修复**记录家族：vaguard.tsv **49 次**（44 ip、4 awk、1 ping），这些**不进** ne_events/cores → 当时的自然 NE 普查 0/4 是 post-guard 下界（C-152）。**2026-11-01 更新**：新一批自然 NE `.stack` **4/4 含同族记录**（C-142 改判），说明记录家族在自然进程里**不是罕见事件**；但 n=4、窗口只到栈尾 16 页，仍不可外推。
-- **vsurv4 canary 不链 vaguard**（build_usr.sh 无 vaguard.o）→ **h4 88/112 不受影响**（C-137/C-139 仍成立）。
+- **vsurv4 canary 不链 vaguard**（build_usr.sh 无 vaguard.o）→ **h4 82/112 不受影响**（C-161/C-139 仍成立）。
 - **ip 的 .bss filter 填充**不是 printf 类 → **40/40 结论不受影响**；但 ip 的总崩溃数被闸门压低（44 次 printf 命中被修），ip 的自然 NE 计数偏低。
 - **nerepair** 现已对全部进程修复同一家族（vsurv4 除外）→ **修复后自然 NE 不再可比**；干净的自然份额窗口需**停闸门 + 停 nerepair**（canary 仍记录 h4）。
 - 闸门 49 次命中的时间跨度 ≈42 h（epoch 1793183044..1793333882）→ ≥1.17 次/小时的记录家族事件（受闸门覆盖的二进制内）；因闸门在写 core/h4 之前就修复，不能换算成自然份额（C-153）。

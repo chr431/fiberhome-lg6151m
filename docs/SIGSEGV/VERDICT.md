@@ -117,6 +117,11 @@ scanary 自扫描金丝雀（自带 8 MB 诱饵区、每 5 ms 全扫、崩不崩
 | H1b/H3 | 按 PA 写 / 直映射写 | E1 | romap（`set_memory_ro(__va(PA))`）：写入继续 ⇒ 绕过 MMU；出内核 fault ⇒ 直映射 store（PC=身份） | kdev+lab |
 | — | MD/SCP 侧 | E1 | 在 MD 共享区搜受害栈 VA（正对照：先搜到 `bat_va`） | lab |
 
+**内核模块仪器路线在本机已封闭（E3，三次实证事故）**：uwhook（13:23，shim 返回地址编码错）、pte_redirect（13:35，把 `alloc_page` 内核页直接塞进用户 PTE ⇒ pfn 双重归属）、
+uprot（13:56，只改权限位仍打崩）——**三次非计划重启，全部由仪器引起、非缺陷本身**；pstore 全文已留存。
+⇒ VA vs PA 的最终判决**本会话未取得**，且**不应再在这台 panic_on_oops=1 的机器上用内核模块尝试**；
+下一轮建议：①重编内核开 KPROBES 做页级判决；②用长驻 daemon 的自然热槽做**纯用户态**观测（sampler2 已证明可行）；③在有独立测试机的条件下再做 PTE 实验。
+
 **诚实的边界**：393/685 个用户写站点未解析、内联 `__put_user`/`sttr` 不在扫描口径、169 个厂商 `.ko` 无 BTF/DWARF、
 SRAM/MMIO 未扫。任何"AP 侧已无处可指"的说法都只在这三个口径内成立。
 

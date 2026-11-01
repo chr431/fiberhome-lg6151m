@@ -65,6 +65,38 @@ RL_NOW=5000 rl_ok selftest_legacy; chk "F1 旧2字段 n=2 -> 第3次放行" 0 "$
 RL_NOW=5000 rl_ok selftest_legacy; chk "F2 旧2字段 n=3 -> 限流" 1 "$?"
 RL_NOW=5060 rl_ok selftest_legacy; chk "F3 旧2字段 -> 60s 后慢重试" 0 "$?"
 
+
+# ---- G. 判活陷阱回归（Lead 指派：三个流各撞一次的同族缺陷的永久护栏） ----
+# G1 名字像(可达形态): 同名不同路径 —— sh /tmp/<token> 而不是 /data/gw/<token>
+printf '#!/bin/sh\nsleep 60\n' > /tmp/ntp_keeper_trap.sh 2>/dev/null
+chmod +x /tmp/ntp_keeper_trap.sh 2>/dev/null
+sh /tmp/ntp_keeper_trap.sh >/dev/null 2>&1 &
+DECOYS="$DECOYS $!"
+sleep 1
+alive "" "" ntp_keeper_trap.sh; chk "G1 同名不同路径(/tmp 非 /data/gw) -> 必须判死" 1 "$?"
+# G1b argv[0] 冒充: 本平台**不可构造** —— busybox ash 无 exec -a, busybox 按 argv[0] 派发
+#   applet, 镜像内也没有独立 sleep 可做 symlink 伪装。**如实 skip, 不假装覆盖**
+#   (同族已由 G2/G3 覆盖; 若将来换了 shell 支持 exec -a, 这段会自动变成真断言)。
+if sh -c 'exec -a probe_xyz_selftest sleep 2' >/dev/null 2>&1 && \
+   [ -n "$(pgrep -f '^probe_xyz_selftest' 2>/dev/null)" ]; then
+    sh -c 'exec -a /data/gw/ntp_keeper_trap.sh sleep 30' >/dev/null 2>&1 &
+    DECOYS="$DECOYS $!"
+    sleep 1
+    alive "" "" ntp_keeper_trap.sh; chk "G1b exec -a 冒充 argv[0] -> 必须判死" 1 "$?"
+else
+    echo "  skip G1b (本平台不支持 exec -a, argv[0] 冒充不可构造; 同族由 G2/G3 覆盖)"
+fi
+# G2 路径像: argv 里有目标路径, 但 argv[0] 不是它
+sh -c 'exec sleep 60 /data/gw/ntp_keeper_trap.sh' >/dev/null 2>&1 &
+DECOYS="$DECOYS $!"
+sleep 1
+alive "" "" ntp_keeper_trap.sh; chk "G2 路径只出现在参数里 -> 必须判死" 1 "$?"
+# G3 自己像: 测试命令自身的 cmdline 含被查字符串, 不得把测试自己算进去
+sh -c 'echo /data/gw/ntp_keeper_trap.sh >/dev/null; sleep 30' >/dev/null 2>&1 &
+DECOYS="$DECOYS $!"
+sleep 1
+alive "" "" ntp_keeper_trap.sh; chk "G3 测试自身 cmdline 含路径 -> 必须判死" 1 "$?"
+
 # ---- 清理 ----
 for _p in $DECOYS; do kill "$_p" 2>/dev/null; done
 rm -f /tmp/watchdog_svc_selftest.rec /tmp/watchdog_svc_selftest_legacy.rec /tmp/svc_selftest.lock

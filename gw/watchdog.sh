@@ -948,12 +948,27 @@ if [ "$_rc" != 0 ]; then
     exit 0
 fi
 # v1.42: 启动横幅改用 VER 单一来源(此前字面量停在 v1.38, 识别/syslog 断言被骗)
-VER=1.45
+VER=1.47
 log "===== watchdog v$VER start (svc_lib primitives + minimal parsers + batch3 metrics; avail keys + outcome probes + bearer-follow dp; alert LED 5G orange) ====="
 logger -t watchdog "watchdog v$VER start"
 # initialize state to current (suppress initial alarms)
 run_cycle  # first run logs transitions but that's fine
+# v1.47: 快车道 —— fast_watch 判定客户端面服务确定性死亡(2 拍确认)后写 /tmp/watchdog.kick,
+#   本循环以 1s 粒度等待并提前跑一轮 —— 配合档A(live=0 当拍重启)把客户端面恢复从 <=30s 压到 <=5s。
+_kickwait() {
+    _kw=0
+    while [ "$_kw" -lt "$CYCLE" ]; do
+        sleep 1
+        _kw=$((_kw + 1))
+        if [ -f /tmp/watchdog.kick ]; then
+            rm -f /tmp/watchdog.kick
+            log "EVT kick from fast_watch (early cycle at ${_kw}s of $CYCLE)"
+            return 0
+        fi
+    done
+    return 0
+}
 while :; do
-    sleep $CYCLE
+    _kickwait
     run_cycle
 done

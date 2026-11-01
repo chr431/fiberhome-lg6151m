@@ -165,6 +165,38 @@ scan_proc() {
     F_s0=$1; F_s1=$2; F_l80=$3; F_l22=$4; F_l53=$5; F_bl22=$6; F_r_eth=$7; F_r_ccm=$8
     return 0
 }
+
+# ---- tier-A 快车道(客户端面 ≤10s) ----------------------------------------
+#   实测约束(2026-11-01 实弹):
+#     * v3httpd 是 **fork-per-connection**(gw/src/v3httpd.c L389), fork 出来的 handler 子进程
+#       cmdline 与父进程相同 -> pgrep/pidof 会数到 N+1, 不能用来判死; 判据必须是 **:80 有 LISTEN**。
+#     * dnsmasq 单进程, 用进程存在 + :53 listener。
+#     * hostapd 用**我方实例**(argv 带 /var/wlan/hap_*.conf), 厂商全局实例常驻, pidof 会假绿。
+#   动作方式: 本函数**只踢 watchdog**(写 /tmp/watchdog.kick), 不自己重启 ——
+#     重启配方只存在于 watchdog 一处, 避免两套监督逻辑打架/双实例; watchdog 收到 kick 立即跑一轮,
+#     档A(进程不存在=强证据)保证同一拍重启。预算(rl_ok 3/h)仍由 watchdog 统一把关。
+#   2 拍确认: 连续 FL_CONFIRM 拍判定死亡才踢, 防 fork 瞬态/端口回收窗口误判。
+FL_CONFIRM=2
+fl_check() { # $1=key $2=alive(1=活/0=死)
+    eval "_fl_n=\${FLN_$1:-0}"
+    if [ "$2" = 1 ]; then
+        [ "$_fl_n" != 0 ] && printf '%s\t%s\t%s\n' "$(date +%s)" "$1" "recovered after ${_fl_n}ticks" >> "$LOGD/fast_kick.tsv"
+        eval "FLN_$1=0"
+        return 0
+    fi
+    _fl_n=$(( _fl_n + 1 ))
+    eval "FLN_$1=$_fl_n"
+    if [ "$_fl_n" -eq "$FL_CONFIRM" ]; then
+        : > /tmp/watchdog.kick
+        printf '%s\t%s\t%s\n' "$(date +%s)" "$1" "absent ${_fl_n}ticks -> kick watchdog" >> "$LOGD/fast_kick.tsv"
+    fi
+}
+fast_lane() {
+    [ "$DRY" = 1 ] && return 0
+    fl_check v3httpd "$F_l80"
+    fl_check dnsmasq "$F_dnsmasq"
+    fl_check hostapd "$F_hostapd"
+}
 F_car0=0; F_br=0; F_ra0=0; F_rai0=0; F_lo=0
 scan_links() {
     rd /sys/class/net/eth0/carrier;  case "$_fw_v" in 1) F_car0=1 ;; *) F_car0=0 ;; esac
@@ -771,7 +803,7 @@ case "${1:-}" in
         TICK=$(( TICK + 1 ))
         now_cs; _rl_t0=$CS
         if [ $(( TICK % 10 )) -eq 1 ]; then now_ep; fi
-        sample_all; flags_upd; compute_levels; compute_led
+        sample_all; fast_lane; flags_upd; compute_levels; compute_led
         eval "_d_gui=\$LV_gui _d_br=\$LV_bridge _d_w2=\$LV_wifi2g _d_eth=\$LV_ethernet _d_cell=\$LV_cellular _d_ssh=\$LV_ssh _d_led=\$LV_led _d_sup=\$LV_supervisor"
         printf 't=%s up=%s ver=%s ovr=%s gui=%s br=%s w2=%s eth=%s cell=%s ssh=%s led=%s sup=%s ledflat=%s/%s/%s ok80=%s l22=%s dns=%s\n' \
             "$TICK" "$UPS" "$VER" "$OVR" "$_d_gui" "$_d_br" "$_d_w2" "$_d_eth" "$_d_cell" "$_d_ssh" "$_d_led" "$_d_sup" \

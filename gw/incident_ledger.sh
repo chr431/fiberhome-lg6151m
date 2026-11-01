@@ -1549,12 +1549,14 @@ mark_clock_skew() { # $1=apply(1|0)
             if (state == 0) {
                 if (NR > 1 && ts <= prev - 600 && ts >= prev - 7200) {
                     state = 1; start = NR; base = prev; mn = ts; mx = ts
+                    # 幂等：块首行已带 clock_skew=1 → 这块已经标过，不再报告/重复标注
+                    done = (index($7, "clock_skew=1") > 0) ? 1 : 0
                 }
             } else {
                 if (ts < mn) mn = ts
                 if (ts > mx) mx = ts
                 if (ts >= base - 120) {
-                    if (NR - start <= 120 && (mx - mn) <= 7200) printf "%d %d\n", start, NR - 1
+                    if (NR - start <= 120 && (mx - mn) <= 7200 && done == 0) printf "%d %d\n", start, NR - 1
                     state = 0
                 } else if (NR - start > 120 || (mx - mn) > 7200) {
                     state = 0

@@ -1,0 +1,36 @@
+# R2-A 观察性研究：canary 命中率 vs 各接口流量（2026-11-01）
+
+采样器：`/data/repro/corr_sampler.sh` → `/data/repro/corr.tsv`（10s/行，19 列）
+canary：4× vsurv4（`/data/repro/vsurv4`），09:47 启动，全程未重启
+主机副本：`_local/evidence/crash-root/corr_raw.tsv`（**拉取做行数断言**：device `wc -l` == fetched rows，本次 106==106）
+
+## 三臂对照
+
+| 臂 | 时长 | 命中 | **命中率** | eth0_rx KB/s | eth1_rx KB/s | br-lan_rx KB/s | rai0_tx KB/s | softirq-NET_RX/s | loadavg |
+|---|---|---|---|---|---|---|---|---|---|
+| Q1 基线 | 374s | 165 | **26.5/min** | 68.1 | 1.6 | 6 | 38.4 | 246.4 | 12 |
+| D 设备curl(只增eth0) | 467s | 316 | **40.6/min** | 695.1 | 1.7 | 4.7 | 10.7 | 339 | 12.56 |
+| Q2 静默 | 244s | 30 | **7.4/min** | 0.4 | 2 | 2.2 | 0.7 | 143.2 | 12.89 |
+
+（D 臂 = 设备自身 `/fhrom/bin/curl` 以 2 MB/s 限速下载 8 min：只增加 eth0 收发，不经 WiFi、不经 LAN）
+
+## 判读
+
+1. **WiFi TX 不是主驱动**：D 臂期间 rai0_tx 从 38.4 掉到 **10.7 KB/s（−3.6×）**，命中率却从 26.5 升到 **40.6/min（+1.53×）**。
+   → 命中与 WiFi TX **反向**；排除"WiFi TX 路径写入"。
+2. **命中强依赖流量**：Q2 静默臂（eth0_rx 0.4、rai0_tx 0.7 KB/s）掉到 **7.4/min（−3.6×）**。
+   → 不是定时器/背景 DMA 的固定速率。
+3. **eth0 RX 正相关但严重次线性**：eth0_rx ×10.2 → 命中仅 ×1.53。若"每个 RX 缓冲回收事件有固定命中概率"，应近似线性。
+4. **近零 eth0 流量下仍有 7.4/min 残余** → 存在第二贡献项（LAN/WiFi RX 软中断，或少量周期流量）。
+5. 逐 10s 相关系数（77 个区间）：**srx 0.873 > eth0_rx 0.725 ≈ eth0_tx 0.667 ≫ rai0_tx 0.172 > eth1 0.06–0.20**。
+
+## 局限（必须写清）
+
+- **未做 canary-CPU 归一**：D 臂软中断负载升高会挤占 canary CPU，可能**低估**流量效应（sampler 未采 canary utime/stime，下一臂应补）。
+- 5 个真实客户端的背景流量不可控，臂间存在混杂。
+- 相关性 ≠ 因果：本轮是"排除 + 收窄"，不是"点名"。
+
+## 与既有结论的关系
+
+- 与上一轮"WED tuple 路径未激活"（P1）一致：两轮都指向 **WiFi TX 侧不成立**。
+- 与 Lead 侦察"记录源 IP 以 eth0 WAN 地址为主"一致：eth0 RX 正相关。

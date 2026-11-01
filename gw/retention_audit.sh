@@ -45,6 +45,7 @@ SEAL=$IL_SEAL;      [ -n "$SEAL" ] || SEAL=$DIR/incidents.seal
 STATUSF=$IL_STATUS; [ -n "$STATUSF" ] || STATUSF=$DIR/incident_ledger.status
 CNTF=$IL_CNT;       [ -n "$CNTF" ] || CNTF=$DIR/.inc_counters
 DRILLF=$DIR/drills.tsv
+NEV=$DIR/ne_events.tsv
 HB=$IL_HB;          [ -n "$HB" ] || HB=/tmp/incident_ledger.hb
 REPORT=$DIR/retention_audit.txt
 HIST=$DIR/retention_audit_history.tsv
@@ -297,8 +298,32 @@ run_audit() {
         echo "QUALITY presync_rows=$IL_PRESYNC backfill_rows=$IL_BACKFILL drill_tagged_rows=$IL_DRILLROWS ledger_hb_age_s=$_hb"
         echo "PRESYNC rows=$PS_N bytes=$PS_B counted_in_oldest=no note=写于NTP首同步前(或时钟=固件构建日), ts已按入账时刻计, 原值在src_ts"
         echo "SOURCE_HEALTH malformed_ne=$(sed -n 's/^malformed_ne=//p' "$STATUSF" 2>/dev/null) source_gaps=$(sed -n 's/^gaps=//p' "$STATUSF" 2>/dev/null) lines_read=$(sed -n 's/^lines_read=//p' "$STATUSF" 2>/dev/null) pending=$(sed -n 's/^pending=//p' "$STATUSF" 2>/dev/null) presync_now=$(sed -n 's/^presync=//p' "$STATUSF" 2>/dev/null) data_free_kb=$(sed -n 's/^data_free_kb=//p' "$STATUSF" 2>/dev/null)"
-        # R2-D: NE 台账形态分布（碎片 vs 旧格式 vs 当前格式）+ aee 侧计数
-        echo "NE_QUALITY forms_good=6:$(sed -n 's/^ne_good_nf6=//p' "$STATUSF" 2>/dev/null)/7:$(sed -n 's/^ne_good_nf7=//p' "$STATUSF" 2>/dev/null)/8:$(sed -n 's/^ne_good_nf8=//p' "$STATUSF" 2>/dev/null)/9:$(sed -n 's/^ne_good_nf9=//p' "$STATUSF" 2>/dev/null) forms_bad=1:$(sed -n 's/^ne_bad_nf1=//p' "$STATUSF" 2>/dev/null)/2:$(sed -n 's/^ne_bad_nf2=//p' "$STATUSF" 2>/dev/null)/other:$(sed -n 's/^ne_bad_nf_other=//p' "$STATUSF" 2>/dev/null) bad_rows_total=$(sed -n 's/^malformed_ne=//p' "$STATUSF" 2>/dev/null) note=碎片只计数不入账"
+        # R2-D: NE 台账**文件级**形态分布（不是每轮计数器 —— 计数器在静默轮会归零，
+        # 会让人误读成"文件里没有合法行"）。一次 awk 扫描源文件，给出：
+        #   合法: 6/7 列=旧格式(core_meta v1.2 前/v1.2~v1.6), 8 列=当前, 9 列=当前+unsync
+        #   脏行: fragments=首列非数字(碎片), blank=空白行, other=首列是数字但列数离谱
+        #   newest_fragment_line 与 total 的对比 = "历史遗留 vs 新产生"的判据
+        if [ -r "$NEV" ]; then
+            _nq=$(awk -F'\t' '
+                /^[ \t]*$/ { blank++; next }
+                $1 !~ /^[0-9]+$/ { frag++; if (NR > maxfrag) maxfrag = NR; next }
+                NF==6 { v6++; next } NF==7 { v7++; next } NF==8 { v8++; next } NF==9 { v9++; next }
+                { other++ }
+                END { printf "%d %d %d %d %d %d %d %d\n", v6+0, v7+0, v8+0, v9+0, frag+0, blank+0, other+0, maxfrag+0 }
+            ' "$NEV" 2>/dev/null)
+            _v6=$(printf '%s' "$_nq" | cut -d' ' -f1); _v7=$(printf '%s' "$_nq" | cut -d' ' -f2)
+            _v8=$(printf '%s' "$_nq" | cut -d' ' -f3); _v9=$(printf '%s' "$_nq" | cut -d' ' -f4)
+            _fr=$(printf '%s' "$_nq" | cut -d' ' -f5); _bl=$(printf '%s' "$_nq" | cut -d' ' -f6)
+            _ot=$(printf '%s' "$_nq" | cut -d' ' -f7); _mf=$(printf '%s' "$_nq" | cut -d' ' -f8)
+            _tot=$(wc -l < "$NEV" 2>/dev/null); _tot=$(num0 "$_tot")
+            _verd=OK
+            [ "$_ot" != 0 ] && _verd=CHECK
+            [ "$_fr" != 0 ] && _verd=FRAGMENTS_HISTORICAL
+            # 新产生的判据：碎片出现在文件最后 50 行内
+            if [ "$_fr" != 0 ] && [ "$_mf" -gt $(( _tot - 50 )) ]; then _verd=FRAGMENTS_RECENT; fi
+            echo "NE_QUALITY file=$NEV total=$_tot valid_6col=$_v6 valid_7col=$_v7 valid_8col=$_v8 valid_9col=$_v9 fragments=$_fr blank=$_bl other=$_ot newest_fragment_line=$_mf verdict=$_verd"
+        fi
+        echo "NE_RUN_COUNTERS malformed_ne=$(sed -n 's/^malformed_ne=//p' "$STATUSF" 2>/dev/null) good_6=$(sed -n 's/^ne_good_nf6=//p' "$STATUSF" 2>/dev/null) good_7=$(sed -n 's/^ne_good_nf7=//p' "$STATUSF" 2>/dev/null) good_8=$(sed -n 's/^ne_good_nf8=//p' "$STATUSF" 2>/dev/null) good_9=$(sed -n 's/^ne_good_nf9=//p' "$STATUSF" 2>/dev/null) bad_1=$(sed -n 's/^ne_bad_nf1=//p' "$STATUSF" 2>/dev/null) bad_2=$(sed -n 's/^ne_bad_nf2=//p' "$STATUSF" 2>/dev/null) note=每轮增量计数(静默轮为 0 属正常)"
         echo "AEE_KE aee_ke_rows=$(sed -n 's/^aee_ke=//p' "$STATUSF" 2>/dev/null) aee_ne_rows=$(sed -n 's/^aee_ne=//p' "$STATUSF" 2>/dev/null) note=KE 权威来源; NE 只计数防双计"
         # 演练窗口（Lead v1.2：排除必须可审计，不能是黑箱）
         _dn=0

@@ -709,7 +709,7 @@ run_loop() {
         TICK=$(( TICK + 1 ))
         now_cs; _rl_t0=$CS
         if [ $(( TICK % 10 )) -eq 1 ]; then now_ep; fi
-        STEP=sample; sample_all
+        STEP=sample; sample_all; fast_lane
         STEP=flags; flags_upd
         STEP=levels; compute_levels
         STEP=led; compute_led

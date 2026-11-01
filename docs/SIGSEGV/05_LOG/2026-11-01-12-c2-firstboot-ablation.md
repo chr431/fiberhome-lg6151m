@@ -81,12 +81,46 @@
 
 ## 10. 结果
 
-（实验后追加：各窗原始读数、日志文件路径、N、LOD、饱和/丢行、行数断言记录。）
+（2026-11-02 追加;会话 2026-11-01 22:42 → 11-02 01:4x。）
+
+- **lab 臂两个有效窗**(两个独立 boot,initramfs /init 自启,固定调用与 §9 逐字一致,START 行参数在案):
+  - 窗1(lab boot 代次 1,1800s):**inj=0 真命中 0**;HIT_APPEAR 5 条全部 inj=1(自检 t1_decoy×1/t2_stack×4);
+    HIT_REWRITE 0;vsurv4 崩溃转储 0。
+  - 窗2(lab boot 代次 2,1800s):**inj=0 真命中 0**;自检 5×inj=1;HIT_REWRITE 0;vsurv4 0。
+- 基线臂:同一晚 B1 N=4(900s;N<5 ⇒ 按 §4 降探索性)、B2 N=109(900s,计划外重启后的补充臂,
+  同判据同二进制 md5 17376b74… 断言);两臂各自仅做存在/消失二分对照(§5 跨 boot 声明)。
+- 观测总量 3600s(≥§5 的 60 min);0/3600s 的 95% 上界(rule of three)≈ **3 条/120min**,
+  对照厂商侧历史记录率 1.0–127.6 条/min(10 §2)。
+- **信道限制(如实披露)**:scanary 的 EXIT/PROBE/SELFTEST_PASS 汇总行仅写日志文件
+  (initramfs RAM,重启即失且本会话无 shell 可读);console 信道(经 /init 重定向 stdout→/dev/console)
+  含 START/HIT_APPEAR/CTX/SENTINEL/SELFTEST_OK,两窗事件全录于台架串口原始流
+  (本地存档 7 条 raw,md5 钉死于 `_local/investigations/sigsegv-tools/phase-AB/c2-final-evidence/all-files.md5`)。
+  窗完整性替代证据:/init 心跳 10s 间隔全程单调、窗内零 panic 零重启、自检注入序列完整。
+- 刷写:p25 = boot-lab-signed.img(91768de9…)md5 门禁 + 写后读回校验通过;LK 验签接受并正常引导。
 
 ## 11. 判决
 
-（实验后追加：V/P/A/T 对号；对应 01_CLAIMS 的 ID 与需新增/撤回的结论。）
+- **V 消失**(§4 V 行对号):①基线臂有效且 ≥1(B1=4、B2=109);②lab 两窗自检完整、console 信道
+  inj=0 均为 0。**结论:32B 记录的写入者属于 {厂商内核内建, 厂商 .ko, CCCI 未启动之 MD} 集合**
+  (集合级消融,不细分要素——§2 H0 注)。
+- 级别 **E2**(同夜双臂、正对照齐、覆盖 2×1800s 独立 boot);B1<5 按 §4 降探索性,由 B2(非探索性
+  量级)补强。四条 caveat:①EXIT/probe 汇总行不可得(T 分支形式要件仅部分旁证);②跨 boot 代次
+  不可比(仅存在/消失二分);③lab 内存节点 480MB 保守值;④lab 6.18.44 vs 厂商 5.15.134 版本差异。
+- 01_CLAIMS:**C-187**(family all)已登记,同判级与 caveat。
+- 会话终态:p25 仍为 lab 镜像、设备断电存放;B 槽(p38/p39)全程零写;原厂恢复件双备份
+  (PC depot + 设备 /data)完好;恢复步骤与物料清单见本地 `_local/investigations/sigsegv-tools/phase-AB/C2-session-report.md`。
 
 ## 12. 偏差与教训
 
-（实验后追加：预注册没料到的、观测者效应、仪器缺陷。）
+1. **lab initramfs 无交互 shell**(cpio 缺 /dev/console 节点 ⇒ PID1 stdio 打不开 ⇒ 任意 rdinit
+   以 exitcode=0 秒退 → panic;厂商 rootfs 上同参数正常)——预注册"窗2 手动同参数"无法执行,
+   改由第二个独立 boot 的 /init 自动窗充当(调用逐字一致;差异=启动者为 /init 而非人工,如实披露)。
+   C2 v2 必改:cpio 补 /dev/console + rdinit 应急脚本通路,离线 qemu 验证 PID1 stdio。
+2. B1 与刷机之间发生计划外重启(同晚另一会话的 ioprobe SEA),按指令补 B2;两基线并报。
+3. TRY_A 计数实测(0x00→0x01→0x02,跨 ~8 次 LK pass)与"+1/启动"档案模型不符;全程按每次
+   catch 实测执行,未触发 A/B 回退。bootctrl 块地址实证为 misc 分区 p1 内偏移 2060。
+4. 台架串口工具链五条教训(PINTEST 5s 输入窗 / autopilot 线程生命周期 / 长命令饿死控制台看门狗 /
+   ^C 回显背压 / pmm dump_alloced 语义)与修复方向见本地会话报告 §6;两轮 LK 侧克隆尝试因此中止,
+   **未产生任何额外闪存写入**(证据链:克隆批第 2 条 write 的回显从未出现 + 后续 boot 的
+   boot_a 验签通过)。
+5. 观测者效应:窗内零追加仪器(§6 预注册遵守);console 信道为 /init 固有重定向,非观测附加。

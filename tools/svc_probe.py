@@ -56,7 +56,7 @@ try:
 except Exception:
     pass
 
-VERSION = "1.6"
+VERSION = "1.7"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_EVIDENCE = os.path.abspath(os.path.join(
     REPO, "..", "_local", "evidence", "svc_probe"))
@@ -648,17 +648,42 @@ def device_pull(evidence_dir, quiet=True):
         "avail_transitions.tsv": "/data/gw/logs/avail_transitions.tsv",
         "drills.tsv": "/data/gw/logs/drills.tsv",
     }
-    got = {}
-    for name, remote in files.items():
-        cmd = "tail -n 4000 %s 2>/dev/null" % remote
-        txt = ""
+    def ssh(cmd, timeout=120):
         try:
             out = subprocess.run([sys.executable, lgssh, cmd], cwd=REPO,
-                                 capture_output=True, text=True, timeout=120)
-            txt = out.stdout or ""
+                                 capture_output=True, text=True, timeout=timeout)
+            return out.stdout or ""
         except Exception as e:
             if not quiet:
-                _p("warn: pull %s failed: %s" % (remote, e))
+                _p("warn: ssh failed: %s" % e)
+            return ""
+
+    def pull_tail(remote, max_lines=4000, chunk=400):
+        """分块拉取尾部 N 行。
+
+        实弹(2026-11-01 09:3x): 单次 tail -n 4000 只回来 8 行 —— dropbear 通道对
+        一次性大块输出会截断(设备侧 tail|wc -l 明明是 1611)。改成按 400 行窗口用
+        sed 分页拉, 每页独立短输出, 稳定且可诊断。**这直接决定 NE 关联的样本量**,
+        少拉一次就会得出 NE 总数 0 的假结论。
+        """
+        try:
+            n = int((ssh("wc -l < %s 2>/dev/null" % remote, timeout=60) or "0").strip())
+        except ValueError:
+            n = 0
+        if n <= 0:
+            return ""
+        start = max(1, n - max_lines + 1)
+        parts = []
+        a = start
+        while a <= n:
+            b = min(a + chunk - 1, n)
+            parts.append(ssh("sed -n '%d,%dp' %s 2>/dev/null" % (a, b, remote)))
+            a = b + 1
+        return "".join(parts)
+
+    got = {}
+    for name, remote in files.items():
+        txt = pull_tail(remote)
         with open(os.path.join(ddir, name), "w", encoding="utf-8") as f:
             f.write(txt)
         got[name] = len(txt.splitlines())
@@ -913,6 +938,123 @@ def build_report(evidence_dir, days=7, pull=False):
     return out
 
 
+def ne_correlate(evidence_dir, days=1, window=60, pull=False, out=None):
+    """NE(设备侧 SIGSEGV 事件) × 客户端可见中断 的时序关联（正式证据，Lead 指定）。
+
+    对 ne_events.tsv 里每条 NE，取客户端在 [NE-window, NE+window] 内的全部采样：
+      win_samples  窗口内有效采样数（icmp/dns/tcp80 任一被采到即算一拍）
+      win_fails    窗口内"任一探针失败"的采样数
+      max_gap_s    窗口内相邻采样的最大间隔（用于判测量缺口）
+      verdict      gap / client_outage / single_fail / no_client_impact
+
+    诚实边界（必须随结果一起引用）：
+      * **no_client_impact 是观测事实，不是"NE 无害"的证明**。探测器只有 1s 粒度、
+        只有 eth 一条路径；NE 可能造成过 <2s 的瞬断（低于去抖阈值）或只影响 WiFi 客户端。
+      * gap 表示该 NE 时刻客户端没在测 —— 不计入分子分母，也不得算作"无害"。
+      * 时间重叠不等于因果。
+    """
+    if pull:
+        device_pull(evidence_dir, quiet=True)
+    ev = load_device_evidence(evidence_dir)
+    cutoff_ms = int((time.time() - days * 86400) * 1000)
+    rows = [r for r in read_samples(evidence_dir, days=days) if r["ms"] >= cutoff_ms]
+    paths = sorted({r["path"] for r in rows})
+
+    # 每个路径一条按时间排序的"任一探针失败"序列
+    seq = {}
+    for p in paths:
+        pts = []
+        for r in rows:
+            if r["path"] != p:
+                continue
+            vals = [r.get(k, -1) for k in ("icmp", "dns", "tcp80")]
+            vals = [v for v in vals if v >= 0]
+            if not vals:
+                continue
+            pts.append((r["ms"], 0 if any(v == 0 for v in vals) else 1))
+        pts.sort()
+        seq[p] = pts
+
+    incidents = []
+    for p in paths:
+        _, merged = derive_episodes([r for r in rows if r["path"] == p])
+        for x in merged:
+            inc = {"path": p, "start": x["start"], "end": x["end"],
+                   "dur_s": x["dur_s"], "probes": x["probes"]}
+            a, ref, exc, why = attribute(inc, ev)
+            inc.update({"attrib": a, "evidence": ref, "excluded": exc,
+                        "excl_reason": why})
+            incidents.append(inc)
+
+    lines = []
+    tally = {}
+    for ne in ev["ne"]:
+        ts = ne["ts"]
+        if ts * 1000 < cutoff_ms:
+            continue
+        tms = ts * 1000
+        nsamp = nfail = 0
+        maxgap = 0
+        last = None
+        for p in paths:
+            pts = seq.get(p) or []
+            for ms, ok in pts:
+                if tms - window * 1000 <= ms <= tms + window * 1000:
+                    nsamp += 1
+                    if ok == 0:
+                        nfail += 1
+                    if last is not None and ms - last > maxgap:
+                        maxgap = ms - last
+                    last = ms
+                elif ms > tms + window * 1000:
+                    break
+        # 覆盖判据: 2*窗口 秒里至少有 25% 的拍(1s 节拍)才算"在测"
+        need = max(4, int(2 * window * 0.25))
+        if nsamp < need:
+            verdict = "gap"
+        elif nfail >= 2:
+            verdict = "client_outage"
+        elif nfail == 1:
+            verdict = "single_fail"
+        else:
+            verdict = "no_client_impact"
+        tally[verdict] = tally.get(verdict, 0) + 1
+        # 同窗口内是否有已排除的中断（演练/重启），供读者判断
+        hits = [i for i in incidents
+                if (i["start"] / 1000.0) - window <= ts <= ((i["end"] or now_ms()) / 1000.0) + window]
+        ex = ""
+        if hits:
+            i = hits[0]
+            ex = "%s:%s:%s" % (i["excluded"], i["excl_reason"] or "-", i["attrib"])
+        lines.append("%d\t%s\t%s\t%d\t%d\t%d\t%s\t%s\t%s" % (
+            ts, ne.get("comm", "?"), ne.get("sig", ""), nsamp, nfail, int(maxgap / 1000),
+            verdict, (hits[0]["dur_s"] if hits else ""), ex))
+
+    hdr = ("#ne_vs_outage v1.1 | window=+-%ds | fields: ne_epoch ne_comm ne_sig "
+           "win_samples win_fails max_gap_s verdict outage_dur_s outage_flags" % window)
+    text = hdr + "\n" + "\n".join(lines) + ("\n" if lines else "")
+    dst = out or os.path.join(evidence_dir, "ne_vs_outage.tsv")
+    with open(dst, "w", encoding="utf-8") as f:
+        f.write(text)
+
+    _p("NE × 客户端可见中断关联（窗口 ±%ds，%dd）" % (window, days))
+    _p("  NE 总数 %d" % len(lines))
+    for k in ("client_outage", "single_fail", "no_client_impact", "gap"):
+        if tally.get(k):
+            _p("    %-16s %d" % (k, tally[k]))
+    measured = tally.get("client_outage", 0) + tally.get("single_fail", 0) + tally.get("no_client_impact", 0)
+    if measured:
+        _p("  在测时段内 NE 造成客户端可见中断(≥2 失败): %d/%d = %.1f%%"
+           % (tally.get("client_outage", 0), measured,
+              100.0 * tally.get("client_outage", 0) / measured))
+        _p("  **这是观测事实，不是 NE 无害的证明**（1s 粒度/单路径/2s 去抖下限）")
+    if tally.get("gap"):
+        _p("  另有 %d 条 NE 落在测量缺口期，不计入分子分母" % tally["gap"])
+    _p("  -> %s" % dst)
+    return {"ne_total": len(lines), "tally": tally, "out": dst,
+            "window_s": window, "days": days, "measured_ne": measured}
+
+
 def print_report(o):
     _p("svc_probe report v%s  window=%dd  generated=%s"
        % (o["version"], o["window_days"], o["generated_at"]))
@@ -981,6 +1123,12 @@ def main(argv=None):
     pd = sub.add_parser("derive")
     pd.add_argument("--days", type=int, default=0)
     pd.add_argument("--quiet", action="store_true")
+
+    pn = sub.add_parser("necorr")
+    pn.add_argument("--days", type=int, default=1)
+    pn.add_argument("--window", type=int, default=60)
+    pn.add_argument("--pull", action="store_true")
+    pn.add_argument("--out", default=None)
 
     pp = sub.add_parser("report")
     pp.add_argument("--days", type=int, default=7)
@@ -1057,6 +1205,10 @@ def main(argv=None):
                     n += 1
         if not ns.quiet:
             _p("derived %d episodes from %d samples -> %s" % (n, len(rows), out))
+        return 0
+
+    if ns.cmd == "necorr":
+        ne_correlate(ed, days=ns.days, window=ns.window, pull=ns.pull, out=ns.out)
         return 0
 
     if ns.cmd == "report":

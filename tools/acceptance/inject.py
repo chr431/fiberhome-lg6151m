@@ -33,14 +33,14 @@ MARK = r"""
 KIND="$1"; TGT="$2"; NOTE="$3"; PHASE="$4"; S0="$5"
 DRILL=/data/gw/logs/drills.tsv
 mkdir -p /data/gw/logs
-[ -f "$DRILL" ] || printf '%s\n' "$DRILL_HDR" > "$DRILL"
+: # P0: 不触碰设备 drills.tsv
 if [ "$PHASE" = open ]; then
   S=$(date +%s)
-  printf '%s\t0\t%s\t%s\tsoak-qa\t%s\n' "$S" "$KIND" "$TGT" "$NOTE" >> "$DRILL"
+  echo "MARK_LOCAL_ONLY $S $KIND $TGT"
   echo "MARK_OPEN $S"
 else
   E=$(date +%s)
-  awk -v s="$S0" -v e="$E" -v k="$TGT" 'BEGIN{FS=OFS="\t"} $1==s && $4==k && $2=="0" { $2=e } { print }' "$DRILL" > "$DRILL.tmp" 2>/dev/null && mv "$DRILL.tmp" "$DRILL"
+  echo "MARK_LOCAL_ONLY_CLOSE $S0 $E"
   echo "MARK_CLOSE $S0 $E"
 fi
 """
@@ -58,11 +58,12 @@ LOG=/data/gw/logs/fault_inject.tsv
 DRILL=/data/gw/logs/drills.tsv
 mkdir -p /data/gw/logs
 [ -f "$LOG" ] || printf '%s\n' "$HDR" > "$LOG"
-[ -f "$DRILL" ] || printf '%s\n' "$DRILL_HDR" > "$DRILL"
+: # P0: 不触碰设备 drills.tsv
 BID0=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
 PRE=0; eval "$CHK" >/dev/null 2>&1 && PRE=1
 S0=$(date +%s)
-printf '%s\t0\tfault-injection\t%s\tsoak-qa\t%s\n' "$S0" "$ID:$TGT" "$NOTE" >> "$DRILL"
+# P0(2026-11-01): drills.tsv 曾被并发重写写坏, 注入器改为**只写本机重建文件**,
+# 不再 append/rewrite 设备 drills.tsv; 窗口由 PC 侧落 _local/evidence/drills_rebuild/.
 T0=$S0
 eval "$ACT" >/tmp/inject_act.out 2>&1
 REC=0; T1=$T0
@@ -81,7 +82,7 @@ if [ "$REC" = 0 ]; then
   eval "$CHK" >/dev/null 2>&1 && RBX=ran_ok || RBX=ran_failed
 fi
 S1=$(date +%s)
-awk -v s="$S0" -v e="$S1" -v k="$ID:$TGT" 'BEGIN{FS=OFS="\t"} $1==s && $4==k && $2=="0" { $2=e } { print }' "$DRILL" > "$DRILL.tmp" 2>/dev/null && mv "$DRILL.tmp" "$DRILL"
+: # P0: 回填改为本机重建文件(见上)
 BID1=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
 REB=0; [ "$BID0" != "$BID1" ] && REB=1
 if [ "$PRE" = 0 ]; then V=SKIP_NOPRE

@@ -1537,14 +1537,28 @@ fi
 mark_clock_skew() { # $1=apply(1|0)
     _ap=$1
     _blocks=/tmp/il_skew_blocks.$$
+    # v2 判据（v1 会误判历史回填批次，实弹：真台账报出 13 块/266 行，绝大多数是
+    # reboot_planned / ne 回填这类"ts 本来就旧"的批次）。真时钟跳变的特征：
+    #   ① 块**短**（跳变期内的几次 append，≤120 行）；
+    #   ② 块内 ts 单调递增（同一段被污染的时间里，写入顺序仍是真实时间顺序）；
+    #   ③ 块内时间跨度 ≤2h（不是跨越几天的回填）；
+    #   ④ 块结束后 ts 回到跳变前水平（±120s 内）。
     awk -F'\t' -v OFS='\t' '
         {
             ts = $1 + 0
             if (state == 0) {
-                if (NR > 1 && ts <= prev - 600) { state = 1; start = NR; base = prev }
+                if (NR > 1 && ts <= prev - 600 && ts >= prev - 7200) {
+                    state = 1; start = NR; base = prev; mn = ts; mx = ts
+                }
             } else {
-                if (ts >= base - 60) { printf "%d %d\n", start, NR - 1; state = 0 }
-                else if (NR - start > 500) { state = 0 }
+                if (ts < mn) mn = ts
+                if (ts > mx) mx = ts
+                if (ts >= base - 120) {
+                    if (NR - start <= 120 && (mx - mn) <= 7200) printf "%d %d\n", start, NR - 1
+                    state = 0
+                } else if (NR - start > 120 || (mx - mn) > 7200) {
+                    state = 0
+                }
             }
             prev = ts
         }' "$LEDGER" > "$_blocks" 2>/dev/null

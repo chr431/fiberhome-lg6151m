@@ -425,3 +425,41 @@ M3 侧已确认脚本本身独立可用（同一命令手动执行 rc=0、游标
 3. **时间重叠 ≠ 因果**：本方法是"看 NE 时刻客户端有没有红"，不是"证明 NE 无害"。
 4. **样本量**：9 条在测 NE 是一个很小的样本，且全部来自同一台设备/同一套负载。
 5. **v3httpd 的子进程 NE 天然对客户端不可见**（§13.1）—— 这会让"NE 无害"的比例系统性偏高，解读时必须按进程角色分层。
+
+---
+
+## 14. 演练标记的追溯与强制（2026-11-01 09:40）
+
+### 14.1 一次「标注晚于事件」的处置（保留原样，不静默改数）
+
+`09:37:08` 客户端观测到一次 tcp80 中断（`dur=73s`，icmp/dns 同时正常 → 单服务中断），
+设备侧同时刻 `pidof v3httpd` 为空、`:80` 无监听、dmesg 无 OOM、最近一条 v3httpd NE 是 07:39（不是这次）。
+当时 `drills.tsv` **没有**覆盖该时刻的窗口，因此第一次计算时它被记为有机中断。
+
+事后 state-truth 认领：那是他的 R4.1 基线演练（kill v3httpd/dnsmasq），**忘了先写窗口**，
+于 `09:40` 补记 `1793497026-1793499516 drill-manual v3httpd+dnsmasq ... retro-marked (lead 09:38)`。
+
+处置（按 Lead 裁决）：
+* 该窗口内的中断按 `excluded=1 / excl_reason=drill` 处理，不计入验收三档；
+* **原始记录保留**（`outages.tsv` 里仍在，带 `drills.tsv:<窗口>` 证据）；
+* 报告里必须写明「**该窗口由 state-truth 补标，标注时间晚于事件**」——这是可审计的诚实做法，不是静默改数。
+
+### 14.2 工具化（Lead 裁决，立即生效）
+
+手工 `echo` 到 `drills.tsv` 不再被接受。所有会中断服务/断链/杀进程的演练必须走：
+
+```sh
+python _local/drill.py status
+python _local/drill.py start --owner <me> --kind drill-manual --target <obj> --note <text>
+python _local/drill.py stop  --owner <me>
+python _local/drill.py guard --owner <me> --target <obj> -- <演练命令...>   # 推荐：自动 start/stop
+```
+
+`start` 会拒绝在已有未闭合窗口时开新窗（防止排除范围说不清）；收工前 `status` 必须是 `open_drill_rows=0`。
+从此刻起，报告里若出现「未标记窗口」，视为流程违规。
+
+### 14.3 本轮遗留的一条观测事实
+
+`09:37:08` 那次中断证明了一件事：**v3httpd 可以无 SIGSEGV、无 OOM 地消失**（进程没了、监听没了、
+NE 台账里没有对应记录）。本次已归因为演练；但若同样的现象在**没有演练**时出现，
+那就是一个 M3 必须抓的有机缺陷，应优先于任何 SIGSEGV 话题排查（因为它直接打断 GUI 路径）。

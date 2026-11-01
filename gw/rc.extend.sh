@@ -1,5 +1,10 @@
 #!/bin/sh
-# rc.extend.sh v3.2 -- slot-aware dispatcher (shared /data between v2/v3)
+# rc.extend.sh v3.8 -- slot-aware dispatcher (shared /data between v2/v3)
+# v3.8 (A1 far-infra 轮): +kmsglog 开机自启(/dev/kmsg 持久镜像, 8MBx2 轮转 +
+#   写前水位守卫 + 写失败游标回卷) 与 arm64 用户态 fault 行武装 —— 本内核
+#   (5.15 arm64) 的 show_unhandled_signals 实际暴露为 /proc/sys/debug/
+#   exception-trace, 两个名字都写; fault 行是 pr_info, console_loglevel=4 下
+#   console/syslog 均不可见, 故必须经 /dev/kmsg 直读。
 # v3.1 (SIGSEGV §8.13): 旧内核修复栈整体退役。slot-a 内的全部自载逻辑删除 ——
 #   FIXSTACK_ENABLE 门控、pstore panic guard、两次 insmod、跨启动种子喂入、
 #   fixstack.log 自载台账; 改为一处占位注释, 当前不留任何自动加载动作。
@@ -84,6 +89,24 @@ if [ -x /data/gw/core_meta.sh ]; then
        logger -t rc.extend "core_pattern wrapped: [$_cur] -> [$(cat /proc/sys/kernel/core_pattern 2>/dev/null)]" ;;
     esac
 fi
+
+# --- v3.8 (A1 far-infra): arm64 user-fault log line + persistent kmsg mirror --
+# (1) fault-line arming: this 5.15 arm64 kernel exposes show_unhandled_signals
+#     as /proc/sys/debug/exception-trace (measured 2026-11-01: the
+#     kernel/show_unhandled_signals path does NOT exist here); rc19 v2.37
+#     already sets it on slot-a -- doing it here covers both slots and the
+#     pre-rc19 window.  The emitted "... unhandled ... fault (11) at 0x..." is
+#     pr_info; console_loglevel is 4 so console/syslog never carry it -- that
+#     is exactly why (2) exists.  Log-line only, zero behavioural change.
+for _k in /proc/sys/kernel/show_unhandled_signals /proc/sys/debug/exception-trace; do
+    [ -w "$_k" ] && echo 1 > "$_k" 2>/dev/null
+done
+# (2) kmsglog: tails /dev/kmsg (level-independent ring read) into
+#     /data/gw/logs/kmsg.log (8MB x2, watermark write-guard before every
+#     write, cursor rewound on write failure so records are retried not
+#     lost).  Single instance is enforced by the binary itself
+#     (/tmp/kmsglog.pid); manual relaunch is therefore a no-op.
+[ -x /data/gw/bin/kmsglog ] && nohup /data/gw/bin/kmsglog >/dev/null 2>&1 &
 
 # --- v2.0(P2/L-7): session tokens cleared at boot. 历史注记: 当时假设 /tmp 非 tmpfs,
 # 2026-11-01 实测为 tmpfs(mount: tmpfs on /tmp, 848MB, 重启即清) —— 保留 rm 是防御性动作

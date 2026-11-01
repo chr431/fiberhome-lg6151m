@@ -1,5 +1,8 @@
 #!/bin/sh
-# retention_audit.sh v1.1 -- 事故台账留存审计（M1 / R1.3 R1.4 R1.5 R1.6 + R2-D）
+# retention_audit.sh v1.4 -- 事故台账留存审计（M1 / R1.3 R1.4 R1.5 R1.6 + R2-D + A1）
+# v1.4 (2026-11-01 A1 far-infra 轮): NE_QUALITY/NE_RUN_COUNTERS 形态分布放行
+#   10/11 列(core_meta v1.13 起行尾 far=/pc=; 不放行会把新行计入 other 误报
+#   CHECK)。(头注此前停在 v1.1 而登记列已 1.3, 本轮追平。)
 # v1.1 (2026-11-01 R2-D 数据质量轮): 新增 NE_QUALITY(ne_events 形态分布: 6/7/8/9 列
 #   合法格式 vs 1/2 列碎片) 与 AEE_KE(aee db_history 的 KE/NE 计数) 两行 —— 台账
 #   数据源的健康度必须在审计里可见, 不能只藏在 incident_ledger.status 里。
@@ -364,7 +367,8 @@ run_audit() {
         echo "SOURCE_HEALTH malformed_ne=$(sed -n 's/^malformed_ne=//p' "$STATUSF" 2>/dev/null) source_gaps=$(sed -n 's/^gaps=//p' "$STATUSF" 2>/dev/null) lines_read=$(sed -n 's/^lines_read=//p' "$STATUSF" 2>/dev/null) pending=$(sed -n 's/^pending=//p' "$STATUSF" 2>/dev/null) presync_now=$(sed -n 's/^presync=//p' "$STATUSF" 2>/dev/null) data_free_kb=$(sed -n 's/^data_free_kb=//p' "$STATUSF" 2>/dev/null)"
         # R2-D: NE 台账**文件级**形态分布（不是每轮计数器 —— 计数器在静默轮会归零，
         # 会让人误读成"文件里没有合法行"）。一次 awk 扫描源文件，给出：
-        #   合法: 6/7 列=旧格式(core_meta v1.2 前/v1.2~v1.6), 8 列=当前, 9 列=当前+unsync
+        #   合法: 6/7 列=旧格式(core_meta v1.2 前/v1.2~v1.6), 8/9 列=v1.7..v1.12,
+        #         10/11 列=v1.13+(行尾 far=/pc=, A1 far-infra)
         #   脏行: fragments=首列非数字(碎片), blank=空白行, other=首列是数字但列数离谱
         #   newest_fragment_line 与 total 的对比 = "历史遗留 vs 新产生"的判据
         if [ -r "$NEV" ]; then
@@ -372,22 +376,24 @@ run_audit() {
                 /^[ \t]*$/ { blank++; next }
                 $1 !~ /^[0-9]+$/ { frag++; if (NR > maxfrag) maxfrag = NR; next }
                 NF==6 { v6++; next } NF==7 { v7++; next } NF==8 { v8++; next } NF==9 { v9++; next }
+                NF==10 { v10++; next } NF==11 { v11++; next }
                 { other++ }
-                END { printf "%d %d %d %d %d %d %d %d\n", v6+0, v7+0, v8+0, v9+0, frag+0, blank+0, other+0, maxfrag+0 }
+                END { printf "%d %d %d %d %d %d %d %d %d %d\n", v6+0, v7+0, v8+0, v9+0, v10+0, v11+0, frag+0, blank+0, other+0, maxfrag+0 }
             ' "$NEV" 2>/dev/null)
             _v6=$(printf '%s' "$_nq" | cut -d' ' -f1); _v7=$(printf '%s' "$_nq" | cut -d' ' -f2)
             _v8=$(printf '%s' "$_nq" | cut -d' ' -f3); _v9=$(printf '%s' "$_nq" | cut -d' ' -f4)
-            _fr=$(printf '%s' "$_nq" | cut -d' ' -f5); _bl=$(printf '%s' "$_nq" | cut -d' ' -f6)
-            _ot=$(printf '%s' "$_nq" | cut -d' ' -f7); _mf=$(printf '%s' "$_nq" | cut -d' ' -f8)
+            _v10=$(printf '%s' "$_nq" | cut -d' ' -f5); _v11=$(printf '%s' "$_nq" | cut -d' ' -f6)
+            _fr=$(printf '%s' "$_nq" | cut -d' ' -f7); _bl=$(printf '%s' "$_nq" | cut -d' ' -f8)
+            _ot=$(printf '%s' "$_nq" | cut -d' ' -f9); _mf=$(printf '%s' "$_nq" | cut -d' ' -f10)
             _tot=$(wc -l < "$NEV" 2>/dev/null); _tot=$(num0 "$_tot")
             _verd=OK
             [ "$_ot" != 0 ] && _verd=CHECK
             [ "$_fr" != 0 ] && _verd=FRAGMENTS_HISTORICAL
             # 新产生的判据：碎片出现在文件最后 50 行内
             if [ "$_fr" != 0 ] && [ "$_mf" -gt $(( _tot - 50 )) ]; then _verd=FRAGMENTS_RECENT; fi
-            echo "NE_QUALITY file=$NEV total=$_tot valid_6col=$_v6 valid_7col=$_v7 valid_8col=$_v8 valid_9col=$_v9 fragments=$_fr blank=$_bl other=$_ot newest_fragment_line=$_mf verdict=$_verd"
+            echo "NE_QUALITY file=$NEV total=$_tot valid_6col=$_v6 valid_7col=$_v7 valid_8col=$_v8 valid_9col=$_v9 valid_10col=$_v10 valid_11col=$_v11 fragments=$_fr blank=$_bl other=$_ot newest_fragment_line=$_mf verdict=$_verd"
         fi
-        echo "NE_RUN_COUNTERS malformed_ne=$(sed -n 's/^malformed_ne=//p' "$STATUSF" 2>/dev/null) good_6=$(sed -n 's/^ne_good_nf6=//p' "$STATUSF" 2>/dev/null) good_7=$(sed -n 's/^ne_good_nf7=//p' "$STATUSF" 2>/dev/null) good_8=$(sed -n 's/^ne_good_nf8=//p' "$STATUSF" 2>/dev/null) good_9=$(sed -n 's/^ne_good_nf9=//p' "$STATUSF" 2>/dev/null) bad_1=$(sed -n 's/^ne_bad_nf1=//p' "$STATUSF" 2>/dev/null) bad_2=$(sed -n 's/^ne_bad_nf2=//p' "$STATUSF" 2>/dev/null) note=每轮增量计数(静默轮为 0 属正常)"
+        echo "NE_RUN_COUNTERS malformed_ne=$(sed -n 's/^malformed_ne=//p' "$STATUSF" 2>/dev/null) good_6=$(sed -n 's/^ne_good_nf6=//p' "$STATUSF" 2>/dev/null) good_7=$(sed -n 's/^ne_good_nf7=//p' "$STATUSF" 2>/dev/null) good_8=$(sed -n 's/^ne_good_nf8=//p' "$STATUSF" 2>/dev/null) good_9=$(sed -n 's/^ne_good_nf9=//p' "$STATUSF" 2>/dev/null) good_10=$(sed -n 's/^ne_good_nf10=//p' "$STATUSF" 2>/dev/null) good_11=$(sed -n 's/^ne_good_nf11=//p' "$STATUSF" 2>/dev/null) bad_1=$(sed -n 's/^ne_bad_nf1=//p' "$STATUSF" 2>/dev/null) bad_2=$(sed -n 's/^ne_bad_nf2=//p' "$STATUSF" 2>/dev/null) note=每轮增量计数(静默轮为 0 属正常)"
         echo "AEE_KE aee_ke_rows=$(sed -n 's/^aee_ke=//p' "$STATUSF" 2>/dev/null) aee_ne_rows=$(sed -n 's/^aee_ne=//p' "$STATUSF" 2>/dev/null) note=KE 权威来源; NE 只计数防双计"
         # 演练窗口（Lead v1.2：排除必须可审计，不能是黑箱）
         _dn=0

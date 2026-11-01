@@ -1,5 +1,9 @@
 #!/bin/sh
-# incident_ledger.sh v1.3 -- 统一事故台账（M1 / R1.1–R1.6 + R2-D + R4-C）
+# incident_ledger.sh v1.6 -- 统一事故台账（M1 / R1.1–R1.6 + R2-D + R4-C + A1）
+#   v1.6 (2026-11-01 A1 far-infra 轮): NE 行形态放行 10/11 列 —— core_meta v1.13
+#     起行尾追加 far=/pc= 两列(致死率对齐数据源), 不放行会把全部新 NE 行误判
+#     malformed 而静默断账; status +ne_good_nf10/nf11; selftest_ne 扩为 9 形态。
+#     (头注此前停在 v1.3 而登记列已 1.5, 本轮追平。)
 #   v1.3 (2026-11-01 R4-C 轮): ① **svc_outages.tsv 真格式并入**（12 列）+ **多探针去重**
 #     （同一次中断 dns/tcp80 各成段 → 按时间窗合并成一条台账行，否则 SEV 统计被放大数倍）；
 #     ② 尊重 excluded/excl_reason（演练/维护/计划重启/上游断网：仍入账但标 excluded）；
@@ -10,7 +14,7 @@
 #     碎片只计数不入账且 status 暴露形态分布；② 新增输入源 10 = aee db_history
 #     （KE 权威台账 —— 内核致命错误后设备直接复位，syslog/dmesg 常无文本痕迹，
 #     2026-11-01 02:55 那次非计划重启就是 KE，旧版只记了 reboot_unplanned 没记 KE）；
-#     ③ 新增 --selftest-ne（7 形态断言）。
+#     ③ 新增 --selftest-ne（断言; v1.6 扩为 9 形态）。
 #
 # 目的：把散落在十余个文件里的事故证据，收敛成**统一、分级、可证明留存**的
 #   事故台账 /data/gw/logs/incidents.tsv。本脚本只做「归一到行」，不发明判据：
@@ -416,8 +420,10 @@ h_wdlog() {
 #              core_meta v1.12 起写入侧列数自检, 不会再产生) -> 只计数, 不进台账
 #     6 列   = core_meta v1.2 之前的旧格式(无 origin/stack)          -> 合法历史行
 #     7 列   = v1.2~v1.6 格式(有 origin, 无 stack)                    -> 合法历史行
-#     8 列   = 当前格式
-#     9 列   = 当前格式 + unsync=1 标记
+#     8 列   = v1.7~v1.12 格式(有 stack)
+#     9 列   = v1.7~v1.12 格式 + unsync=1 标记
+#     10 列  = v1.13+ 格式(行尾追加 far=/pc= 两列, A1 far-infra)
+#     11 列  = v1.13+ 格式 + unsync=1 标记
 #   首列必须是 epoch；不是的一律按碎片计（哪怕它恰好有 6 列）。
 h_ne() {
     while IFS= read -r L; do
@@ -433,7 +439,7 @@ h_ne() {
             continue ;;
         esac
         case "$_nf" in
-        6|7|8|9) cnt_add good_ne_nf$_nf 1 ;;
+        6|7|8|9|10|11) cnt_add good_ne_nf$_nf 1 ;;
         *)
             # 首列是 epoch 但列数离谱（缺列/被截断/多列）—— 同样不入账，单独计数
             cnt_add malformed_ne 1
@@ -1278,6 +1284,8 @@ write_status() {
         echo "ne_good_nf7=$(cnt_get good_ne_nf7)"
         echo "ne_good_nf8=$(cnt_get good_ne_nf8)"
         echo "ne_good_nf9=$(cnt_get good_ne_nf9)"
+        echo "ne_good_nf10=$(cnt_get good_ne_nf10)"
+        echo "ne_good_nf11=$(cnt_get good_ne_nf11)"
         echo "ne_bad_nf1=$(cnt_get bad_ne_nf1)"
         echo "ne_bad_nf2=$(cnt_get bad_ne_nf2)"
         echo "ne_bad_nf_other=$(cnt_get bad_ne_nf3)"
@@ -1435,6 +1443,8 @@ selftest_ne() {
         printf '1792455500	20199	ip	sig=11	exe=/y	args=ip addr	origin=our-tree\n'
         printf '1792455600	20200	awk	sig=11	exe=/z	args=awk	origin=our-tree	stack=/s\n'
         printf '1792455700	20201	sh	sig=11	exe=/w	args=sh	unsync=1	origin=our-tree	stack=/s\n'
+        printf '1792455800	20202	iptables	sig=11	exe=/i	args=iptables	origin=our-tree	stack=/s	far=0x25d5f	pc=0x4c8728\n'
+        printf '1792455900	20203	tail	sig=11	exe=/t	args=tail	unsync=1	origin=our-tree	stack=/s	far=0x4	pc=0x4b31cc\n'
         printf 'notanumber	fake	sig=11	exe=x	args=y	origin=z\n'
     } > "$_d/ne_events.tsv"
     IL_DIR=$_d IL_NOW=1793464339 IL_DATA_KB=999999999 IL_BACKFILL_N=50 IL_BACKFILL_N_NE=50 sh "$0" >/dev/null 2>&1
@@ -1444,14 +1454,16 @@ selftest_ne() {
     _g7=$(sed -n 's/^ne_good_nf7=//p' "$_d/incident_ledger.status" 2>/dev/null); _g7=$(num0 "$_g7")
     _g8=$(sed -n 's/^ne_good_nf8=//p' "$_d/incident_ledger.status" 2>/dev/null); _g8=$(num0 "$_g8")
     _g9=$(sed -n 's/^ne_good_nf9=//p' "$_d/incident_ledger.status" 2>/dev/null); _g9=$(num0 "$_g9")
+    _g10=$(sed -n 's/^ne_good_nf10=//p' "$_d/incident_ledger.status" 2>/dev/null); _g10=$(num0 "$_g10")
+    _g11=$(sed -n 's/^ne_good_nf11=//p' "$_d/incident_ledger.status" 2>/dev/null); _g11=$(num0 "$_g11")
     _fail=0
-    [ "$_rows" = 4 ] || { echo "FAIL ne_forms: 入账行数=$_rows 应为 4(6/7/8/9 列各一)"; _fail=1; }
+    [ "$_rows" = 6 ] || { echo "FAIL ne_forms: 入账行数=$_rows 应为 6(6/7/8/9/10/11 列各一)"; _fail=1; }
     [ "$_bad" = 3 ] || { echo "FAIL ne_forms: malformed_ne=$_bad 应为 3(1列碎片+2列碎片+首列非数字)"; _fail=1; }
-    [ "$_g6" = 1 ] && [ "$_g7" = 1 ] && [ "$_g8" = 1 ] && [ "$_g9" = 1 ] || {
-        echo "FAIL ne_forms: 形态计数 g6=$_g6 g7=$_g7 g8=$_g8 g9=$_g9 应各为 1"; _fail=1; }
+    [ "$_g6" = 1 ] && [ "$_g7" = 1 ] && [ "$_g8" = 1 ] && [ "$_g9" = 1 ] && [ "$_g10" = 1 ] && [ "$_g11" = 1 ] || {
+        echo "FAIL ne_forms: 形态计数 g6=$_g6 g7=$_g7 g8=$_g8 g9=$_g9 g10=$_g10 g11=$_g11 应各为 1"; _fail=1; }
     rm -rf "$_d"
     if [ "$_fail" = 0 ]; then
-        echo "incident_ledger selftest_ne: 7 形态(PASS) 入账=4 碎片计数=3 形态计数=1/1/1/1"
+        echo "incident_ledger selftest_ne: 9 形态(PASS) 入账=6 碎片计数=3 形态计数=1/1/1/1/1/1"
         return 0
     fi
     return 1

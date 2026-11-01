@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
-"""deploy.py v2.40 -- single source of truth for PC<->CPE deployment + drift guard.
+"""deploy.py v2.42 -- single source of truth for PC<->CPE deployment + drift guard.
 
+v2.42 (A1 far-infra 轮): MANIFEST +gw/bin/coreaddr(ELF core note 头 FAR/PC 解析件,
+  core_meta.sh v1.13+ 的运行时依赖, 助手失败回退空列) +gw/bin/kmsglog(/dev/kmsg
+  持久镜像守护: 写前水位守卫/8MBx2 轮转/写失败游标回卷; rc.extend v3.8+ 自启)。
+  (登记列此前停在 2.40 而文件注记已有 v2.41, 本轮追平。)
 v2.41 (M4 G2 配置漂移自愈轮): MANIFEST +gw/cfg_heal.sh(配置漂移自愈器 —— 只做
   "发现漂移 + 调度既有施加器重建": 聚合/NAT/FORWARD 走 wan_agg.sh --reapply,
   端口映射/WAN 纵深守卫走 fw_apply.sh apply, br-lan 成员走 brctl addif; 自身不持
@@ -178,6 +182,8 @@ MANIFEST = [
     ("gw/bin/healthdog.ko", "/data/gw/healthdog.ko"),
     ("gw/bin/nerepair", "/data/gw/bin/nerepair"),
     ("gw/bin/stackdump", "/data/gw/bin/stackdump"),   # fault-time stack window (core_meta v1.7+ dep; v2.32 manifest member)
+    ("gw/bin/coreaddr", "/data/gw/bin/coreaddr"),   # ELF core note-head FAR/PC parser (core_meta v1.13+ dep; A1 far-infra)
+    ("gw/bin/kmsglog", "/data/gw/bin/kmsglog"),     # persistent /dev/kmsg mirror (8MBx2, write-guard, cursor-safe; rc.extend v3.8+ autostart)
     ("gw/nerepair_launch.sh", "/data/gw/nerepair_launch.sh"),
     ("gw/bin/v3_fix.ko", "/data/gw/v3_fix.ko"),
     ("gw/bin/v3_steth.ko", "/data/gw/v3_steth.ko"),

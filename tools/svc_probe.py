@@ -56,7 +56,7 @@ try:
 except Exception:
     pass
 
-VERSION = "2.0"
+VERSION = "2.1"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_EVIDENCE = os.path.abspath(os.path.join(
     REPO, "..", "_local", "evidence", "svc_probe"))
@@ -567,14 +567,29 @@ def read_samples(evidence_dir, days=None):
 def derive_episodes(samples, merge_gap_s=2.0):
     """samples: rows of ONE path. Returns (per-probe episodes, merged incidents).
     Debounce = 2 consecutive failures (R3.1); duration = first fail -> first ok."""
+    GAP_CLOSE_MS = 10000      # 同一探针相邻真实样本超过 10s = 采样缺口, 失败态在此收尾
     per = {pr: [] for pr in PROBES}
     for pr in PROBES:
         fails = 0
         start = None
+        last_ts = None
         for r in samples:
             v = r.get(pr, -1)
-            if v < 0:
-                continue
+            # 采样缺失(-1)不等于失败, 但**也不能让进行中的失败态跨过缺口继续计时** ——
+            # 实弹: 02:55 重启后 raw ICMP socket 失效 28 分钟(-1), 恢复成功时把
+            # 02:55:15 起的失败态一路收到 03:23:56, 算出 1709s(真实只有 99s)。
+            # 现在: 距上一个真实样本超过 GAP_CLOSE_MS 就按最后一个真实样本收尾并标 gap。
+            if v < 0 or (last_ts is not None and r["ms"] - last_ts > GAP_CLOSE_MS):
+                if start is not None and last_ts is not None and r["ms"] - last_ts > GAP_CLOSE_MS:
+                    if fails >= 2:
+                        per[pr].append({"start": start, "end": last_ts,
+                                        "dur_s": round((last_ts - start) / 1000.0, 3),
+                                        "gap": True})
+                    start = None
+                    fails = 0
+                if v < 0:
+                    continue
+            last_ts = r["ms"]
             if v == 0:
                 if start is None:
                     start = r["ms"]

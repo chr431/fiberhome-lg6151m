@@ -1,6 +1,6 @@
 # 可靠性验收报告 (M4 自持性 + 汇总口径)
 
-> 生成时刻: 2026-11-01 10:06:30 (UTC+8)  生成器: `tools/acceptance/report.py`
+> 生成时刻: 2026-11-01 11:39:53 (UTC+8)  生成器: `tools/acceptance/report.py`
 > 合同: `docs/RELIABILITY_SPEC.md` v1.0  证据: 设备 `/data/gw/logs/*`(可复核) + 本机归档
 > 原则: 每个判定都指向一个设备侧文件与时间窗; 数据缺失记 **unknown**, 不记 0。
 
@@ -8,10 +8,10 @@
 
 | 需求 | 判定 | 一句话依据 |
 |---|---|---|
-| R4.1 守护覆盖审计 | PASS | 覆盖表 + 35 条注入实测, 见 §2/§6 |
+| R4.1 守护覆盖审计 | FAIL | 覆盖表 + 61 条注入实测, 见 §2/§6 |
 | R4.2 资源不泄漏 | PASS | 每日 checkpoint 趋势 + 轮转上界, 见 §3 |
 | R4.3 30d soak 装置 | PASS | 装置在位并已产生 4 条样本, 见 §4 |
-| R4.4 故障注入 >=30 | PASS | 有效 34 条: 34 条自愈(100%), 0 条失败, 1 条中止/跳过, 见 §6 |
+| R4.4 故障注入 >=30 | FAIL | 有效 60 条: 56 条自愈(93%), 4 条失败, 1 条中止/跳过, 见 §6 |
 | R4.5 无人干预声明 | PASS | 人工动作清单已列全并逐条处置, 见 §7 |
 
 **本报告不宣称 30 天已跑完**: 30d 不可在一个会话内等待, 交付物是「装置 + 已运行样本 + 外推论证 + 每日自动日报」; 装置在无人值守下继续累积。
@@ -65,8 +65,34 @@
 | `traffic_logger.sh` | kill_daemon | 6s | **PASS** |
 | `log_keeper.sh` | kill_daemon | 6s | **PASS** |
 | `ntp_keeper.sh` | kill_daemon | 6s | **PASS** |
+| `SIGSEGV throwaway sh` | ne | 2s | **PASS** |
+| `SIGSEGV /data/gw/bin/ip (our-tree)` | ne | 121s | **FAIL** |
+| `300MB tmpfs 压力后清理` | memory | 21s | **PASS** |
+| `200 个 sleep 子进程后清理` | memory | 27s | **PASS** |
+| `40 路 ICMP 洪泛 10s` | storm | 12s | **PASS** |
+| `200 路 TCP 连 :80` | storm | 10s | **PASS** |
+| `SIGSEGV our-tree busybox` | ne | 2s | **PASS** |
+| `fill to ~120MB free then clean` | disk | 189s | **PASS** |
+| `fill below 100MB threshold then clean` | disk | 127s | **PASS** |
+| `clock +30min (NTP synced)` | clock | 10s | **PASS** |
+| `clock -45min + drop ntp marker (unsynced)` | clock | 10s | **PASS** |
+| `2026-11-01 11:36:19` | clock | 1812s | **FAIL** |
+| `2026-11-01 10:12:57` | clock | -2688s | **PASS** |
+| `fast fill to 100MB floor (guard vs 60s fill)` | disk | 115s | **PASS** |
+| `2026-11-01 10:35:33` | clock | 103s | **PASS** |
+| `ra0 down 20s then up` | link | 28s | **PASS** |
+| `rai0 down 20s then up` | link | 30s | **PASS** |
+| `br-lan delif ra0 20s then addif` | link | 26s | **PASS** |
+| `eth0 down 15s then up` | link | 41s | **PASS** |
+| `ra0 link down` | link | 72s | **PASS** |
+| `rai0 link down` | link | 96s | **PASS** |
+| `br-lan ra0 membership` | link | 301s | **FAIL** |
+| `NAT masquerade rule` | config | 0s | **PASS** |
+| `fwmark policy rule` | config | 0s | **PASS** |
+| `mangle WANAGG marks` | config | 9s | **PASS** |
+| `2026-11-01 10:51:35` | clock | 181s | **FAIL** |
 
-自愈耗时分布: min=0s p50=42s p90=81s max=120s
+自愈耗时分布: min=0s p50=30s p90=103s max=189s
 
 ## 3. R4.2 资源不泄漏
 
@@ -223,15 +249,20 @@
 装置: `tools/acceptance/inject.py` (PC 驱动, 设备侧单次 exec 内完成 注入→轮询→回滚→落账)。
 每条注入: 必须持设备锁、距 04:00 >=15min、有回滚路径、恢复即验证、结果落 `/data/gw/logs/fault_inject.tsv`。
 
-- 注入条目总数: **35** (要求 >=30 条有效注入)
-- 有效 34 条 / 中止或跳过 1 条(不计入通过率)
-- 判定分布: {'PASS': 34, 'ABORTED_HARNESS': 1}
-- 通过率(仅有效): 100%
-- 自愈耗时: min=0s p50=42s p90=81s max=120s
+- 注入条目总数: **61** (要求 >=30 条有效注入)
+- 有效 60 条 / 中止或跳过 1 条(不计入通过率)
+- 判定分布: {'PASS': 56, 'ABORTED_HARNESS': 1, 'FAIL': 4}
+- 通过率(仅有效): 93%
+- 自愈耗时: min=0s p50=30s p90=103s max=189s
 
 ### 6.1 失败项(未自愈) —— 必须闭环
 
-无(全部注入均自愈)。
+| id | 目标 | 类别 | 耗时 | 证据 |
+|---|---|---|---|---|
+| B-NE-2 | SIGSEGV /data/gw/bin/ip (our-tree) | ne | 121s |  |
+| B-CLK-1r | 2026-11-01 11:36:19 | clock | 1812s | target=2026-11-01 11:36:19 after=1793504179  |
+| L01 | br-lan ra0 membership | link | 301s | rb=ran_ok act= |
+| B-CLK-2r | 2026-11-01 10:51:35 | clock | 181s | awk: cmd. line:1: Unexpected token routes=  |
 
 ### 6.2 前后对照: R4.1 快路径(tier-A)上线前后
 
@@ -264,14 +295,52 @@
 
 > 契约: `drills.tsv`(Lead v1.2) 是唯一演练标记文件; 消费方(svc-probe/state-truth/obs-ledger)按窗口打 excluded。
 
-- 窗口行总数: 2 (批级 0 / 逐条 2)
+- 窗口行总数: 89 (批级 64 / 逐条 24)
 - 残留 end_epoch=0 的行: **0** (无残留)
-- 演练总时长: 12 s
+- 演练总时长: 17175 s
 
 | start | end | kind | target | owner |
 |---|---|---|---|---|
+| 1793470827 | 1793470901 | drill-manual | led_mgr | state-truth |
+| 1793470904 | 1793470942 | drill-manual | LED_NIGHT=1 | state-truth |
+| 1793477575 | 1793478475 | maintenance-reboot | lead-approved-validation | state-truth |
+| 1793497026 | 1793499516 | drill-manual | v3httpd+dnsmasq | state-truth |
+| 1793497336 | 1793497343 | drill-manual | v3httpd+dnsmasq | state-truth |
+| 1793497351 | 1793497359 | drill-manual | v3httpd+dnsmasq | state-truth |
+| 1793497369 | 1793497425 | drill-manual | wan_mode+mangle-MARK (D7 positive leg) | cfg-heal |
+| 1793497464 | 1793497532 | drill-manual | v3httpd+dnsmasq | state-truth |
+| 1793498048 | 1793498053 | fault-injection | R2C-guard-attempt1 | soak-qa |
+| 1793498123 | 1793498430 | drill-manual | v3httpd+dnsmasq | state-truth |
+| 1793498155 | 1793498220 | drill-manual | dnsmasq | state-truth |
+| 1793498450 | 1793498479 | fault-injection | K06:reboot_sched.sh | soak-qa |
+| 1793498453 | 1793498526 | fault-injection | R2C-rounds1-2 | soak-qa |
+| 1793498474 | 1793498525 | fault-injection | K06:reboot_sched.sh | soak-qa |
+| 1793498475 | 1793498528 | fault-injection | K07:log_keeper.sh | soak-qa |
+| 1793498608 | 1793498621 | fault-injection | K06:reboot_sched.sh | soak-qa |
+| 1793498609 | 1793498622 | fault-injection | K07:log_keeper.sh | soak-qa |
+| 1793498611 | 1793498620 | fault-injection | R2C-round3 | soak-qa |
 | 1793498613 | 1793498619 | fault-injection | K04:traffic_logger.sh | soak-qa |
 | 1793498613 | 1793498619 | fault-injection | K07:log_keeper.sh | soak-qa |
+| 1793499181 | 1793499224 | drill-manual | dnsmasq | state-truth |
+| 1793499228 | 1793499253 | drill-manual | dnsmasq | state-truth |
+| 1793499351 | 1793499419 | drill-manual | v3httpd | state-truth |
+| 1793499425 | 1793499463 | drill-manual | v3httpd | state-truth |
+| 1793501594 | 1793501813 | fault-injection | batchB-g1-NE-MEM-STM | soak-qa |
+| 1793501923 | 1793502284 | drill-manual | batchB-g2-nonet | soak-qa |
+| 1793502378 | 1793503194 | drill-manual | 全链路 | soak-qa |
+| 1793502470 | 1793502571 | drill-manual | 全链路 | soak-qa |
+| 1793502592 | 1793502687 | drill-manual | 全链路 | soak-qa |
+| 1793502777 | 1793503194 | drill-manual | 全链路 | soak-qa |
+| 1793502845 | 1793502936 | drill-manual | 全链路 | soak-qa |
+| 1793503062 | 1793503085 | drill-manual | ntp_keeper | obs-ledger |
+| 1793503087 | 1793503194 | drill-manual | 全链路 | soak-qa |
+| 1793503232 | 1793503341 | drill-manual | 全链路 | soak-qa |
+| 1793501730 | 1793503341 | clock-skew | 全链路 | soak-qa |
+| 1793503601 | 1793504083 | drill-manual | wifi | soak-qa |
+| 1793504095 | 1793504095 | drill-manual | wan | soak-qa |
+| 1793504227 | 1793504237 | drill-manual | wan | soak-qa |
+| 1793504312 | 1793504317 | drill-manual | br-lan:ra0 | cfg-heal |
+| 1793504338 | 1793504349 | drill-manual | br-lan:ra0 | cfg-heal |
 
 ## 9. 假状态演练记录(判据类改动的实弹)
 
@@ -290,11 +359,11 @@
 > 消费侧校验(tools/acceptance/ne_audit.py): 只查字段数一致性/脏行定位/历史判别/M1 覆盖度;
 > 写入方根因由 obs-ledger 负责。
 
-- 台账行数 1612; 字段数分布 {'1': 230, '2': 13, '6': 285, '7': 1058, '8': 22, '9': 4}
+- 台账行数 1619; 字段数分布 {'1': 230, '2': 13, '6': 285, '7': 1058, '8': 29, '9': 4}
 - **碎片行(NF<5) 243 条**, 行号 [14, 923], 上下文 epoch 1792472046 .. 1793270536
 - 判据: 6/7/8 列是 schema 演进(正常); <5 列是 args 含换行被拆成多行(历史脏行, 写入方 core_meta 自 v1.11 起对 ARGS/PARGS 做换行/制表压平)
 - args 含 TAB 导致的 9 列行: 4 条(同为历史)
-- M1 覆盖: incidents.tsv 中 category=ne 共 1369 行
+- M1 覆盖: incidents.tsv 中 category=ne 共 1376 行
 
 ### 10.1 隔夜 NE 逐条归因(2026-11-01 04:33-09:30)
 

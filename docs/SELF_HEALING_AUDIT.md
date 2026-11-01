@@ -100,7 +100,7 @@ L3  14 个脚本守护 + 7 个专用服务 = 全部常驻服务面
 | ID | 缺口 | 影响 | 证据 | 闭环状态 |
 |---|---|---|---|---|
 | **G1** | **自愈延时系统性 90–120s**(watchdog 2-of-3 + 30s 周期), 不满足 R4.1 "≤60s" | 任何守护死亡后服务中断 1.5–2min | 注入实测 fault_inject.tsv(ACCEPTANCE_REPORT §6 耗时分布) | **未修**; 已量化基线交 Lead 做架构修复(减采样轮数/事件驱动) |
-| **G2** | **配置类漂移无自愈**: NAT MASQUERADE、mangle WANAGG MARK、ip rule fwmark、br-lan 成员被外力删除后, watchdog 只记 FAIL 不重建 | 客户端出网/分流/WiFi 掉线后**永不恢复**, 只能人工或重启 | 注入 C01/C02/C03/L01 | **未修**; 建议给 wan_agg 加"策略自检即重建", 或 watchdog 判 FAIL 后调 wan_agg --reapply |
+| **G2** | ~~配置类漂移无自愈~~ **已由 cfg-heal 修复(2026-11-01 起)** | NAT/mangle/fwmark 被删后由 cfg_heal 自愈 | 注入 C01/C02/C03 = **0s/9s/0s PASS**; cfg_heal.tsv 1793504230 split:wanagg observe suspect + 1793504236 agg wan_agg repair ok | **本轮实测显示已能自愈**。旧结论 G2 是在 2026-11-01 02:00 的数据下得出(当时无 cfg-heal healer), 两条不矛盾 |
 | G3 | watchdog 自身恢复上界 worst case ≈420s(beat 陈旧 120s + healthdog 300s 限频) | 监督层空窗 | healthdog.sh v1.6 代码 + 注入 K14 | 待实测; 建议 healthdog 对"进程确定不存在"走快速路径 |
 | G4 | healthdog 死亡 → 内核 90s 硬复位 → **完整重启 ~110s** | 一次服务中断 + 计划外重启计数 | 注入 K13(单独批) | 接受(兜底路径); 代价已量化 |
 | G5 | radvd 恢复上界 ~120s(v6_reconcile 每 4 轮) | LAN IPv6 短暂缺失 | 注入 K20 | 接受(IPv6 非验收主路径) |
@@ -184,3 +184,25 @@ python tools/acceptance/boot_audit.py --tsv /tmp/boot.tsv --json /tmp/boot.json
 # 汇总报告:
 python tools/acceptance/report.py
 ```
+
+---
+
+## 8. 本轮新增的两条判据纪律(2026-11-01 实弹)
+
+### 8.1 恢复判定必须持续观察 >=30s, 不能只看瞬时
+
+**实弹**: L01(br-lan 摘 ra0) 的 rollback brctl addif 执行后立即 check **通过**(rb=ran_ok),
+但 47 秒后复查 ra0 **又不在网桥里了** —— 瞬时通过不等于稳定恢复。
+
+**纪律**: 任何「修复/回滚后是否恢复」的判定, 必须在动作后**持续观察 >=30s**(2 次采样间隔 >=30s 都通过),
+否则记录为 recovered_transient 而不是 PASS。
+
+### 8.2 任何会被 import 的脚本必须有 __main__ 守卫
+
+**实弹**: 我用 python -c import bb_run6 做语法检查, 而该文件末尾直接调 bb_run.main() ——
+**import 即执行**, 三条链路注入在**无锁、无演练窗口**的情况下跑了。
+
+**纪律**: 会被 import 的脚本一律 if __name__ == __main__: main(); 一次性助手也不豁免。
+
+**审计结果**: 仓内 6 个 acceptance 工具 + bb_run.py 全部有守卫; 缺守卫的是 _local/ 下 6 个一次性助手
+(bb_run2..6, cfg3) —— 不入仓不追责, 但纪律适用。

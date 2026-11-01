@@ -56,7 +56,7 @@ try:
 except Exception:
     pass
 
-VERSION = "1.9"
+VERSION = "2.0"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_EVIDENCE = os.path.abspath(os.path.join(
     REPO, "..", "_local", "evidence", "svc_probe"))
@@ -683,13 +683,15 @@ def device_pull(evidence_dir, quiet=True):
             page = ssh("sed -n '%d,%dp' %s 2>/dev/null" % (a, b, remote))
             exp = b - a + 1
             gotn = len(page.splitlines())
-            if gotn != exp:
+            # 只把"比预期少"当截断。比预期多是**正常**的: 设备日志在 awk 计数
+            # 与 sed 读取之间还在追加(实弹: reboots.log 每次拉都多 1 行)。
+            if gotn < exp:
                 _p("WARN: pull %s page %d-%d expected %d lines got %d "
                    "(dropbear 截断？结论可能假 0)" % (remote, a, b, exp, gotn))
             parts.append(page)
             a = b + 1
         txt = "".join(parts)
-        if len(txt.splitlines()) != want:
+        if len(txt.splitlines()) < want:
             _p("WARN: pull %s total lines %d != expected %d -- 不要基于这份数据下结论"
                % (remote, len(txt.splitlines()), want))
         return txt

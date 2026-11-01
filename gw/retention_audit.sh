@@ -142,7 +142,9 @@ integrity() {
         if (match($0, /rp2=[0-9]+/)) { s=substr($0, RSTART+4, RLENGTH-4); e+=s+0 }
         if (match($0, /rp3=[0-9]+/)) { s=substr($0, RSTART+4, RLENGTH-4); f+=s+0 }
         if (match($0, /last_seq=[0-9]+/)) { s=substr($0, RSTART+9, RLENGTH-9); if (s+0>mx) mx=s+0 }
-        if (match($0, /reuse=[0-9]+/)) { s=substr($0, RSTART+6, RLENGTH-6); g+=s+0 }
+        # reuse 是**累计标记**（取最大值而非求和）：同一条对账记录被重复写入时
+        # 不能重复扣减（实弹：我跑了两遍 reconcile 脚本 → 求和 2 → 反而少算 1）。
+        if (match($0, /reuse=[0-9]+/)) { s=substr($0, RSTART+6, RLENGTH-6); if (s+0>g) g=s+0 }
     } END { print a+0" "b+0" "c+0" "d+0" "e+0" "f+0" "mx+0" "g+0 }' "$SEAL" 2>/dev/null)
     IL_RM1=$(printf '%s' "$_rms" | cut -d' ' -f1); IL_RM1=$(num0 "$IL_RM1")
     IL_RM2=$(printf '%s' "$_rms" | cut -d' ' -f2); IL_RM2=$(num0 "$IL_RM2")

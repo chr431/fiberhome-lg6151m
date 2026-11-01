@@ -746,11 +746,15 @@ def device_pull(evidence_dir, quiet=True):
                % (remote, len(txt.splitlines()), want))
         return txt
 
-    # fast_facts 是 1s 事实流, 一天 1-2 万行; 恢复时间对齐需要更长的历史, 单独放宽上限
+    # fast_facts 是 1s 事实流, 一天 1-2 万行; 恢复时间对齐需要更长的历史, 单独放宽上限。
+    # ne_events 的行很长(args= 里带整条命令行), 400 行一页会撞通道上限(实弹: 页 801-1200
+    # 稳定回 0 行), 所以按字节量估算把页缩小到 100 行。
     big = {"fast_facts_tail.tsv": 24000}
+    small_chunk = {"ne_events_tail.tsv": 100}
     got = {}
     for name, remote in files.items():
-        txt = pull_tail(remote, max_lines=big.get(name, 4000))
+        txt = pull_tail(remote, max_lines=big.get(name, 4000),
+                        chunk=small_chunk.get(name, 400))
         with open(os.path.join(ddir, name), "w", encoding="utf-8") as f:
             f.write(txt)
         got[name] = len(txt.splitlines())

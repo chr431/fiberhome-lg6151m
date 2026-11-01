@@ -135,3 +135,28 @@ canary：4×vsurv4，taskset 绑 CPU2/CPU3；采样器绑 CPU0。数据 `_local/
 - 也解释了 canary 与自然进程的差异：canary 的栈页是**刚分配的**（大概率来自回收的 RX 缓冲页池），
   而自然进程的栈页通常是长寿命页，落在"曾经是 RX 缓冲"的页上的概率低得多 → 自然 NE 率远低于 canary 率，
   **不能用 canary 率外推自然 NE 率**（与 00_STATE §6 停止规则一致）。
+
+## 静态：EDMA RX 路径（vmlinux.elf，符号齐全，capstone 反汇编）
+
+对象：`analysis/kern/vmlinux.elf`（18 MB，47,910 符号）。工具：`_local/work/crash-root/vml_dis.py <sym>`。
+
+| 函数 | 事实 |
+|---|---|
+| `mtk_poll_rx_edma0/1` | NAPI RX 轮询：描述符基址 `[ring+0x28]`，**步长 0x20（32B）**，索引按 `ring+0x20`(cidx) 与 `ring+0x1c`(环深) 取模；取描述符后 `tbz w28,#0x1f` 检查 **w1 的 bit31（DD/完成位）**，未置位即退出循环 → **消费侧的顺序是对的**（先确认 DMA 完成再消费） |
+| `recycle_fe_dma_buf` | 薄壳：`container_of(x0-0x40)` → 调 `ops->[0x48]` |
+| `fe_edma_recycle_buf` | 把缓冲挂进**延迟回收链表**（自旋锁内 `str x5,[x3,#8] / str x3,[x20,#0x7d8]`），**不做 dma_unmap** |
+| `fe_dma_set_rx_recycle` | 只置 `+0x540` 的回收模式字节 |
+| `mtk_rx_clean_edma` | 环 teardown：逐缓冲 `dma_unmap_page_attrs(desc->w0)` → `page_frag_free()` |
+| 分配器 | **无 page_pool**；缓冲来自 `__netdev_alloc_frag_align` / `build_skb`（page_frag） |
+
+**静态判决（如实）**：**路径已锁定，具体窗口未定位。**
+- 消费侧（DD 位检查）顺序正确，未发现"未等 DMA 完成就消费"。
+- 回收是**延迟链表**（不是立即回填），也未发现"先 free 后 unmap"。
+- 因此**未能在静态层面指出明确的 bug 点**。可能的位置收敛为：延迟回收链表与回填/环复用的交错时序，
+  或 `page_frag` 在跨 CPU 回收时的可见性——两者都需要运行时证据（kprobe 被 `CONFIG_KPROBES=n` 堵死，
+  `pagemap` 也不存在），故本轮**不作断言**。
+
+**形状线索（待验证假设，不是结论）**：RX 描述符 = 32B、`w0=缓冲 PA`、`w1=状态/长度（bit31=DD）`、
+`w2..w7` 在空闲态为 0（`dump_dma` 实测）。记录 = `{小整数, 0, len, src_ip}`，**尺寸吻合但内容与"空闲态描述符"不符**；
+若硬件在 DMA 完成时把 L3/L4 信息写回 `w2..w7`（MT7988 EDMA 支持 RSS/L3L4 信息），则记录可能是**写回后的描述符片段**。
+验证方法：在收到包后立刻 dump 该槽位的 8 个字，与记录逐字段比对（下一轮可做，需 1 次 `dbg_dma` + 1 次记录抓取）。

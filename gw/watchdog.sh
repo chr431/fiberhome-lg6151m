@@ -977,7 +977,7 @@ run_cycle  # first run logs transitions but that's fine
 #   永不放弃(慢重试一直在), 永不无节制(3/h + 60s)。
 _fp_restart() { # $1=name  $2=kind
     if rl_ok "$1"; then
-        log "EVT $1 fast-restart (10s subcheck: listener/socket gone)"
+        log "EVT $1 fast-restart (2s subcheck: listener/socket gone)"
         case "$2" in
         v3httpd) spawn v3httpd /dev/null /data/gw/v3httpd ;;
         dnsmasq)

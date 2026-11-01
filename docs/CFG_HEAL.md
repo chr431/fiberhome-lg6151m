@@ -267,6 +267,24 @@ Lead 01:00 裁决: **gw/wan_agg.sh 归本任务**(原本无主), 授权加 --rea
 | D5 | D5_fw_guard | 删 V4WANGUARDF 跳转 | ≤60s 回来(fw_apply) | 无 |
 | D6 | D6_reapply_idempotent | 连跑两次 wan_agg --reapply | 第二次 delta = **0 行**(幂等硬要求) | 无 |
 | D7 | D7_stale_source_negative | /tmp/wan_mode 改陈旧 + 删 MARK | **20s 内必须不动手**; 恢复来源后 ≤60s 修好 | 分流失效但不乱修 |
+| D8 | D8_bridge_ra0 | brctl delif br-lan ra0 | ≤60s 加回(v1.3 修盲区后实测 **8.5s**) | WiFi 客户端失 L2 归属, PC 走 eth1 不受影响 |
+
+> **v1.3 修的盲区(L01 复现, 2026-11-01 11:39)**: soak-qa 的 batchB 注入"摘 ra0"**301s 未自愈**,
+> 而我的 D4"摘 eth1"16s 就修好 —— 差异不在成员表(eth1/ra0/rai0 都在期望表里), 而在**两道让步闸门**:
+>
+> | 闸门 | 实际行为 | 后果 |
+> |---|---|---|
+> | ② "hostapd 恢复后 120s 内不判", 用 `stat -c %Y /tmp/watchdog.log` 取 mtime | 本机**没有 stat**(实测 `/bin/stat`、`/usr/bin/stat` 均不存在, PATH 里也没有) -> `_ml` 恒为 0 -> 该闸门**从未生效**; 即便生效也是错的: watchdog.log 每 30s 写 TICK, mtime **永远新鲜** = 永久抑制 | 死代码 + 设计错误 |
+> | ① `pgrep -f 'wifi_up[.]sh'` 全命令行**子串**匹配 | 实测: 只要有任何进程的 cmdline **提到** `wifi_up.sh`(演练 harness、包装脚本、甚至探针命令自己), 整个期间抑制 ra0/rai0 判定 | **这才是 301s 的机制** |
+>
+> **修法(v1.3)**: 拆掉①②, 只保留一个精确廉价的让步 —— **我方 hostapd 不在**(重启窗口)时不判,
+> 由 watchdog 的恢复路径自己 `brctl addif`; hostapd 活着时桥成员缺了就补。
+> 依据: 只增不删 + `brctl addif` 幂等 + 跨拍 2-of-2 已过滤亚秒级抖动 —— 让步的收益(少一行日志)
+> 远小于代价(301s 盲区)。
+>
+> **对验收口径的含义**: v1.2 及以前, ra0/rai0 的检测时延**无上界**(闸门关闭期间完全不评估);
+> v1.3 起检测上界 = tick 周期 5s + 跨拍确认 ≥4s + worker ≤1s ≈ **≤10s**, 实测 8.5s。
+> 这条又是 §10 定律二的现场实例: **子串匹配会被"提及者"骗**, `pgrep -f` 是本项目的高危原语。
 
 **反例(D7)是本演练的重点之一**(Lead 明确要求): 自愈器的期望值来源被破坏时必须
 "宁可不修", 而不是拿陈旧状态去乱装 —— 那会比原问题更糟。D7 同时验证正反两面。

@@ -964,7 +964,7 @@ if [ "$_rc" != 0 ]; then
     exit 0
 fi
 # v1.42: 启动横幅改用 VER 单一来源(此前字面量停在 v1.38, 识别/syslog 断言被骗)
-VER=1.49
+VER=1.50
 log "===== watchdog v$VER start (svc_lib primitives + minimal parsers + batch3 metrics; avail keys + outcome probes + bearer-follow dp; alert LED 5G orange) ====="
 logger -t watchdog "watchdog v$VER start"
 # initialize state to current (suppress initial alarms)
@@ -994,7 +994,10 @@ _fp_restart() { # $1=name  $2=kind
     return 1
 }
 _fastpass() {
-    [ "$UP" -lt 240 ] && return 0
+    # v1.50: 开机守卫自己读 uptime($UP 来自上一轮 run_cycle, 最多滞后 30s)
+    _fp_up=$(cut -d. -f1 /proc/uptime 2>/dev/null)
+    case "$_fp_up" in ''|*[!0-9]*) _fp_up=999999 ;; esac
+    [ "$_fp_up" -lt 240 ] && return 0
     port_listen 80 || _fp_restart v3httpd v3httpd
     port_listen 53 || _fp_restart dnsmasq dnsmasq
 }
@@ -1003,7 +1006,8 @@ _kickwait() {
     while [ "$_kw" -lt "$CYCLE" ]; do
         sleep 1
         _kw=$((_kw + 1))
-        case $((_kw % 10)) in 0) _fastpass ;; esac
+        # v1.50(R4-A <=5s): 2s 节拍(原 10s)。实测分解: 重启+可应答 ≈1.58s -> 最坏 ≈3.6s
+        case $((_kw % 2)) in 0) _fastpass ;; esac
     done
     return 0
 }

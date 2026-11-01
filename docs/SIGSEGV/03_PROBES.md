@@ -18,14 +18,14 @@
 | P-09 | `vprobe` | 任意 live va_list 的写入 | 4 实例/30ms | 无 | **COND** | 无 N/LOD；窗口短 |
 | P-10 | `pwatch`/`va2pa` | 指定 PA 的内容变化 | 单页 | 自检 | **COND** | pin 改变页生命周期；单页单次 |
 | P-11 | `pfcanary` | 崩溃率代理 | 200M snprintf | 自身 | **COND** | handler 递归；速率 5.3x 不是 1:1；非自然人口 |
-| P-12 | `core_meta`/`ne_events` | 崩溃台账/元数据 | 全 NE | 测试自杀进程（v1.13 far/pc vs dmesg/kmsglog） | **STAGED** | aee 去重；core_trap 已停用；unsync；origin 可能 unknown；far/pc 依赖 coreaddr+note 头落在前 8KB（截断→空列回退） |
+| P-12 | `core_meta`/`ne_events` | 崩溃台账/元数据 | 全 NE | **有**：测试自杀进程 far/pc 三方一致（v1.13, 2026-11-01） | **OK (device)** | aee 去重；core_trap 已停用；unsync；origin 可能 unknown；far/pc 依赖 coreaddr+note 头落在前 8KB（截断→空列回退） |
 | P-13 | `vaguard.tsv` | 闸门命中 | 已链接二进制 | 设备 A/B | **COND** | 首命中+每 256 一行；3 次是下限 |
 | P-14 | `probe_selftest` | PF/c2u/cfu/uw 正对照 | 待设备 | 设计 | **STAGED** | 源码/说明；设备测试待做 |
 | P-15 | `patrace.ko` | VA→PA 解析（+页前 16B） | 单 VA | **有**：mmap 写 `PATRACE_MAGIC16` → VA→PA → 读回一致（E3） | **OK（有限）** | **缺**「同 VA 跨时刻 PA 可变」的检出能力正对照 → C-160 不可用（C-164）；补 D7 后转 OK |
 | P-16 | `rxring.ko` | 内核态读 RX 环 DD 位 | 3 条环 | **无**（从未读到 DD=1） | **E0（无正对照）** | 24.9 万次扫描 0 次 DD=1；「环里没有 DD=1」**不可引用**（C-169） |
 | P-17 | `dd_burst`（`dump_dma` 解析） | DD=1 写回形态 | 3 次突发 | **无** | **E0（无正对照）** | 24 快照 dd_set=0；H4（HW 写回）从未被直接观测（C-169） |
 | P-18 | `pascan`（`/dev/mem` 按值搜） | 按值搜物理内存 | 全 RAM | **部分**：随机值 6 处 / 0xdeadbeef 32 处 = 噪声底 | **E1** | 缺「已知在内存里的值」正对照；「内核映像 0 命中」不可引用（C-169） |
-| P-19 | `kmsglog`（/dev/kmsg 持久镜像） | 内核环全量落盘（含 pr_info fault 行） | /dev/kmsg 全记录 | 测试自杀进程（fault 行捕获） | **STAGED** | 只收启动后新记录（SEEK_END 起）；环溢出丢行（SEQ 缺口在日志内自证）；8MBx2 有界 |
+| P-19 | `kmsglog`（/dev/kmsg 持久镜像） | 内核环全量落盘（含 pr_info fault 行） | /dev/kmsg 全记录 | **有**：aee 处理链 pr_info 行落盘（2026-11-01）；`--selftest` 游标回卷原语 PASS | **OK (device)** | 只收启动后新记录（SEEK_END 起）；环溢出丢行（SEQ 缺口在日志内自证）；8MBx2 有界；**注意**：`unhandled fault` 行在 nerepair 在役时结构性缺席（arm64 `unhandled_signal()` 要求 `!tsk->ptrace`，实测全部 pid TracerPid=nerepair）——FAR 权威来源是 P-12 的 far/pc 列，不是 kmsg |
 
 > **2026-11-01 skeptic 标注（audit §10 / C-169）**：P-05（cth）的阴性 = **E1**（只覆盖已 hook 路径 + `g_hit` 可能饱和）；P-06（uw）= **E0**（无正对照、300 站点从未成功）；P-08（vro 0/12）= **E0**（03_PROBES 自述其为「目标=va_list 的必然结果」）；P-14（probe_selftest）= 未上机 → 其覆盖的 PF/c2u/cfu/uw 阴性全部 **E0/E1**。
 
@@ -118,18 +118,20 @@
 - **缺陷**：handler 自己 `snprintf`；崩溃计数含 handler 受害；4 实例 5.3x 不是 1:1；非自然人口。
 - **状态**：COND；速率不能外推到自然 NE。
 
-### P-12 `core_meta`/`ne_events`（STAGED，far/pc 轮）
+### P-12 `core_meta`/`ne_events`（OK device，far/pc 轮）
 
 - **测什么**：崩溃台账/元数据（v1.13 起行含 far=/pc=，来源 = core note 头：
   NT_SIGINFO si_addr + NT_PRSTATUS pc，偏移在真实设备 .hdr 上实证，与 P-02 解析一致）。
-- **正对照**：v1.7 stack 列已有设备实证；far/pc 列 = 测试自杀进程（已知崩溃地址），
-  ne_events far/pc 与 dmesg `unhandled ... fault (11) at 0x...` 行及 kmsglog（P-19）
-  抓到的同款行三方一致。待做（STAGED → OK 的翻转条件）。
+- **正对照（2026-11-01 设备实弹）**：测试自杀进程（/tmp/a1crash，向 0x5151dead000 写入）
+  → ne_events 行 `far=0x5151dead000 pc=0x101087c`；反汇编证明 0x101087c 正是
+  `str x9,[x8]`（x8=0x5151dead000）——far/pc 与二进制级真值一致；设备侧对
+  同事件 .hdr 复跑 coreaddr 输出同值；自然 NE 同批也带 far/pc
+  （cfg_heal sh: far=0x16ca4；aee_aed: far=0x7f98845568）。
 - **缺陷**：aee 去重；`core_trap` 已停用（好），但历史盲窗仍在数据里；`unsync` 行；
   `origin` 可能 unknown；far/pc 依赖 coreaddr 在场且 note 段落在 core 前 8KB
   （多线程大 note 段截断 → 空列回退，不写坏行）；列数 10/11 与旧 8/9 并存
   （incident_ledger v1.6+/retention_audit v1.4+ 放行）。
-- **状态**：STAGED；不是 census。
+- **状态**：OK (device)；不是 census。
 
 ### P-13 `vaguard.tsv`（COND）
 
@@ -147,7 +149,7 @@
   - uw：hrtimer/tasklet 上下文对**已 pin/已存在**的用户页做 `copy_to_user`；`uw_hook` 应记录 `ENABLE` site。
 - **状态**：设计/源码骨架；设备测试待做。
 
-### P-19 `kmsglog`（/dev/kmsg 持久镜像，STAGED）
+### P-19 `kmsglog`（/dev/kmsg 持久镜像，OK device）
 
 - **目的**：arm64 用户态 fault 行是 pr_info，console_loglevel=4 下 console/syslog 都收不到；
   本机 (5.15 arm64) 的 show_unhandled_signals 实际暴露为 `/proc/sys/debug/exception-trace`
@@ -156,10 +158,15 @@
 - **方法**：SEEK_END 起只收新记录；批 ≤64KB；**写前守卫**（每次 write 前 statvfs /data，
   <100MB 先轮转再写——2026-11-01 满盘 60s 教训）；8MB×2 轮转；写失败按 seq 回卷游标重试
   （不丢不推进）；`--selftest` 验证按 seq 回卷原语。
-- **正对照**：测试自杀进程后 kmsg.log 含 `unhandled ... fault (11) at 0x...` 行（待做）。
+- **正对照（2026-11-01 设备实弹）**：自杀进程事件链的 aee_aed pr_info 行
+  （`pid: 28797 ... >>> /tmp/a1crash <<<` 等，prio=6）落 kmsg.log —— 证明与
+  console_loglevel 无关的环全量捕获；`--selftest` 游标回卷原语（SEEK_SET0+按 seq
+  前跳）设备 PASS。`unhandled ... fault (11)` 行本身**在 nerepair 在役时结构性缺席**
+  （实测全 pid TracerPid=nerepair；arm64 `unhandled_signal()` 要求 `!tsk->ptrace`），
+  FAR 权威来源是 P-12 far/pc 列，不是 kmsg。
 - **已知限制**：只收启动后新记录（开机 backlog 归 console-ramoops/pstore 口径）；环溢出丢行
   （SEQ 缺口在日志内自证，可审计）；日志有界（8MB×2），风暴下最老记录被轮转掉。
-- **状态**：STAGED；文件 `gw/src/kmsglog.c`（二进制 `/data/gw/bin/kmsglog`）。
+- **状态**：OK (device)；文件 `gw/src/kmsglog.c`（二进制 `/data/gw/bin/kmsglog`，rc.extend v3.8+ 自启）。
 
 ## 3. 仪器使用纪律
 

@@ -195,4 +195,82 @@ stack=/data/gw/logs/cores/meta/*.stack）、/data/gw/logs/pstore/（console-ramo
    ledger_hb_age 会涨（审计不判 FAIL，但 SOURCE_HEALTH 与 QUALITY 行可见）。
 3. seal 不能防 root 同时改账与改 seal（见 §4.4），外部锚点靠 PC 侧报告。
 4. 演练窗口只能标注，不能事后纠正已写入的行（append-only 的代价）；因此
-   drills.tsv 必须在注入**前**写行。
+   drills.tsv 必须在注入**前**写行。事后补写的窗口用 --reannotate --since <epoch>
+   回溯标注（默认干跑，--apply 才改 detail）。
+5. **时钟跳变会污染时间轴**（见 §14）：审计只看 md5/行数/seq，看不见时间轴错误；
+   只能靠 CLOCK_SKEW 行显式暴露。
+6. 台账每行**没有 uptime 字段**：跨时钟跳变无法精确切分污染区间（当前用启发式检测）。
+
+## 12. 服务中断并入（svc_outages.tsv，R4-C 轮）
+
+M1 原来看不见「进程活着但不服务」——2026-11-01 09:50–10:01 有 4 段共 363s 的
+DNS/GUI 中断，NE 台账只记到 1 条（因为没有进程崩溃）。现在把 M3 的服务中断台账
+作为第 8 个输入源并入。
+
+格式（svc_outage v1.0，12 列 TAB，首行 # 头）：
+
+    start end dur path probe severity attrib excluded excl_reason evidence side flags
+
+**去重是硬要求**：同一次中断在源文件里会有多行（dns 与 tcp80 各自成段，甚至一段
+拆多段）。若一行一条地入账，M1 的 SEV 统计会被同一次故障放大数倍（实弹：34 段
+对应约 18 起中断）。合并规则：
+
+- 按 start 排序，**重叠或间隔 ≤5s** 的段合并成一条台账行；
+- 合并行的 dur 取并集（end_max - start_min），**SEV 按合并后时长重算**（R1.2），
+  源文件的 severity 只作参考写进 src_severity=；
+- detail 保留 probes=dns+tcp80 segments=N、excluded=1（全部段都排除）/
+  excluded=partial（部分段排除）、excl_reason=、evidence=（证据链引用原样透传）；
+- **结算窗**：只处理 end 已过 180s 的段，保证同一次中断的各探针段都已落盘、
+  能在同一批里被合并（否则会被切成两条）；
+- **跨批去重**：.inc_state 记 svcout_last=<start>:<end>，与上次已落账区间重叠的
+  整段跳过。
+
+excluded 语义（与 M3 一致）：**排除的行仍然入账**（可溯源性不豁免），只是带
+excluded=1；验收统计在 M3 侧按 excluded 过滤，M1 侧全量留存。
+
+## 13. 修复性删除 vs 留存裁剪（seal 字段语义）
+
+seal 里有两组删除计数，**不要混用**：
+
+| 字段 | 含义 | 红线 |
+|---|---|---|
+| rm1/rm2/rm3 | **留存裁剪**（op=prune / disk_guard / retention） | **rm1 必须恒 0**（SEV1 永不自动删除） |
+| rp1/rp2/rp3 | **修复性删除**（去重/纠错重写，op=repair） | 无红线，但必须在 reason= 里写清原因与 seq 区间 |
+| reuse=N | 累计标记：有 N 次删除落在「当时的末尾」，seq 随后被重用（删除不留缺口） | 用于缺口对账 |
+| tail_gaps | 删掉末尾行时**内部缺口不会增长**，必须单独对账 | — |
+
+审计的缺口公式：gone = first_seq-1 + 内部缺口 + tail_gaps，
+accounted = Σ(prune 行的 rm*) + Σ(repair 行的 rm*+rp*) - reuse。
+历史教训（2026-11-01）：把去重删除写成 rm1=30 → 审计判「SEV1 被裁剪」FAIL；
+且尾部删除 + seq 重用让对账差 1。现在 next_seq() 用 .inc_state 的
+seq_high_water 兜底，seq **单调不复用**。
+
+## 14. 时钟污染（M1 新失效模式，2026-11-01）
+
+设备无 RTC，时钟靠 NTP；注入/异常会让 epoch **跳变**，期间写入的所有行时间戳都偏移，
+**而审计只看 md5/行数/seq，看不见时间轴错误**。
+
+实弹（soak-qa B-CLK 注入，watchdog 记录三次跳变）：
+
+    10:35:41 EVT clock jump: epoch -2666s vs uptime +34s (skew 2700s)
+    11:18:26 EVT clock jump: epoch +3641s vs uptime +40s (skew 3601s)
+    11:21:21 EVT clock jump: epoch +2740s vs uptime +40s (skew 2700s)
+
+**污染面至少覆盖 10:35 起**（不止客户端锚点给出的 11:05–11:18）。该区间设备侧
+时间轴**不可用于跨源对齐**，只能用客户端锚点校正。
+
+处理方式（不删不改，只标注）：
+
+    sh /data/gw/incident_ledger.sh --mark-clock-skew            # 干跑：列出污染块
+    sh /data/gw/incident_ledger.sh --mark-clock-skew --apply    # 给 detail 加 clock_skew=1
+
+**检测判据**（数据驱动，不依赖外部时钟）：按 seq 顺序扫，同时满足
+①某行 ts 比前一行小 600–7200s（向下跳）；②块结束后 ts 回到跳变前水平 ±120s 内；
+③块长 ≤120 行；④块内时间跨度 ≤2h —— 四条的才是跳变块。
+只满足 ① 的是**历史回填批次**（reboot_planned/ne 回填行的 ts 天然比前一行旧），
+实弹：只有 ① 时会误判 13 块/266 行，加 ②③④ 后为 **2 块/8 行**。
+
+审计暴露：CLOCK_SKEW rows=N spans=M（summary 行带 clock_skew=N）。
+
+**下一步（未做）**：台账每行加 uptime= 字段（单调时钟）。时钟跳变时 uptime 仍单调，
+可直接切分污染区间，不必依赖启发式。改 schema 影响面大，留待单独一轮。

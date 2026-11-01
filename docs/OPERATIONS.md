@@ -90,6 +90,30 @@ python tools/deploy.py attic      # 设备侧流浪脚本归档
 - rebase 到新版：`build_v4.sh` 模式（挂 p39 取树 → 全套定制 → mksquashfs → 刷 A），
   mksquashfs 工具链经 depot 推 squashfs ipk 解包
 
+## 演练与设备变更工具（2026-11-01 新增，**强制**）
+
+> 背景：一天内三个子代理各自犯过「未持锁写设备」或「演练未开窗」，导致 M3 验收计数被污染、
+> 甚至出现过 3 条 `全链路` 孤儿窗口把 14 分钟内的所有中断都排除掉。靠人记不可靠，已工具化。
+
+| 工具 | 作用 | 用法 |
+|---|---|---|
+| `_local/device_lock.py` | 单设备互斥锁（v2 心跳，STALE 30min） | `acquire/release/touch/run/hold` |
+| `_local/drill.py` | 演练窗口标记（**必须**，否则中断会被记成有机故障） | `start/stop/guard/status` |
+| `_local/devop.py` | **上面两个的合体（推荐）** | `devop.py --owner X --purpose "..." [--drill-target 服务名] -- <cmd>` |
+
+**规则**：
+1) **任何写设备或会中断服务的操作，必须经 `devop.py`**；裸 `lgssh.py` 只用于只读查询。
+2) 会中断服务的必须带 `--drill-target`，且**按作用域写**：`v3httpd`/`dnsmasq`/`hostapd`/`dropbear`/`wifi`/`wan`/`全链路`。
+   **空 target 会被拒绝**（空 = 全链路 = 排除一切，实弹造成过 14 分钟全排除）。
+3) `devop.py` 任一步失败**命令不会执行**；看到 `REFUSED` 就停手，不要绕过。
+4) 演练窗**可以并存**（排除取并集，偏保守），但**收工必须 `drill.py status` 确认 `open_drill_rows=0`**。
+5) **长批次不要塞进单次 120s 工具调用**（超时会让 finally 跑不到 → 留下孤儿窗）；拆成多次调用或后台跑。
+6) **恢复判定必须持续观察 ≥30s**：回填后立刻 check 通过 ≠ 稳定恢复（实弹：rollback 报 `ran_ok` 但 47s 后又坏）。
+
+**测量学前提**：`drills.tsv` 的排除是**窗口并集**——重叠只会多排除（保守），**但过宽窗口会把真事故洗成演练**。
+所以 target 的作用域必须写准。另：**事后补写 drills 不会回溯修正 incidents.tsv**（ledger 已 ingest），
+补写只能影响之后的统计。
+
 ## 已知坑（操作红线）
 
 - **rootfs_a 被 dd 重写后严禁 drop_caches**（自毁运行视图，只能断电）

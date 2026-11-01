@@ -942,6 +942,74 @@ seal_write() { # $1=op $2=reason $3=rm1 $4=rm2 $5=rm3
 }
 
 # =====================================================================
+# 回溯标注（--reannotate --since <epoch> [--apply]）
+#   场景：drills.tsv 被重建/补写后，那些窗口内**已经 ingest** 的台账行当时没有
+#   [drill] 标记（时序陷阱：补写不回溯）。本模式把当前 drills.tsv 的窗口重新套到
+#   ts >= since 且尚未标记的行上：
+#     · 默认 dry-run：只打印「应当被标但未标」的清单（行号/ts/category/窗口）
+#     · --apply：就地重写这些行的 detail（加 [drill] drill=1 drill_kind/owner 前缀），
+#       行数/seq 不变，并写一条 op=reannotate 的 seal 行（可审计、可复查）
+#   纯 awk 无数组实现（busybox awk 运行期数组有 ~1% SIGSEGV，见 SIGSEGV_ANALYSIS §11）。
+# =====================================================================
+reannotate() { # $1=since $2=apply(1|0)
+    _since=$(num0 "$1"); _apply=$2
+    [ "$_since" -gt 0 ] || { echo "reannotate: need --since <epoch>"; return 2; }
+    # 只装载 end >= since 的窗口（含 end=0 未闭合 → 视作到 now）
+    _wl=$(awk -F'\t' -v n="$NOW" -v s="$_since" '
+        NF>=4 {
+            e=$2+0; if (e==0) e=9999999999
+            if (e < s) next
+            printf "%s:%s:%s:%s ", $1+0, e, $3, $5
+        }' "$DRILLF" 2>/dev/null)
+    _nw=$(printf '%s' "$_wl" | wc -w); _nw=$(num0 "$_nw")
+    echo "# reannotate since=$_since windows=$_nw apply=$_apply"
+    _out=/tmp/il_reann.$$
+    awk -F'\t' -v OFS='\t' -v s="$_since" -v wl="$_wl" -v ap="$_apply" '
+        function winhit(ts,   rest, sp, w, c1, c2, c3, a, b, k, o, r1, r2) {
+            rest = wl
+            while (rest != "") {
+                sp = index(rest, " "); if (sp == 0) sp = length(rest) + 1
+                w = substr(rest, 1, sp - 1); rest = substr(rest, sp + 1)
+                c1 = index(w, ":"); if (c1 == 0) continue
+                a = substr(w, 1, c1 - 1); r1 = substr(w, c1 + 1)
+                c2 = index(r1, ":"); if (c2 == 0) continue
+                b = substr(r1, 1, c2 - 1); r2 = substr(r1, c2 + 1)
+                c3 = index(r2, ":"); if (c3 == 0) continue
+                k = substr(r2, 1, c3 - 1); o = substr(r2, c3 + 1)
+                if (ts + 0 >= a + 0 && ts + 0 <= b + 0) { HK = k; HO = o; return 1 }
+            }
+            return 0
+        }
+        {
+            ts = $1 + 0
+            if (ts < s) { if (ap == 1) print; next }
+            if (index($7, "drill=1") > 0) { if (ap == 1) print; next }
+            HK = ""; HO = ""
+            if (winhit(ts)) {
+                if (ap == 1) { $7 = "[drill] drill=1 drill_kind=" HK " drill_owner=" HO " " $7; print }
+                else { printf "%d\t%s\t%s\t%s\t%s\t%s\n", NR, $1, $3, $4, HK, HO }
+            } else {
+                if (ap == 1) print
+            }
+        }' "$LEDGER" > "$_out" 2>/dev/null
+    if [ "$_apply" = 1 ]; then
+        _n=$(wc -l < "$_out" 2>/dev/null); _n=$(num0 "$_n")
+        _rows=$(wc -l < "$LEDGER" 2>/dev/null); _rows=$(num0 "$_rows")
+        if [ "$_n" = "$_rows" ]; then
+            mv "$_out" "$LEDGER"
+            seal_write reannotate "since=$_since windows=$_nw" 0 0 0
+            echo "# reannotate APPLIED rows=$_rows windows=$_nw (seal op=reannotate written)"
+        else
+            echo "# reannotate ABORT: line count mismatch in=$_rows out=$_n (no change)"
+            rm -f "$_out"; return 1
+        fi
+    else
+        cat "$_out"; rm -f "$_out"
+    fi
+    return 0
+}
+
+# =====================================================================
 # 裁剪（R1.3 留存策略 / R1.6 磁盘守卫）—— SEV1 永不删
 # =====================================================================
 prune_tier() { # $1=SEVx $2=ttl_days → 打印删除行数
@@ -1218,6 +1286,20 @@ if [ "$1" = "--flush-pending" ]; then
     append_batch
     [ "$IL_APPENDED" -gt 0 ] && seal_write append manual_flush
     write_status
+    rm -f "$BATCH"
+    exit 0
+fi
+if [ "$1" = "--reannotate" ]; then
+    _since=""; _apply=0
+    shift
+    while [ $# -gt 0 ]; do
+        case "$1" in
+        --since) shift; _since=$1 ;;
+        --apply) _apply=1 ;;
+        esac
+        shift
+    done
+    reannotate "$_since" "$_apply"
     rm -f "$BATCH"
     exit 0
 fi

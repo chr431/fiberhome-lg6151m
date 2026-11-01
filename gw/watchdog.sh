@@ -964,7 +964,7 @@ if [ "$_rc" != 0 ]; then
     exit 0
 fi
 # v1.42: 启动横幅改用 VER 单一来源(此前字面量停在 v1.38, 识别/syslog 断言被骗)
-VER=1.51
+VER=1.52
 log "===== watchdog v$VER start (svc_lib primitives + minimal parsers + batch3 metrics; avail keys + outcome probes + bearer-follow dp; alert LED 5G orange) ====="
 logger -t watchdog "watchdog v$VER start"
 # initialize state to current (suppress initial alarms)
@@ -998,12 +998,17 @@ _fp_restart() { # $1=name  $2=kind
 #   设计: 每 2s 一次 df(2 fork, 可接受), **只在跨档时打一条**(防刷屏), 分工=watchdog 只告警,
 #   prune 由 incident_ledger 做(避免两个写方竞争)。
 #   档: ok(>=300MB) / warn(<300MB) / high(<200MB) / critical(<100MB)
+_fp_dt=${_fp_dt:-ok}   # 初始按 ok, 保证第一条告警是 ok->X 而不是 ->X
 _fp_disk() {
     _dk=$("$BB" df -k /data 2>/dev/null | "$BB" awk 'NR==2{print $4}')
     case "$_dk" in ''|*[!0-9]*) return 0 ;; esac
-    if [ "$_dk" -lt 102400 ]; then _dt=critical
-    elif [ "$_dk" -lt 204800 ]; then _dt=high
-    elif [ "$_dk" -lt 307200 ]; then _dt=warn
+    # v1.52: 阈值可用环境变量覆盖(便于**零风险验证**同一条代码路径, 无需真的填盘)
+    #   FP_DISK_CRIT / FP_DISK_HIGH / FP_DISK_WARN (单位 KB)
+    _dc=${FP_DISK_CRIT:-102400}; _dh=${FP_DISK_HIGH:-204800}; _dw=${FP_DISK_WARN:-307200}
+    case "$_dc$_dh$_dw" in *[!0-9]*) _dc=102400; _dh=204800; _dw=307200 ;; esac
+    if [ "$_dk" -lt "$_dc" ]; then _dt=critical
+    elif [ "$_dk" -lt "$_dh" ]; then _dt=high
+    elif [ "$_dk" -lt "$_dw" ]; then _dt=warn
     else _dt=ok; fi
     if [ "$_dt" != "$_fp_dt" ]; then
         log "EVT /data free tier $_fp_dt->$_dt (${_dk}KB free)"

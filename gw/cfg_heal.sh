@@ -338,10 +338,19 @@ detect() {
     [ -n "$DET" ] && DET=$(printf '%s' "$DET" | sed 's/^ *//')
     [ -n "$OBS" ] && OBS=$(printf '%s' "$OBS" | sed 's/^ *//')
 
-    _dp=$(pidof dnsmasq 2>/dev/null | cut -d' ' -f1)
-    if [ -n "$_dp" ] && [ -r /proc/$_dp/cmdline ]; then
-        _cl=$(tr '\0' ' ' < /proc/$_dp/cmdline 2>/dev/null)
-        case "$_cl" in *"-i br-lan"*) ;; *) OBS="$OBS dnsmasq:iface" ;; esac
+    # v1.2 修假阳性: 原实现只取 pidof 的**第一个** pid。冷启动后/重启窗口里可能同时存在两个
+    #   dnsmasq(厂商 DNS-only 实例 + 我方 DHCP 实例), 取到前者就误报 "dnsmasq:iface 漂移"
+    #   (2026-11-01 08:43 / 09:25 各一条假观测)。正确语义 = 只要**任一** dnsmasq 在服务
+    #   br-lan 即算正常。
+    _dps=$(pidof dnsmasq 2>/dev/null)
+    if [ -n "$_dps" ]; then
+        _dok=0
+        for _dp in $_dps; do
+            [ -r /proc/$_dp/cmdline ] || continue
+            _cl=$(tr '\0' ' ' < /proc/$_dp/cmdline 2>/dev/null)
+            case "$_cl" in *"-i br-lan"*) _dok=1; break ;; esac
+        done
+        [ "$_dok" = 1 ] || OBS="$OBS dnsmasq:iface"
     fi
 }
 

@@ -322,6 +322,22 @@ svc_supervise() { # $1=name $2=pattern $3=lock $4=recipe $5=hb $6=maxage $7=env
     fi
 }
 
+
+# v1.48 (lead 2026-11-01 批准) 档A: 按**证据强度**分档恢复
+#   强证据(确定性死亡): 监听套接字消失 -> 有 handler 子进程也没用(没人 accept), 当拍重启, 不等 2-of-3。
+#   弱证据(进程在但不应答/pid 在但监听没了): 保留 2-of-3, 避免抖动误重启。
+#   为什么需要它: 实测 v3httpd 09:37 死 -> 2-of-3 走了 73s; dnsmasq 更久(见 09:55 事故复盘)。
+tier_a_or_strike() { # $1=key $2=strong(1=确定性死亡)
+    if [ "$2" = 1 ]; then
+        rm -f "/tmp/watchdog_strike_$1" 2>/dev/null
+        log "EVT $1 tier-A (definitive death: listener gone) — immediate restart"
+        return 0
+    fi
+    strike "$1" && return 0
+    log "SKIP  $1 recovery (weak evidence: process present but not serving, need 2/3)"
+    return 1
+}
+
 run_cycle() {
     FAILS=0
     TOOLFAILS=0
@@ -506,7 +522,9 @@ run_cycle() {
         set_state v3httpd 1 "GUI httpd"
         FAILS=$((FAILS+1))
         log "WARN  v3httpd unhealthy (pid=$(pidof v3httpd 2>/dev/null || echo none) :80=$(port_listen 80 && echo y || echo n))"
-        if strike v3httpd; then
+        # 档A: :80 无 LISTEN = 确定性死亡(有 handler 子进程也没用)
+        _va_strong=0; port_listen 80 || _va_strong=1
+        if tier_a_or_strike v3httpd "$_va_strong"; then
             if rl_ok v3httpd; then
                 _old=$(pidof v3httpd 2>/dev/null)
                 [ -n "$_old" ] && kill -9 $_old 2>/dev/null
@@ -515,8 +533,6 @@ run_cycle() {
             else
                 log "WARN  v3httpd restart budget exhausted (3/h) — alert only"
             fi
-        else
-            log "SKIP  v3httpd recovery (sample 1/3, need 2/3)"
         fi
     fi
 
@@ -948,7 +964,7 @@ if [ "$_rc" != 0 ]; then
     exit 0
 fi
 # v1.42: 启动横幅改用 VER 单一来源(此前字面量停在 v1.38, 识别/syslog 断言被骗)
-VER=1.47
+VER=1.48
 log "===== watchdog v$VER start (svc_lib primitives + minimal parsers + batch3 metrics; avail keys + outcome probes + bearer-follow dp; alert LED 5G orange) ====="
 logger -t watchdog "watchdog v$VER start"
 # initialize state to current (suppress initial alarms)

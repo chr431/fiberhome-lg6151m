@@ -329,24 +329,25 @@ scan_drill() {
     while IFS="$TAB" read -r _fw_s _fw_e _fw_k _fw_t _fw_o _fw_n; do
         case "$_fw_s" in ''|*[!0-9]*) continue ;; esac
         case "$_fw_e" in ''|*[!0-9]*) _fw_e=0 ;; esac
-        # 自动闭合护栏(lead 2026-11-01): end=0 且超 1h 的窗口一律按 start+3600 关闭。
-        #   取 1h 而不是 30min: soak-qa 的批量注入窗口最长 35min, 30min 会误闭合法窗口(反而藏证据);
-        #   1h 仍远小于"永久", 足以保证"忘记回填"不会让状态总线永久带 drill 标志。
+        # ⚠ v2.7 (2026-11-01 10:09 P0 止血): **自动闭合功能已彻底移除**。
+        #   事故: 该逻辑每 5 拍用 awk 重写整张 drills.tsv, 与其它流的并发追加竞争,
+        #   把台账写坏(874 行空行, 全部历史演练窗口丢失, M3 排除层失效)。
+        #   教训: **共享台账文件禁止整文件重写** —— 多写方场景下只有「只追加」是安全的。
+        #   现在的行为: 只读判断(下面那行 DRILL 标志), 绝不写 drills.tsv。
         if [ "$_fw_e" -eq 0 ] && [ $(( _fw_now - _fw_s )) -gt 3600 ]; then
-            _dr_need=1
+            # 只记一次告警(不重写台账), 让"忘记回填"可见而不是静默
+            case " $_dr_warned " in
+            *" $_fw_s "*) ;;
+            *) _dr_warned="$_dr_warned $_fw_s"
+               printf '%s	WARN	open window start=%s older than 3600s (no rewrite; fix by hand)
+' "$_fw_now" "$_fw_s" >> "$LOGD/drills_autoclose.log" ;;
+            esac
             continue
         fi
         if [ "$_fw_now" -ge "$_fw_s" ]; then
             if [ "$_fw_e" -eq 0 ] || [ "$_fw_now" -le "$_fw_e" ]; then DRILL=1; fi
         fi
     done < "$LOGD/drills.tsv"
-    if [ "$_dr_need" = 1 ] && [ "$DRY" != 1 ]; then
-        "$BB" awk -F"$TAB" -v n="$_fw_now" 'BEGIN{OFS="\t"} { if ($2==0 && $1+0>0 && n-$1>3600) $2=$1+3600; print }' \
-            "$LOGD/drills.tsv" > "$LOGD/drills.tsv.tmp" 2>/dev/null \
-            && mv -f "$LOGD/drills.tsv.tmp" "$LOGD/drills.tsv"
-        printf '%s\tautoclose\tend=0 older than 3600s -> start+3600\n' "$_fw_now" >> "$LOGD/drills_autoclose.log"
-        DRILL=0
-    fi
 }
 
 # ---- 状态机 -------------------------------------------------------------

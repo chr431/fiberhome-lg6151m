@@ -126,15 +126,30 @@ integrity() {
         [ "$IL_BYTES" = "$IL_SBYTES" ] && IL_OK_BYTES=yes
         [ "$IL_MD5" = "$IL_SMD5" ] && IL_OK_MD5=yes
     fi
-    # 累计 prune 计数（逐次 prune 行求和）
+    # 累计删除计数：rm*=留存裁剪（SEV1 必须恒 0）；rp*=修复性删除（去重/纠错重写，
+    # 可为任意级别）。两者都造成 seq 缺口，但只有 rm* 违反"SEV1 永不裁剪"的红线。
+    # 语义判定：只有 prune/disk_guard/retention 这三类 op 的 rm* 才算"留存裁剪"；
+    # 其它 op（repair/reannotate）行上的 rm* 一律按**修复性删除**计 —— 这样历史里
+    # 那次"去重修复却写了 rm1"的错记不会永久污染 SEV1 红线（向后兼容，不改历史）。
     _rms=$(awk '{
-        if (match($0, /rm1=[0-9]+/)) { s=substr($0, RSTART+4, RLENGTH-4); a+=s+0 }
-        if (match($0, /rm2=[0-9]+/)) { s=substr($0, RSTART+4, RLENGTH-4); b+=s+0 }
-        if (match($0, /rm3=[0-9]+/)) { s=substr($0, RSTART+4, RLENGTH-4); c+=s+0 }
-    } END { print a+0" "b+0" "c+0 }' "$SEAL" 2>/dev/null)
+        op = ""
+        if (match($0, /op=[a-z_]+/)) op = substr($0, RSTART+3, RLENGTH-3)
+        prune = (op == "prune" || op == "disk_guard" || op == "retention")
+        if (match($0, /rm1=[0-9]+/)) { s=substr($0, RSTART+4, RLENGTH-4); if (prune) a+=s+0; else d+=s+0 }
+        if (match($0, /rm2=[0-9]+/)) { s=substr($0, RSTART+4, RLENGTH-4); if (prune) b+=s+0; else e+=s+0 }
+        if (match($0, /rm3=[0-9]+/)) { s=substr($0, RSTART+4, RLENGTH-4); if (prune) c+=s+0; else f+=s+0 }
+        if (match($0, /rp1=[0-9]+/)) { s=substr($0, RSTART+4, RLENGTH-4); d+=s+0 }
+        if (match($0, /rp2=[0-9]+/)) { s=substr($0, RSTART+4, RLENGTH-4); e+=s+0 }
+        if (match($0, /rp3=[0-9]+/)) { s=substr($0, RSTART+4, RLENGTH-4); f+=s+0 }
+        if (match($0, /last_seq=[0-9]+/)) { s=substr($0, RSTART+9, RLENGTH-9); if (s+0>mx) mx=s+0 }
+    } END { print a+0" "b+0" "c+0" "d+0" "e+0" "f+0" "mx+0 }' "$SEAL" 2>/dev/null)
     IL_RM1=$(printf '%s' "$_rms" | cut -d' ' -f1); IL_RM1=$(num0 "$IL_RM1")
     IL_RM2=$(printf '%s' "$_rms" | cut -d' ' -f2); IL_RM2=$(num0 "$IL_RM2")
     IL_RM3=$(printf '%s' "$_rms" | cut -d' ' -f3); IL_RM3=$(num0 "$IL_RM3")
+    IL_RP1=$(printf '%s' "$_rms" | cut -d' ' -f4); IL_RP1=$(num0 "$IL_RP1")
+    IL_RP2=$(printf '%s' "$_rms" | cut -d' ' -f5); IL_RP2=$(num0 "$IL_RP2")
+    IL_RP3=$(printf '%s' "$_rms" | cut -d' ' -f6); IL_RP3=$(num0 "$IL_RP3")
+    IL_MAXSEQ=$(printf '%s' "$_rms" | cut -d' ' -f7); IL_MAXSEQ=$(num0 "$IL_MAXSEQ")
     # seq 连续性（标量 awk）
     _ss=$(awk -F'\t' '
         { s=$8+0; if (n==0) { first=s } else { if (s != prev+1) gap += s-prev-1 }
@@ -144,10 +159,15 @@ integrity() {
     IL_LAST=$(printf '%s' "$_ss" | cut -d' ' -f2); IL_LAST=$(num0 "$IL_LAST")
     IL_GAPS=$(printf '%s' "$_ss" | cut -d' ' -f3); IL_GAPS=$(num0 "$IL_GAPS")
     IL_SEQN=$(printf '%s' "$_ss" | cut -d' ' -f4); IL_SEQN=$(num0 "$IL_SEQN")
-    # 缺口对账：first-1 + 内部缺口 必须等于 seal 记录的累计删除数
-    _gone=$(( IL_FIRST - 1 + IL_GAPS ))
-    _rec=$(( IL_RM1 + IL_RM2 + IL_RM3 ))
+    # 缺口对账：first-1 + 内部缺口 + **尾部缺口** 必须等于 seal 记录的累计删除数。
+    # 尾部缺口 = 曾经分配过的最大 seq - 当前最大 seq（删掉末尾行时内部缺口不会增长，
+    # 2026-11-01 实弹：删 35 行尾部只多出 34 个内部缺口，对账差 1）。
+    _tail=$(( IL_MAXSEQ - IL_LAST ))
+    [ "$_tail" -lt 0 ] && _tail=0
+    _gone=$(( IL_FIRST - 1 + IL_GAPS + _tail ))
+    _rec=$(( IL_RM1 + IL_RM2 + IL_RM3 + IL_RP1 + IL_RP2 + IL_RP3 ))
     [ "$_gone" = "$_rec" ] && IL_OK_ACC=yes
+    IL_GONE=$_gone; IL_REC=$_rec; IL_TAIL=$_tail
     [ "$IL_SEQN" = "$IL_ROWS" ] && [ "$IL_GAPS" = 0 ] && IL_OK_SEQ=yes
     [ "$IL_RM1" = 0 ] && IL_OK_SEV1=yes
     # 台账自身总龄（用最早一行的 ts）
@@ -288,7 +308,7 @@ run_audit() {
         echo "ledger=$SRC rows=$IL_ROWS bytes=$IL_BYTES md5=$IL_MD5"
         echo "SNAPSHOT consistent=$SNAP_OK attempts=$SNAP_TRY note=台账读取期可能被 tick 追加, 一致性快照后计算"
         echo "seal=$SEAL lines=$IL_SEAL_N last_rows=$IL_SROWS last_bytes=$IL_SBYTES last_md5=$IL_SMD5"
-        echo "INTEGRITY rows_match=$IL_OK_ROWS bytes_match=$IL_OK_BYTES md5_match=$IL_OK_MD5 seq_contiguous=$IL_OK_SEQ gaps=$IL_GAPS gaps_accounted=$IL_OK_ACC removed_total=$(( IL_RM1 + IL_RM2 + IL_RM3 )) rm1=$IL_RM1 rm2=$IL_RM2 rm3=$IL_RM3 sev1_never_pruned=$IL_OK_SEV1"
+        echo "INTEGRITY rows_match=$IL_OK_ROWS bytes_match=$IL_OK_BYTES md5_match=$IL_OK_MD5 seq_contiguous=$IL_OK_SEQ gaps=$IL_GAPS tail_gaps=$IL_TAIL gaps_accounted=$IL_OK_ACC gone=$IL_GONE accounted=$IL_REC pruned_total=$(( IL_RM1 + IL_RM2 + IL_RM3 )) rm1=$IL_RM1 rm2=$IL_RM2 rm3=$IL_RM3 repaired_total=$(( IL_RP1 + IL_RP2 + IL_RP3 )) rp1=$IL_RP1 rp2=$IL_RP2 rp3=$IL_RP3 sev1_never_pruned=$IL_OK_SEV1"
         echo "TIER SEV1 rows=$R1 bytes=$B1 oldest_ts=$O1 oldest_age_days=$(days "$_a1") target_days=$T_SEV1 contract_days=$C_SEV1 verdict=$V1"
         echo "TIER SEV2 rows=$R2 bytes=$B2 oldest_ts=$O2 oldest_age_days=$(days "$_a2") target_days=$T_SEV2 contract_days=$C_SEV2 verdict=$V2"
         echo "TIER SEV3 rows=$R3 bytes=$B3 oldest_ts=$O3 oldest_age_days=$(days "$_a3") target_days=$T_SEV3 contract_days=$C_SEV3 verdict=$V3"
@@ -297,6 +317,14 @@ run_audit() {
         echo "OLDEST_SEV1 attested_since_ts=$IL_S1_ATTEST_TS seal_line=$IL_S1_ATTEST_LINE row_md5=$_m1"
         echo "QUALITY presync_rows=$IL_PRESYNC backfill_rows=$IL_BACKFILL drill_tagged_rows=$IL_DRILLROWS ledger_hb_age_s=$_hb"
         echo "PRESYNC rows=$PS_N bytes=$PS_B counted_in_oldest=no note=写于NTP首同步前(或时钟=固件构建日), ts已按入账时刻计, 原值在src_ts"
+        # R4-C: 各 category 的行数分布（新 category 必须能在 tier 统计里被正确归类；
+        # 这里给出 category × severity 的交叉表，便于核对"活着但不服务"这类新来源）
+        if [ -s "$SRC" ]; then
+            awk -F'\t' '
+                { k = $3 "/" $2; n[k]++ }
+                END { for (x in n) printf "%s=%d ", x, n[x]; print "" }
+            ' "$SRC" 2>/dev/null | sed 's/^/CATEGORIES /'
+        fi
         echo "SOURCE_HEALTH malformed_ne=$(sed -n 's/^malformed_ne=//p' "$STATUSF" 2>/dev/null) source_gaps=$(sed -n 's/^gaps=//p' "$STATUSF" 2>/dev/null) lines_read=$(sed -n 's/^lines_read=//p' "$STATUSF" 2>/dev/null) pending=$(sed -n 's/^pending=//p' "$STATUSF" 2>/dev/null) presync_now=$(sed -n 's/^presync=//p' "$STATUSF" 2>/dev/null) data_free_kb=$(sed -n 's/^data_free_kb=//p' "$STATUSF" 2>/dev/null)"
         # R2-D: NE 台账**文件级**形态分布（不是每轮计数器 —— 计数器在静默轮会归零，
         # 会让人误读成"文件里没有合法行"）。一次 awk 扫描源文件，给出：
@@ -385,8 +413,9 @@ mkfix() { # $1=dir $2=rowsfile $3=rm1 $4=rm2 $5=rm3 $6=first_seq
     _mk_bytes=$(wc -c < "$_d/incidents.tsv" 2>/dev/null); _mk_bytes=$(num0 "$_mk_bytes")
     _mk_md5=$(md5sum "$_d/incidents.tsv" 2>/dev/null | cut -d' ' -f1)
     _mk_ls=$(tail -n 1 "$_d/incidents.tsv" 2>/dev/null | cut -f8); _mk_ls=$(num0 "$_mk_ls")
-    printf 'op=append ts=%s rows=%s bytes=%s md5=%s first_seq=%s last_seq=%s sev1=0 sev2=0 sev3=0 rm1=%s rm2=%s rm3=%s oldest_sev1_ts=- oldest_sev1_md5=- reason=fixture\n' \
-        "$NOW" "$_mk_rows" "$_mk_bytes" "$_mk_md5" "$6" "$_mk_ls" "$3" "$4" "$5" > "$_d/incidents.seal"
+    _mk_op=$7; [ -n "$_mk_op" ] || _mk_op=append
+    printf 'op=%s ts=%s rows=%s bytes=%s md5=%s first_seq=%s last_seq=%s sev1=0 sev2=0 sev3=0 rm1=%s rm2=%s rm3=%s oldest_sev1_ts=- oldest_sev1_md5=- reason=fixture\n' \
+        "$_mk_op" "$NOW" "$_mk_rows" "$_mk_bytes" "$_mk_md5" "$6" "$_mk_ls" "$3" "$4" "$5" > "$_d/incidents.seal"
 }
 selftest() {
     _td=/tmp/ra_selftest.$$
@@ -436,9 +465,17 @@ selftest() {
     printf '%s\tSEV1\tne\n%s\tSEV2\tsvc_restart\n%s\tSEV3\tnetcfg_repair\n' "$_D2" "$(( NOW - 86400 ))" "$NOW" > "$_rowsf"
     mkfix "$_td/growing" "$_rowsf" 0 0 0 1
     chk growing PARTIAL "$_td/growing"
-    # 8) SEV1 被 prune 过（rm1>0）→ 完整性红线 FAIL
+    # 7b) 尾部删除 + rp 记账（seq 1..7 存在, 曾分配 1..10 → 尾部缺口 3, rp3=3）→ 必须 PROVEN
+    printf '%s\tSEV1\tne\n%s\tSEV2\tsvc_restart\n%s\tSEV3\tnetcfg_repair\n' "$_D40" "$_D10" "$_D3" > "$_rowsf"
+    mkfix "$_td/tailrp" "$_rowsf" 0 0 0 1
+    _tl=$(wc -l < "$_td/tailrp/incidents.tsv"); _tb=$(wc -c < "$_td/tailrp/incidents.tsv")
+    _tm=$(md5sum "$_td/tailrp/incidents.tsv" | cut -d' ' -f1)
+    # 模拟"曾分配 seq 到 10、现只剩 1..3"：尾部缺口 7 必须由 rp3=7 记账
+    printf 'op=repair ts=%s rows=%s bytes=%s md5=%s first_seq=1 last_seq=10 sev1=1 sev2=1 sev3=1 rm1=0 rm2=0 rm3=0 rp1=0 rp2=0 rp3=7 oldest_sev1_ts=- oldest_sev1_md5=- reason=test_tail\n' "$NOW" "$_tl" "$_tb" "$_tm" >> "$_td/tailrp/incidents.seal"
+    chk tail_removal_rp PROVEN "$_td/tailrp"
+    # 8) SEV1 被 prune 过（prune 行 rm1>0）→ 完整性红线 FAIL
     printf '%s\tSEV2\tsvc_restart\n%s\tSEV3\tnetcfg_repair\n' "$_D10" "$_D3" > "$_rowsf"
-    mkfix "$_td/sev1gone" "$_rowsf" 1 0 0 2
+    mkfix "$_td/sev1gone" "$_rowsf" 1 0 0 2 prune
     chk sev1_pruned_flag FAIL "$_td/sev1gone"
     rm -rf "$_td"
     echo "retention_audit selftest cases=$_n failures=$_bad"

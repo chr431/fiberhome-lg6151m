@@ -1,5 +1,11 @@
 #!/bin/sh
-# incident_ledger.sh v1.1 -- 统一事故台账（M1 / R1.1–R1.6 + R2-D 数据质量）
+# incident_ledger.sh v1.3 -- 统一事故台账（M1 / R1.1–R1.6 + R2-D + R4-C）
+#   v1.3 (2026-11-01 R4-C 轮): ① **svc_outages.tsv 真格式并入**（12 列）+ **多探针去重**
+#     （同一次中断 dns/tcp80 各成段 → 按时间窗合并成一条台账行，否则 SEV 统计被放大数倍）；
+#     ② 尊重 excluded/excl_reason（演练/维护/计划重启/上游断网：仍入账但标 excluded）；
+#     ③ evidence 证据链透传；④ 修 IFS 空字段塌陷（连续 TAB 让 read 变量左移）；
+#     ⑤ R1.2 映射修正：cfg_heal:* 的 netcfg_repair 落 SEV2；
+#     ⑥ 新增 --selftest-svcout（4 段 → 3 行、合并时长、excluded 透传、时长→SEV 重算）。
 #   v1.1 (2026-11-01 R2-D): ① NE 消费改按**字段数形态**分类（碎片/旧格式/当前格式），
 #     碎片只计数不入账且 status 暴露形态分布；② 新增输入源 10 = aee db_history
 #     （KE 权威台账 —— 内核致命错误后设备直接复位，syslog/dmesg 常无文本痕迹，
@@ -157,6 +163,14 @@ sev_of() {
             return 0 ;;
         esac ;;
     svc_restart|reboot_unplanned|netcfg_storm) echo SEV2; return 0 ;;
+    netcfg_repair)
+        # R1.2 映射修正（R4-C 轮，cfg-heal 提了两轮）：cfg_heal:* 是"配置被外力蒸发后
+        # 自愈"，背后是真实的 NAT/路由/防火墙降级面（客户端可能已受影响），落 SEV2；
+        # 其余单次修复（route/table 补装）仍按一般事件 SEV3。
+        case "$_det" in
+        *cfg_heal*) echo SEV2; return 0 ;;
+        *) echo SEV3; return 0 ;;
+        esac ;;
     degraded)
         case "$_det" in
         *level=down*) echo SEV2; return 0 ;;
@@ -631,23 +645,87 @@ h_trans() {
 # 输入源 8: svc_outages.tsv（M3/T3 交付后接入，R3.3 格式）
 #   容错解析：能认 dur= 就用；认不出就整行入账（不丢证据、不猜字段）
 # =====================================================================
+# v1.3 (R4-C 轮): 真格式解析 + **多探针去重** + 尊重 excluded。
+#   实测格式(svc_outage v1.0, 12 列 TAB):
+#     start end dur path probe severity attrib excluded excl_reason evidence side flags
+#   同一次中断在文件里会有多行(dns/tcp80 各自成段, 甚至一段拆多段) —— 必须按时间窗
+#   合并成**一条台账行**, 否则 M1 的 SEV 统计会被同一故障放大数倍。
+#   结算窗 SVCOUT_SETTLE: 只处理 end 已过 180s 的段 —— 保证同一次中断的各探针段
+#   都已落盘、能在同一批里被合并(而不是被切成两条)。
+SVCOUT_SETTLE=180
 h_svcout() {
+    _acc=/tmp/il_svcout.$$
+    : > "$_acc"
     while IFS= read -r L; do
         [ -n "$L" ] || continue
         case "$L" in \#*) continue ;; esac
-        _e=$(printf '%s' "$L" | cut -f1)
-        case "$_e" in ''|*[!0-9]*) _e=$NOW ;; esac
-        mkref
-        _dur=$(printf '%s' "$L" | sed -n 's/.*dur=\([0-9]*\).*/\1/p' | head -1)
-        [ -n "$_dur" ] || _dur=$(printf '%s' "$L" | cut -f3)
-        case "$_dur" in ''|*[!0-9]*) _dur=- ;; esac
-        _path=$(printf '%s' "$L" | sed -n 's/.*path=\([A-Za-z0-9_.-]*\).*/\1/p' | head -1)
-        [ -n "$_path" ] || _path=$(printf '%s' "$L" | cut -f4)
-        [ -n "$_path" ] || _path=-
-        _exc=""
-        case "$L" in *excluded=1*) _exc=" excluded=1" ;; esac
-        emit svc_outage "$(san_comp "$_path")" "$_dur" "$_ref" "raw=$(san "$L")$_exc" "$_e"
+        _s=$(printf '%s' "$L" | cut -f1); _e=$(printf '%s' "$L" | cut -f2)
+        case "$_s$_e" in ''|*[!0-9]*) continue ;; esac
+        [ "$_e" -le $(( NOW - SVCOUT_SETTLE )) ] || continue
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "$_s" "$_e" "$(printf '%s' "$L" | cut -f3)" "$(printf '%s' "$L" | cut -f4)" \
+            "$(printf '%s' "$L" | cut -f5)" "$(printf '%s' "$L" | cut -f6)" \
+            "$(printf '%s' "$L" | cut -f7)" "$(printf '%s' "$L" | cut -f8)" \
+            "$(printf '%s' "$L" | cut -f9)" "$(printf '%s' "$L" | cut -f10)" >> "$_acc"
     done
+    [ -s "$_acc" ] || { rm -f "$_acc"; return 0; }
+    sort -n -k1,1 "$_acc" > "$_acc.s"
+    awk -F'\t' -v OFS='\t' -v gap=5 '
+        # 空字段必须写成 "-"：POSIX sh 的 IFS 是 TAB(空白类)，连续 TAB 会塌成一个，
+        # 导致 read 的后续变量整体左移（实弹：空的 excl_reason 把 evidence 挤到了 excl_reason 位）。
+        function nz(v) { return (v == "" ? "-" : v) }
+        function out() { if (n > 0) printf "%d\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n", cs, ce, ce-cs, nz(cpath), nz(cp), nz(csev), nz(catt), nz(cexc), csegs, nz(cxr), nz(cev) }
+        {
+            s = $1 + 0; e = $2 + 0
+            if (n == 0) { cs = s; ce = e; cp = $5; cpath = $4; cexc = $8; catt = $7; csev = $6; csegs = 1; cxr = $9; cev = $10; n = 1; next }
+            if (s <= ce + gap) {
+                if (e > ce) ce = e
+                if (index(cp, $5) == 0) cp = cp "+" $5
+                if (index(cpath, $4) == 0) cpath = cpath "+" $4
+                if ($8 != cexc) cexc = "mixed"
+                if ($6 == "SEV1") csev = "SEV1"
+                if (cxr == "" && $9 != "") cxr = $9
+                if (cev == "" && $10 != "") cev = $10
+                csegs++
+                next
+            }
+            out()
+            cs = s; ce = e; cp = $5; cpath = $4; cexc = $8; catt = $7; csev = $6; csegs = 1; cxr = $9; cev = $10
+        }
+        END { out() }' "$_acc.s" > "$_acc.m"
+    # 跨批去重：与上一次已落账的区间重叠的，整段跳过（避免同一次中断被记两遍）
+    _last=$(sed -n 's/^svcout_last=//p' "$STATEF" 2>/dev/null | head -1)
+    _lstart=0; _lend=0
+    case "$_last" in
+    *:*) _lstart=$(printf '%s' "$_last" | cut -d: -f1); _lend=$(printf '%s' "$_last" | cut -d: -f2) ;;
+    esac
+    case "$_lstart$_lend" in ''|*[!0-9]*) _lstart=0; _lend=0 ;; esac
+    _maxend=0
+    while IFS='	' read -r _ms _me _mdur _mpath _mprobe _msev _matt _mexc _msegs _mxr _mev; do
+        case "$_ms$_me" in ''|*[!0-9]*) continue ;; esac
+        if [ "$_lend" -gt 0 ] && [ "$_ms" -ge "$_lstart" ] && [ "$_me" -le "$_lend" ]; then
+            continue
+        fi
+        mkref
+        _extra="probes=$_mprobe segments=$_msegs src_severity=$_msev"
+        case "$_mexc" in
+        1) _extra="$_extra excluded=1" ;;
+        mixed) _extra="$_extra excluded=partial" ;;
+        esac
+        [ -n "$_matt" ] && [ "$_matt" != "-" ] && _extra="$_extra attrib=$_matt"
+        [ -n "$_mxr" ] && [ "$_mxr" != "-" ] && _extra="$_extra excl_reason=$_mxr"
+        [ -n "$_mev" ] && [ "$_mev" != "-" ] && _extra="$_extra evidence=$(san "$_mev")"
+        emit svc_outage "$(san_comp "$_mpath")" "$_mdur" "$_ref" "$_extra" "$_ms"
+        [ "$_me" -gt "$_maxend" ] && _maxend=$_me
+    done < "$_acc.m"
+    if [ "$_maxend" -gt 0 ] && [ "$DRYRUN" != 1 ]; then
+        _firststart=$(head -1 "$_acc.m" 2>/dev/null | cut -f1)
+        case "$_firststart" in ''|*[!0-9]*) _firststart=0 ;; esac
+        grep -v '^svcout_last=' "$STATEF" 2>/dev/null > "$STATEF.tmp"
+        printf 'svcout_last=%s:%s\n' "$_firststart" "$_maxend" >> "$STATEF.tmp" 2>/dev/null
+        mv "$STATEF.tmp" "$STATEF" 2>/dev/null
+    fi
+    rm -f "$_acc" "$_acc.s" "$_acc.m"
 }
 
 # =====================================================================
@@ -940,9 +1018,16 @@ seal_write() { # $1=op $2=reason $3=rm1 $4=rm2 $5=rm3
     *) _s1md5=$(sed -n "$_s1ln"p "$LEDGER" 2>/dev/null | md5sum | cut -d' ' -f1)
        [ -n "$_s1md5" ] || _s1md5=- ;;
     esac
-    printf 'op=%s ts=%s rows=%s bytes=%s md5=%s first_seq=%s last_seq=%s sev1=%s sev2=%s sev3=%s rm1=%s rm2=%s rm3=%s oldest_sev1_ts=%s oldest_sev1_md5=%s reason=%s\n' \
+    # rm1/rm2/rm3 = 留存裁剪(prune/disk_guard)删除数 —— SEV1 必须恒 0（审计红线）；
+    # rp1/rp2/rp3 = **修复性**删除数（去重/纠错重写，可为任意级别）—— 与裁剪分开记，
+    #   否则一次合法的去重修复会被审计当成"SEV1 被裁剪"而误判 FAIL（2026-11-01 实弹）。
+    _p1=$IL_RP1; [ -n "$_p1" ] || _p1=0
+    _p2=$IL_RP2; [ -n "$_p2" ] || _p2=0
+    _p3=$IL_RP3; [ -n "$_p3" ] || _p3=0
+    printf 'op=%s ts=%s rows=%s bytes=%s md5=%s first_seq=%s last_seq=%s sev1=%s sev2=%s sev3=%s rm1=%s rm2=%s rm3=%s rp1=%s rp2=%s rp3=%s oldest_sev1_ts=%s oldest_sev1_md5=%s reason=%s\n' \
         "$_op" "$NOW" "$_rows" "$_bytes" "$_md5" "$_fs" "$_ls" "$_c1" "$_c2" "$_c3" \
-        "$_r1" "$_r2" "$_r3" "$_s1ts" "$_s1md5" "$_rsn" >> "$SEAL"
+        "$_r1" "$_r2" "$_r3" "$_p1" "$_p2" "$_p3" "$_s1ts" "$_s1md5" "$_rsn" >> "$SEAL"
+    IL_RP1=0; IL_RP2=0; IL_RP3=0
 }
 
 # =====================================================================
@@ -1174,6 +1259,8 @@ selftest() {
     t SEV3 svc_fail led_mgr 2 "label=led_mgr"
     t SEV2 netcfg_storm netcfg - "repairs_in_window=11"
     t SEV3 netcfg_repair netcfg - "reason=route"
+    t SEV2 netcfg_repair netcfg - "reason=cfg_heal:agg rc=0 verified=ok"
+    t SEV3 netcfg_repair netcfg - "reason=table200 v6 default rc=0 verified=?"
     t SEV2 reboot_unplanned - - "no match"
     t SEV3 reboot_planned - 3600 "target=04:00"
     t SEV3 degraded lan.wifi2g - "trans=op->deg"
@@ -1187,7 +1274,47 @@ selftest() {
     [ "$_bad" -eq 0 ] || return 1
     selftest_ne || return 1
     selftest_drill || return 1
+    selftest_svcout || return 1
     return 0
+}
+
+# svc_outages 并入单测（R4-C）：多探针同一次中断必须合并成一行；excluded 必须被尊重；
+# 严重度必须按 R1.2 由**合并后的时长**重算（而不是照抄文件里的 severity 列）。
+selftest_svcout() {
+    _sv=/tmp/il_svcout_selftest.$$
+    rm -rf "$_sv"; mkdir -p "$_sv"
+    {
+        printf '#svc_outage v1.0\tfields: start end dur path probe severity attrib excluded excl_reason evidence side flags\n'
+        # 同一次中断：dns 83s + tcp80 90s（重叠）→ 必须合并成 1 行，dur=90
+        printf '1793460000\t1793460083\t83\tgw\tdns\tSEV1\tdrill\t1\tdrill\tdrills:1-2\tdev\t\n'
+        printf '1793460000\t1793460090\t90\tgw\ttcp80\tSEV1\tdrill\t1\tdrill\tdrills:1-2\tdev\t\n'
+        # 独立短中断 4s → SEV3
+        printf '1793460300\t1793460304\t4\tgw\tdns\tSEV3\t-\t0\t-\t-\tdev\t\n'
+        # 独立长中断 30s，未排除 → SEV1
+        printf '1793460500\t1793460530\t30\tgw\ttcp80\tSEV1\t-\t0\t-\t-\tdev\t\n'
+    } > "$_sv/svc_outages.tsv"
+    IL_DIR=$_sv IL_NOW=1793465000 IL_DATA_KB=999999999 IL_BACKFILL_N=50 sh "$0" >/dev/null 2>&1
+    _n=$(grep -c '	svc_outage	' "$_sv/incidents.tsv" 2>/dev/null); _n=$(num0 "$_n")
+    _merged=$(grep 'probes=dns+tcp80' "$_sv/incidents.tsv" 2>/dev/null | head -1)
+    _mdur=$(printf '%s' "$_merged" | cut -f5)
+    _msev=$(printf '%s' "$_merged" | cut -f2)
+    _mexc=$(printf '%s' "$_merged" | sed -n 's/.*excluded=\([a-z0-9]*\).*/\1/p')
+    _sev3=$(grep -c '	svc_outage	gw	4	' "$_sv/incidents.tsv" 2>/dev/null)
+    _sev1=$(grep -c '	svc_outage	gw	30	' "$_sv/incidents.tsv" 2>/dev/null)
+    _fail=0
+    [ "$_n" = 3 ] || { echo "FAIL svcout: 入账行数=$_n 应为 3（2 段合并成 1 + 2 段独立）"; _fail=1; }
+    [ -n "$_merged" ] || { echo "FAIL svcout: 未合并多探针（probes=dns+tcp80 未出现）"; _fail=1; }
+    [ "$_mdur" = 90 ] || { echo "FAIL svcout: 合并时长=$_mdur 应为 90（取并集）"; _fail=1; }
+    [ "$_msev" = SEV1 ] || { echo "FAIL svcout: 合并后严重度=$_msev 应为 SEV1（>20s）"; _fail=1; }
+    [ "$_mexc" = 1 ] || { echo "FAIL svcout: excluded 未透传（=$_mexc 应为 1）"; _fail=1; }
+    [ "$_sev3" = 1 ] || { echo "FAIL svcout: 4s 中断未落 SEV3"; _fail=1; }
+    [ "$_sev1" = 1 ] || { echo "FAIL svcout: 30s 中断未落 SEV1"; _fail=1; }
+    rm -rf "$_sv"
+    if [ "$_fail" = 0 ]; then
+        echo "incident_ledger selftest_svcout: 4 段→3 行(PASS) 合并 dur=90 SEV1 excluded=1; 4s→SEV3; 30s→SEV1"
+        return 0
+    fi
+    return 1
 }
 
 # drills.tsv 解析单测（Lead 2026-11-01 v2 要求）：空行/CR 残片/4 列碎片/非数字起点

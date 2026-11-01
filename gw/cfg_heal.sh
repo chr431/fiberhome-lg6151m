@@ -306,17 +306,22 @@ detect() {
     # --- 3) br-lan 成员口(只补 eth1/ra0/rai0; rndis0 归 usb_mgr, eth0 是 WAN) ---
     if [ -n "$BR_MEM" ]; then
         [ -d /sys/class/net/eth1 ] && { br_has eth1 || DET="$DET br:eth1"; }
-        if ! pgrep -f 'wifi_up[.]sh' >/dev/null 2>&1; then
-            _hr=0
-            if grep -q 'recover hostapd' /tmp/watchdog.log 2>/dev/null; then
-                _ml=$(stat -c %Y /tmp/watchdog.log 2>/dev/null || echo 0)
-                [ $(( $(date +%s) - _ml )) -lt 120 ] && _hr=1
-            fi
-            if [ "$_hr" = 0 ]; then
-                for _w in ra0 rai0; do
-                    [ -d /sys/class/net/$_w ] && { br_has $_w || DET="$DET br:$_w"; }
-                done
-            fi
+        # v1.3: 拆掉两个**有害/失效**的让步闸门(2026-11-01 L01 实测: 摘 ra0 后 301s 不自愈)
+        #   ① 原 "hostapd 恢复后 120s 内不判": 用 stat -c %Y /tmp/watchdog.log 取 mtime ——
+        #      本机执行环境里没有 stat(实测 "stat: not found"), _ml 恒为 0 -> 该闸门从未生效;
+        #      而即便生效也是错的: watchdog.log 每 30s 写一行 TICK, mtime **永远新鲜**,
+        #      等价于永久抑制 ra0/rai0 判定。
+        #   ② 原 pgrep -f 'wifi_up[.]sh' 是全命令行**子串**匹配(违反 §10 定律二): 演练 harness
+        #      的 cmdline 只要提到该路径, 就会在整个演练期间抑制判定 —— 这正是 301s 的机制。
+        #   现只保留一个**精确且廉价**的让步: 我方 hostapd 不在(重启窗口)时不判, 由 watchdog
+        #   的恢复路径自己 brctl addif。hostapd 活着时桥成员缺了就补(只增不删, brctl addif 幂等,
+        #   再加一次无害; 跨拍 2-of-2 已过滤亚秒级抖动)。
+        _skipbr=0
+        if [ "$SVCLIB_OK" = 1 ] && ! svc_our_hostapd >/dev/null 2>&1; then _skipbr=1; fi
+        if [ "$_skipbr" = 0 ]; then
+            for _w in ra0 rai0; do
+                [ -d /sys/class/net/$_w ] && { br_has $_w || DET="$DET br:$_w"; }
+            done
         fi
     fi
 

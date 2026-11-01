@@ -224,6 +224,17 @@ def cases():
             note="WAN->LAN 新建暴露面; 由既有 fw_apply.sh apply 重建",
         ),
         dict(
+            id="D8_bridge_ra0",
+            title="把 WiFi 口 ra0 从 br-lan 摘除 (L01; soak-qa batchB 301s 未自愈的复现点)",
+            discover="brctl show br-lan 2>/dev/null | awk 'NR>1{print $NF}' | tr '\n' ' '",
+            inject="brctl delif br-lan ra0 2>/dev/null; true",
+            check="brctl show br-lan 2>/dev/null | awk 'NR>1{print $NF}' | grep -qx ra0",
+            restore="brctl addif br-lan ra0 2>/dev/null; true",
+            deadman=False, conn_required=False,
+            note="WiFi 侧桥成员。PC 走 eth1 不受影响; 但 WiFi 客户端会失去 L2 归属。"
+                 "v1.2 及以前此处有永久盲区(stat 闸门失效 + pgrep 子串), v1.3 已修。",
+        ),
+        dict(
             id="D6_reapply_idempotent",
             title="wan_agg --reapply 连跑两次, 第二次不得产生任何变更(幂等硬要求)",
             discover="cat /tmp/wan_mode 2>/dev/null",

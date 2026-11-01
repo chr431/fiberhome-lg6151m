@@ -67,7 +67,7 @@ classify() { # $1=probe $2=start $3=end
     # ① 演练窗口（Lead v1.2 契约；end=0 视为仍在进行，防止忘记回填把假中断放行）
     if [ -r "$DRILLS" ]; then
         # 上界 4h(Lead 2026-11-01 允许长批次窗口; 仍保留上界防忘记回填藏掉后续真中断)
-        _c_d=$(awk -v a="$_c_a" -v b="$_c_b" -v now="$_c_now" -v maxopen="${DRILL_MAX_OPEN:-14400}" '
+        _c_d=$(awk -v a="$_c_a" -v b="$_c_b" -v now="$_c_now" -v maxopen="${DRILL_MAX_OPEN:-14400}" -v pr="$_c_p" '
             /^[#]/ { next }
             NF >= 2 {
                       # 演练作用域: WiFi TX/hostapd 域演练不影响网关服务判据(tcp80/dns),
@@ -78,8 +78,24 @@ classify() { # $1=probe $2=start $3=end
                       # 统一判据: NF>=5 且 $1/$2 都是纯数字。
                       if (NF < 5) next
                       if ($1 !~ /^[0-9]+$/ || $2 !~ /^[0-9]+$/) next
+                      # 作用域(Lead 2026-11-01 制度化): target 写清影响面, 只排除该面内的探针。
+                      # 过宽的窗口会把同窗口内真实中断一起排掉(实弹: 1h hw-drill warp1 吞过四条真中断)。
                       tgt = tolower($4)
-                      if (tgt ~ /warp|wifi|ra0|rai0|beacon|hostapd/) next
+                      scope = ""
+                      if (tgt == "" || tgt ~ /全链路/ || tgt ~ /all/) scope = "all"
+                      else {
+                        if (tgt ~ /v3httpd|gui|tcp80/) scope = scope "tcp80,"
+                        if (tgt ~ /dnsmasq|dns/)       scope = scope "dns,"
+                        if (tgt ~ /dropbear|ssh|tcp22/) scope = scope "tcp22,"
+                        if (tgt ~ /wifi|ra0|rai0|hostapd|beacon|warp/) scope = scope ""
+                        if (tgt ~ /wan|eth0|uplink|ccmni|agg/) scope = scope ""
+                        if (scope == "") {
+                          # 认得出是 wifi/wan 域 -> 不影响网关服务判据; 否则保守按全链路
+                          if (tgt ~ /wifi|ra0|rai0|hostapd|beacon|warp|wan|eth0|uplink|ccmni|agg/) next
+                          scope = "all"
+                        }
+                      }
+                      if (scope != "all" && index(scope, pr ",") == 0) next
                       st=$1+0; en=$2+0
                       # end=0 = 注入进行中; 但忘记回填的行不能变成无限期排除(会藏掉真中断),
                       # 上界 DRILL_MAX_OPEN(默认 1800s), 超界按 start+上界关闭。

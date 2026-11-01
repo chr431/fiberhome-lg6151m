@@ -56,7 +56,7 @@ try:
 except Exception:
     pass
 
-VERSION = "2.3"
+VERSION = "2.4"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_EVIDENCE = os.path.abspath(os.path.join(
     REPO, "..", "_local", "evidence", "svc_probe"))
@@ -521,7 +521,32 @@ DRILL_MAX_OPEN_S = 14400
 # 不做这个区分，一条 1 小时、target=warp1 的硬件演练就会把同窗口内真实的 GUI/DNS
 # 中断全部"排除"掉 —— 那不是审计，是把证据藏起来。（实弹：crash-root 的
 # hw-drill warp1 00:12–01:13 窗口吞掉了 state-truth 的四条真实服务中断。）
-_DRILL_WIFI_ONLY = ("warp", "wifi", "ra0", "rai0", "beacon", "hostapd")
+# 演练作用域（Lead 2026-11-01 制度化）：target 必须写清影响面，消费方据此只排除
+# 该影响面内的探针。**过宽的窗口会把同窗口内真实的有机中断一起排掉** ——
+# 实弹：crash-root 的 1h hw-drill warp1 吞掉过 state-truth 四条真实服务中断。
+# 返回 None = 全链路（排除所有探针）；返回 set() = 不影响本路径任何探针。
+_DRILL_SCOPE = (
+    (("v3httpd", "gui", "tcp80"), ("tcp80",)),
+    (("dnsmasq", "dns"), ("dns",)),
+    (("dropbear", "ssh", "tcp22"), ("tcp22",)),
+    (("wifi", "ra0", "rai0", "hostapd", "beacon", "warp"), ()),   # WiFi 域不影响以太路径
+    (("wan", "eth0", "uplink", "ccmni", "agg"), ()),              # WAN 域不影响 LAN 客户端探针
+)
+
+
+def _drill_scope(target):
+    t = (target or "").lower()
+    if not t or "全链路" in t or "all" in t:
+        return None                     # 明确全链路
+    probes = set()
+    matched = False
+    for keys, ps in _DRILL_SCOPE:
+        if any(k in t for k in keys):
+            matched = True
+            probes |= set(ps)
+    if not matched:
+        return None                     # 认不出作用域 -> 保守按全链路
+    return probes
 
 PROBES = ("icmp", "dns", "tcp80", "tcp22")
 PROBE_COL = {"icmp": (3, 4), "dns": (5, 6), "tcp80": (7, 8), "tcp22": (9, 10)}
@@ -840,8 +865,9 @@ def attribute(inc, ev):
     #    into the acceptance count.
     for d in ev.get("drills", []):
         _t = (d.get("target") or "").lower()
-        if any(k in _t for k in _DRILL_WIFI_ONLY) and inc.get("path") not in ("wifi", "rndis"):
-            continue          # WiFi 域演练不影响以太/RNDIS 路径的观测
+        _sc = _drill_scope(d.get("target"))
+        if _sc is not None and not (set(inc["probes"]) & _sc):
+            continue      # 该演练的作用域不覆盖本条中断的探针 -> 不排除(否则会把真中断洗成演练)
         # end_epoch=0 表示"注入进行中"。但一行忘记回填的演练如果被当成无限期，
         # 会把之后所有真实中断都排掉 —— 那是另一种自欺。因此给未回填行设上界
         # DRILL_MAX_OPEN_S（默认 30min），超界按 start+上界关闭，并在报告里列为

@@ -193,9 +193,14 @@ fl_check() { # $1=key $2=alive(1=活/0=死)
 }
 fast_lane() {
     [ "$DRY" = 1 ] && return 0
-    fl_check v3httpd "$F_l80"
-    fl_check dnsmasq "$F_dnsmasq"
-    fl_check hostapd "$F_hostapd"
+    # 判据必须用**已有的真实量**, 不能写想当然的变量名——
+    #   实弹(自查): 初版写了 F_dnsmasq/F_hostapd, 而这两个变量根本不存在 ->
+    #   每拍都读到空串 = 判死 = 每 2 拍踢一次 watchdog(会把 30s 循环变成 1s 循环并反复重启真服务)。
+    #   scan_proc 已经给出权威量: F_l80(:80 LISTEN) F_l53(:53 LISTEN)
+    #   F_s0(/var/run/hostapd/ra0 活套接字) F_s1(/var/run/hostapd/rai0 活套接字)。
+    fl_check v3httpd "$F_l80"      # :80 有 LISTEN 才算活(fork 出来的 handler 子进程不算)
+    fl_check dnsmasq "$F_l53"      # :53 有 LISTEN 才算活
+    fl_check hostapd "$(( F_s0 & F_s1 ))"  # 两个 AP 控制套接字都在才算活
 }
 F_car0=0; F_br=0; F_ra0=0; F_rai0=0; F_lo=0
 scan_links() {

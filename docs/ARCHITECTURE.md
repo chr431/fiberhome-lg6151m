@@ -49,7 +49,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/bin/fhstub.so` | **v1.0** | manifest | `/data/gw/fhstub.so` | FH符号桩库(顶掉vendor api库的生态依赖,仅ioctl路径) |
 | `gw/bin/healthdog.ko` | **v1.0** | manifest | `/data/gw/healthdog.ko` | 取证看门狗内核模块(forensic=1) |
 | `gw/bin/ip` | **v1.1** | manifest | `/data/gw/bin/ip` | 静态 aarch64 iproute2 6.3.0(与厂商 ip -V 同版本, zig cc musl 重建); 输出与厂商逐字节一致, 保留 link add type bridge; v1.1: 注册表注订正(2026-10-31 审计轮) — v1.1 声称链接闸门但产物从未带闸门(实装二进制无残留, 待 Linux 主机重建未发生) |
-| `gw/bin/kmsglog` | **v1.0** | manifest | `/data/gw/bin/kmsglog` | /dev/kmsg 持久镜像守护(A1 far-infra): 只收新记录(SEEK_END 起); 写前水位守卫(每次 write 前 statvfs /data, <100MB 先轮转再写, 2026-11-01 满盘 60s 教训的落地); 8MBx2 轮转; 写失败游标回卷到未写记录 seq 重试(不丢不推进); /tmp/kmsglog.pid 单实例+心跳 /tmp/kmsglog.hb; --selftest 验证按 seq 回卷原语; rc.extend v3.8+ 自启 |
+| `gw/bin/kmsglog` | **v1.1** | manifest | `/data/gw/bin/kmsglog` | /dev/kmsg 持久镜像守护(A1 far-infra): 只收新记录(SEEK_END 起); 写前水位守卫(每次 write 前 statvfs /data, <100MB 先轮转再写, 2026-11-01 满盘 60s 教训的落地); 8MBx2 轮转; 写失败游标回卷重试(SEEK_SET0+按 seq 前跳, 不丢不推进不重复); /tmp/kmsglog.pid 单实例+心跳 /tmp/kmsglog.hb; --selftest 验证按 seq 回卷原语; rc.extend v3.8+ 自启 |
 | `gw/bin/logc` | **v1.5** | manifest | `/data/gw/bin/logc` | 静态日志采集器; v1.2(P1-2): 信号面包屑(/tmp/logc.crash: 帧偏移/长度)+--dump-raw 原始流+--selftest+ubus 缓冲移出栈+stack-protector; v1.1(batch1): socket/oneshot 超时; 历史见git; v1.3(batch3): --fuzz 确定性变异 + ASAN 构建入口; v1.4(SIGSEGV 轮, ⟦收口 §22⟧ 非家族根因: 摘除最高频污染解引用点): 记录路径彻底去 printf/strftime — 手写 ctime 格式(表+有界整数)与整行拼装, 静态不再链入 strftime/`%0*lld`(在 musl vfprintf 内崩溃); 超长消息跳过而非中止整轮(原 rc=1 截断); v1.5(SIGSEGV Phase 0): on_crash 面包屑后解屏蔽+SIG_DFL+raise 重新触发, 经 core_pattern 管道进 ne_events |
 | `gw/bin/logcut` | **v1.0** | manifest | `/data/gw/bin/logcut` | 静态锚点截取器: 输出文件中最后一次精确匹配锚行之后的全部内容; 单遍扫描+单行缓冲, 无数组/无printf/无locale; 取代 log_keeper delta() 的 busybox awk(其运行期数组退出清理约 1% SIGSEGV)；⟦收口 §22⟧ awk 缺陷说未证实且不再必要(§16.3)；保留理由=少 spawn/无数组 |
 | `gw/bin/mipc_cellular` | **v0.19** | manifest | `/data/gw/mipc_cellular` | v0.19(vaguard 退役轮): 摘除闸门链接重建, 无功能变化; 蜂窝MIPC直连CLI; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘; v0.18(SIGSEGV §18): 链接 vfprintf va_list 闸门 v2 |
@@ -133,7 +133,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `gw/src/coreaddr.c` | **v1.0** | src | `gw/bin/coreaddr` | coreaddr 源码(随产物) |
 | `gw/src/fhstub.c` | **v1.0** | src | `gw/bin/fhstub.so` | FH符号桩库源码 |
 | `gw/src/healthdog.c` | **v1.0** | src | `gw/bin/healthdog.ko` | 看门狗模块源码(版本随产物) |
-| `gw/src/kmsglog.c` | **v1.0** | src | `gw/bin/kmsglog` | kmsglog 源码(随产物) |
+| `gw/src/kmsglog.c` | **v1.1** | src | `gw/bin/kmsglog` | kmsglog 源码(随产物; v1.1 游标回卷改 SEEK_SET0+按 seq 前跳, 设备实测按 seq lseek=EINVAL) |
 | `gw/src/logc.c` | **v1.5** | src | `gw/bin/logc` | logc 源码(同产物; 面包屑/dump-raw/selftest/防栈溢出); v1.3: --fuzz; v1.4: printf-free 记录路径; v1.5(SIGSEGV Phase 0): 崩溃改回默认动作可记账(同上产物) |
 | `gw/src/logcut.c` | **v1.0** | src | `gw/bin/logcut` | logcut 源码(同产物; --selftest) |
 | `gw/src/mipc_cellular.c` | **v0.19** | src | `gw/bin/mipc_cellular` | v0.19: 同产物; 蜂窝MIPC直连CLI源码; v0.17: 日志 primary/last 传输分开(plen/prc/pms+lrlen/lrc/lms); v0.16: cells tag 双变体 0x810b/0x010b(19邻区用 0x010b); 解码失败原始载荷落盘 |

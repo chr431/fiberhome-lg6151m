@@ -166,6 +166,6 @@ tools/devop.py	2.0	tool	-	设备变更唯一入口: 锁+演练窗一步到位, �
 gw/bin/coreaddr	1.0	manifest	/data/gw/bin/coreaddr	ELF core note 头解析件: NT_SIGINFO si_addr(far)+NT_PRSTATUS pc(pr_reg 基址 112/pc 索引 32, 真实设备 .hdr 实证=与 oneoff/sigsegv/core_scan.py 一致); 输出 far=/pc= 两行, 缺啥打啥, 全缺 exit 1; 输入可为 4KB/8KB 截断头, 解析不到即失败(core_meta 回退空列); core_meta.sh v1.13+ 运行时依赖(A1 far-infra)
 gw/src/coreaddr.c	1.0	src	gw/bin/coreaddr	coreaddr 源码(随产物)
 tools/build_coreaddr.sh	1.0	tool	-	coreaddr 构建(zig cc aarch64-linux-musl 静态; 同 stackdump 链)
-gw/bin/kmsglog	1.0	manifest	/data/gw/bin/kmsglog	/dev/kmsg 持久镜像守护(A1 far-infra): 只收新记录(SEEK_END 起); 写前水位守卫(每次 write 前 statvfs /data, <100MB 先轮转再写, 2026-11-01 满盘 60s 教训的落地); 8MBx2 轮转; 写失败游标回卷到未写记录 seq 重试(不丢不推进); /tmp/kmsglog.pid 单实例+心跳 /tmp/kmsglog.hb; --selftest 验证按 seq 回卷原语; rc.extend v3.8+ 自启
-gw/src/kmsglog.c	1.0	src	gw/bin/kmsglog	kmsglog 源码(随产物)
+gw/bin/kmsglog	1.1	manifest	/data/gw/bin/kmsglog	/dev/kmsg 持久镜像守护(A1 far-infra): 只收新记录(SEEK_END 起); 写前水位守卫(每次 write 前 statvfs /data, <100MB 先轮转再写, 2026-11-01 满盘 60s 教训的落地); 8MBx2 轮转; 写失败游标回卷重试(SEEK_SET0+按 seq 前跳, 不丢不推进不重复); /tmp/kmsglog.pid 单实例+心跳 /tmp/kmsglog.hb; --selftest 验证按 seq 回卷原语; rc.extend v3.8+ 自启
+gw/src/kmsglog.c	1.1	src	gw/bin/kmsglog	kmsglog 源码(随产物; v1.1 游标回卷改 SEEK_SET0+按 seq 前跳, 设备实测按 seq lseek=EINVAL)
 tools/build_kmsglog.sh	1.0	tool	-	kmsglog 构建(zig cc aarch64-linux-musl 静态)

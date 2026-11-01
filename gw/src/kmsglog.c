@@ -1,4 +1,11 @@
-/* kmsglog.c v1.0 -- persistent /dev/kmsg mirror (A1 far-infra).
+/* kmsglog.c v1.1 -- persistent /dev/kmsg mirror (A1 far-infra).
+ *
+ * v1.1: cursor rewind re-implemented -- lseek(fd, seq, SEEK_SET) is EINVAL on
+ *   this 5.15 kernel (nonzero offsets are rejected; measured on device
+ *   2026-11-01).  Real primitive: lseek(fd, 0, SEEK_SET) rewinds to the
+ *   oldest buffered record, then records are skipped until their sequence
+ *   number reaches the first unwritten one (records with seq < pending were
+ *   already flushed -> dropped, never duplicated).
  *
  * Usage: kmsglog [--log /data/gw/logs/kmsg.log] [--max-kb 8192] [--backups 1]
  *                [--low-kb 102400] [--selftest]
@@ -16,9 +23,9 @@
  *     is trimmed first (rotate away the backup, start a fresh file);
  *   - size cap: rotate at --max-kb, keep --backups old files;
  *   - a failed/partial write NEVER advances the kmsg cursor: the batch is
- *     dropped and the read position rewound to the first unwritten record's
- *     sequence number (lseek SEEK_SET by seq; verified by --selftest), so
- *     records are retried rather than silently lost.
+ *     dropped and the read position rewound (SEEK_SET 0 + skip records with
+ *     seq < first-unwritten; primitive verified by --selftest), so records
+ *     are retried rather than silently lost.
  *
  * Single instance: /tmp/kmsglog.pid (O_EXCL; stale pid detected via
  * kill(pid,0)==ESRCH).  Heartbeat: /tmp/kmsglog.hb (epoch, every 60s).
@@ -40,7 +47,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define KMSGLOG_VER "1.0"
+#define KMSGLOG_VER "1.1"
 #define DEV_KMSG    "/dev/kmsg"
 #define PIDFILE     "/tmp/kmsglog.pid"
 #define HBFILE      "/tmp/kmsglog.hb"
@@ -57,6 +64,7 @@ static long g_max_kb = 8192;
 static long g_backups = 1;
 static long g_low_kb = 102400;
 static volatile sig_atomic_t g_stop = 0;
+static unsigned long long g_skip_below = 0;  /* after a rewind: drop already-flushed records (seq < this) */
 static int g_have_pidfile = 0;
 static pid_t g_mypid;
 
@@ -177,26 +185,40 @@ static int selftest(void)
     }
     rec[n] = 0;
     s1 = rec_seq(rec, n);
-    if (lseek(fd, (off_t)s1, SEEK_SET) < 0) {
-        printf("FAIL seek-by-seq: %s\n", strerror(errno));
+    /* rewind primitive (measured on device 2026-11-01: nonzero-offset lseek
+     * on this 5.15 kernel is EINVAL) = SEEK_SET 0 + skip forward by seq */
+    if (lseek(fd, 0, SEEK_SET) < 0) {
+        printf("FAIL rewind-0 %s: %s\n", DEV_KMSG, strerror(errno));
         close(fd);
         return 1;
     }
-    do {
-        n = read(fd, rec, sizeof(rec) - 1);
-    } while (n < 0 && errno == EINTR);
-    if (n <= 0) {
-        printf("FAIL re-read after seek-by-seq: rc=%zd\n", n);
-        close(fd);
-        return 1;
+    {
+        int guard = 0;
+        for (;;) {
+            do {
+                n = read(fd, rec, sizeof(rec) - 1);
+            } while (n < 0 && errno == EINTR);
+            if (n <= 0) {
+                printf("FAIL scan-forward after rewind: rc=%zd\n", n);
+                close(fd);
+                return 1;
+            }
+            rec[n] = 0;
+            s2 = rec_seq(rec, n);
+            if (s2 >= s1)
+                break;
+            if (++guard > 200000) {
+                printf("FAIL scan-forward: no seq>=%llu within bound\n", s1);
+                close(fd);
+                return 1;
+            }
+        }
     }
-    rec[n] = 0;
-    s2 = rec_seq(rec, n);
     if (s1 == 0 || s1 != s2) {
-        printf("FAIL cursor rewind: first seq=%llu re-read seq=%llu\n", s1, s2);
+        printf("FAIL cursor rewind: first seq=%llu re-read seq=%llu (overwritten?)\n", s1, s2);
         fail++;
     } else {
-        printf("PASS cursor rewind by seq (%llu)\n", s1);
+        printf("PASS cursor rewind (SEEK_SET0+skip to seq %llu)\n", s1);
     }
     close(fd);
 
@@ -392,6 +414,12 @@ int main(int argc, char **argv)
                 }
                 if (n == 0)
                     break;
+                if (g_skip_below) {
+                    unsigned long long sq = rec_seq(rec, n);
+                    if (sq < g_skip_below)
+                        continue;        /* already flushed: skip, no duplicates */
+                    g_skip_below = 0;
+                }
                 if (blen == 0)
                     pending_seq = rec_seq(rec, n);
                 if (blen + (size_t)n > sizeof(batch)) {
@@ -438,10 +466,13 @@ int main(int argc, char **argv)
             if (w == (ssize_t)blen) {
                 blen = 0;                 /* only now is the cursor advanced */
             } else {
-                /* never advance: rewind to the first unwritten record */
+                /* never advance: rewind to the oldest record and skip
+                 * forward to the first unwritten one (seq-seek lseek is
+                 * EINVAL on this kernel; measured 2026-11-01) */
                 note_err("write log");
-                if (lseek(kfd, (off_t)pending_seq, SEEK_SET) < 0)
-                    lseek(kfd, 0, SEEK_SET);
+                if (lseek(kfd, 0, SEEK_SET) < 0)
+                    note_err("rewind");
+                g_skip_below = pending_seq;
                 blen = 0;
                 {
                     struct timespec ts;

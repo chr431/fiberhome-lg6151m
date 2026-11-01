@@ -1,4 +1,8 @@
-/* kmsglog.c v1.1 -- persistent /dev/kmsg mirror (A1 far-infra).
+/* kmsglog.c v1.2 -- persistent /dev/kmsg mirror (A1 far-infra).
+ *
+ * v1.2: rec_seq() parsed the FIRST prefix field as the sequence number, but
+ *   the dev-kmsg ABI is "prio,seq,ts,[flags];text" (measured on device:
+ *   selftest reported "seq 6" = the priority).  Now parses the second field.
  *
  * v1.1: cursor rewind re-implemented -- lseek(fd, seq, SEEK_SET) is EINVAL on
  *   this 5.15 kernel (nonzero offsets are rejected; measured on device
@@ -47,7 +51,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define KMSGLOG_VER "1.1"
+#define KMSGLOG_VER "1.2"
 #define DEV_KMSG    "/dev/kmsg"
 #define PIDFILE     "/tmp/kmsglog.pid"
 #define HBFILE      "/tmp/kmsglog.hb"
@@ -98,14 +102,29 @@ static void hb_write(void)
     close(fd);
 }
 
-/* first decimal field of a kmsg record prefix is its sequence number */
+/* kmsg record prefix is "prio,seq,ts,[flags];text" (dev-kmsg ABI) -- the
+ * SEQUENCE number is the SECOND field; the first is the syslog priority. */
 static unsigned long long rec_seq(const char *rec, ssize_t len)
 {
     unsigned long long seq = 0;
-    ssize_t i;
-    for (i = 0; i < len && rec[i] >= '0' && rec[i] <= '9'; i++)
-        seq = seq * 10 + (unsigned long long)(rec[i] - '0');
-    return (i > 0 && i < len && rec[i] == ',') ? seq : 0;
+    ssize_t i = 0;
+    int field = 0;
+    while (i < len) {
+        if (rec[i] == ',') {
+            field++;
+            if (field == 2) {          /* inside the seq field now */
+                i++;
+                {
+                    ssize_t start = i;
+                    while (i < len && rec[i] >= '0' && rec[i] <= '9')
+                        seq = seq * 10 + (unsigned long long)(rec[i] - '0');
+                    return (i > start && i < len && rec[i] == ',') ? seq : 0;
+                }
+            }
+        }
+        i++;
+    }
+    return 0;
 }
 
 static long data_free_kb(void)

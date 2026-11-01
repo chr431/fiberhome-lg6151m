@@ -680,14 +680,20 @@ def device_pull(evidence_dir, quiet=True):
         a = start
         while a <= n:
             b = min(a + chunk - 1, n)
-            page = ssh("sed -n '%d,%dp' %s 2>/dev/null" % (a, b, remote))
             exp = b - a + 1
+            page = ""
+            for _try in range(3):
+                page = ssh("sed -n '%d,%dp' %s 2>/dev/null" % (a, b, remote))
+                if len(page.splitlines()) >= exp:
+                    break
+                _p("WARN: pull %s page %d-%d short read %d/%d, retry %d"
+                   % (remote, a, b, len(page.splitlines()), exp, _try + 1))
             gotn = len(page.splitlines())
             # 只把"比预期少"当截断。比预期多是**正常**的: 设备日志在 awk 计数
             # 与 sed 读取之间还在追加(实弹: reboots.log 每次拉都多 1 行)。
             if gotn < exp:
-                _p("WARN: pull %s page %d-%d expected %d lines got %d "
-                   "(dropbear 截断？结论可能假 0)" % (remote, a, b, exp, gotn))
+                _p("WARN: pull %s page %d-%d expected %d lines got %d after retries "
+                   "(结论可能假 0)" % (remote, a, b, exp, gotn))
             parts.append(page)
             a = b + 1
         txt = "".join(parts)

@@ -1,6 +1,6 @@
 # 可靠性验收报告 (M4 自持性 + 汇总口径)
 
-> 生成时刻: 2026-11-01 11:39:53 (UTC+8)  生成器: `tools/acceptance/report.py`
+> 生成时刻: 2026-11-01 11:42:39 (UTC+8)  生成器: `tools/acceptance/report.py`
 > 合同: `docs/RELIABILITY_SPEC.md` v1.0  证据: 设备 `/data/gw/logs/*`(可复核) + 本机归档
 > 原则: 每个判定都指向一个设备侧文件与时间窗; 数据缺失记 **unknown**, 不记 0。
 
@@ -8,10 +8,10 @@
 
 | 需求 | 判定 | 一句话依据 |
 |---|---|---|
-| R4.1 守护覆盖审计 | FAIL | 覆盖表 + 61 条注入实测, 见 §2/§6 |
+| R4.1 守护覆盖审计 | FAIL | 覆盖表 + 62 条注入实测, 见 §2/§6 |
 | R4.2 资源不泄漏 | PASS | 每日 checkpoint 趋势 + 轮转上界, 见 §3 |
 | R4.3 30d soak 装置 | PASS | 装置在位并已产生 4 条样本, 见 §4 |
-| R4.4 故障注入 >=30 | FAIL | 有效 60 条: 56 条自愈(93%), 4 条失败, 1 条中止/跳过, 见 §6 |
+| R4.4 故障注入 >=30 | FAIL | 有效 61 条: 57 条自愈(93%), 4 条失败, 1 条中止/跳过, 见 §6 |
 | R4.5 无人干预声明 | PASS | 人工动作清单已列全并逐条处置, 见 §7 |
 
 **本报告不宣称 30 天已跑完**: 30d 不可在一个会话内等待, 交付物是「装置 + 已运行样本 + 外推论证 + 每日自动日报」; 装置在无人值守下继续累积。
@@ -91,6 +91,7 @@
 | `fwmark policy rule` | config | 0s | **PASS** |
 | `mangle WANAGG marks` | config | 9s | **PASS** |
 | `2026-11-01 10:51:35` | clock | 181s | **FAIL** |
+| `br-lan ra0 membership` | link | 12s | **PASS** |
 
 自愈耗时分布: min=0s p50=30s p90=103s max=189s
 
@@ -249,9 +250,9 @@
 装置: `tools/acceptance/inject.py` (PC 驱动, 设备侧单次 exec 内完成 注入→轮询→回滚→落账)。
 每条注入: 必须持设备锁、距 04:00 >=15min、有回滚路径、恢复即验证、结果落 `/data/gw/logs/fault_inject.tsv`。
 
-- 注入条目总数: **61** (要求 >=30 条有效注入)
-- 有效 60 条 / 中止或跳过 1 条(不计入通过率)
-- 判定分布: {'PASS': 56, 'ABORTED_HARNESS': 1, 'FAIL': 4}
+- 注入条目总数: **62** (要求 >=30 条有效注入)
+- 有效 61 条 / 中止或跳过 1 条(不计入通过率)
+- 判定分布: {'PASS': 57, 'ABORTED_HARNESS': 1, 'FAIL': 4}
 - 通过率(仅有效): 93%
 - 自愈耗时: min=0s p50=30s p90=103s max=189s
 
@@ -295,13 +296,12 @@
 
 > 契约: `drills.tsv`(Lead v1.2) 是唯一演练标记文件; 消费方(svc-probe/state-truth/obs-ledger)按窗口打 excluded。
 
-- 窗口行总数: 89 (批级 64 / 逐条 24)
+- 窗口行总数: 90 (批级 65 / 逐条 24)
 - 残留 end_epoch=0 的行: **0** (无残留)
-- 演练总时长: 17175 s
+- 演练总时长: 17189 s
 
 | start | end | kind | target | owner |
 |---|---|---|---|---|
-| 1793470827 | 1793470901 | drill-manual | led_mgr | state-truth |
 | 1793470904 | 1793470942 | drill-manual | LED_NIGHT=1 | state-truth |
 | 1793477575 | 1793478475 | maintenance-reboot | lead-approved-validation | state-truth |
 | 1793497026 | 1793499516 | drill-manual | v3httpd+dnsmasq | state-truth |
@@ -341,6 +341,7 @@
 | 1793504227 | 1793504237 | drill-manual | wan | soak-qa |
 | 1793504312 | 1793504317 | drill-manual | br-lan:ra0 | cfg-heal |
 | 1793504338 | 1793504349 | drill-manual | br-lan:ra0 | cfg-heal |
+| 1793504455 | 1793504469 | drill-manual | wifi | soak-qa |
 
 ## 9. 假状态演练记录(判据类改动的实弹)
 

@@ -56,7 +56,7 @@ try:
 except Exception:
     pass
 
-VERSION = "1.7"
+VERSION = "1.8"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_EVIDENCE = os.path.abspath(os.path.join(
     REPO, "..", "_local", "evidence", "svc_probe"))
@@ -673,13 +673,24 @@ def device_pull(evidence_dir, quiet=True):
         if n <= 0:
             return ""
         start = max(1, n - max_lines + 1)
+        want = n - start + 1
         parts = []
         a = start
         while a <= n:
             b = min(a + chunk - 1, n)
-            parts.append(ssh("sed -n '%d,%dp' %s 2>/dev/null" % (a, b, remote)))
+            page = ssh("sed -n '%d,%dp' %s 2>/dev/null" % (a, b, remote))
+            exp = b - a + 1
+            gotn = len(page.splitlines())
+            if gotn != exp:
+                _p("WARN: pull %s page %d-%d expected %d lines got %d "
+                   "(dropbear 截断？结论可能假 0)" % (remote, a, b, exp, gotn))
+            parts.append(page)
             a = b + 1
-        return "".join(parts)
+        txt = "".join(parts)
+        if len(txt.splitlines()) != want:
+            _p("WARN: pull %s total lines %d != expected %d -- 不要基于这份数据下结论"
+               % (remote, len(txt.splitlines()), want))
+        return txt
 
     got = {}
     for name, remote in files.items():

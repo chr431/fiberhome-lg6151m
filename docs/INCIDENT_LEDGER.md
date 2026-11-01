@@ -166,6 +166,44 @@ stack=/data/gw/logs/cores/meta/*.stack）、/data/gw/logs/pstore/（console-ramo
 
 裁剪同样在 seal 里留 op=prune 行（rm1 恒 0）。
 
+### 9.1 失效模式（2026-11-01 实弹：守卫能被快速填充跑赢）
+
+**现象**：soak-qa 用 dd 以 ~25MB/s 把 /data 从 1470MB 空闲填到 **0 字节（100%）只花
+约 60 秒**。整段满盘期间**守卫一次都没触发** —— 唯一一次 prune 发生在清理**之后 5 秒**，
+只剪了 1 条 SEV3。
+
+**根因**：守卫是 **tick 驱动 + 阈值分档**。它挂在 log_keeper 的 5min 块里，而填满只用
+60s —— tick 完全没落进那个窗口。**阈值分档本身没错，错的是「谁在什么时候去看阈值」**：
+把「检查频率」当成「响应能力」，就等于假设故障一定比 tick 慢。
+
+**同一时刻还有第二处失效**：watchdog 的低盘告警也在 HEALTH 块里，每 10 个周期
+（≈5min）才跑一次 → 对 40–60s 的满盘**0 条告警**。两处判据都属「集合正确、时机错误」。
+
+**修法（incident_ledger v1.4 / log_keeper v2.13 / watchdog v1.52）**：
+
+1. **写前守卫**：append_batch() 在**每次写台账之前**做一次廉价水位检查（1 次 df），
+   低于阈值就**先裁再写** —— 在「写不进去」之前腾空间，不依赖 tick 何时到。
+2. **写后行数校验**：满盘时 cat >> 会**静默失败**（旧代码还有 2>/dev/null 吞掉错误）。
+   现在写完立即比对行数，不增即判 WRITE-FAIL 并**不推进游标** —— 下一轮重试，行不丢。
+3. **事件式检查**：log_keeper **每轮（30s）**查一次 /data 剩余，<300MB 就 fork
+   incident_ledger --disk-guard（廉价模式：只查水位+裁剪，不摄取）。最坏响应
+   5min → **30s**。
+4. **告警前移**：watchdog 的低盘告警挪到 **2s fastpass**，分档 ok/warn/high/critical，
+   **只在跨档时打**（避免每 2s 刷屏）。
+
+**验收（阈值覆盖模拟，只动 /tmp 副本，不碰真数据）**：
+
+    IL_DIR=/tmp/il_dg_reg IL_DATA_KB=90000 sh /data/gw/incident_ledger.sh --disk-guard
+    before rows=2243 SEV1=1458 SEV2=321 SEV3=464
+    after  rows=2155 SEV1=1458 SEV2=307 SEV3=390
+    守卫行: 1793503427  SEV2  tier=3 free_kb=90000 stage=prewrite pruned_sev2=15 pruned_sev3=74 pruned_sev1=0
+    PASS: SEV1 行数 1458 -> 1458 不变（永不自动删除）
+    真台账 2243 行前后一致（回归只动副本）
+
+**仍未做**：**真实 60s 填满的端到端演练**（要 dd 填 /data 到 0，会把设备推到崩溃边缘，
+风险高）。当前只是**阈值覆盖等价验证** —— 它证明了「阈值触发时的裁剪行为正确」，
+但**没有**证明「60s 填满时守卫能在写失败前抢到窗口」。这一条需要专门窗口 + Lead 授权。
+
 ## 10. 运维速查
 
     # 设备侧：留存审计（人读）

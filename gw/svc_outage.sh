@@ -66,7 +66,8 @@ classify() { # $1=probe $2=start $3=end
     _c_now=$(date +%s)
     # ① 演练窗口（Lead v1.2 契约；end=0 视为仍在进行，防止忘记回填把假中断放行）
     if [ -r "$DRILLS" ]; then
-        _c_d=$(awk -v a="$_c_a" -v b="$_c_b" -v now="$_c_now" -v maxopen="${DRILL_MAX_OPEN:-1800}" '
+        # 上界 4h(Lead 2026-11-01 允许长批次窗口; 仍保留上界防忘记回填藏掉后续真中断)
+        _c_d=$(awk -v a="$_c_a" -v b="$_c_b" -v now="$_c_now" -v maxopen="${DRILL_MAX_OPEN:-14400}" '
             /^[#]/ { next }
             NF >= 2 {
                       # 演练作用域: WiFi TX/hostapd 域演练不影响网关服务判据(tcp80/dns),

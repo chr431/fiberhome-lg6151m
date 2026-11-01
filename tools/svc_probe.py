@@ -56,7 +56,7 @@ try:
 except Exception:
     pass
 
-VERSION = "2.2"
+VERSION = "2.3"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_EVIDENCE = os.path.abspath(os.path.join(
     REPO, "..", "_local", "evidence", "svc_probe"))
@@ -512,7 +512,11 @@ def anchor_once(evidence_dir):
 # --------------------------------------------------------------------------
 # derive outages from samples
 # --------------------------------------------------------------------------
-DRILL_MAX_OPEN_S = 1800   # 未回填演练行的最大生效时长（见 attribute()）
+# 未回填演练行的最大生效时长。Lead 2026-11-01 起允许**长批次窗口**（soak-qa 的
+# batchB 一开 20+ 分钟），所以上界从 30min 放宽到 4h；仍然保留上界是因为
+# 「一行忘记回填」不能变成无限期排除（那会把之后的真实中断全藏掉）。
+# 超界按 start+上界关闭，并在报告 drills.stale_open 里告警。
+DRILL_MAX_OPEN_S = 14400
 # 演练作用域：只门控 WiFi TX / hostapd 的演练**不会**影响以太 LAN 路径的客户端观测。
 # 不做这个区分，一条 1 小时、target=warp1 的硬件演练就会把同窗口内真实的 GUI/DNS
 # 中断全部"排除"掉 —— 那不是审计，是把证据藏起来。（实弹：crash-root 的

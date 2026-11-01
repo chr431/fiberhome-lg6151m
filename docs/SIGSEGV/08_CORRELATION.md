@@ -1,5 +1,14 @@
 # R2-A 观察性研究：canary 命中率 vs 各接口流量（2026-11-01）
 
+## 头条结论
+
+> **写入者的必要条件落在「有线端口（eth0/eth1）共用的 EDMA RX 环」上 —— 既不是 eth0 专属路径，也不是 WiFi TX。**
+>
+> 依据：**真静默臂**（我方 8 分钟零 SSH）里 `eth0 RX 仅 1.4 pps`、`rai0 TX 0 pps`，canary 命中仍达 **7.7/min**；
+> 同期唯一在跑的 RX 是 **eth1/br-lan 17.9 pps**。→ 只要有有线 LAN 的 RX，记录写入就持续发生。
+> 反证：D 臂（设备自身 curl，只走 eth0）期间 WiFi TX 掉 3.6× 而命中升 1.53× → **WiFi TX 被排除**。
+> 局限：eth0 RX ×10.2 只带来命中 ×1.53（次线性），故**尚不能**断言"每包固定概率"；决定性对照臂（PC→设备直连，只抬 eth1 RX、零 eth0）见文末。
+
 采样器：`/data/repro/corr_sampler.sh` → `/data/repro/corr.tsv`（10s/行，19 列）
 canary：4× vsurv4（`/data/repro/vsurv4`），09:47 启动，全程未重启
 主机副本：`_local/evidence/crash-root/corr_raw.tsv`（**拉取做行数断言**：device `wc -l` == fetched rows，本次 106==106）
@@ -60,3 +69,23 @@ Lead 提醒 Q2 可能被我方 SSH 污染，故补跑自治采集：设备侧 10
 - `echo edma dump ring_status|recycle_mode|free_count|flow_ctrl|rx_ring_max_dist > /proc/mtkfe/dbg_dma` 可用，输出走 **dmesg**。
 - `ring_status` 的 cidx/didx 是**死值**（RX 恒 511/0、TX 恒 0/0），5 MB/s 下载前后不变 → **不能当进度计数器**（想用它做线性回归的路已堵）。
 - `recycle_mode`：edma-0/1 均 "in rx recycle mode"，两环各 "0 free bufs, 0 recycle bufs"。
+
+## 方法论笔记（本轮踩到的坑，写给后续轮次）
+
+### A. 「大输出截断」是系统性问题，不是个案
+本轮我首次 `cat /proc/mtkfe/dump_dma`（设备侧 5656 行）只拿回 **602 行**就去做形状分析——
+与 svc-probe 的 `tail -n 4000` 拿回 8 行、soak-qa 的 1611 行变 8 行是**同一类缺陷**：
+**单条 SSH 通道的大输出会被静默截断，且工具返回"成功"**。
+**纪律**：任何跨 SSH 的批量拉取，必须先取设备侧 `wc -l`，再分页（≤250 行/页）拉取，并**断言 fetched == wc -l**；
+不等即判失败重取。本轮此后所有拉取（corr.tsv 106==106、corr4.tsv 68==68）都带此断言。
+
+### B. FOE/hw_nat 只能写「无法证实」
+`/proc/hnat/{hnat_entry,hnat_mib,hnat_usage,hnat_type}` **全部返回空**（`cat` 与 `dd` 均空），
+`hnat_entry` 在重载下仍 0 行；但 `/proc/mtkfe/users` 显示 FE 的消费者是 `ethernet` + **`hw_nat dr`**（已注册）。
+→ 正确表述是 **"无法证实 hw_nat offload 在工作"**；**不能**写成"未启用"——proc 全空也可能是驱动没实现导出。
+
+### C. 我本轮的流程失误（如实记录）
+1. **两次无锁写设备**：obs-ledger 持锁期间我发出了 kill/部署命令（kill 静默失败、未生效）；
+   sampler2/3/4 的部署与启停也未持锁。违反 RELIABILITY_SPEC §4.1，后续必须 `device_lock.py hold/run`。
+2. **截断未断言**（见 A）。
+3. 曾把 canary CPU 的 jiffies 误算成"被饿死"，自查后改正（实测 4 canary 占 3.52 核，调度健康）。

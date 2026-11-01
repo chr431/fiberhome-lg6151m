@@ -1,5 +1,10 @@
 #!/bin/sh
-# core_meta.sh v1.10 -- core_pattern metadata wrapper (stability P1-2/P1-5).
+# core_meta.sh v1.12 -- core_pattern metadata wrapper (stability P1-2/P1-5).
+# v1.12 (2026-11-01 R2-D NE 台账数据质量轮): **写入侧列数自检** —— 历史上有 243 行
+#   碎片(argv 内含换行的 awk/sed 脚本直落 TSV) 把 8 列契约打破, 消费方(incident_ledger)
+#   只能靠"非数字开头"猜。本版把契约做成写入侧的硬不变量: 构造行后数一遍列数,
+#   不是 8/9 就把 args 降级为 MALFORMED(nf=N) 再写, 保证任何上游脏变量都写不出坏行。
+#   同时 COMM/EXE/SIG 也过 flat()(换行/制表压平), 不再只依赖 ARGS/PARGS 已清洗。
 # v1.10 (2026-10-31 质量轮): ne_events.tsv 加 4000 行上限(tail+原子 mv, 与
 #   netcfg_repairs.tsv 同款) — 兄弟台账全有界, 唯独 NE 台账无界, 风暴下 /data
 #   无限膨胀且采样器游标扫描成本随之增长。avail_sampler 的行数游标对轮转收缩
@@ -158,10 +163,24 @@ _origin() { # $1=崩溃 pid; 输出 our-tree|vendor-tree|unknown
 # v1.1: unsync marker when the clock is obviously pre-NTP (epoch < 2025-01-01)
 # so boot-window NE rows can be told apart instead of landing in 1970 buckets
 _us=""
-{ [ ! -s /tmp/ntp_synced ] || [ "${_ts:-0}" -lt 1735689600 ]; } 2>/dev/null && _us="	unsync=1"
+{ [ ! -s /tmp/ntp_synced ] || [ "${_ts:-0}" -lt 1735689600 ]; } 2>/dev/null && _us="unsync=1"
 _or=$(_origin "$PID")
 case "$_or" in our-tree|vendor-tree) ;; *) _or=unknown ;; esac
-[ -s "$F" ] && echo "$_ts	$PID	${COMM:-?}	sig=$SIG	exe=${EXE:-?}	args=${ARGS:-?}$_us	origin=$_or	stack=${STACK:-?}" >> "$TSV" 2>/dev/null
+# v1.12: 写入侧列数自检（8 列常规 / 9 列带 unsync=1）。任何字段混入 TAB 或换行都会
+# 把行撑破 —— 历史实弹 243 行碎片就是这么来的。宁可降级 args 也不写坏行。
+flat() { printf '%s' "$1" | tr '\n\r\t' '   '; }
+_c=$(flat "${COMM:-?}"); _s=$(flat "$SIG"); _x=$(flat "${EXE:-?}"); _a=$(flat "${ARGS:-?}"); _k=$(flat "${STACK:-?}")
+if [ -n "$_us" ]; then
+    _line=$(printf '%s\t%s\t%s\tsig=%s\texe=%s\targs=%s\t%s\torigin=%s\tstack=%s' "$_ts" "$PID" "$_c" "$_s" "$_x" "$_a" "$_us" "$_or" "$_k")
+else
+    _line=$(printf '%s\t%s\t%s\tsig=%s\texe=%s\targs=%s\torigin=%s\tstack=%s' "$_ts" "$PID" "$_c" "$_s" "$_x" "$_a" "$_or" "$_k")
+fi
+_nf=$(printf '%s' "$_line" | awk -F'\t' '{print NF}')
+case "$_nf" in
+8|9) ;;
+*)  _line=$(printf '%s\t%s\t%s\tsig=%s\texe=%s\targs=MALFORMED(nf=%s)\torigin=%s\tstack=%s' "$_ts" "$PID" "$_c" "$_s" "$_x" "$_nf" "$_or" "$_k") ;;
+esac
+[ -s "$F" ] && printf '%s\n' "$_line" >> "$TSV" 2>/dev/null
 
 # v1.10: census cap -- keep the newest 4000 rows (atomic tail+mv).  Readers
 # (avail_sampler line cursors) already tolerate rotation shrinkage.

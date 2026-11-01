@@ -1,5 +1,8 @@
 #!/bin/sh
-# retention_audit.sh v1.0 -- 事故台账留存审计（M1 / R1.3 R1.4 R1.5 R1.6）
+# retention_audit.sh v1.1 -- 事故台账留存审计（M1 / R1.3 R1.4 R1.5 R1.6 + R2-D）
+# v1.1 (2026-11-01 R2-D 数据质量轮): 新增 NE_QUALITY(ne_events 形态分布: 6/7/8/9 列
+#   合法格式 vs 1/2 列碎片) 与 AEE_KE(aee db_history 的 KE/NE 计数) 两行 —— 台账
+#   数据源的健康度必须在审计里可见, 不能只藏在 incident_ledger.status 里。
 #
 # 一句话：让「最老一条 SEV1 是 N 天前的、仍在盘上、没被轮转吃掉」变成**一条命令
 #   能反复验证的事实**，而不是承诺。
@@ -294,6 +297,9 @@ run_audit() {
         echo "QUALITY presync_rows=$IL_PRESYNC backfill_rows=$IL_BACKFILL drill_tagged_rows=$IL_DRILLROWS ledger_hb_age_s=$_hb"
         echo "PRESYNC rows=$PS_N bytes=$PS_B counted_in_oldest=no note=写于NTP首同步前(或时钟=固件构建日), ts已按入账时刻计, 原值在src_ts"
         echo "SOURCE_HEALTH malformed_ne=$(sed -n 's/^malformed_ne=//p' "$STATUSF" 2>/dev/null) source_gaps=$(sed -n 's/^gaps=//p' "$STATUSF" 2>/dev/null) lines_read=$(sed -n 's/^lines_read=//p' "$STATUSF" 2>/dev/null) pending=$(sed -n 's/^pending=//p' "$STATUSF" 2>/dev/null) presync_now=$(sed -n 's/^presync=//p' "$STATUSF" 2>/dev/null) data_free_kb=$(sed -n 's/^data_free_kb=//p' "$STATUSF" 2>/dev/null)"
+        # R2-D: NE 台账形态分布（碎片 vs 旧格式 vs 当前格式）+ aee 侧计数
+        echo "NE_QUALITY forms_good=6:$(sed -n 's/^ne_good_nf6=//p' "$STATUSF" 2>/dev/null)/7:$(sed -n 's/^ne_good_nf7=//p' "$STATUSF" 2>/dev/null)/8:$(sed -n 's/^ne_good_nf8=//p' "$STATUSF" 2>/dev/null)/9:$(sed -n 's/^ne_good_nf9=//p' "$STATUSF" 2>/dev/null) forms_bad=1:$(sed -n 's/^ne_bad_nf1=//p' "$STATUSF" 2>/dev/null)/2:$(sed -n 's/^ne_bad_nf2=//p' "$STATUSF" 2>/dev/null)/other:$(sed -n 's/^ne_bad_nf_other=//p' "$STATUSF" 2>/dev/null) bad_rows_total=$(sed -n 's/^malformed_ne=//p' "$STATUSF" 2>/dev/null) note=碎片只计数不入账"
+        echo "AEE_KE aee_ke_rows=$(sed -n 's/^aee_ke=//p' "$STATUSF" 2>/dev/null) aee_ne_rows=$(sed -n 's/^aee_ne=//p' "$STATUSF" 2>/dev/null) note=KE 权威来源; NE 只计数防双计"
         # 演练窗口（Lead v1.2：排除必须可审计，不能是黑箱）
         _dn=0
         if [ -s "$DRILLF" ]; then

@@ -1,5 +1,10 @@
 #!/bin/sh
-# incident_ledger.sh v1.0 -- 统一事故台账（M1 / R1.1–R1.6）
+# incident_ledger.sh v1.1 -- 统一事故台账（M1 / R1.1–R1.6 + R2-D 数据质量）
+#   v1.1 (2026-11-01 R2-D): ① NE 消费改按**字段数形态**分类（碎片/旧格式/当前格式），
+#     碎片只计数不入账且 status 暴露形态分布；② 新增输入源 10 = aee db_history
+#     （KE 权威台账 —— 内核致命错误后设备直接复位，syslog/dmesg 常无文本痕迹，
+#     2026-11-01 02:55 那次非计划重启就是 KE，旧版只记了 reboot_unplanned 没记 KE）；
+#     ③ 新增 --selftest-ne（7 形态断言）。
 #
 # 目的：把散落在十余个文件里的事故证据，收敛成**统一、分级、可证明留存**的
 #   事故台账 /data/gw/logs/incidents.tsv。本脚本只做「归一到行」，不发明判据：
@@ -386,19 +391,37 @@ h_wdlog() {
 #     b) ts 过小 / unsync=1 —— pre-sync 脏时钟
 #   组件归属沿用 AVAILABILITY_DESIGN §2 三规则（args 含守护脚本 → 归属）
 # =====================================================================
+# v1.1 (R2-D 数据质量轮): 按**字段数形态**分类，不再只看"首列是不是数字"。
+#   实测分布(2026-11-01, 1611 行): 1 列 230 / 2 列 13 / 6 列 285 / 7 列 1058 /
+#   8 列 21 / 9 列 4。其中：
+#     1~2 列 = argv 含换行的 awk/sed 脚本被 echo 直落造成的**碎片**(243 行, 历史遗留,
+#              core_meta v1.12 起写入侧列数自检, 不会再产生) -> 只计数, 不进台账
+#     6 列   = core_meta v1.2 之前的旧格式(无 origin/stack)          -> 合法历史行
+#     7 列   = v1.2~v1.6 格式(有 origin, 无 stack)                    -> 合法历史行
+#     8 列   = 当前格式
+#     9 列   = 当前格式 + unsync=1 标记
+#   首列必须是 epoch；不是的一律按碎片计（哪怕它恰好有 6 列）。
 h_ne() {
     while IFS= read -r L; do
         [ -n "$L" ] || continue
-        case "$L" in
-        [0-9]*) ;;
-        *) cnt_add malformed_ne 1; continue ;;
-        esac
-        case "$L" in
-        *"	"*) ;;
-        *) cnt_add malformed_ne 1; continue ;;
-        esac
+        _nf=$(printf '%s' "$L" | awk -F'\t' '{print NF}')
+        _nf=$(num0 "$_nf")
         _ts=$(printf '%s' "$L" | cut -f1)
-        case "$_ts" in ''|*[!0-9]*) cnt_add malformed_ne 1; continue ;; esac
+        case "$_ts" in
+        ''|*[!0-9]*)
+            # 首列不是 epoch -> 绝不是台账行（碎片/半写）
+            cnt_add malformed_ne 1
+            cnt_add bad_ne_nf$_nf 1
+            continue ;;
+        esac
+        case "$_nf" in
+        6|7|8|9) cnt_add good_ne_nf$_nf 1 ;;
+        *)
+            # 首列是 epoch 但列数离谱（缺列/被截断/多列）—— 同样不入账，单独计数
+            cnt_add malformed_ne 1
+            cnt_add bad_ne_nf$_nf 1
+            continue ;;
+        esac
         mkref
         _comm=$(printf '%s' "$L" | cut -f3); [ -n "$_comm" ] || _comm='?'
         _sig=$(printf '%s' "$L" | cut -f4)
@@ -620,6 +643,61 @@ h_svcout() {
         _exc=""
         case "$L" in *excluded=1*) _exc=" excluded=1" ;; esac
         emit svc_outage "$(san_comp "$_path")" "$_dur" "$_ref" "raw=$(san "$L")$_exc" "$_e"
+    done
+}
+
+# =====================================================================
+# 输入源 10: /data/log/aee_exp/db_history（aee 自己的崩溃台账）
+#   行: /data/log/aee_exp/db.fatal.NN.KE, Sat Oct 31 18:55:48 UTC 2026
+#       /data/log/aee_exp/db.NN.NE,       Sun Nov  1 04:58:59 CST 2026
+#   **KE 的权威来源**：内核致命错误后设备直接复位，syslog/dmesg 的持久镜像里
+#   往往一个字都没有（2026-11-01 02:55 实弹：dmesg 里 0 条 panic 文本，只有 aee
+#   的 db.fatal.07.KE 记着 18:55:48 UTC = 02:55:48 CST）。只靠 syslog 文本会漏 KE。
+#   NE 行**只计数不落账**（NE 口径唯一来源仍是 ne_events.tsv，避免双计）。
+# =====================================================================
+AEEH=$IL_AEEH; [ -n "$AEEH" ] || AEEH=/data/log/aee_exp/db_history
+aee_epoch() { # "... , Sat Oct 31 18:55:48 UTC 2026" -> 本地 epoch
+    _d=$(printf '%s' "$1" | sed -n 's/^[^,]*,[ ]*//p')
+    [ -n "$_d" ] || return 1
+    _d=$(printf '%s' "$_d" | tr -s '  ' ' ')
+    _mon=$(printf '%s' "$_d" | cut -d' ' -f2)
+    _day=$(printf '%s' "$_d" | cut -d' ' -f3)
+    _hms=$(printf '%s' "$_d" | cut -d' ' -f4)
+    _tz=$(printf '%s' "$_d" | cut -d' ' -f5)
+    _yr=$(printf '%s' "$_d" | cut -d' ' -f6)
+    case "$_mon" in
+    Jan) _m=01 ;; Feb) _m=02 ;; Mar) _m=03 ;; Apr) _m=04 ;;
+    May) _m=05 ;; Jun) _m=06 ;; Jul) _m=07 ;; Aug) _m=08 ;;
+    Sep) _m=09 ;; Oct) _m=10 ;; Nov) _m=11 ;; Dec) _m=12 ;;
+    *) return 1 ;;
+    esac
+    case "$_day" in ''|*[!0-9]*) return 1 ;; esac
+    _dl=$(printf '%s' "$_day" | wc -c)
+    [ "$_dl" -eq 1 ] && _day=0$_day
+    case "$_hms" in ''|*[!0-9:]*) return 1 ;; esac
+    _e=$(date -d "$_yr-$_m-$_day $_hms" +%s 2>/dev/null) || return 1
+    case "$_e" in ''|*[!0-9]*) return 1 ;; esac
+    case "$_tz" in
+    UTC|GMT) _e=$(( _e + 28800 )) ;;   # 设备本地 = CST(UTC+8)
+    esac
+    echo "$_e"
+}
+h_aee() {
+    while IFS= read -r L; do
+        [ -n "$L" ] || continue
+        case "$L" in
+        *.KE,*) _kind=KE ;;
+        *.NE,*) _kind=NE ;;
+        *) continue ;;
+        esac
+        mkref
+        _e=$(aee_epoch "$L") || _e=$NOW
+        if [ "$_kind" = KE ]; then
+            cnt_add aee_ke 1
+            emit ke_panic - - "$_ref" "aee=$L source=aee_db_history" "$_e"
+        else
+            cnt_add aee_ne 1
+        fi
     done
 }
 
@@ -972,6 +1050,15 @@ write_status() {
         echo "lines_read=$(cnt_get lines_read)"
         echo "gaps=$(cnt_get gaps)"
         echo "malformed_ne=$(cnt_get malformed_ne)"
+        echo "ne_good_nf6=$(cnt_get good_ne_nf6)"
+        echo "ne_good_nf7=$(cnt_get good_ne_nf7)"
+        echo "ne_good_nf8=$(cnt_get good_ne_nf8)"
+        echo "ne_good_nf9=$(cnt_get good_ne_nf9)"
+        echo "ne_bad_nf1=$(cnt_get bad_ne_nf1)"
+        echo "ne_bad_nf2=$(cnt_get bad_ne_nf2)"
+        echo "ne_bad_nf_other=$(cnt_get bad_ne_nf3)"
+        echo "aee_ke=$(cnt_get aee_ke)"
+        echo "aee_ne=$(cnt_get aee_ne)"
         echo "pending=$IL_PENDING"
         echo "open_episodes=$_open"
         echo "data_free_kb=$IL_FREE"
@@ -1026,7 +1113,42 @@ selftest() {
     t SEV3 unknowncat x - "whatever"
     echo "incident_ledger selftest cases=$_n failures=$_bad"
     [ "$_bad" -eq 0 ] || return 1
+    selftest_ne || return 1
     return 0
+}
+
+# NE 台账形态单测（R2-D）：构造 1/2/6/7/8/9 列 + 首列非数字，断言
+#   ① 碎片只计数不入账 ② 旧格式(6/7 列)照常入账 ③ 当前格式(8/9 列)入账 ④ 正常行不受影响
+selftest_ne() {
+    _d=/tmp/il_ne_selftest.$$
+    rm -rf "$_d"; mkdir -p "$_d"
+    {
+        printf '%s\n' '        index($0, last) == 1 && length($0) == length(last) { n = 0 }'
+        printf '%s\n' '    } 	origin=our-tree'
+        printf '1792455416	20198	busybox	sig=11	exe=/x	args=busybox sh\n'
+        printf '1792455500	20199	ip	sig=11	exe=/y	args=ip addr	origin=our-tree\n'
+        printf '1792455600	20200	awk	sig=11	exe=/z	args=awk	origin=our-tree	stack=/s\n'
+        printf '1792455700	20201	sh	sig=11	exe=/w	args=sh	unsync=1	origin=our-tree	stack=/s\n'
+        printf 'notanumber	fake	sig=11	exe=x	args=y	origin=z\n'
+    } > "$_d/ne_events.tsv"
+    IL_DIR=$_d IL_NOW=1793464339 IL_DATA_KB=999999999 IL_BACKFILL_N=50 IL_BACKFILL_N_NE=50 sh "$0" >/dev/null 2>&1
+    _rows=$(grep -c '	ne	' "$_d/incidents.tsv" 2>/dev/null); _rows=$(num0 "$_rows")
+    _bad=$(sed -n 's/^malformed_ne=//p' "$_d/incident_ledger.status" 2>/dev/null); _bad=$(num0 "$_bad")
+    _g6=$(sed -n 's/^ne_good_nf6=//p' "$_d/incident_ledger.status" 2>/dev/null); _g6=$(num0 "$_g6")
+    _g7=$(sed -n 's/^ne_good_nf7=//p' "$_d/incident_ledger.status" 2>/dev/null); _g7=$(num0 "$_g7")
+    _g8=$(sed -n 's/^ne_good_nf8=//p' "$_d/incident_ledger.status" 2>/dev/null); _g8=$(num0 "$_g8")
+    _g9=$(sed -n 's/^ne_good_nf9=//p' "$_d/incident_ledger.status" 2>/dev/null); _g9=$(num0 "$_g9")
+    _fail=0
+    [ "$_rows" = 4 ] || { echo "FAIL ne_forms: 入账行数=$_rows 应为 4(6/7/8/9 列各一)"; _fail=1; }
+    [ "$_bad" = 3 ] || { echo "FAIL ne_forms: malformed_ne=$_bad 应为 3(1列碎片+2列碎片+首列非数字)"; _fail=1; }
+    [ "$_g6" = 1 ] && [ "$_g7" = 1 ] && [ "$_g8" = 1 ] && [ "$_g9" = 1 ] || {
+        echo "FAIL ne_forms: 形态计数 g6=$_g6 g7=$_g7 g8=$_g8 g9=$_g9 应各为 1"; _fail=1; }
+    rm -rf "$_d"
+    if [ "$_fail" = 0 ]; then
+        echo "incident_ledger selftest_ne: 7 形态(PASS) 入账=4 碎片计数=3 形态计数=1/1/1/1"
+        return 0
+    fi
+    return 1
 }
 
 # =====================================================================
@@ -1121,6 +1243,7 @@ if [ "$PRESYNC" = 1 ]; then
     ingest trans   "$DIR/avail_transitions.tsv" -                            h_trans
     ingest svcout  "$DIR/svc_outages.tsv"       -                            h_svcout
     ingest syslog  "$DIR/syslog.log"            "$DIR/syslog.log.1"          h_syslog
+    ingest aee     "$AEEH"                      -                            h_aee
     if [ -s "$BATCH" ]; then
         cat "$BATCH" >> "$PENDF" 2>/dev/null
         _pn=$(wc -l < "$BATCH" | tr -d ' ')
@@ -1145,6 +1268,7 @@ ingest edges   "$DIR/avail_edges.tsv"       -                            h_edges
 ingest trans   "$DIR/avail_transitions.tsv" -                            h_trans
 ingest svcout  "$DIR/svc_outages.tsv"       -                            h_svcout
 ingest syslog  "$DIR/syslog.log"            "$DIR/syslog.log.1"          h_syslog
+ingest aee     "$AEEH"                      -                            h_aee
 
 append_batch
 [ "$IL_APPENDED" -gt 0 ] && seal_write append tick

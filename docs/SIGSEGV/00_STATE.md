@@ -8,9 +8,17 @@
 **记录真实、来自进程外部、不是受害者自己生成的；它精确落在 fault-time va_list，目标随进程栈布局（top-x2 恒 0x390），固定 VA 与固定 PA 都已排除。**
 当前主问题：**VA-resolved 的写入是 uaccess 还是 GUP-DMA；写入者是否在 AP 可达范围。**
 
-**2026-10-31 更新**：vsurv4 H4v1 普查 **88/112** 份 canary dump 含记录（78.6%，Wilson 95% CI **70.1–85.2%**）；`top-x2=0x390` 在 **111/112** 恒定；记录有三副本（`x2` 82、`x2-0x240` 66、`x2-0x130` 18）。canary 作为记录探测器已被验证（C-137/C-139）；自然 NE 份额 **0/4**（3 自然 core + 1 自然 .stack），Wilson 95% 上界 **49.0%**（C-142）；不能用 canary 外推（C-140）。
+**2026-11-01 更新（skeptic 审计修订）**：vsurv4 H4v1 普查 **82/112** 份 canary dump 含规范记录（73.2%，Wilson 95% CI **64.3–80.5%**；原 88/112 作废，C-161）；`top-x2=0x390` 在 **111/112** 恒定；记录有**两副本**（`x2` 82、`x2-0x240` 66，后者只出现在 x2 也命中的样本里），`x2-0x130` 的 18 份是 **ASCII 十进制数字伪影**（strict 判据 0/112）；32B stride 的全页扫描**结构性**找不到记录（dump 偏移恒 ≡16 mod 32，实测 0/112，C-162）。canary 作为记录探测器已被验证（C-137/C-139）；自然 NE 份额 **0/4**（3 自然 core + 1 自然 .stack），Wilson 95% 上界 **49.0%**（C-142）；不能用 canary 外推（C-140）。
 
-**判决（C-145）**：**Transport = PA/DMA（E2）**；记录 = WED TXD；页级 kprobe 判决被 `CONFIG_KPROBES=n` 阻断（C-144），故停在 E2。详见 [VERDICT.md](VERDICT.md)。
+**判决（2026-11-01 13:00 重写，取代 C-145）**：**旧「Transport = PA/DMA（E2）+ 记录 = WED TXD」已作废**（C-138/C-145 → X）。
+当前口径（详见 [VERDICT.md](VERDICT.md) v2 与 [11_TRANSPORT_SCORECARD.md](11_TRANSPORT_SCORECARD.md)）：
+- **写目标 = 活栈帧内的 va_list**（**E3**，scanary 5 档深度臂：命中点随人为帧深 D 精确平移、残差 0/0/0/0/0，每档 n≥191，诱饵区 0，C-171）；
+- **记录 = 两个 16B 槽 `{u64 值; u64 0}`**，归一化后唯一载荷 `{A, 0, {len, addr}, 0}`（A 型/B 型只是 va_arg 自增 +8 落在不同槽，C-162/formlen）；
+- **已证伪**：EDMA RX 描述符、WED TXD、固定 PA+固定页内偏移、固定栈顶相对偏移、信号帧、put_cmsg、pipe_to_user/sk_msg（§3 X-1..X-10）；
+- **未排除**：H2 uaccess / H5 每次按当前 VA 重新 pin / H6 pt_regs->sp 派生 / H7 按进程缓存的地址；
+- **写入是普遍的**：健康进程栈 2/12 文件含记录（strict，C-173），自然长驻 daemon 栈上有**稳定槽**（dnsmasq start_stack−0x1b40、nerepair −0x3b0）；
+  ⇒ **崩溃数只是写入数的下界**，不能当记录率；
+- **写入者身份仍未点名**；判决实验 D15（pte_redirect 打在 daemon 稳定槽上）是"VA 解析 vs 裸 PA 写"的一刀切。
 
 **修复（C-146..C-149）**：`nerepair` 已部署（`/data/gw/bin/nerepair` + `rc.extend v3.3` 开机自启）；修复记录家族 SIGSEGV（`Xt=sp, pc+=4`，抑制信号），覆盖所有用户进程（PID 1 + fork 跟随），排除 vsurv4 canary；**不停止 DMA 写入**（根修复需厂商驱动 R1 或 SMMU R2）。详见 [FIX.md](FIX.md)。
 
@@ -31,11 +39,11 @@
 | C-052 | 固定 VA 与固定 PA 都排除；目标是 stack-top-relative、VA-resolved | top-x2=0x390；x2 页内偏移 0x570 vs 0xf30 |
 | C-053 | sh.core 是 canary2.sh 装置 shell，不是自然进程；记录有两个零字、含公网 IP | NT_PRPSINFO pr_fname=canary2.sh |
 | C-055 | 空模型 0/19232；handler 伪影排除；106 份是 43 pids/one boot/40.6 min | C-002/003/004/028 降 E2 |
-| C-137 | H4v1 shape 扫描：88/112 h4 含记录（A0B2/B0A2 在 x2/x2-0x240/x2-0x130）；旧 0/17 是字面字节扫描 bug | 88/112；95% CI 70.1–85.2% |
-| C-139 | vsurv4 canary 是有效记录探测器；自然 NE 0/3 不是探测器伪影 | 88/112 vs 0/3 |
-| C-140 | canary 记录落在自身栈、固定 top-relative 偏移；PA/DMA+页复用比 VA-targeted 更能解释（外部写入者拿不到 va_list VA）；transport 倾向 PA/DMA | 88/112；top-x2 0x390×111；w2=len\|ip |
+| C-137 | H4v1 **strict** shape 扫描：**82/112** 含记录（两副本 82/66 + 一条 ASCII 伪影 18→0）；旧 88/112 与“三副本”作废（C-161） | 82/112；CI 64.3–80.5%；strict 0/458752 误报（C-163） |
+| C-139 | vsurv4 canary 是有效记录探测器；自然 NE 0/3 不是探测器伪影 | 82/112 vs 0/3（P(0/3｜p=0.732)=1.9%） |
+| C-140 | 【skeptic 2026-11-01 降级 E1】原论证方向反了：固定 PA 预测**页内偏移固定**，实测 53 种页内偏移；PA/DMA 表述与几何数据冲突（C-170）。VA-targeted 未被排除 | 82/112；top-x2 0x390×2552/2552；53 种页内偏移 |
 | C-141 | core_meta v1.9 .stack/.stackerr 在真实死亡进程上验证通过 | .stack 65592 B；readable=16 |
-| C-142 | 自然 NE 记录份额 0/4；Wilson 95% 上界 49.0%；自然 .stack 的 3 个 shape 都是巧合 | 0/4；≤49% |
+| C-142 | **改判 2026-11-01**：自然 NE `.stack` **4/4** 含同族 32B 记录（q2=0x04D08ADE0000062F，len 1583，ip 222.138.208.4），位置 start_stack−0x1390…−0x7970 **不同深度**；旧 0/4（上界 49%）作废——判据 bug + 两批窗口不同不可混 | **4/4；Wilson 95% 下界 51%**（n=4，栈尾 16 页窗口，不可外推） |
 
 ## 3. 已撤回 / 不可再引用（X）
 
@@ -59,14 +67,15 @@
 | C-035 | cth_cfu 正对照 Oops/重启 | 一次未复现；3 个候选机制 | 修 cth（递归守卫、去 dump_stack、默认关 c2u）后再跑 |
 | C-044..C-048 | ip 是页级写入的受害者；HIF-TXD/FOE 形状候选 | ip 全 .text 无写 filter.pfx；mtk_wed 32B 描述符 +0x10/+0x14；hw_nat FOE IP +0x10/+0x14 | **mtk_warp**（738KB，未扫）是真正 ring/DMA；mt_wifi fh_netlink_send_to_user |
 
-## 5. 当前方向（按优先级）
+## 5. 当前方向（按优先级，2026-11-01 skeptic 修订）
 
-1. **P-A：mtk_warp 静态（最高价值）**。warp_wlan_tx / warp_dma_handler / warp_page_hash_get / warp_ring_init；查 skb_shinfo()->frags / skb_zcopy / dma_map_page 的入参；HIF-TXD 32B 描述符；mt_wed 薄壳；mt_wifi fh_netlink_send_to_user。
-2. **P-1：vsurv5 暂存槽实验（B-1）**。手写 va_copy 到人为偏移；A0B2 是否跟着暂存槽走；B0A2 是否仍钉在 musl ap2。
-3. **B-5：ref/use-after-unpin**。ref=1025 已杀泄漏 pin；若 mtk_warp 的 dma_unmap 早于 DMA/页复用，则是 use-after-unpin。
-4. **B-4：三哨兵重写**。PF 按 fault PC 分类 + 迭代速率 INVALID；不要“只读 S1 + 60s”。
-5. **自然 NE 普查**。3 份自然 core 0/3 record；先分层、先算 design effect；不要用 canary 外推。
-6. **明确降级**：在 1–3 完成前，不再做“找那一个写入者”的新仪器/新模块。
+1. **D10 语义实验（最高性价比）**：已知包长（242 B vs 1242 B）、已知源 IP（192.168.9.222/223）的单流；判 len 是否跟随包长、ip 是本机还是对端 → 直接判 H4 死/活并给 len 定性（见 05_LOG/2026-11-01-06-transport-scorecard.md §5/§8）。
+2. **D9 布局扰动**：canary 改栈布局（b[24]/msg[160]/调用深度，或把缓冲区移到 heap）；判记录跟 va_list 还是跟缓冲区 → H2 特征（scorecard §3）。
+3. **D5 环池成员（带正对照）**：命中页 PA 是否出现在 RX 环缓冲池 → H1 直接点名/排除（scorecard §2）。
+4. **D6 迁移跟随**（madvise 换 PA）：VA-targeted vs PA-targeted 的终局判决（scorecard §2/§4）。
+5. **D8 PTE 重定向三哨兵**（F-07 判据）：H2 vs H1/H3（scorecard §3）。
+6. **D1/D2**（同会话 A/B/A；同包率 UDP vs SSH）：写入者路径归因，与 transport 正交但决定 R1（audit §5.4）。
+7. **明确降级**：1–5 有结果前，不再加新仪器/新模块；不再用无正对照的阴性做排除（C-169）。
 
 ## 6. 停止规则
 
@@ -83,6 +92,7 @@
 | 文件 | 状态 |
 |---|---|
 | docs/SIGSEGV/ 本目录 | 新建，当前事实源 |
+| **docs/SIGSEGV/11_TRANSPORT_SCORECARD.md** | **新建（2026-11-01）**：transport 假设记分卡（H1a/H1b=H5/H2/H3/H4 + 判读边界 + 判决实验排期）。**对外表述以此页为准** |
 | tools/oneoff/sigsegv/va_scan.py | 106 份 71/32/3；legacy 71/35 |
 | tools/oneoff/sigsegv/core_scan.py | 6 份 an2 5 A0B2 + 1 B0A2 |
 | tools/oneoff/sigsegv/natural_scan.py | h4/sd 解析 |
@@ -109,7 +119,7 @@
 
 ## 9. 测量偏差（2026-10-31，vaguard / nerepair）
 
-- **vaguard**（自建 busybox/ip/logc/mipc_cellular/v3httpd 的 vfprintf 闸门）在自然进程里**修复**记录家族：vaguard.tsv **49 次**（44 ip、4 awk、1 ping），这些**不进** ne_events/cores → 自然 NE 普查 **0/4 是 post-guard 下界**（C-152），不能当作无偏的自然份额。
+- **vaguard**（自建 busybox/ip/logc/mipc_cellular/v3httpd 的 vfprintf 闸门）在自然进程里**修复**记录家族：vaguard.tsv **49 次**（44 ip、4 awk、1 ping），这些**不进** ne_events/cores → 当时的自然 NE 普查 0/4 是 post-guard 下界（C-152）。**2026-11-01 更新**：新一批自然 NE `.stack` **4/4 含同族记录**（C-142 改判），说明记录家族在自然进程里**不是罕见事件**；但 n=4、窗口只到栈尾 16 页，仍不可外推。
 - **vsurv4 canary 不链 vaguard**（build_usr.sh 无 vaguard.o）→ **h4 88/112 不受影响**（C-137/C-139 仍成立）。
 - **ip 的 .bss filter 填充**不是 printf 类 → **40/40 结论不受影响**；但 ip 的总崩溃数被闸门压低（44 次 printf 命中被修），ip 的自然 NE 计数偏低。
 - **nerepair** 现已对全部进程修复同一家族（vsurv4 除外）→ **修复后自然 NE 不再可比**；干净的自然份额窗口需**停闸门 + 停 nerepair**（canary 仍记录 h4）。
@@ -135,7 +145,7 @@
 
 **副产物（测量学）**：canary 命中率 **1.3–1.5 次/千个 WED TX 包、20–35 次/min**（4 实例），
 B 臂 8 min 即 246 命中（P(0)=e^-246）→ **后续机制 A/B 只需 5–10 min/臂**；
-自然 NE 仍必须 ≥6 h（canary 暴露率≈100% vs 自然进程≈0，不可互推）。
+自然 NE 仍必须 ≥6 h（**注意：2026-11-01 起"自然进程≈0"已被推翻**——4/4 自然 NE `.stack` 含同族记录（C-142 改判）；速率仍不可互推，但"家族是否存在于自然进程"这一问已答"是"）。
 
 **证据**：`_local/evidence/crash-root/hwtx_*.jsonl`（主机侧）；设备 `/data/repro/h4_*.bin`（334→1243）；
 `docs/SIGSEGV/07_LEVER.md` §6；`tools/oneoff/sigsegv/hwtx_gate.sh`（门控脚本，status/off/on/verify）。
@@ -193,13 +203,13 @@ B 臂 8 min 即 246 命中（P(0)=e^-246）→ **后续机制 A/B 只需 5–10 
 提供 `/proc/patrace`：`echo "<pid> <hexva>" > /proc/patrace` → 读回 `pa=0x...` + 该页前 16 B。
 验收：用户态 mmap 写入 magic `PATRACE_MAGIC16` → VA 0x7fb6774000 → **PA 0xb4703000**，peek 与 magic 完全一致。
 
-**C-160（本轮核心结论，E3）**：**canary 的命中页是固定物理页，被反复写入。**
+**C-160（已撤回，2026-11-01 skeptic）**：原写“canary 的命中页是固定物理页，被反复写入 → 存在指向该 PA 的固定引用”。**该推断不成立**：h4_meta 2552 行里 75 个 pid、**0 个 pid 有 >1 个 x2**（distinct x2 仅 62），pa_hist 对同一 pid 反复解析的是**同一个 VA**，PA 必然相同（重言式，C-164）。下表只保留观测，不再作推断；重建需 D7 正对照（同 VA 跨时刻 PA 可变性）。
 | pid | VA | PA | 命中次数 | PA 是否变化 |
 |---|---|---|---|---|
-| 18023 | 0x7fe2b69850 | **0xb2ca1850** | 20 | **不变** |
-| 18022 | 0x7fd46233a0 | **0xb46433a0** | 20 | **不变** |
+| 18023 | 0x7fe2b69850 | **0xb2ca1850** | **18** | **不变** |
+| 18022 | 0x7fd46233a0 | **0xb46433a0** | **22** | **不变** |
 
-→ **存在指向该 PA 的固定引用（stale 指针/坏条目），不是"页被回收后随机复用"的窗口竞争。**
+→ **该推断撤回（C-164）**：同一 pid 的 x2 恒定，PA 恒定是重复解析同一 VA 的必然结果，与"固定引用"无关。
 
 **后续搜索（未收敛）**：
 - 环 dump 里没有该 PA（注意 dump 只显示 DD=0 的武装态条目）；
@@ -215,7 +225,7 @@ B 臂 8 min 即 246 命中（P(0)=e^-246）→ **后续机制 A/B 只需 5–10 
 
 ### 阳性
 - **patrace.ko 可用**（VA→PA，验收通过，见 §13）。
-- **C-160：canary 命中页是固定 PA**（20/20 次同一 PA，两个 canary 各自不同 PA）→ **存在指向该 PA 的固定引用**。
+- **C-160：canary 命中页是固定 PA**（原件 22/18 行，同一 pid 的 VA 与 PA 全同；两个 canary 各自不同 PA）→ **存在指向该 PA 的固定引用**。
 
 ### 三条阴性（都做了对照，不是"没找到"就算阴性）
 1. **按 PA/VA 搜常驻内存 = 噪声**：全 RAM（523,008 页）扫目标值得 1–2 处，
@@ -228,7 +238,7 @@ B 臂 8 min 即 246 命中（P(0)=e^-246）→ **后续机制 A/B 只需 5–10 
    → 要么扫错了环（eth1 流量可能走 ring1/edma-1），要么 DD 位语义与假设不符，要么消费太快（20k pps 下描述符寿命 ~50µs < 330µs 采样间隔）。
 
 ### 结论
-本轮把问题从"不知道在哪"推进到 **"有线 EDMA RX + 命中页固定 PA 引用"**，
+本轮把问题推进到 **"命中与 eth1(LAN) RX 强相关（单窗 ×71）+ 记录落点 VA 相对（top−x2=0x390、页内偏移 53 种）"**；**"写入者在有线 EDMA RX 路径"只有 E1**（同一生成器 1 h 后复跑无效应；"每 RX 包一次机会"速率律被 09 结果 6 证伪，C-166）；**"固定 PA 引用"撤回**（C-164），
 但**写入者的具体身份仍未点名**。三条用户态路径 + 两条内核态路径（内存搜索、环采样）均未收敛。
 继续需要：换环（ring1/edma-1）重试 rxring、或直接读 FE 寄存器（0x15100000）搜 ring base。
 
@@ -247,9 +257,20 @@ B 臂 8 min 即 246 命中（P(0)=e^-246）→ **后续机制 A/B 只需 5–10 
 **不再加仪器**。SIGSEGV 本轮到此为止。
 
 ### 本轮净收益（最终）
-1. **写入者路径**：有线端口共用 EDMA RX（LAN-only 臂 ×71，eth0 RX 反降、rai0 TX=0）；
-2. **C-160**：命中页是**固定 PA**，20/20 次不变 → 存在指向该 PA 的固定引用；
+1. **写入者路径（E1，未定）**：LAN-only 臂单窗 ×71（eth0 RX 反降、rai0 TX=0、WED IRQ/s 恒定 48）；但**同一生成器 1 h 后复跑无效应** → 归因未定；判别实验 D1/D2/D6（见 05_LOG/2026-11-01-06-transport-scorecard.md §8）；
+2. **C-160 撤回**：固定 PA 只是“同一 VA 反复解析”的必然结果（C-164）；需 D7 正对照后重建；
 3. **可复用工具**：`patrace.ko`（VA→PA，已验收）+ `pascan`（/dev/mem 按值搜，带对照）+ `rxring.ko`（内核态环采样，已能工作但未捕到 DD=1）；
 4. **测量边界**：canary 命中率跨会话不可比（见 10_MEASUREMENT_PROTOCOL.md）。
 
 **继续投入需要新手段**（硬件调试器 / 厂商源码 / 关 `no_hash_pointers` 的内核重编），不是再跑更多实验。
+
+---
+
+## 15. 口径与选择效应（2026-11-01，skeptic 审计 C-168/C-170）
+
+1. **所有 canary 记录结论的分母是“已崩溃的进程”**：“记录在 x2”“A 值 40k–150k”都是崩溃选择后的分布，**不能**反推写入者的字段语义或落点分布；w1/w3 与 w2 不在崩溃路径上，不受此污染。
+2. **几何证据指向 VA 相对写入**：固定 PA 预测页内偏移固定，实测 53 种页内偏移而 top−x2 恒定；固定-PA 模型要解释 82/112 需要约 0.73×空闲页（设空闲 13 万页时 ≈9.5 万页≈380 MB）的已释放缓冲仍被环武装，量级不成立 → “PA/DMA”这个表述与最强几何数据冲突，判决实验 D6。
+3. **transport 现状（2026-11-01 深度臂后）**：**写目标 = 活栈帧内的 va_list（帧相对）→ E3**（scanary 900 s 五档，残差 0，每档 n≥191；C-171）。由此 **H1a（固定 PA）、H1b（陈旧 PA DMA）、H3（直映射写）、H5（GUP-pin + 固定 VA）全部被否证（E3）**；H4（HW 描述符写回）此前已按字段语义证伪（E2）。**写入者身份仍未点名**，收敛到 **H2（uaccess）** 与 **H6（内核用 pt_regs->sp 定位用户栈，D9 逼出的新假设）**。详见 **11_TRANSPORT_SCORECARD.md**（对外以此页为准）。
+   **未达 E3 的一步**：「写入者是外部（非 victim 自写）」仍需 32B 原始载荷 + 自然 NE 同载荷一致性；「ep0 与 ep4 PA 不同页」这条论证依赖"五个 epoch 同一 victim 进程"，待确认。
+   **限定**：以上样本以 vsurv4 canary 为主；但自然 NE 也含同族记录——**4/4 份自然 NE `.stack` 含同族 32B 记录**（C-142 改判；旧 0/4 系判据 bug），位置随各自栈深度不同。n=4、只覆盖栈尾 16 页 ⇒ 只能写 **≥51%（Wilson 下界）**，不可外推。
+4. **三条无正对照的阴性**（rxring dd_total=0 / dd_burst dd_set=0 / pascan 内核映像 0 命中）只能 E0/E1（C-169）。

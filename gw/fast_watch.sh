@@ -709,8 +709,11 @@ run_loop() {
         TICK=$(( TICK + 1 ))
         now_cs; _rl_t0=$CS
         if [ $(( TICK % 10 )) -eq 1 ]; then now_ep; fi
-        STEP=sample; sample_all; fast_lane
-        STEP=flags; flags_upd
+        # ⚠ v2.6 回滚(lead 10:03): fast_lane **停用**。实弹证据: kick 只能叫醒 watchdog,
+        #   而 watchdog 对 v3httpd/dnsmasq/hostapd 走的是**定制块 + strike 2-of-3**(不是档A), 所以 kick 不能加速重启;
+        #   更糟: kick 让 watchdog 多跑几轮, 而每轮的检查在“进程在但不应答”窗口会记 PASS -> strike_clear 把 2-of-3 计数清零,
+        #   反而把 90s 拉长到 6min(09:55-10:01 真实 DNS 中断)。重新上线前必须先证明不干扰计数。
+        STEP=sample; sample_all        STEP=flags; flags_upd
         STEP=levels; compute_levels
         STEP=led; compute_led
         if [ "$DIRTY" = 1 ]; then STEP=publish; publish; DIRTY=0; fi

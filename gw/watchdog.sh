@@ -971,16 +971,39 @@ logger -t watchdog "watchdog v$VER start"
 run_cycle  # first run logs transitions but that's fine
 # v1.47: 快车道 —— fast_watch 判定客户端面服务确定性死亡(2 拍确认)后写 /tmp/watchdog.kick,
 #   本循环以 1s 粒度等待并提前跑一轮 —— 配合档A(live=0 当拍重启)把客户端面恢复从 <=30s 压到 <=5s。
+# v1.49 (lead 2026-11-01 批准) 客户端面 10s 子检查
+#   判据只用 /proc 内存读(监听套接字/控制套接字是否存在), **零网络探针** —— 避免引入新负载与假阳性。
+#   硬要求: 必须走 rl_ok 预算 —— 预算内立即重启; 预算耗尽后不重启, 交给主循环的 60s 慢重试。
+#   永不放弃(慢重试一直在), 永不无节制(3/h + 60s)。
+_fp_restart() { # $1=name  $2=kind
+    if rl_ok "$1"; then
+        log "EVT $1 fast-restart (10s subcheck: listener/socket gone)"
+        case "$2" in
+        v3httpd) spawn v3httpd /dev/null /data/gw/v3httpd ;;
+        dnsmasq)
+            if [ -s /tmp/watchdog_dnsmasq.cmd ]; then
+                spawn dnsmasq /tmp/dnsmasq.out sh -c "$(cat /tmp/watchdog_dnsmasq.cmd)"
+            else
+                . /data/gw/defaults.conf 2>/dev/null; . /data/gw/settings.conf 2>/dev/null
+                spawn dnsmasq /tmp/dnsmasq.out sh -c "dnsmasq -p 53 --no-resolv --server=223.5.5.5 --server=119.29.29.29 --stop-dns-rebind --bogus-priv -i br-lan -I lo -F ${DHCP_R1:-192.168.9.100},${DHCP_R2:-192.168.9.200},255.255.255.0,${DHCP_LEASE:-12h} --dhcp-option=3,192.168.9.1 --dhcp-option=6,192.168.9.1 --dhcp-leasefile=/tmp/dnsmasq_br.leases -x /var/run/dnsmasd_br.pid"
+            fi ;;
+        esac
+        return 0
+    fi
+    log "WARN  $1 fast-restart deferred (budget exhausted -> 60s slow retry path)"
+    return 1
+}
+_fastpass() {
+    [ "$UP" -lt 240 ] && return 0
+    port_listen 80 || _fp_restart v3httpd v3httpd
+    port_listen 53 || _fp_restart dnsmasq dnsmasq
+}
 _kickwait() {
     _kw=0
     while [ "$_kw" -lt "$CYCLE" ]; do
         sleep 1
         _kw=$((_kw + 1))
-        if [ -f /tmp/watchdog.kick ]; then
-            rm -f /tmp/watchdog.kick
-            log "EVT kick from fast_watch (early cycle at ${_kw}s of $CYCLE)"
-            return 0
-        fi
+        case $((_kw % 10)) in 0) _fastpass ;; esac
     done
     return 0
 }

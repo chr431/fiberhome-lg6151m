@@ -31,11 +31,16 @@ CMD = ("awk -F'\\t' '{print NR\"\\t\"NF\"\\t\"$0}' %s" % NE)
 
 
 def fetch():
+    """分页拉取 + 行数断言。
+
+    单次大输出会被 dropbear 通道静默截断(2026-11-01 svc-probe 实弹: 1611 行只回 8 行,
+    工具还报成功)。所以必须分页拉 + 断言 "拉回来的行数 == 设备 wc -l"。
+    """
     from sshx import Dev
     with Dev() as d:
-        _, ne = d.run("cat %s 2>/dev/null" % NE, timeout=120)
+        ne, want = d.pull_lines(NE, page=400)
         _, inc = d.run("awk -F'\\t' '$3==\"ne\"{c++} END{print c+0}' %s 2>/dev/null" % INC, timeout=120)
-        _, cnt = d.run("wc -l < %s 2>/dev/null" % NE, timeout=60)
+        cnt = str(want)
     return ne, inc.strip(), cnt.strip()
 
 

@@ -99,7 +99,7 @@ def q(s):
     return "'" + s.replace("'", "'\\''") + "'"
 
 P_ALIVE = "pgrep -f '%s' >/dev/null 2>&1"
-KILL = "p=$(pgrep -f '%s' | head -1); [ -n \"$p\" ] && kill -9 $p || true"
+KILL = "for p in $(pgrep -f '%s'); do kill -9 $p 2>/dev/null; done; true"
 
 DAEMONS = [
     ("K01", "led_mgr.sh",     "led_mgr[.]sh",     "指示灯 supervisor"),

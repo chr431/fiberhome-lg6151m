@@ -60,6 +60,39 @@ class Dev:
                 pass
         return rc == 0
 
+
+    def pull_lines(self, path, page=400, timeout=120):
+        """Paged, line-count-asserted pull of a device text file.
+
+        Why: a single large exec output can be silently truncated by the dropbear
+        channel (observed 2026-11-01 by svc-probe: 1611-line ne_events.tsv came
+        back as 8 lines and the tool still reported success).  Any "count is 0 /
+        suspiciously small" conclusion must first prove it actually pulled the
+        whole file.  So: read wc -l first, fetch in pages, then ASSERT.
+        Returns (text, device_lines).  Raises RuntimeError on mismatch.
+        """
+        rc, wc = self.run("wc -l < %s 2>/dev/null" % path, timeout=60)
+        wc = wc.strip().splitlines()[-1].strip() if wc.strip() else ""
+        if not wc.isdigit():
+            raise RuntimeError("pull_lines: cannot stat %s (wc -l=%r)" % (path, wc))
+        want = int(wc)
+        out = []
+        a = 1
+        while a <= want:
+            b = min(a + page - 1, want)
+            rc, chunk = self.run("sed -n '%d,%dp' %s 2>/dev/null" % (a, b, path), timeout=timeout)
+            if rc != 0:
+                raise RuntimeError("pull_lines: page %d-%d failed rc=%s" % (a, b, rc))
+            out.append(chunk)
+            a = b + 1
+        text = "".join(out)
+        # 用**物理行数**比对 wc -l: 台账里存在空行(碎片行的空行也是 NF=1 脏行),
+        # 按"非空行"数会恒差几行 —— 首次实跑就是 device=1612 got=1611 报错。
+        got = len(text.splitlines())
+        if got != want:
+            raise RuntimeError("pull_lines: TRUNCATED %s device=%d got=%d" % (path, want, got))
+        return text, want
+
     def close(self):
         try:
             self.c.close()

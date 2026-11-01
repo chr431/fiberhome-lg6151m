@@ -470,6 +470,20 @@ def do_case(d, c, max_wait, rows):
     ok = bool(repaired) and lat is not None and lat <= 60.0
     if c.get("conn_required"):
         ok = ok and conn["ok"]
+
+    # 稳定恢复断言(soak-qa 2026-11-01 教训: 回填后立刻 check 通过 != 稳定恢复)。
+    # 修复确认后再观察 30s, 期间任何一次回到缺失 => 判不稳, 而不是只看瞬时。
+    stable = True
+    if ok:
+        t_end = time.time() + 30
+        while time.time() < t_end:
+            time.sleep(5.0)
+            st2 = d.ok(c["check"])
+            if st2 is not True:
+                stable = False
+                print("   !! 修复后 30s 观察窗内又回到缺失/不可达 (t+%ds)" % int(time.time() - t_end + 30))
+                break
+    ok = ok and stable
     print("   latency=%ss conn=[%s] ssh_lost_polls=%d ledger +%d rows repairs +%d => %s"
           % (lat, fmt_conn(conn), lost, n1 - n0, r1 - r0, "PASS" if ok else "FAIL"))
     for ln in d.run("tail -n 6 %s 2>/dev/null" % LEDGER).splitlines()[-6:]:
@@ -479,7 +493,8 @@ def do_case(d, c, max_wait, rows):
                                  if repaired else ""),
                      latency_s=(lat if lat is not None else ">%d" % max_wait),
                      passed=int(ok), conn=fmt_conn(conn),
-                     ledger="+%drows +%drepairs ssh_lost=%d" % (n1 - n0, r1 - r0, lost),
+                     ledger="+%drows +%drepairs ssh_lost=%d stable30s=%d"
+                            % (n1 - n0, r1 - r0, lost, int(stable)),
                      note=c.get("note", "")))
     return ok
 

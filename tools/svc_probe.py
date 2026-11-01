@@ -56,7 +56,7 @@ try:
 except Exception:
     pass
 
-VERSION = "1.8"
+VERSION = "1.9"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_EVIDENCE = os.path.abspath(os.path.join(
     REPO, "..", "_local", "evidence", "svc_probe"))
@@ -667,7 +667,9 @@ def device_pull(evidence_dir, quiet=True):
         少拉一次就会得出 NE 总数 0 的假结论。
         """
         try:
-            n = int((ssh("wc -l < %s 2>/dev/null" % remote, timeout=60) or "0").strip())
+            # 用 awk END{NR} 而不是 wc -l: 设备日志末行常常没有换行符,
+            # wc -l 会少算 1 行(实弹: 13 行文件 wc 报 12), 导致分页边界错位 + 假告警。
+            n = int((ssh("awk 'END{print NR}' %s 2>/dev/null" % remote, timeout=60) or "0").strip())
         except ValueError:
             n = 0
         if n <= 0:

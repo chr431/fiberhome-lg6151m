@@ -456,7 +456,9 @@ run_cycle() {
         set_state dnsmasq 1 "DHCP/DNS"
         FAILS=$((FAILS+1))
         log "WARN  dnsmasq unhealthy (pid=${_dp:-none} :53=$(port_listen 53 && echo y || echo n))"
-        if strike dnsmasq; then
+        # 档A: :53 无 LISTEN = 确定性死亡(客户端会 Connection refused), 当拍重启不等 2-of-3
+        _dn_strong=0; port_listen 53 || _dn_strong=1
+        if tier_a_or_strike dnsmasq "$_dn_strong"; then
             if rl_ok dnsmasq; then
                 [ -n "$_dp" ] && kill -9 $_dp 2>/dev/null
                 if [ -s /tmp/watchdog_dnsmasq.cmd ]; then
@@ -470,8 +472,6 @@ run_cycle() {
             else
                 log "WARN  dnsmasq restart budget exhausted (3/h) — alert only"
             fi
-        else
-            log "SKIP  dnsmasq recovery (sample 1/3, need 2/3)"
         fi
     fi
 

@@ -142,7 +142,8 @@ integrity() {
         if (match($0, /rp2=[0-9]+/)) { s=substr($0, RSTART+4, RLENGTH-4); e+=s+0 }
         if (match($0, /rp3=[0-9]+/)) { s=substr($0, RSTART+4, RLENGTH-4); f+=s+0 }
         if (match($0, /last_seq=[0-9]+/)) { s=substr($0, RSTART+9, RLENGTH-9); if (s+0>mx) mx=s+0 }
-    } END { print a+0" "b+0" "c+0" "d+0" "e+0" "f+0" "mx+0 }' "$SEAL" 2>/dev/null)
+        if (match($0, /reuse=[0-9]+/)) { s=substr($0, RSTART+6, RLENGTH-6); g+=s+0 }
+    } END { print a+0" "b+0" "c+0" "d+0" "e+0" "f+0" "mx+0" "g+0 }' "$SEAL" 2>/dev/null)
     IL_RM1=$(printf '%s' "$_rms" | cut -d' ' -f1); IL_RM1=$(num0 "$IL_RM1")
     IL_RM2=$(printf '%s' "$_rms" | cut -d' ' -f2); IL_RM2=$(num0 "$IL_RM2")
     IL_RM3=$(printf '%s' "$_rms" | cut -d' ' -f3); IL_RM3=$(num0 "$IL_RM3")
@@ -150,6 +151,9 @@ integrity() {
     IL_RP2=$(printf '%s' "$_rms" | cut -d' ' -f5); IL_RP2=$(num0 "$IL_RP2")
     IL_RP3=$(printf '%s' "$_rms" | cut -d' ' -f6); IL_RP3=$(num0 "$IL_RP3")
     IL_MAXSEQ=$(printf '%s' "$_rms" | cut -d' ' -f7); IL_MAXSEQ=$(num0 "$IL_MAXSEQ")
+    # reuse = 历史上有几次删除落在"当时的末尾"、seq 随后被重用（删除不留缺口）。
+    # 这是唯一会让"记录删除数 > 实际缺口数"的情形，必须显式声明（见 ledger 的 seq 高水位修复）。
+    IL_REUSE=$(printf '%s' "$_rms" | cut -d' ' -f8); IL_REUSE=$(num0 "$IL_REUSE")
     # seq 连续性（标量 awk）
     _ss=$(awk -F'\t' '
         { s=$8+0; if (n==0) { first=s } else { if (s != prev+1) gap += s-prev-1 }
@@ -165,8 +169,10 @@ integrity() {
     _tail=$(( IL_MAXSEQ - IL_LAST ))
     [ "$_tail" -lt 0 ] && _tail=0
     _gone=$(( IL_FIRST - 1 + IL_GAPS + _tail ))
-    _rec=$(( IL_RM1 + IL_RM2 + IL_RM3 + IL_RP1 + IL_RP2 + IL_RP3 ))
+    _rec=$(( IL_RM1 + IL_RM2 + IL_RM3 + IL_RP1 + IL_RP2 + IL_RP3 - IL_REUSE ))
     [ "$_gone" = "$_rec" ] && IL_OK_ACC=yes
+    # 重复 seq 检测（真实损坏信号；正常应为 0）
+    IL_DUP=$(awk -F'\t' '{print $8}' "$LEDGER" 2>/dev/null | sort -n | uniq -d | wc -l); IL_DUP=$(num0 "$IL_DUP")
     IL_GONE=$_gone; IL_REC=$_rec; IL_TAIL=$_tail
     [ "$IL_SEQN" = "$IL_ROWS" ] && [ "$IL_GAPS" = 0 ] && IL_OK_SEQ=yes
     [ "$IL_RM1" = 0 ] && IL_OK_SEV1=yes
@@ -302,13 +308,14 @@ run_audit() {
     [ "$IL_OK_ACC" = yes ] || OVERALL=FAIL
     [ "$IL_OK_SEV1" = yes ] || OVERALL=FAIL
     [ "$SNAP_OK" = yes ] || OVERALL=FAIL
+    [ "$IL_DUP" = 0 ] || OVERALL=FAIL
     # 输出
     {
         echo "retention_audit v1.0  ts=$NOW  ($(date '+%F %T %Z'))"
         echo "ledger=$SRC rows=$IL_ROWS bytes=$IL_BYTES md5=$IL_MD5"
         echo "SNAPSHOT consistent=$SNAP_OK attempts=$SNAP_TRY note=台账读取期可能被 tick 追加, 一致性快照后计算"
         echo "seal=$SEAL lines=$IL_SEAL_N last_rows=$IL_SROWS last_bytes=$IL_SBYTES last_md5=$IL_SMD5"
-        echo "INTEGRITY rows_match=$IL_OK_ROWS bytes_match=$IL_OK_BYTES md5_match=$IL_OK_MD5 seq_contiguous=$IL_OK_SEQ gaps=$IL_GAPS tail_gaps=$IL_TAIL gaps_accounted=$IL_OK_ACC gone=$IL_GONE accounted=$IL_REC pruned_total=$(( IL_RM1 + IL_RM2 + IL_RM3 )) rm1=$IL_RM1 rm2=$IL_RM2 rm3=$IL_RM3 repaired_total=$(( IL_RP1 + IL_RP2 + IL_RP3 )) rp1=$IL_RP1 rp2=$IL_RP2 rp3=$IL_RP3 sev1_never_pruned=$IL_OK_SEV1"
+        echo "INTEGRITY rows_match=$IL_OK_ROWS bytes_match=$IL_OK_BYTES md5_match=$IL_OK_MD5 seq_contiguous=$IL_OK_SEQ gaps=$IL_GAPS tail_gaps=$IL_TAIL gaps_accounted=$IL_OK_ACC gone=$IL_GONE accounted=$IL_REC reused_seqs=$IL_REUSE dup_seqs=$IL_DUP pruned_total=$(( IL_RM1 + IL_RM2 + IL_RM3 )) rm1=$IL_RM1 rm2=$IL_RM2 rm3=$IL_RM3 repaired_total=$(( IL_RP1 + IL_RP2 + IL_RP3 )) rp1=$IL_RP1 rp2=$IL_RP2 rp3=$IL_RP3 sev1_never_pruned=$IL_OK_SEV1"
         echo "TIER SEV1 rows=$R1 bytes=$B1 oldest_ts=$O1 oldest_age_days=$(days "$_a1") target_days=$T_SEV1 contract_days=$C_SEV1 verdict=$V1"
         echo "TIER SEV2 rows=$R2 bytes=$B2 oldest_ts=$O2 oldest_age_days=$(days "$_a2") target_days=$T_SEV2 contract_days=$C_SEV2 verdict=$V2"
         echo "TIER SEV3 rows=$R3 bytes=$B3 oldest_ts=$O3 oldest_age_days=$(days "$_a3") target_days=$T_SEV3 contract_days=$C_SEV3 verdict=$V3"

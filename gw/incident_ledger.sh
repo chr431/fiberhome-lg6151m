@@ -944,9 +944,25 @@ $_tail"
 # =====================================================================
 IL_APPENDED=0
 next_seq() {
+    # seq 高水位：只用"末行 seq+1"会在**尾部删除**后重用 seq（被删的行不留缺口，
+    # 审计的 rm/rp 对账就永远差 1 —— 2026-11-01 实弹 77 vs 76）。用 .inc_state 的
+    # seq_high_water 兜底，保证 seq 单调不复用。
     _l=$(tail -n 1 "$LEDGER" 2>/dev/null)
     _s=$(printf '%s' "$_l" | cut -f8)
-    case "$_s" in ''|*[!0-9]*) echo 1 ;; *) echo $(( _s + 1 )) ;; esac
+    case "$_s" in ''|*[!0-9]*) _s=0 ;; esac
+    _hw=$(sed -n 's/^seq_high_water=//p' "$STATEF" 2>/dev/null | head -1)
+    case "$_hw" in ''|*[!0-9]*) _hw=0 ;; esac
+    [ "$_hw" -gt "$_s" ] && _s=$_hw
+    echo $(( _s + 1 ))
+}
+seq_hw_bump() { # $1=刚分配到的最大 seq
+    [ "$DRYRUN" = 1 ] && return 0
+    _cur=$(sed -n 's/^seq_high_water=//p' "$STATEF" 2>/dev/null | head -1)
+    case "$_cur" in ''|*[!0-9]*) _cur=0 ;; esac
+    [ "$1" -le "$_cur" ] && return 0
+    grep -v '^seq_high_water=' "$STATEF" 2>/dev/null > "$STATEF.tmp"
+    printf 'seq_high_water=%s\n' "$1" >> "$STATEF.tmp"
+    mv "$STATEF.tmp" "$STATEF" 2>/dev/null
 }
 append_batch() {
     IL_APPENDED=0
@@ -989,6 +1005,7 @@ append_batch() {
         cat "$_rows" >> "$LEDGER"
     fi
     IL_APPENDED=$_n
+    seq_hw_bump $(( _sq - 1 ))
     rm -f "$_existing" "$_bkeys" "$_bkeys.new" "$_keep" "$_rows"
     : > "$BATCH"
 }
@@ -1024,9 +1041,10 @@ seal_write() { # $1=op $2=reason $3=rm1 $4=rm2 $5=rm3
     _p1=$IL_RP1; [ -n "$_p1" ] || _p1=0
     _p2=$IL_RP2; [ -n "$_p2" ] || _p2=0
     _p3=$IL_RP3; [ -n "$_p3" ] || _p3=0
-    printf 'op=%s ts=%s rows=%s bytes=%s md5=%s first_seq=%s last_seq=%s sev1=%s sev2=%s sev3=%s rm1=%s rm2=%s rm3=%s rp1=%s rp2=%s rp3=%s oldest_sev1_ts=%s oldest_sev1_md5=%s reason=%s\n' \
+    _re=$IL_REUSE; [ -n "$_re" ] || _re=0
+    printf 'op=%s ts=%s rows=%s bytes=%s md5=%s first_seq=%s last_seq=%s sev1=%s sev2=%s sev3=%s rm1=%s rm2=%s rm3=%s rp1=%s rp2=%s rp3=%s reuse=%s oldest_sev1_ts=%s oldest_sev1_md5=%s reason=%s\n' \
         "$_op" "$NOW" "$_rows" "$_bytes" "$_md5" "$_fs" "$_ls" "$_c1" "$_c2" "$_c3" \
-        "$_r1" "$_r2" "$_r3" "$_p1" "$_p2" "$_p3" "$_s1ts" "$_s1md5" "$_rsn" >> "$SEAL"
+        "$_r1" "$_r2" "$_r3" "$_p1" "$_p2" "$_p3" "$_re" "$_s1ts" "$_s1md5" "$_rsn" >> "$SEAL"
     IL_RP1=0; IL_RP2=0; IL_RP3=0
 }
 

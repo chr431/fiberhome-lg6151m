@@ -24,14 +24,37 @@
 
 ### 0.2 nerepair 的覆盖边界（必须逐字理解）
 
+**v2.0 起有两条判据路径**（v1.7 只有路径 1）：
+
 ```
-repair(pid) ⇔  insn ∈ {LDR/LDUR/LDRB/H/SW 的自指形式}    ← A
-          ∧  rt == rn                                    ← B
-          ∧  si_addr == regs[rt]                         ← C
-          ∧  shape_ok(x2 处 32B, si_addr)                ← D
-          →  regs[rt] = sp;  pc += 4;  信号吞掉
+路径 1（pop 型，v1.0–v1.7 已有）
+repair ⇔ insn ∈ {LDR/LDUR/LDRB/H/SW 的自指形式}  ← A
+       ∧ rt == rn                                ← B
+       ∧ si_addr == regs[rt]                     ← C
+       ∧ shape_ok(x2 处 32B, si_addr)            ← D
+       → regs[rt] = sp; pc += 4; 信号吞掉
+
+路径 2（deref 型，v2.0 新增）
+repair ⇔ insn 是 load（任意形式，非 store、非 FP）      ← A2
+       ∧ 0 < si_addr < 16 MiB（不可信小值）             ← B2
+       ∧ rn != 31（基址不是 sp）                        ← C2
+       ∧ [sp, sp+16KB) 内存在 32B 记录：q0 或 low32(q2)
+         == si_addr（或 ±8），且 w1==w3==0、len 在带内  ← D2（硬门槛）
+       → regs[rn] = sp; pc += 4; 信号吞掉
 ```
-- **只有 A∧B∧C∧D 全满足才修**；任一不满足 → `PASS`，进程正常死亡。
+- **路径 1 优先尝试**，失败才走路径 2（避免 deref 判据"抢走"已被证明有效的 pop 修复）。
+- **D2 是硬门槛**：没有记录证据就绝不修 —— 这是"不掩盖真实 NULL/bug"的唯一保证。
+- **只修 load，绝不修 store**：把 store 的基址改到 sp 会往栈上乱写。
+
+**两条参数取值的证据（不是拍脑袋，Lead 已批准偏离原始规格）**
+
+| 参数 | 取值 | 证据 | 若按原规格会怎样 |
+|---|---|---|---|
+| **si_addr 上界** | **16 MiB**（原始规格 0x10000） | 家族实录 `w0`（=故障地址）分布：**0–597004，中位数 102011，1733 个不同取值**（`_local/evidence/crash-root/h4_rec150.txt`，150/150 的 w0 全 < 2²⁴；09_CONDITIONAL 结果 5）；`len` 侧 1601–72085 | 用 0x10000 会把**中位数以上（>65,536）的全部样本**排除 —— 按实录估计漏掉 **>95%** 的真实命中 |
+| **栈内扫描步长** | **8 B**（原始规格 16 B） | 4 份自然 NE `.stack` 的记录**页内偏移**：`0x8ea8 / 0x8ff0 / 0xebc8 / 0x8840 / 0x9168 / 0x92b0 / 0xec70`（`natne_scan.py` 实测）。对 16 取模：`0x8ea8%16=8`、`0xebc8%16=8`、`0x9168%16=8` ⇒ **7 个样本里 3 个不是 16 对齐** | 16 B 步长会**漏掉 3/7 的真实自然 NE 样本**；8 B 步长多出的开销只是每页 512 次比较（微秒级） |
+
+> 复核：`python _local/work/crash-root/fix/natne_scan.py` 直接打印每个记录的页内偏移；
+> `awk '{print $2}' h4_rec150.txt | sort -u | tail` 可看 w0 的量级。
 - **已知不覆盖（结构性，非 bug）**：被污染 va_list 产生的**解引用型**崩溃
   （`%s` → `strlen` 里的 `ldrb w2,[x0]`，`rt≠rn`）、非 load 指令、`si_addr≠Xt`、记录不在 x2。
 - **行为级正/负对照（E3）**：正控 `rectest`（自注入记录）**SURVIVED rc=0**；负控 `sh -c 'kill -11 $$'` **rc=139**（不修）。
@@ -92,6 +115,12 @@ v1.7 **不查 `w3`、不查长度带**（加固见 §1.3）。
 | **v1.8** | 判据加固：`w3==0` + 长度带 `0x400..0x20000` + tag 掩码 | `nerepair_v18.c/.patch` | host 验证通过，未部署 |
 | **v1.9 / v1.9.1** | **dry-run**（不修、不吞信号）+ PID1 重试 + (pid,site) 熔断 + inode canary 豁免 + **BIN 行** + NEAR pc | `nerepair_v191.c/.patch`（二进制 48,512 B） | **Lead 已批准做 24 h dry-run** |
 | **v1.9.2** | 再加 `NEAR reason=insn`（量 V3 盲区规模） | `nerepair_v192.c/.patch`（49,376 B） | 与 dry-run 同批上 |
+| **v2.0（本轮成品）** | **新增路径 2：deref 型**（记录证据硬门槛）+ 按指令形态分类的 NEAR + `DREPAIR/WOULD_DREPAIR` 事件 + STAT `rep2/would2/dfhit` | `gw/src/nerepair.c` + `gw/bin/nerepair`（**52,216 B**，md5 `75e2942489d8c81c14d64691f0d12983`）+ diff `_local/work/crash-root/fix/nerepair_v2_vs_v17.diff`（569 行） | **本轮交付** |
+
+**v2.0 的 host 证据（E2）**：`deref_test.c` 直接 `#include` 由 `sed` 从 `nerepair_v2.c` 抽出的判据函数（非拷贝），
+**17 项断言全通过**：指令分类 10 项（ldr/ldrb/ldrh/ldur 判 load；str/strb/add/FP 判非 load）、
+真实自然 NE 栈里按 q2 命中并定位到准确 VA、伪造地址/零地址/脏 w1/长度越界 4 项全拒。
+复核：`zig cc -O2 deref_test.c -o t && ./t <natne/1793477586-17847-1793509363.stack>`。
 
 **判据加固的 host 证据（E2）**：`nerepair_mask_test.c` 以设备实录 150 条记录为阳性语料 ——
 v1.7 接受 **150/150**、v1.8 同样 **150/150**（加固未丢覆盖）；8 条合成阴性样本：v1.7 **误接受 3/8**、v1.8 **0/8**。
@@ -150,7 +179,27 @@ v1.7 接受 **150/150**、v1.8 同样 **150/150**（加固未丢覆盖）；8 �
 
 ## §4 验收判据：什么算「修好了」
 
-### 4.0 三条指标必须同时报（缺一条不算通过）
+### 4.0 验收分两层（skeptic C-178，**不要混**）
+
+| 层 | 适用对象 | 指标 | 判据 |
+|---|---|---|---|
+| **层 I · 写入活性** | **只适用于能影响写入的缓解**：pageguard / SMMU / 靶向隔离 | 热槽 distinct-content 重写率（ABAB） | **RR ≤ 0.5 且 95% CI 上界 < 1.0**；**反向保护**：A 两臂之间 RR 必须落在 **[0.7,1.4]**，否则整轮 **INVALID** |
+| **层 II · 后果** | **所有缓解；nerepair 只能看这一层** | ① nerepair `REPAIR` 事件率 ② 家族死亡数 ③ 自然 NE | 见 §4.1 / §4.3 |
+
+> ⚠️ **关键（C-149）**：**nerepair 只修崩溃、不停止写入** ⇒ **写入活性预期不变**。
+> 若上 nerepair 后看到槽重写速率下降，**先怀疑"进程死了 / 写入者换目标"，不要当成功**。
+> 反过来：**上 pageguard 才应该看层 I**（它真的阻断写入落点）。
+
+**功效（skeptic 给的，别再自己算）**：热槽 0.62 次/s ⇒ 10 min 臂约 **372 事件**；
+**50% 降幅 1.3 min/臂、20% 降幅 9.5 min/臂**（理想泊松）。
+**自然 NE 别当主判据**：0.5/h 基线 ⇒ 50% 降幅需 **94 h/臂**、70% 需 41.6 h、90% 需 21.3 h。
+
+**验收前 8 条假象检查（逐条打勾，缺一条本轮作废）**：
+① 进程重启换栈（记 target pid + `[stack]` 边界）② 写入者换目标（同窗监控 ≥3 槽 + 系统级扫描）
+③ 观测者污染（停扫描对照臂）④ boot 代次（一轮之内不许跨 boot 比较）⑤ 判据漂移（q0 允 0 / len 区间 / IP 单播 / stride 8–16）
+⑥ 幸存者偏差（分母用**臂开始时**的集合）⑦ 均值回归（A 两臂一致性保护，见层 I）⑧ 缓解自身副作用（内存配额/分配失败率；nerepair 类：**无崩溃 ≠ 无写入**）。
+
+### 4.0b 三条指标必须同时报（缺一条不算通过）
 
 | # | 指标 | 工具 | 依赖什么 | 功效 | 级别 |
 |---|---|---|---|---|---|
@@ -184,7 +233,7 @@ v1.7 接受 **150/150**、v1.8 同样 **150/150**（加固未丢覆盖）；8 �
 | 不死锁 | `reason=repair-loop` < 3 次/天 | 24 h |
 | 心跳 | `/tmp/nerepair.hb` 最大间隔 <180 s | 24 h |
 
-### 4.2 止写层（pageguard 或任何写侧修复）—— **主判据 = 槽重写速率**
+### 4.2 止写层（**仅 pageguard / 靶向隔离**）—— 层 I，主判据 = 槽重写速率
 
 **预注册（改动前先写死，事后不许改）**：
 
@@ -192,14 +241,13 @@ v1.7 接受 **150/150**、v1.8 同样 **150/150**（加固未丢覆盖）；8 �
 |---|---|
 | 槽的**准入门槛** | 只有「A 臂 10 min 内重写 **≥20 次**」的槽可用于判据；否则该槽**功率不足，不得用于判决**（写"无功效"，不写"阴性"） |
 | 槽数量 | **≥3 个槽**同时报（不同进程/不同偏移，避免单点） |
-| 窗口 | **同会话、同槽、同一 boot**；A 臂 10 min → B 臂 10 min（可 ABAB 交替 2 轮取合并） |
-| **主判据** | **B 臂速率 / A 臂速率 < 0.20**，且 A 臂 ≥20 次重写 |
-| 统计 | 等时长下用条件二项检验（H0：B 占 0.5）或泊松率比；**必须给 95% CI**，CI 含 1 = 无功效 |
-| 一致性（防混淆） | 同窗口同时报 ②canary 命中率、③自然 NE；若 ①降而 ②③不降（或反之）**必须解释**，否则不予采信 |
-| 代价上限 | 吞吐 ↓≤3%；`softirq NET_RX`/s ↑≤5%；pageguard 的 quarantine 不触上限 |
+| 窗口 | **同会话、同槽、同一 boot**；每臂 **10–15 min**；ABAB |
+| **主判据** | **RR ≤ 0.5 且 95% CI 上界 < 1.0**（skeptic C-178 口径） |
+| **反向保护** | **A 两臂之间 RR ∈ [0.7, 1.4]**，否则整轮 **INVALID**（均值回归/漂移保护） |
+| 统计 | 泊松率比；必须给 95% CI |
+| 代价上限 | 吞吐 ↓≤3%；`softirq NET_RX`/s ↑≤5%；pageguard 的 quarantine 不触上限；**并报分配失败率**（pageguard 引入的新风险面） |
 
-**为什么阈值是 0.20 而不是 0.5**：槽速率是代理指标，存在"写入者改打别处"的混淆（§5.4），
-0.20 留出 5 倍余量；同时 A 臂 ≥20 次保证在 H0 下判别力足够（20 次、比值 0.2 ⇒ 期望 4 次，二项检验可分辨）。
+> **注意适用对象**：这一节**不适用于 nerepair** —— nerepair 不停写入，层 I 对它预期"无变化"（§4.0）。
 
 **分阶段**：
 1. **单槽定标**（10 min）：确认该槽在你的窗口里真能跑到 ≥20 次重写；跑不到就换槽（这是**功效检查**，不是失败）。
@@ -213,6 +261,32 @@ v1.7 接受 **150/150**、v1.8 同样 **150/150**（加固未丢覆盖）；8 �
 
 基线 ~0.5–4/h；**6 h 窗口无功效**（0.5/h 下 P(0)=5%）：24 h 期望 12、P(0)=6.1e-6，才可说「未再发生」；72 h 功效充分。
 **口径前提**：测自然 NE 必须停 nerepair；且 dry-run 期间不修 ⇒ **自然 NE 会真的打死进程**，先确认「无其它实验依赖这些进程活着」并写进 drill 记录。
+
+### 4.5 G6 名单规范：「已知会死、dry-run 故意不救」
+
+> 用途：dry-run 不修 ⇒ 家族进程**真的会死**。这份名单是①给厂商的证据 ②armed 后**预期修复量**的基准 ③上线后**回归核对表**。
+
+**采集口径（必须全量，不许抽样）**
+
+| 来源 | 采集方法 | 备注 |
+|---|---|---|
+| 本会修但没修 | dry-run 下的 `WOULD_REPAIR`（pop 型）与 `WOULD_DREPAIR`（deref 型）行 | 由 `ne_sites.py` / `dryrun_report.py` 的 A7 段自动聚合 |
+| 本会修但判据没接住 | `NEAR`（`reason=insn` / `w3` / 长度带） | 这是"射程外"的名单，单独列，**不计入**预期修复量 |
+| 真死了的家族 NE | `.stack` 含记录 ∧ fault 地址与记录对齐的自然 NE | 由 `natne_scan.py` + `ne_events.tsv` 交叉 |
+
+**必备字段（缺一列即报告不完整）**
+
+```
+comm | pid | site(pc 或 指令形态) | 记录证据(q0/q2/记录 VA) | 首次/末次 epoch | 次数
+     | 进程角色(监听父进程 / 一次性子进程 / 守护) | 该角色死亡是否影响服务 | procd/watchdog 是否会重启它
+```
+
+**与 armed 的关系（写清楚，别混）**
+
+1. **G6 名单 = armed 后的「预期修复量上界」**：armed 后这些进程**不再死**，所以"自然 NE 计数"应下降 —— 但下降的**上限就是 G6 的条数**，不能宣称超过它。
+2. **armed 后必须拿 G6 逐条回归**：名单里的 (comm, site) 若仍出现死亡 ⇒ 修复失败或该例不属于可修形态 ⇒ **立即回滚并复查**。
+3. **G6 不是"受害面"**：写入面比死亡面大 2–3 个数量级（08 的算术：约 580 次写机会才 1 次死亡）。**不得用 G6 条数描述问题规模**，只能描述"我们会救活多少"。
+4. **服务进程优先**：G6 里"监听父进程/守护"的条目单独标出 —— 它们的收益是服务不中断，比一次性子进程值钱得多。
 
 ### 4.4 dry-run → armed 门禁
 
@@ -298,6 +372,7 @@ dmesg | tail -40                # 保留现场
 | R-8 | kprobe/ftrace/perf/pagemap 全不可用 | E3 | 页级判决只能靠内核模块或重编内核 |
 | R-9 | 自然 NE 口径受 nerepair 污染 | E2 | 停判定量必须先停 nerepair |
 | R-10 | **槽监视器是代理指标且未复核**（E1）：槽速率 ≠ 内存破坏；写入者可能改目标 | E1 | 必须与 canary/自然 NE 同窗同向，并排除 §5.4 三种假象 |
+| **R-11** | **nerepair 只在「后果层」生效：它把进程从崩溃里救回来，但写入本身仍在继续**（C-149） | **E3** | 内存破坏面不变；被救回的进程可能带着被污染的栈/数据继续运行；**不能把"NE 下降"当成"写入停止"** |
 
 ---
 
@@ -354,3 +429,132 @@ kallsyms 只有通用 `iommu_*` 核心、**无 `arm_smmu_*`/`mtk_iommu` 驱动�
 | [05_LOG/2026-11-01-fix-design.md](05_LOG/2026-11-01-fix-design.md) | 本文设计依据（nerepair 加固 / pageguard / 判据 / 自然 NE 缺口 §7） |
 | [05_LOG/TEMPLATE-nerepair-dryrun.md](05_LOG/TEMPLATE-nerepair-dryrun.md) | dry-run 报表模板 |
 | [VERDICT.md](VERDICT.md) | **历史判决（PA/DMA E2）已作废**，仅存档，勿引用 |
+---
+
+## §9 部署与回滚手册（照着敲就能跑）
+
+> 目标：把 **nerepair v2.0** 从仓库装到设备并验证；装不上或出问题能**原路退回**；最坏情况能**从串口救回来**。
+> 所有设备写操作都必须带锁（`tools/devop.py`，输出必须有 `ACQUIRED`/`RELEASED` 配对）。
+
+### 9.1 要动的文件（只有两个）
+
+| 文件 | 类型 | 目标 | 本次版本 | md5 |
+|---|---|---|---|---|
+| `gw/bin/nerepair` | manifest（可执行） | `/data/gw/bin/nerepair` | **2.0**（52,216 B） | `75e2942489d8c81c14d64691f0d12983` |
+| `gw/src/nerepair.c` | src（不部署，只登记） | — | **2.0** | — |
+
+**不用动**：`rc.extend.sh`（v3.7 的 v3.3 块已按路径拉起 `/data/gw/bin/nerepair`，换二进制即可生效）、
+`nerepair_launch.sh`、`svc_lib.sh`（watchdog 的 `nerepair` 判活条目不变）。
+
+### 9.2 部署步骤（逐条执行，别跳）
+
+```sh
+# ── 0) 前置：版本注册表必须先改，否则 deploy.py 会拒绝一切操作
+#     tools/VERSIONS.tsv 两行（Lead 统一提交时改）：
+#       gw/bin/nerepair   1.7 → 2.0   （md5 列填 75e2942489d8c81c14d64691f0d12983）
+#       gw/src/nerepair.c 1.7 → 2.0
+cd lg6151m-public && python tools/vercheck.py check      # 必须全绿
+
+# ── 1) 留证据：部署前的现状（照抄进 drill 记录）
+MSYS_NO_PATHCONV=1 python tools/lgssh.py 'ps | grep -w nerepair | grep -v grep; ls -l /proc/$(pidof nerepair)/exe; tail -2 /data/gw/logs/nerepair.log'
+
+# ── 2) 停旧实例（持锁）
+MSYS_NO_PATHCONV=1 python tools/devop.py --owner fixer --purpose "nerepair v2 部署：停旧实例" -- killall nerepair
+MSYS_NO_PATHCONV=1 python tools/lgssh.py 'sleep 2; pidof nerepair || echo STOPPED'
+
+# ── 3) 推二进制（deploy.py push 带 #DEPLOY 溯源戳；put 不保留权限位，后面必须 chmod）
+MSYS_NO_PATHCONV=1 python tools/deploy.py push gw/bin/nerepair
+MSYS_NO_PATHCONV=1 python tools/devop.py --owner fixer --purpose "nerepair v2 部署：补执行位" -- chmod 755 /data/gw/bin/nerepair
+
+# ── 4) 校验落盘 md5（必须与 9.1 一致）
+MSYS_NO_PATHCONV=1 python tools/lgssh.py 'md5sum /data/gw/bin/nerepair'
+
+# ── 5) 先跑 dry-run（强烈建议：不修、只记 WOULD_REPAIR / WOULD_DREPAIR）
+MSYS_NO_PATHCONV=1 python tools/devop.py --owner fixer --purpose "nerepair v2 dry-run 标记" -- touch /data/gw/nerepair.dry
+MSYS_NO_PATHCONV=1 python tools/devop.py --owner fixer --purpose "nerepair v2 dry-run 启动" -- sh /data/gw/nerepair_launch.sh
+
+# ── 6) 60 秒后核对（判据见 9.3）
+sleep 60
+MSYS_NO_PATHCONV=1 python tools/lgssh.py 'grep -E "START|MODE" /data/gw/logs/nerepair.log | tail -3; tail -1 /data/gw/logs/nerepair.log'
+```
+
+**转 armed（24 h dry-run 通过 G0–G6/G2b 之后才做）**：
+
+```sh
+MSYS_NO_PATHCONV=1 python tools/devop.py --owner fixer --purpose "nerepair v2 转 armed" -- rm -f /data/gw/nerepair.dry
+MSYS_NO_PATHCONV=1 python tools/devop.py --owner fixer --purpose "nerepair v2 重启生效" -- killall nerepair
+# watchdog 会在下一轮拉起；或手工 sh /data/gw/nerepair_launch.sh
+```
+
+### 9.3 部署后判据（60 s 内必须全绿，任一红就回滚）
+
+| # | 检查 | 命令 | 期望 |
+|---|---|---|---|
+| 1 | 进程在跑 | `pidof nerepair` | 一个 pid（不是两个） |
+| 2 | 版本对 | `grep START /data/gw/logs/nerepair.log \| tail -1` | `ver=2.0` 且 `dry=1`（若在 dry-run） |
+| 3 | 心跳新鲜 | `cat /tmp/nerepair.hb` | 数字在涨（60 s 一轮） |
+| 4 | STAT 正常 | `grep STAT … \| tail -1` | `mode=dry`（或 armed）、`attached>0` |
+| 5 | 覆盖没退化 | 同上 `attached=` | ≥ 部署前那一行 |
+| 6 | 无 Oops | `dmesg \| tail -20` | 无 `Unable to handle`/`Oops` |
+
+### 9.4 回滚（三种粒度，从轻到重）
+
+```sh
+# (a) 只关 dry-run 以外的修复 → 立刻"不修，让进程正常死"
+MSYS_NO_PATHCONV=1 python tools/devop.py --owner fixer --purpose "回滚：停修复" -- killall nerepair
+#    tracee 自动 detach，设备不会僵；watchdog 会按 SVC_TABLE 再拉起 —— 要彻底停需改 rc.extend（见 c）
+
+# (b) 退回 v1.7 二进制
+#     仓库里保留旧产物即可：git show <v1.7 提交>:gw/bin/nerepair > /tmp/nerepair.v17
+MSYS_NO_PATHCONV=1 python tools/deploy.py put /tmp/nerepair.v17 /data/gw/bin/nerepair
+MSYS_NO_PATHCONV=1 python tools/devop.py --owner fixer --purpose "回滚：恢复 v1.7 执行位" -- chmod 755 /data/gw/bin/nerepair
+MSYS_NO_PATHCONV=1 python tools/devop.py --owner fixer --purpose "回滚：重启 v1.7" -- sh /data/gw/nerepair_launch.sh
+
+# (c) 彻底停用（连 watchdog 也不再拉）
+#     编辑 gw/rc.extend.sh 注释掉 v3.3 的 nerepair 块 → deploy.py push gw/rc.extend.sh → 重启
+#     同时从 svc_lib.sh 的 SVC_TABLE 摘掉 nerepair 行（否则 watchdog 会重启一个不存在的服务）
+```
+
+**回滚触发条件**：9.3 任一红；出现 `reason=repair-loop` 风暴；被修复进程行为异常且确认非本家族；
+内核 Oops/panic。
+
+### 9.5 LK 救砖（设备起不来时的唯一入口）
+
+> 前提：SSH 不通、串口能出字。**串口 COM6 @921600 8N1**。**不要**在没有串口日志的情况下反复断电。
+> 救砖链路已在 `AGENTS.md`「刷机管线」里验证过，工具：`tools/lk_flash_v4.py`（主）、`tools/lk_eth1_resume.py`（续跑）。
+
+```sh
+# 1) 抓 LK 窗口：设备断电 → 上电，同时连续发 Ctrl-C（弹幕）打断到 LK 提示符（PINTEST）
+#    脚本已封装：python tools/lk_flash_v4.py --port COM6 --baud 921600 --stage lk
+# 2) 在 LK 里把 init 改成 shell
+#      kcmdline append init=/bin/sh
+#      repeat 2000 heap alloc 65536        # 清堆，避免 LK 分配失败
+#      boot
+# 3) 进 raw shell 后先重建最小环境（根只读、无 /dev/null，后台 & 会因 stdin 失败而中止）
+#      mount -t tmpfs tmpfs /dev && mknod /dev/null c 1 3
+#      mount -t proc proc /proc
+# 4) 网络：eth0/eth1 任一，零配置 169.254/16（PHY 在 ifup 后 attach）
+#      ifconfig eth1 up && udhcpc -i eth1 -q -n || true
+# 5) 拉恢复脚本（md5 门禁）
+#      export LD_LIBRARY_PATH=/fhrom/lib:/fhrom/usr/lib
+#      /fhrom/bin/curl -o /tmp/deploy2.sh http://169.254.x.x/deploy2.sh && md5sum /tmp/deploy2.sh
+#      sh /tmp/deploy2.sh          # 后台自驱：tar+镜像 md5 门禁 → dd p26 → 挂载验证 → /data 还原 → bootctrl 翻 A → sysrq-b
+```
+
+**三条红线（违反会变砖或丢数据）**：
+1. **不写 p39**（B 槽 = 官方回滚底线）；只写 p26（A 槽）。
+2. **bootctrl 只在四重验证全过后翻**（rcS 锚点 / toor / S98 / S99zmtk 缺席）；翻完必须读回 `0f 03`。
+3. **任何设备侧文件传输必须 md5 门禁**（历史事故：传输损坏导致刷机失败）。
+
+**若只是 nerepair 部署失败、设备还能启动**：不要走 LK —— 用 9.4 的 (a)/(b) 即可。
+LK 只用于「内核 panic 循环 / 根文件系统损坏 / bootctrl 掉槽」。
+
+### 9.6 事故分级
+
+| 现象 | 分级 | 动作 |
+|---|---|---|
+| nerepair 心跳停、watchdog 重启 | 中 | 看 `nerepair.out`；`killall` 后观察；必要时 9.4(b) |
+| 被修复进程行为异常 | 中 | 查 `REPAIR`/`DREPAIR` 行，核对是否真家族；可疑则 9.4(a) |
+| 内核 Oops/panic | 高 | 先落 `pstore` → 9.4(c) → 复盘；**不要**重复触发 |
+| 起不来（无 SSH、串口有字） | 高 | 9.5 LK 救砖 |
+| 起不来且串口无字 | 最高 | 断电 10 s 再上电；仍无字 → 硬件/供电问题，停止操作并上报 |

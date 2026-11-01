@@ -166,6 +166,8 @@
 | 5 | **D6 迁移跟随**（madvise 换 PA） | VA-targeted vs PA-targeted（终局） | 30 min | scanary 深度臂 |
 | 6 | D1/D2（同会话 A/B/A、UDP vs SSH） | 写入者路径归因（与 transport 正交，但决定 R1） | 35 min | lab |
 | 7 | **D13 S 臂**（SIGSTOP 冻结 2 个 canary + /dev/mem 每 30 s 直读其 8 页栈，另 2 个作活性对照，10 min） | **写入者是否需要目标进程处于运行态**（活对象 vs 固定页/陈旧 VA）。命中 ⇒ 削弱 H2-live；0 ⇒ 与 H2-live 相容。**不判 VMA 权限**——它不是 mprotect 臂的等价物（见 audit §19⑥） | 15 min | lab |
+| 10 | **D17 userfaultfd 点名写入者** | 事件+非本进程阻塞任务 ⇒ CPU uaccess（E4）；仅自身 ⇒ 调保护区；0 事件 ⇒ 仅当**同一 VA 注册前有写入活性**才可判 PA，否则 INVALID。**2026-11-01 状态：BLOCKED**——本内核 `__arm64_sys_userfaultfd` 是 `mov x0,#-38; ret` 的 COND 桩（E3），`CONFIG_USERFAULTFD=n`（C-179）；须先用 30 s syscall 探针推翻 | 30 min | lab（探针） |
+| 9 | **D16 P1 `process_madvise(MADV_DONTNEED)` 判 VA/PA**（靶子必须是有活性的**非 ptrace** 槽：`sh` 类 ≥5 次内容变化/10 min；`nerepair` 槽只能当对照观测） | VA 重新长出+对照活跃 ⇒ VA；静默+对照活跃 ⇒ PA；都静默 ⇒ INVALID。前置见 audit §46（含 madvise 返回值/读回全 0/PA 变化/进程存活） | 20 min | lab（+fixer 观察） |
 | 8 | **D15 pte_redirect 判 VA/PA**（对象=天然稳定槽：dnsmasq start_stack−0x1b40 静态 / nerepair start_stack−0x3b0 活动） | 判据见 audit §30.3。**2026-11-01 状态：INVALID**——模块 zero 路径触发 `BUG: Bad page state ... pfn:acdcb` → `panic_on_taint` panic（**第二次仪器事故**，C-174）。修好模块前不得重跑，也不得把本次写成阴性 | 30 min | kdev（修模块）+ lab（执行） |
 
 **排期逻辑**：先做 1–2（各 20–30 min，能直接杀死两条假设），再做 3–5（需要新仪器/改动）。

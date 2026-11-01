@@ -162,3 +162,10 @@ echo $ORIG_O > /proc/sys/kernel/panic_on_oops  ; cat …
 ### 12.4 实验靶子的禁忌（2026-11-01 新增，Lead 裁定）
 **禁止把 `nerepair`（或任何 ptrace 监督者）的 mm 当成 `ro`/`pte_redirect`/`uprot` 的实验对象**——它的 mm 与 ptrace 路径竞争，加写锁极易挂死（表现为 hang→watchdog 重启，不是 panic，最难诊断）。
 靶子选：**无 ptrace、无 mmap_write_lock 竞争的阻塞普通 daemon**（dnsmasq 类），或**让 victim 自己 mprotect**（rovictim2 式，最干净）。
+
+### 12.5 本轮允许重启（用户授权，2026-11-01 第 7 轮）与「重启也算数据」
+- **授权范围**：仅本轮实验；串口 LK 为兜底恢复手段。
+- **重启前必记**：`boot_id` / `date +%s` / `uptime` / 当前臂与目标 `pid+VA` / 已采到的对照数据。
+- **重启后立刻**：拉 `/sys/fs/pstore/console-ramoops-*` → **md5 落盘**（下次 panic 会覆盖）→ 用 `analysis/kern/kallsyms.txt` 反查地址。
+- **判读**：pstore 的 `CPU/PID/Comm` + 调用栈 = **写入者路径的直接证据（E3）**；仍按 §12.3 三分法归类（panic / hang→watchdog / 冷复位），**hang 不得写成 panic**。
+- **代次**：重启即新代次，跨代次不可比（本条不因"允许重启"而放松）。

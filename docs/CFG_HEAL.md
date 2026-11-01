@@ -392,6 +392,7 @@ passed / conn / ledger / note)。
 | ① | `svc_lib.alive()` 回退分支 | `pgrep -f "/data/gw/<x>"` —— 全命令行**子串**匹配 | 注入 harness 的 rollback 配方里提到 `ntp_keeper.sh` 路径, 真进程已死 **153s**, watchdog 仍连报 `ntp_keeper=0`(假活) | svc_lib v1.10: argv **token 精确**匹配 + 锚定正则; `sh -c` / `grep` / `tail -f` 提及一律不算 |
 | ② | selftest 某条断言 | 测试命令自己的 cmdline 含被查字符串 | 测试**自己把自己判活**, 断言恒真 | 判据必须排除自身 pid 与祖先进程 |
 | ③ | `cfg_heal` dnsmasq 观测 | `pidof dnsmasq \| cut -d' ' -f1` —— 只取**第一个** pid | 多实例窗口(厂商 DNS-only 实例 + 我方 DHCP 实例并存)取到前者 -> 误报"dnsmasq 没在服务 br-lan"(2026-11-01 08:43 / 09:25 各一条假观测) | cfg_heal v1.2: 扫**全量** pid, 任一实例命中即算活 |
+| ④ | @B@cfg_heal@B@ br-lan 成员判定(v1.2) | 让步闸门 @B@pgrep -f 'wifi_up[.]sh'@B@ —— 全命令行**子串** | **摘 ra0 后 301s 不自愈**(soak-qa batchB L01 判 FAIL): 只要设备上有任何进程的 cmdline 提到 @B@wifi_up.sh@B@(演练 harness / rollback 脚本 / 包装 shell / 探针命令自己), 整个期间 ra0/rai0 判定被整段跳过。现场演示 @B@sh -c "echo marker-wifi_up.sh; pgrep -f ..."@B@ -> 命中 2 个 | cfg_heal v1.3: 拆掉子串闸门, 只保留精确判据 @B@svc_our_hostapd@B@(我方 hostapd 不在=重启窗口才让路); 实测摘 ra0 端到端 8.5s |
 
 ### 10.2 三条定律
 
@@ -405,6 +406,15 @@ dropbear(每个 SSH 会话一个)、ccmni(多 PDN 并存, 还有僵尸口)。
 进程名/命令行**子串**匹配会被"提及者"骗: 注入脚本、`grep`、`tail -f`、`sh -c` 包装、测试自身。
 本项目的守护都是 `sh /data/gw/<x>.sh` 形态, 这条路径会出现在无数无关 cmdline 里。
 **判据必须做 argv token 精确比较(或锚定正则), 只认"argv 里真的以该脚本为执行体"的进程。**
+
+本定律现有 **三个实证**, 全部造成过真实后果:
+1. `svc_lib.alive()` 回退分支 → 真进程已死 153s 而 watchdog 连报正常(案例 ①);
+2. selftest 用 `pgrep -f` 数守护 → 检查命令自身被算进去, `boot_gate:2` 假红(案例 ②);
+3. `cfg_heal` 的 `pgrep -f 'wifi_up[.]sh'` 让步闸门 → **摘 ra0 后 301s 不自愈**(案例 ④)。
+
+> **`pgrep -f` / `pidof` 在本项目属高危原语**。用之前先问三句:
+> ① 匹配的是**执行体**还是**任何提及**? ② 角色是否**多实例**? ③ 观测者(自己/grep/包装脚本)会不会被算进去?
+> 三问有一个答不上, 就不要用它做**修复决策**(可以用于"让步/告警"这类低风险分支, 且必须有界)。
 
 **定律三 · 观测者污染**
 判据自己也会出现在被观测的集合里(selftest 自匹配、`grep` 自己的命令行、包装脚本、注入 harness)。

@@ -150,3 +150,15 @@ echo $ORIG_O > /proc/sys/kernel/panic_on_oops  ; cat …
 3. 与 §12.2（boot 代次）配套：**"哪个 boot + 哪个二进制"** 必须能唯一确定一份数据。
 
 **触发本次新增的实例**：`uprot.ko` 先报 187,664 B / `9fc7cca…`，后更正为 **187,656 B / `d3f0dd70505f9405cf99bf51d569b164`**（改格式串之前的构建被误引）。差 8 字节本身无害，但**如果在上机后才发生这种更正，数据就无法归属到具体二进制**。
+
+### 12.3 三类重启必须分开记（2026-11-01 新增）
+| 类型 | 判据 | 本会话实例 |
+|---|---|---|
+| **panic 型** | pstore 里有 Oops/BUG + `Kernel panic` | uwhook（IABT）、pte_redirect（bad page → panic_on_taint） |
+| **hang → watchdog 型** | pstore 里**无 Oops**，末尾是 `healthdog: heartbeat stale >90s → EMERGENCY RESTART` | uprot `ro` on nerepair 栈页 |
+| 冷复位/断电型 | pstore 为空、`uptime` 归零、无 panic 记录 | （本会话未确认到） |
+**报表要求**：每次重启必须写"类型 + 证据文件 + md5"，并更新 boot 代次；**hang 型不能记成 panic 型**（两者根因完全不同）。
+
+### 12.4 实验靶子的禁忌（2026-11-01 新增，Lead 裁定）
+**禁止把 `nerepair`（或任何 ptrace 监督者）的 mm 当成 `ro`/`pte_redirect`/`uprot` 的实验对象**——它的 mm 与 ptrace 路径竞争，加写锁极易挂死（表现为 hang→watchdog 重启，不是 panic，最难诊断）。
+靶子选：**无 ptrace、无 mmap_write_lock 竞争的阻塞普通 daemon**（dnsmasq 类），或**让 victim 自己 mprotect**（rovictim2 式，最干净）。

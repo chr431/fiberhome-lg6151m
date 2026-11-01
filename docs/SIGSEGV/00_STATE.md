@@ -61,7 +61,7 @@
 |---|---|---|---|
 | C-006 | 0x780 暂存槽 vs ap2 是两个目标地址；71/32 的物理含义 | 暂存槽只活 ~10 条指令；固定写 ap2 产生不了 A0B2 | **vsurv5**：手写 va_copy 到不同暂存偏移；A0B2 跟暂存槽走/消失则 B-1 成立 |
 | C-009 | sh.core 的“bystander”是否安全 | sh.core 是装置 shell；记录两个零字可把指针槽清零 | 降 E1；补良性正对照 |
-| C-013/C-034 | 传输是 uaccess 还是 GUP-DMA | **判决 PA/DMA（E2，C-145）**；页级 kprobe 被 CONFIG_KPROBES=n 阻断（C-144） | 升 E3：重编内核开 KPROBES，或用户态 remap/RO 实验 |
+| C-013/C-034 | 传输是 uaccess 还是 GUP-DMA | **旧判决「PA/DMA（E2，C-145）」已撤回**（C-171/C-176 之后 transport 未定）；页级 kprobe 被 CONFIG_KPROBES=n 阻断（C-144） | 判决实验见 11_TRANSPORT_SCORECARD §8（uprot / rovictim2 路线） |
 | C-025 | 自然 NE 中记录家族占比 | **改判 2026-11-01**：自然 NE `.stack` **4/4 含同族记录**（C-142）；健康栈 **2/12** 为基线（C-173）⇒ 占比须按同一 strict 判据重扫；canary 82/112 验证探测器 | 分层重扫三套语料；不要用 canary 外推 |
 | C-026/C-038 | GUP/stale 用户指针 | 内核有完整 zerocopy 栈；模块 0 GUP 导入；驱动 dma_map_page | 查 mtk_warp/mt_wifi 的 skb frag/zerocopy；ref/use-after-unpin |
 | C-035 | cth_cfu 正对照 Oops/重启 | 一次未复现；3 个候选机制 | 修 cth（递归守卫、去 dump_stack、默认关 c2u）后再跑 |
@@ -112,7 +112,7 @@
 - **free_dma_tx_pkt（0x1bfc）**：dma_unmap_page_attrs → __dev_kfree_skb_any；先 unmap 再 free，但**不清 fdesc/ring，也不等硬件完成**。这是运行期 TX completion 的剩余 stale-PA 窗口。
 - **RX token**：wed_release_rx_token（0x22c0）是 4 指令 stub；wed_acquire_rx_token（0x224c）调回调；RX refill 仍未闭合。
 - **GUP/zerocopy 否定**：mtk_warp/mt_wifi/mtk_hwifi 0 个 GUP/pin/iov_iter/skb_zcopy；5 个 dma_map_page_attrs 全是内核 kaddr 且显式拒绝 vmalloc。
-- **形状**：ip 的 .bss 填充是 17 个 16B {A,0}，与 17 个 WED TXD 对齐；32B 记录 = 两条相邻 16B TXD；txdmad DW0..DW3 的位域仍待 dump_txinfo 读出。
+- **形状（历史，已作废）**：ip 的 .bss 填充是 17 个 16B {A,0}（与 17 个 WED TXD 对齐，这条观察保留）；**"32B 记录 = 两条相邻 16B TXD"已被证伪**（C-138→X，见 VERDICT v2 §3）；txdmad 位域未再追。
 - **覆盖缺口**：fh_netlink_send_to_user 的实现模块不在 17 个 .ko/kallsyms 里。
 
 **当前判决**：H-GUP 否定（0.9）；H-TOUSER 否定（0.95，warp 无 copy_to_user）；H-STALE 仍活（0.6），落点是 free_dma_tx_pkt/运行期 TX completion，而不是 reset 路径。下一步：P-C（RX 缓冲页释放+填毒+记录 PA）判决，P-B 补 free_dma_tx_pkt 的调用者（ops 结构），P-D 找缺失的 FiberHome 模块。
@@ -132,7 +132,7 @@
 → 正确口径：**该路径在本负载下未被激活，因此 A/B 的"无变化"是门控惰性，不构成对该路径的证伪**。
 （"WED tuple 路径不是写入者"这句话**不可**再作为结论引用。）
 
-**关键数字**（4× vsurv4 canary，按 WED TX 包归一）
+**关键数字**（历史记录：4× vsurv4 canary，按 WED TX 包归一；**该速率口径已作废**，见 C-166）
 - A 臂（TRUE）：456 命中 / 20.3 min / 300,152 TX 包 = **1.519 命中/千包**
 - B 臂（FALSE）：246 命中 / 8.1 min / 176,990 TX 包 = **1.390 命中/千包**
 - 比值 **0.915（95% CI 0.783–1.068）**；吞吐 24.6→36.4 MB/min（无下降）、loadavg 12.63→12.50（无变化）
@@ -143,7 +143,7 @@
 `warp_wlan_tx`、0x8bc `cbz w0` → 0 则走 `ops->tx` 软件回退。**门控是惰性的可能原因**：
 `warp_wlan_tx` 还有第一道门 `wifi_hw_tx_allow`（mt_wifi 回调），本次未控制。
 
-**副产物（测量学）**：canary 命中率 **1.3–1.5 次/千个 WED TX 包、20–35 次/min**（4 实例），
+**副产物（测量学，已作废）**：canary 命中率 **1.3–1.5 次/千个 WED TX 包、20–35 次/min**（4 实例）——**该"每千包"口径已被 C-166 撤回**，仅存"同会话内约 20–35 次/min"这一观察；
 B 臂 8 min 即 246 命中（P(0)=e^-246）→ **后续机制 A/B 只需 5–10 min/臂**；
 自然 NE 仍必须 ≥6 h（**注意：2026-11-01 起"自然进程≈0"已被推翻**——4/4 自然 NE `.stack` 含同族记录（C-142 改判）；速率仍不可互推，但"家族是否存在于自然进程"这一问已答"是"）。
 
@@ -193,7 +193,7 @@ B 臂 8 min 即 246 命中（P(0)=e^-246）→ **后续机制 A/B 只需 5–10 
 | C-159 | **流量形态无关**：RX 包数跨 1366× 命中率恒定；canary 重启与 eth0 环重置均无响应 | 1.2–2.4/min 恒定；重启 1.0 vs 2.75/min；重置 4.6→4.2/千包 |
 
 **测量边界（重要）**：canary 命中率跨会话**不可比**（同一批新 canary 差 19 倍，1.0 vs 19/min）。
-「1.3 命中/千包」只在**同一会话内**有效。详见 [10_MEASUREMENT_PROTOCOL.md](10_MEASUREMENT_PROTOCOL.md)。
+「1.3 命中/千包」**已撤回**（C-166：单窗未复现 + 速率律被 09 结果 6 证伪）；它最多只能当**那次会话内的经验斜率**，详见 [10_MEASUREMENT_PROTOCOL.md](10_MEASUREMENT_PROTOCOL.md) 与 [11_TRANSPORT_SCORECARD.md](11_TRANSPORT_SCORECARD.md)。
 
 **未排除方向**：慢变设备状态（页池组成 / stale 描述符存量）。建议下一轮做 4–6 h 长时程协变量记录（每 5 min）。
 

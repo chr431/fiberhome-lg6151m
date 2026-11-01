@@ -330,11 +330,15 @@ run_audit() {
         if [ -s "$DRILLF" ]; then
             _dn=$(wc -l < "$DRILLF" 2>/dev/null); _dn=$(num0 "$_dn")
         fi
+        _dn=$(awk -F'\t' 'NF>=5 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/' "$DRILLF" 2>/dev/null | wc -l); _dn=$(num0 "$_dn")
         echo "DRILLS windows=$_dn rows_tagged=$IL_DRILLROWS"
         if [ "$_dn" -gt 0 ]; then
+            # 统一窗口判据（Lead 2026-11-01 v2）：NF>=5 && start/end 都是纯数字；
+            # 空行 / CR 残片 / 碎片行一律跳过 —— 否则会把写坏的文件读成"一堆未闭合窗口"。
             while IFS='	' read -r _ds _de _dk _dt _do _dn2; do
-                [ -n "$_ds" ] || continue
-                case "$_de" in ''|*[!0-9]*) _de=0 ;; esac
+                case "$_ds" in ''|*[!0-9]*) continue ;; esac
+                case "$_de" in ''|*[!0-9]*) continue ;; esac
+                [ -n "$_dk" ] || continue
                 _flag=""
                 [ "$_de" = 0 ] && _flag="OPEN_WINDOW"
                 echo "  drill $_ds..$_de kind=$_dk target=$_dt owner=$_do $_flag"

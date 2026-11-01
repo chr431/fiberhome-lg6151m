@@ -202,9 +202,13 @@ san_comp() {
 IL_DRILLS=""
 # 只装载"近 2 天内仍有效"的窗口（演练窗口天然短命），并对总量封顶 —— 否则每次
 # emit 都要遍历全部历史窗口，回填期会把 5min tick 拖成分钟级。
+# 统一窗口判据（Lead 2026-11-01 v2，全项目一致）：
+#   NF>=5 && $1 纯数字 && $2 纯数字；空行 / CR 残片 / 碎片行一律跳过，**绝不当窗口**。
+#   实弹：drills.tsv 被写坏后第 1 行是 CR 残片，旧的 NF>=4 + $2+0==0 会把它当成
+#   "未闭合窗口 0..∞"，于是每一行都被判成演练内（集合比目标大）。
 load_drills() {
     IL_DRILLS=$(awk -F'\t' -v n="$NOW" '
-        NF>=4 {
+        NF>=5 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ {
             s=$1+0; e=$2+0; if (e==0) e=9999999999
             if (e < n-172800) next
             printf "%s:%s:%s:%s ", s, e, $3, $5
@@ -956,7 +960,7 @@ reannotate() { # $1=since $2=apply(1|0)
     [ "$_since" -gt 0 ] || { echo "reannotate: need --since <epoch>"; return 2; }
     # 只装载 end >= since 的窗口（含 end=0 未闭合 → 视作到 now）
     _wl=$(awk -F'\t' -v n="$NOW" -v s="$_since" '
-        NF>=4 {
+        NF>=5 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ {
             e=$2+0; if (e==0) e=9999999999
             if (e < s) next
             printf "%s:%s:%s:%s ", $1+0, e, $3, $5
@@ -1131,7 +1135,7 @@ write_status() {
         echo "open_episodes=$_open"
         echo "data_free_kb=$IL_FREE"
         echo "drill_windows=$(printf '%s' "$IL_DRILLS" | wc -w | tr -d ' ')"
-        echo "drill_open=$(awk -F'\t' 'NF>=2 && $2+0==0' "$DRILLF" 2>/dev/null | wc -l | tr -d ' ')"
+        echo "drill_open=$(awk -F'\t' 'NF>=5 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ && $2+0==0' "$DRILLF" 2>/dev/null | wc -l | tr -d ' ')"
         echo "ttl_sev1=$TTL_SEV1"
         echo "ttl_sev2=$TTL_SEV2"
         echo "ttl_sev3=$TTL_SEV3"
@@ -1182,7 +1186,47 @@ selftest() {
     echo "incident_ledger selftest cases=$_n failures=$_bad"
     [ "$_bad" -eq 0 ] || return 1
     selftest_ne || return 1
+    selftest_drill || return 1
     return 0
+}
+
+# drills.tsv 解析单测（Lead 2026-11-01 v2 要求）：空行/CR 残片/4 列碎片/非数字起点
+# 一律**不得**被当成窗口；合法窗口（含 end=0 未闭合）必须被正确识别。
+selftest_drill() {
+    _sd=/tmp/il_drill_selftest.$$
+    rm -rf "$_sd"; mkdir -p "$_sd"
+    _save_drillf=$DRILLF
+    DRILLF=$_sd/drills.tsv
+    {
+        printf '1793468500\t1793468700\tdrill-manual\tX\tme\tclosed\n'
+        printf '1793469000\t0\tdrill-manual\tY\tme\topen\n'
+        printf '\n'
+        printf '\r\n'
+        printf '1793468000\t1793468100\tfrag\tX\n'
+        printf 'abc\t1793468100\tdrill-manual\tZ\tme\tbad\n'
+    } > "$DRILLF"
+    IL_DRILLS=""
+    load_drills
+    _nw=$(printf '%s' "$IL_DRILLS" | wc -w); _nw=$(num0 "$_nw")
+    _t1=$(drill_tag 1793468600 "d")
+    _t2=$(drill_tag 1793468050 "d")
+    _t3=$(drill_tag 1793469500 "d")
+    _t4=$(drill_tag 1793468800 "d")
+    _op=$(awk -F'\t' 'NF>=5 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ && $2+0==0' "$DRILLF" | wc -l)
+    _fail=0
+    [ "$_nw" = 2 ] || { echo "FAIL drill_parse: windows=$_nw 应为 2（CR/空行/4列碎片/非数字起点都要跳过）"; _fail=1; }
+    [ "$_op" = 1 ] || { echo "FAIL drill_parse: open=$_op 应为 1（只认合法的 end=0 行）"; _fail=1; }
+    case "$_t1" in "[drill]"*) ;; *) echo "FAIL drill_parse: 闭合窗口内的行未被标记"; _fail=1 ;; esac
+    case "$_t2" in "[drill]"*) echo "FAIL drill_parse: 4 列碎片行被当成窗口（应跳过）"; _fail=1 ;; esac
+    case "$_t3" in "[drill]"*) ;; *) echo "FAIL drill_parse: 未闭合窗口(0)内的行未被标记"; _fail=1 ;; esac
+    case "$_t4" in "[drill]"*) echo "FAIL drill_parse: 窗口外的行被误标"; _fail=1 ;; esac
+    DRILLF=$_save_drillf
+    rm -rf "$_sd"
+    if [ "$_fail" = 0 ]; then
+        echo "incident_ledger selftest_drill: 6 形态(PASS) windows=2 open=1 窗口内标记/碎片不误判"
+        return 0
+    fi
+    return 1
 }
 
 # NE 台账形态单测（R2-D）：构造 1/2/6/7/8/9 列 + 首列非数字，断言

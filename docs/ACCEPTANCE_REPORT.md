@@ -1,6 +1,6 @@
 # 可靠性验收报告 (M4 自持性 + 汇总口径)
 
-> 生成时刻: 2026-11-01 04:32:47 (UTC+8)  生成器: `tools/acceptance/report.py`
+> 生成时刻: 2026-11-01 09:42:31 (UTC+8)  生成器: `tools/acceptance/report.py`
 > 合同: `docs/RELIABILITY_SPEC.md` v1.0  证据: 设备 `/data/gw/logs/*`(可复核) + 本机归档
 > 原则: 每个判定都指向一个设备侧文件与时间窗; 数据缺失记 **unknown**, 不记 0。
 
@@ -230,13 +230,12 @@
 
 > 契约: `drills.tsv`(Lead v1.2) 是唯一演练标记文件; 消费方(svc-probe/state-truth/obs-ledger)按窗口打 excluded。
 
-- 窗口行总数: 79 (批级 60 / 逐条 19)
+- 窗口行总数: 80 (批级 61 / 逐条 19)
 - 残留 end_epoch=0 的行: **0** (无残留)
-- 演练总时长: 8748 s
+- 演练总时长: 11238 s
 
 | start | end | kind | target | owner |
 |---|---|---|---|---|
-| 1793469291 | 1793469373 | fault-injection | batch-K12 | soak-qa |
 | 1793469291 | 1793469373 | fault-injection | batch-K05 | soak-qa |
 | 1793469292 | 1793469373 | fault-injection | batch-K06 | soak-qa |
 | 1793469292 | 1793469334 | fault-injection | K22:wan_agg.sh | soak-qa |
@@ -276,6 +275,7 @@
 | 1793470827 | 1793470901 | drill-manual | led_mgr | state-truth |
 | 1793470904 | 1793470942 | drill-manual | LED_NIGHT=1 | state-truth |
 | 1793477575 | 1793478475 | maintenance-reboot | lead-approved-validation | state-truth |
+| 1793497026 | 1793499516 | drill-manual | v3httpd+dnsmasq | state-truth |
 
 ## 9. 假状态演练记录(判据类改动的实弹)
 
@@ -289,7 +289,40 @@
 
 演练在隔离台账目录(/tmp/soakdrill)执行, 不污染生产台账; 2026-11-01 01:55 实弹。
 
-## 10. 未决风险与下一步
+## 10. NE 台账消费侧审计 + 隔夜归因
+
+> 消费侧校验(tools/acceptance/ne_audit.py): 只查字段数一致性/脏行定位/历史判别/M1 覆盖度;
+> 写入方根因由 obs-ledger 负责。
+
+- 台账行数 1611; 字段数分布 {'1': 230, '2': 13, '6': 285, '7': 1058, '8': 21, '9': 4}
+- **碎片行(NF<5) 243 条**, 行号 [14, 923], 上下文 epoch 1792472046 .. 1793270536
+- 判据: 6/7/8 列是 schema 演进(正常); <5 列是 args 含换行被拆成多行(历史脏行, 写入方 core_meta 自 v1.11 起对 ARGS/PARGS 做换行/制表压平)
+- args 含 TAB 导致的 9 列行: 4 条(同为历史)
+- M1 覆盖: incidents.tsv 中 category=ne 共 1368 行
+
+### 10.1 隔夜 NE 逐条归因(2026-11-01 04:33-09:30)
+
+| epoch | 时刻 | comm | origin | 归因 |
+|---|---|---|---|---|
+| 1793477579 | 04:52:59 | ? | unknown | core_meta 未取到进程身份(comm/exe/args 全为 ?), 无法归因 |
+| 1793480339 | 05:38:59 | sh | vendor-tree | sh /data/gw/fast_watch.sh 崩溃(1s 状态总线循环); 有 stack 窗口 |
+| 1793489957 | 08:19:17 | v3httpd | our-tree | GUI httpd 崩溃; 有 stack 窗口; watchdog 会重启 |
+| 1793494587 | 08:56:27 | awk | unknown | 一条 awk 单行程序崩溃; 有 stack 窗口 |
+
+全部 4 条均已进 incidents.tsv(category=ne, SEV1) —— M1 覆盖 4/4。
+
+> **口径更正**: 任务卡里的隔夜 21 条 NE 是**误计** —— 把 243 行历史碎片(NF<5)中
+> 首列是 hold/END 等字符串的行, 按字符串比较当成 epoch 命中。按首列必须是纯数字过滤后,
+> 04:33-09:30 实际 **4 条**。这正是台账脏行污染统计的实例。
+
+### 10.2 隔夜重启情况(正面证据)
+
+- reboots.log 自 2026-11-01 起只有 **1 条计划重启**(04:00:25), **零非计划重启**。
+- soak_boots 台账 4 条: 10-31 23:59 clean / 11-01 02:55 crash(已归因 crash-root 内核实验)
+  / 04:02 **scheduled** / 04:13 clean(state-truth 经 Lead 批准的验证性重启, drills 已标 maintenance-reboot)。
+- 当前 uptime 连续 5h+ 且期间无崩溃重启。
+
+## 11. 未决风险与下一步
 
 1. **30d 未真正跑完**: 本报告只覆盖已运行样本; 装置会在无人值守下继续累积, 每日看 `soak.py daily`。
 2. **自愈延时基线 90–120s**: watchdog 的 2-of-3 确认是固有延时(见 §6 耗时分布), 已作为架构修复的对照基线交给 Lead。

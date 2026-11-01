@@ -42,6 +42,7 @@ tools/acceptance/inject.py	1.0	tool	-	M4 soak 轮: R4.4 故障注入 campaign �
 tools/acceptance/boot_audit.py	1.0	tool	-	M4 soak 轮: 重启归因审计 —— pstore console-ramoops(每次启动时保存上一 boot console, 文件名带本次 boot_id 精确对应) + reboots.log(计划触发) + healthdog.armlog(达 stable 的 boot) 三源交叉, 输出 scheduled/clean/sysrq/crash/unknown 五分类逐次表; 判不出写 unknown 不猜
 tools/acceptance/soak.py	1.0	tool	-	M4 soak 轮: 30d soak 装置 PC 侧(pull 归档到 _local/evidence/soak / trend 斜率 / alert 漂移判定退出码 / daily 日报); 缺失列按未知处理不写 0
 tools/acceptance/report.py	1.0	tool	-	M4 soak 轮: 验收报告生成器 —— 聚合 M1 incidents + M3 svc_daily + M4 soak/inject/drills + boot_audit, 生成 docs/ACCEPTANCE_REPORT.md(每项 PASS/FAIL/UNKNOWN + 证据路径 + 时间窗 + 已排除演练窗口单列)
+tools/acceptance/ne_audit.py	1.0	tool	-	R2-C: NE 台账消费侧数据质量审计 —— 字段数分布/碎片行(NF<5)定位与历史判别/args 含 TAB 的 9 列行/M1(incidents.tsv category=ne)覆盖度交叉核对; 只做消费侧, 写入方根因归 obs-ledger; 实弹: 1611 行中 243 行碎片全部为历史(上下文 epoch 2026-10-20..10-29), 隔夜 NE 实为 4 条而非 21 条
 tools/serial_server.py	1.8	tool	-	v1.8(2026-10-31 质量轮): watcher 的 pump/lost 判定改全程持锁(原 acquire 即 release 后锁外清 buf, 与 run() 输出收集交错偷走 marker=误报 TIMEOUT 整段重发); 常驻串口控制台守护(:7717, 唯一登录驱动; v1.7凭证外置_local/secrets)
 tools/serial_cmd.py	1.3	tool	-	串口命令瘦客户端(marker输出捕获; v1.3示例路径更新)
 tools/lk_flip2.py	1.1	tool	-	LK 一键翻槽(a|b, misc[2060]字节)

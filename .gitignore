@@ -7,3 +7,4 @@ install/kit.tar.gz
 install/MANIFEST.md5
 lk_flash.log
 lk_flash_serial.raw
+_drill_backup/labkernel/*.img

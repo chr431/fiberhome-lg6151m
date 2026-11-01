@@ -42,6 +42,8 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `README.md` | **v1.1** | doc | `-` | 仓库总览与快速上手 |
 | `docs/ARCHITECTURE.md` | **v1.2** | doc | `-` | 架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针); v1.2: batch3 版本表刷新 |
 | `docs/GUI_TERMINOLOGY.md` | **v1.2** | doc | `-` | GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git |
+| `_drill_backup/labkernel/boot-lab2-signed.img` | **v1.0** | image | `c43db542a2a96f4054bd910d00268430` | labkernel 32MiB 签名 boot 镜像; v2 实战缺陷修复版(console/shell/netup); 构建自检全绿; 见 docs/LABKERNEL.md runbook |
+| `_drill_backup/labkernel/boot-lab3-signed.img` | **v1.0** | image | `217ccd57c64cfe46e03e57d7a1a15c9f` | labkernel 32MiB 签名 boot 镜像; v3 资产版(热管理/看门狗/TRYA 自清/boot card/模块储备); 构建自检全绿; 见 docs/LABKERNEL.md runbook |
 | `gw/agg_pins.default` | **v1.0** | manifest | `/data/gw/agg_pins.default` | MAC钉死表出厂缺省基线(只读, 不含任何MAC; 设备侧活文件 agg_pins.conf 由 wan_agg 缺省才写地播种, 个人MAC不入库) |
 | `gw/avail_sampler.sh` | **v1.16** | manifest | `/data/gw/avail_sampler.sh` | v1.16(2026-11-01 M2 状态真值总线轮, 实测缺陷根治): ⑤ 秒级边缘收割改由 gw/state_edge_lib.sh 单一契约实现(字段位置+id常量+解析函数) —— 原 awk 硬编码 ts=$1/id=$3/ev=$4, 而生产方日志是 epoch+日期+时刻+id+ev, 映射恒 NOMATCH(实测 8 行台账 6 行 NOMATCH), 防假绿机制静默失效; 坏行计数落 logs/edge_parse_bad.log; v1.15(实弹): 边缘收割 awk 映射改 if/else 链 — busybox awk 表达式内反斜杠续行=Unexpected token(两行复现实锤), 三元续行版整块静默失败; v1.14(判据审计轮): +秒级边缘收割(avail_watch) — 窗口 down 边缘>0 组件至少 deg(快照假绿根治), down/up 边缘对合成事件表行(带精确秒时长), SESS 保留位启用为边缘游标; v1.13(内核看门狗轮): sys.kernel 重定义 — 标签内核/修复栈→内核看门狗, 固定 off 悬空占位改 healthdog 三层判(模块/守护/hb), KEYS_OF 接 healthdog 键; id 不改保台账连续; v1.12(时间源统一轮): FRESH 的 cycle 键改 uptime 比较(配 watchdog v1.40); 组件可用性采样器; v1.5(假红实弹): NE 死者退出置态条件只做 cause 注记(11:03 残留 watchdog 实例被 NE 收走, 主实例全程健康却记 10min 退化; 真实死亡由 FAIL 键/重启事件窗口兜住, 覆盖无缺口; 证伪演练=selftest t_avail_ne_drill); v1.4: grep -c case 守卫; v1.3: metrics 活性读台账 epoch; v1.2(防假绿): 窗口迁移+结果组合+活性+WiFi 信号+usb off; 判据分级审计见 AVAILABILITY_DESIGN §8; v1.6(SIGSEGV Phase 1): s:kernel 见 /tmp/fixstack.disabled 判 off(不出事件), 修复栈停用不再假降级; 移除 core_trap 死映射; v1.7(SIGSEGV Phase 2 退役): 移除旧修复栈依赖(dpquar/dpclamp lsmod 与 /proc 判据、sweeps/SW_STUCK), s:kernel 固定 off; v1.8(LAN v6): s:radvd6 四态化(off=仅 V6LAN=0; deg=无 v6 上行; down=该在没在), 事实源 /tmp/v6_state; v1.9(时钟轮): pre-sync 保护(/tmp/ntp_synced 缺失时只刷实况快照, 不写小时直方图/日条/事件表 — 修 24 行 2026090910 假小时行); v1.10(断网轮): +sys.netlock 组件(锁被长持记 deg — failover 有紧急单笔通道与看门狗轮转兜底); v1.11: +sys.nerepair(pid+/tmp/nerepair.hb 新鲜度) |
 | `gw/bin/busybox` | **v1.1** | manifest | `/data/gw/bin/busybox` | 静态 aarch64 busybox 1.36.1(Alpine busybox-static 1.36.1-r31, 与厂商同版本); P2 崩溃家族工具链静态化；⟦收口 §22⟧ 工具链自主权载体，对崩溃零改善(§16.7/§22.1); v1.1(SIGSEGV §18): 用 musl-cross 在 WSL 重建并链接 va_list 闸门 v2(build: make CROSS_COMPILE=aarch64-linux-musl- + trylink 补丁; 备份 busybox.pre-vfguard) |
@@ -183,6 +185,39 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/identify2.py` | **v1.0** | tool | `-` | 残留终验取证器(user_data清单/p26纯净性挂载验证/proc-net快照) |
 | `tools/identify_fw.py` | **v1.0** | tool | `-` | 只读固件身份取证器(release/cmdline/v4标记/挂载表; 前置空格防tty首字符丢失) |
 | `tools/incident_audit.py` | **v1.0** | tool | `-` | PC 侧独立留存审计(M1/R1.4): 经 SSH 取回 incidents.tsv/seal/status 原始字节, 本地重算 md5/行数/seq 连续性/各 tier 最老龄并与设备侧 retention_audit 交叉核对, 报告落 _local/evidence/; 丢行或篡改 exit 1; --selftest 本地合成用例(不连设备) |
+| `tools/labkernel/README.md` | **v1.0** | tool | `-` | 套件文档: 环境记录/上游与载荷 md5 钉死/从零准备/一键构建/自检说明 |
+| `tools/labkernel/REPOMETA.txt` | **v1.0** | tool | `-` | 供应链钉死: 基座仓 HEAD/tarball sha256/内核 sha256/stock dtb md5 |
+| `tools/labkernel/config/config-lab2-6.18.44` | **v1.0** | tool | `-` | v2 完整内核 config(与 C1/C2 逐字节一致=零漂移证明件) |
+| `tools/labkernel/config/config-lab3-6.18.44` | **v1.0** | tool | `-` | v3 完整内核 config(=v2+34 新增: LVTS 热管理+cfg80211/mac80211/mt76 模块栈) |
+| `tools/labkernel/dts/mt6990-fiberhome-lg6151m.dts` | **v1.0** | tool | `-` | lg6151m 板级 DTS(仓实机骨架+身份/chosen 替换; 与 stock DTB 逐节点互证) |
+| `tools/labkernel/scripts/assemble_boot.sh` | **v1.0** | tool | `-` | C1/C2 组包签名(Android boot v2+MTK mt2737 签名链+cert1 校验) |
+| `tools/labkernel/scripts/build_kernel.sh` | **v1.0** | tool | `-` | C1 基础构建(initramfs 装载+INITRAMFS_SOURCE 接线+Image/dtbs) |
+| `tools/labkernel/scripts/build_labkernel.sh` | **v1.0** | tool | `-` | labkernel 一键重建入口(WSL 备树内跑 v3 全管线: config 增量->Image/模块->组包->签名->自检电池) |
+| `tools/labkernel/scripts/c2_repack.sh` | **v1.0** | tool | `-` | C2 台架会话重打包(scanary 补进 initramfs 的先例脚本) |
+| `tools/labkernel/scripts/c2_selfcheck.py` | **v1.0** | tool | `-` | C1 自检电池 27 项(initramfs 内容/嵌入链/boot 头/签名) |
+| `tools/labkernel/scripts/dl_kernel.sh` | **v1.0** | tool | `-` | 内核 tarball 三源竞速下载(sha256 钉死校验) |
+| `tools/labkernel/scripts/export_artifacts.sh` | **v1.0** | tool | `-` | C1 产物导出(镜像/符号/配置+vmlinux.zst+哈希台账) |
+| `tools/labkernel/scripts/get_py310.sh` | **v1.0** | tool | `-` | uv 装 CPython 3.10.14(MTK 签名工具 .pyc 兼容) |
+| `tools/labkernel/scripts/initramfs_skel.sh` | **v1.0** | tool | `-` | initramfs 骨架构建(目录+busybox applets+/dev/console 节点+init+helpers; 载荷 md5 钉死见套件 README) |
+| `tools/labkernel/scripts/kjump.sh` | **v1.0** | tool | `-` | /bin/kjump: kexec 助手(内核侧就绪; 用户态 kexec 未内置时如实报缺) |
+| `tools/labkernel/scripts/lab_init.sh` | **v1.0** | tool | `-` | /init C1 版(自检+心跳+vsurv4) |
+| `tools/labkernel/scripts/lab_init_c2.sh` | **v1.0** | tool | `-` | /init C2 版(+scanary w1 预注册自启) |
+| `tools/labkernel/scripts/lab_init_v2.sh` | **v1.0** | tool | `-` | /init v2(F1 console 修复+F2 观测窗后交互 shell+F3 netup) |
+| `tools/labkernel/scripts/lab_init_v3.sh` | **v1.0** | tool | `-` | /init v3(+A1 热管理心跳带温告警保护关机+A2 看门狗喂狗+A3 TRY_A 自清+A4 boot card; shell/netup 承 v2) |
+| `tools/labkernel/scripts/make_lg6151m_dts.sh` | **v1.0** | tool | `-` | lg6151m DTS 生成(仓 dts 骨架+板级身份/chosen 三处替换, python 断言唯一命中) |
+| `tools/labkernel/scripts/netup.sh` | **v1.0** | tool | `-` | /bin/netup: eth* 零配置 169.254.9.n/16 应急传输通道 |
+| `tools/labkernel/scripts/prep_tree.sh` | **v1.0** | tool | `-` | 从零准备: 解包+535 补丁+files overlay+lg6151m DTS 入树+config 三层合并 |
+| `tools/labkernel/scripts/reconfig.sh` | **v1.0** | tool | `-` | config 组装(观测 26 符号+安全阀+initramfs; olddefconfig 后 26 项核对) |
+| `tools/labkernel/scripts/romount.sh` | **v1.0** | tool | `-` | /bin/romount: 分区只读挂载助手(squashfs/ext4 自动尝试, 免网络取证) |
+| `tools/labkernel/scripts/scanary_report.sh` | **v1.0** | tool | `-` | /bin/scanary_report: 观测日志 on-device 汇总(busybox awk) |
+| `tools/labkernel/scripts/v2_assemble_boot.sh` | **v1.0** | tool | `-` | v2 组包签名(boot-lab2 产物名) |
+| `tools/labkernel/scripts/v2_export.sh` | **v1.0** | tool | `-` | v2 产物导出+SUMS 再生 |
+| `tools/labkernel/scripts/v2_repack.sh` | **v1.0** | tool | `-` | v2 重建(F1 cpio 设备节点+F2 init v2+F3 netup; config 零漂移门禁) |
+| `tools/labkernel/scripts/v2_selfcheck.py` | **v1.0** | tool | `-` | v2 电池(C1 29 项继承+F1 解包验证 console 节点+F2 shell 通路静态断言+F3 netup, 共 46 项) |
+| `tools/labkernel/scripts/v3_assemble_boot.sh` | **v1.0** | tool | `-` | v3 组包签名(boot-lab3 产物名) |
+| `tools/labkernel/scripts/v3_export.sh` | **v1.0** | tool | `-` | v3 产物导出+SUMS 再生(v1+v2+v3 全集) |
+| `tools/labkernel/scripts/v3_repack.sh` | **v1.0** | tool | `-` | v3 重建(A 热管理/看门狗/TRYA/boot card + B 模块只构建不加载; 26 观测符号冻结+config 只增不删门禁) |
+| `tools/labkernel/scripts/v3_selfcheck.py` | **v1.0** | tool | `-` | v3 电池(v2 46 项继承+A1/A2/A3/A4 标记+模块 ELF+不自动加载精确断言+26 符号 vs v2 逐项一致) |
 | `tools/leak_check.py` | **v2.4** | tool | `-` | v2.4(巡检轮): scan_tree 对 Windows 保留设备名(nul 等 shell 重定向残渣)免疫 — relpath ValueError 曾令门禁整崩(fail-open); v2.3(质量轮): 模式逐条编译校验(非法正则 exit 1 不再零命中放行)/LG_SECRETS_DIR 显式指定而缺失时 fail-closed; 敏感词零命中门禁; v2.2: --history 全量扫提交正文(%B, 原仅扫标题%s可漏检消息体); v2.1: 修复 PAT_PARTS NameError; 历史见git |
 | `tools/lgssh.py` | **v1.4** | tool | `-` | v1.4(dropbear 排查轮): connect() 指数退避重试(3次) — 设备侧 tcpdump 实证 20 路并发时 dropbear SYN-ACK 20/20 且 banner/kex 数据全部送达, RST 全发自 PC 本机代理栈(Mihomo TUN 类); 重试对该故障免疫, 指纹失配仍立即中止; SSH助手(env/_local/secrets凭证; run()命令通道); v1.3: 主机密钥指纹钉死PinPolicy(HOST_KEY_FP/LG_HOST_KEY_FP, 认证前校验, 审计P0-5) |
 | `tools/lk_eth1_resume.py` | **v1.1** | tool | `-` | eth1续链器(LK控制台接管: kcmdline已注入态恢复; 含misc回退现场抓取; 补登记) |

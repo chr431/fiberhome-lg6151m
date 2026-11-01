@@ -117,6 +117,12 @@ v1.7 **不查 `w3`、不查长度带**（加固见 §1.3）。
 | **v1.9.2** | 再加 `NEAR reason=insn`（量 V3 盲区规模） | `nerepair_v192.c/.patch`（49,376 B） | 与 dry-run 同批上 |
 | **v2.0（本轮成品）** | **新增路径 2：deref 型**（记录证据硬门槛）+ 按指令形态分类的 NEAR + `DREPAIR/WOULD_DREPAIR` 事件 + STAT `rep2/would2/dfhit` | `gw/src/nerepair.c` + `gw/bin/nerepair`（**52,216 B**，md5 `75e2942489d8c81c14d64691f0d12983`）+ diff `_local/work/crash-root/fix/nerepair_v2_vs_v17.diff`（569 行） | **本轮交付** |
 
+**构建注意（2026-11-01 17:39 定位，影响所有 .ko）**：本树同时暴露 `include/uapi/asm/stat.h`（guard `__ASM_GENERIC_STAT_H`）
+与 `arch/arm64/include/asm/stat.h`（guard `__ASM_STAT_H`），两者都在 `-I` 路径上时**任何模块编译**都会
+`redefinition of 'stat64'`。修法：编译命令加 **`-D__ASM_GENERIC_STAT_H`**（已写进
+`_local/work/crash-root/fix/{hookguard,pageguard}/build_*.sh`）。此前 pageguard"能编"只是 zig 缓存命中，
+**从新文件重编会失败** —— 复核方式：`cp pageguard.c /tmp/x.c && echo '//' >> /tmp/x.c` 再编译。
+
 **v2.0 的 host 证据（E2）**：`deref_test.c` 直接 `#include` 由 `sed` 从 `nerepair_v2.c` 抽出的判据函数（非拷贝），
 **17 项断言全通过**：指令分类 10 项（ldr/ldrb/ldrh/ldur 判 load；str/strb/add/FP 判非 load）、
 真实自然 NE 栈里按 q2 命中并定位到准确 VA、伪造地址/零地址/脏 w1/长度越界 4 项全拒。
@@ -558,3 +564,33 @@ LK 只用于「内核 panic 循环 / 根文件系统损坏 / bootctrl 掉槽」�
 | 内核 Oops/panic | 高 | 先落 `pstore` → 9.4(c) → 复盘；**不要**重复触发 |
 | 起不来（无 SSH、串口有字） | 高 | 9.5 LK 救砖 |
 | 起不来且串口无字 | 最高 | 断电 10 s 再上电；仍无字 → 硬件/供电问题，停止操作并上报 |
+### 9.7 slotdrop 模式（v2.1，默认关闭）—— 给 faultwatch 造一个必被写的目标
+
+> 为什么：faultwatch/dropwatch 跑在新起的受害进程上，而新进程 7 min 拿不到记录槽（第 6 轮证据）
+> ⇒ 窗口注定阴性。nerepair 自己的栈上有一个已被证明会被写的热槽（start_stack−0x3b0，600 s 内 369 种内容 ≈0.62 次/s）。
+
+**行为**：启动时看到 /tmp/nerepair.slotdrop（或收到 SIGUSR1）→ 独立线程扫描自己 [sp, start_stack)（8B 步进、strict 记录判据）
+→ 找到后打印 SLOTDROP va=0x… page=0x… start_stack=0x… → 每 200 ms 对该页 madvise(MADV_DONTNEED)；找不到则每 30 s 重试并打印 SLOTDROP NOSLOT。
+ptrace 主循环不受影响（独立线程）。
+
+**安全阀**：只丢严格高于主线程当前 sp 的页（g_main_sp 每轮主循环刷新），否则计 SKIP_LIVE 不动手。
+**信号重定义（v2.1 起）**：SIGUSR1 = 开 slotdrop；SIGUSR2 = 切换 dry-run（原 SIGUSR1 的语义已迁移）。
+
+**开启 / 关闭**（全部走 devop 持锁）
+
+```sh
+# 开
+python tools/devop.py --owner fixer --purpose 'slotdrop 开启' -- touch /tmp/nerepair.slotdrop
+python tools/devop.py --owner fixer --purpose 'slotdrop 热开' -- kill -USR1 $(pidof nerepair)
+# 关（删标记 + 重启；不重启则本进程仍继续丢页）
+python tools/devop.py --owner fixer --purpose 'slotdrop 关闭' -- rm -f /tmp/nerepair.slotdrop
+python tools/devop.py --owner fixer --purpose 'slotdrop 关闭重启' -- killall nerepair
+# 确认
+python tools/lgssh.py 'grep SLOTDROP /data/gw/logs/nerepair.log | tail -3; grep STAT /data/gw/logs/nerepair.log | tail -1'
+```
+
+**判据**：① SLOTDROP va=… 出现且 start_stack − va ≈ 0x3b0（历史值，不同构建可能差几百字节）；
+② STAT 里 sd=1/… 计数在涨；③ 与 faultwatch 联跑：把 faultwatch 的 lo/hi 设成该页 → 若写入者按 VA 写，必然在 faultwatch 里留下内核栈。
+
+**风险与回滚**：madvise 的是自己栈上 sp 之上的冷页；nerepair 若崩，launcher/watchdog 会拉起（覆盖暂时下降，属已知代价）。
+回滚 = 删标记 + killall nerepair（见上）。

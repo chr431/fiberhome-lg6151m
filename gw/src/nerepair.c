@@ -68,6 +68,8 @@
 #include <sys/uio.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/mman.h>
+#include <pthread.h>
 
 #ifndef __WALL
 #define __WALL 0x40000000
@@ -86,11 +88,12 @@
 #endif
 #define NT_PRSTATUS 1
 #define LOGPATH "/data/gw/logs/nerepair.log"
-#define NEREPAIR_VER "2.0"
+#define NEREPAIR_VER "2.1"
 
 struct regs64 { unsigned long regs[31]; unsigned long sp, pc, pstate; };
 static pid_t self_pid;
 static int logfd = -1;
+static pthread_mutex_t g_log_mu = PTHREAD_MUTEX_INITIALIZER;
 static unsigned long g_attached, g_segv, g_repaired, g_passed, g_suppressed, g_abuse;
 static unsigned long g_would, g_near, g_loop, g_near_insn;
 /* v2.0 counters: dereference-type path (see deref_attempt) */
@@ -201,8 +204,10 @@ static void logev(const char *ev, pid_t pid, const char *fmt, ...)
     if (m > (int)sizeof msg - 1 - n) m = (int)sizeof msg - 1 - n;
     n += m;
     msg[n++] = '\n';
+    pthread_mutex_lock(&g_log_mu);
     if (logfd >= 0) { ssize_t r = write(logfd, msg, n); (void)r; }
     rotate_log();
+    pthread_mutex_unlock(&g_log_mu);
 }
 /* v1.9.1: BIN line -- resolve each tracee's executable ONCE (path + dev/ino) and
  * log it.  Why: the 'pc' in WOULD_REPAIR/NEAR/REPAIR is a *user-space* PC, so an
@@ -353,6 +358,119 @@ static int record_probe(pid_t pid, struct regs64 *r, unsigned long fault)
     if (read_mem(pid, r->regs[2], w, 32) < 0)
         return 0;
     return shape_ok(w, fault);
+}
+
+/* ---------------------------------------------------------------- v2.1 slotdrop --
+ * Why: dropwatch/faultwatch can only catch a writer that actually arrives at the
+ * address it watches.  A freshly started victim process gets no record slot for
+ * minutes (round-6 evidence), so those windows are negative by construction.
+ * nerepair's OWN stack carries a known hot slot (start_stack-0x3b0, 369 distinct
+ * contents in 600 s ~= 0.62 writes/s) -- an address that is *proven* to be
+ * written.  Slotdrop keeps that page missing (MADV_DONTNEED every 200 ms) so the
+ * faultwatch hook on it has something to catch, and so the writer must re-take a
+ * page each time.
+ *
+ * Safety: only pages STRICTLY ABOVE the main thread's live sp are dropped
+ * (g_main_sp is refreshed every main-loop iteration).  A page that the main
+ * thread could be using is never touched; instead we count SKIP_LIVE.
+ * Off by default: enable with the marker file /tmp/nerepair.slotdrop or SIGUSR1.
+ * Disable: delete the marker and restart nerepair (killall nerepair; the launcher
+ * or watchdog starts it again).
+ */
+#define SD_PERIOD_US   200000UL     /* 200 ms between MADV_DONTNEED */
+#define SD_RETRY_S     30           /* retry interval when no slot is found */
+#define SD_LEN_MIN     0x400UL
+#define SD_LEN_MAX     0x20000UL
+
+static volatile sig_atomic_t g_slotdrop;    /* mode on/off */
+static volatile unsigned long g_main_sp;    /* refreshed by the main loop */
+static volatile int g_sd_stop;
+static pthread_t g_sd_tid;
+static int g_sd_started;
+static unsigned long g_sd_drops, g_sd_skips, g_sd_scans;
+
+/* strict family-record test on a buffer; returns the record VA or 0.
+ * Kept buffer-based so the host unit test can feed it a synthetic stack. */
+static unsigned long slot_scan_buf(const unsigned char *buf, size_t len, unsigned long base)
+{
+    size_t off;
+
+    for (off = 0; off + 32 <= len; off += 8) {
+        /* fixed-width on purpose: 'unsigned long' is 32-bit on the Windows build
+         * host (LLP64) but 64-bit on the aarch64 target, which would silently
+         * truncate the q-words in the host unit test. */
+        unsigned long long q0, q1, q2, q3;
+        unsigned int lo2, hi2;
+
+        memcpy(&q0, buf + off, 8);
+        memcpy(&q1, buf + off + 8, 8);
+        memcpy(&q2, buf + off + 16, 8);
+        memcpy(&q3, buf + off + 24, 8);
+        if (q1 != 0 || q3 != 0)                    continue;
+        if (!(q0 > 0 && q0 < (1ULL << 24)))        continue;   /* observed w0: 0x1c949..0x597004 */
+        lo2 = (unsigned int)(q2 & 0xFFFFFFFFULL);
+        hi2 = (unsigned int)(q2 >> 32);
+        if (!(lo2 >= SD_LEN_MIN && lo2 <= SD_LEN_MAX)) continue;
+        if (!hi2)                            continue;   /* needs the IP-ish half */
+        return base + (unsigned long)off;
+    }
+    return 0;
+}
+
+/* find [stack] bounds of this process */
+static int self_stack_bounds(unsigned long *lo, unsigned long *hi)
+{
+    FILE *f = fopen("/proc/self/maps", "r");
+    char line[256];
+
+    if (!f) return -1;
+    while (fgets(line, sizeof line, f)) {
+        unsigned long a, b;
+        if (strstr(line, "[stack]") && sscanf(line, "%lx-%lx", &a, &b) == 2) {
+            *lo = a; *hi = b; fclose(f); return 0;
+        }
+    }
+    fclose(f);
+    return -1;
+}
+
+static void *slotdrop_thread(void *arg)
+{
+    unsigned long lo = 0, hi = 0, slot = 0, page = 0;
+
+    (void)arg;
+    for (;;) {
+        if (g_sd_stop) return NULL;
+        if (!g_slotdrop) { sleep(1); continue; }
+        if (!hi && self_stack_bounds(&lo, &hi) < 0) { sleep(SD_RETRY_S); continue; }
+        if (!slot) {
+            unsigned long from = g_main_sp ? g_main_sp : lo;
+            unsigned long va;
+
+            if (from < lo) from = lo;
+            if (from >= hi) { sleep(SD_RETRY_S); continue; }
+            g_sd_scans++;
+            va = slot_scan_buf((const unsigned char *)from, (size_t)(hi - from), from);
+            if (!va) {
+                if (rate_ok_prio())
+                    logev("SLOTDROP", 0, "NOSLOT scan=[%#lx,%#lx) main_sp=%#lx", from, hi, g_main_sp);
+                sleep(SD_RETRY_S);
+                continue;
+            }
+            slot = va;
+            page = va & ~0xFFFUL;
+            if (rate_ok_prio())
+                logev("SLOTDROP", 0, "va=%#lx page=%#lx start_stack=%#lx", slot, page, hi);
+        }
+        if (page >= g_main_sp + 4096) {       /* never touch the live frame page */
+            madvise((void *)page, 4096, MADV_DONTNEED);
+            g_sd_drops++;
+        } else {
+            g_sd_skips++;
+        }
+        usleep(SD_PERIOD_US);
+    }
+    return NULL;
 }
 
 /* ------------------------------------------------------------------ v2.0 ----
@@ -688,17 +806,23 @@ static void write_hb(void)
 static unsigned g_ticks;
 static void on_alarm(int s) { (void)s; g_alarm = 1; }
 static void on_term(int s) { (void)s; g_term = 1; }
-static void on_usr1(int s) { (void)s; g_usr1 = 1; }
+static volatile sig_atomic_t g_usr2;
+static void on_usr1(int s) { (void)s; g_usr1 = 1; }   /* v2.1: enable slotdrop */
+static void on_usr2(int s) { (void)s; g_usr2 = 1; }   /* v2.1: toggle dry-run */
 int main(void)
 {
     int st; pid_t pid;
     struct stat statb;
+    volatile unsigned long g_spmark[1];       /* address == main thread's stack frame */
     self_pid = getpid();
+    g_main_sp = (unsigned long)g_spmark;
     /* v1.9 dry-run selection order: env NEREPAIR_DRY=1 > marker file. */
     if (getenv("NEREPAIR_DRY") && *getenv("NEREPAIR_DRY") && strcmp(getenv("NEREPAIR_DRY"), "0"))
         g_dry = 1;
     else if (stat("/data/gw/nerepair.dry", &statb) == 0)
         g_dry = 1;
+    if (stat("/tmp/nerepair.slotdrop", &statb) == 0)      /* v2.1: marker file */
+        g_slotdrop = 1;
     canary_init();
     logfd = open(LOGPATH, O_WRONLY | O_CREAT | O_APPEND, 0644);
     logev("START", 0, "pid=%d ver=%s dry=%d canary=%s resolved=%d",
@@ -709,6 +833,16 @@ int main(void)
     { struct sigaction sa; memset(&sa, 0, sizeof sa); sa.sa_handler = on_alarm; sa.sa_flags = 0; sigaction(SIGALRM, &sa, NULL); }
     { struct sigaction sa; memset(&sa, 0, sizeof sa); sa.sa_handler = on_term; sa.sa_flags = 0; sigaction(SIGTERM, &sa, NULL); sigaction(SIGINT, &sa, NULL); }
     { struct sigaction sa; memset(&sa, 0, sizeof sa); sa.sa_handler = on_usr1; sa.sa_flags = 0; sigaction(SIGUSR1, &sa, NULL); }
+    { struct sigaction sa; memset(&sa, 0, sizeof sa); sa.sa_handler = on_usr2; sa.sa_flags = 0; sigaction(SIGUSR2, &sa, NULL); }
+    if (g_slotdrop) {
+        if (pthread_create(&g_sd_tid, NULL, slotdrop_thread, NULL) == 0) {
+            g_sd_started = 1;
+            logev("MODE", 0, "slotdrop=1 source=marker");
+        } else {
+            g_slotdrop = 0;
+            logev("MODE", 0, "slotdrop=0 pthread_create failed");
+        }
+    }
     alarm(60);
     if (!traced(1)) attach_pid(1);
     scan_proc();
@@ -722,22 +856,36 @@ int main(void)
          * 风暴解耦; EINTR 分支保留原逻辑作兜底。 */
         if (g_alarm) {
             g_alarm = 0; alarm(60); write_hb();
-            logev("STAT", 0, "mode=%s attached=%lu segv=%lu repaired=%lu passed=%lu suppressed=%lu abuse=%lu loop=%lu would=%lu near=%lu nearinsn=%lu rep2=%lu would2=%lu dfhit=%lu",
+            logev("STAT", 0, "mode=%s attached=%lu segv=%lu repaired=%lu passed=%lu suppressed=%lu abuse=%lu loop=%lu would=%lu near=%lu nearinsn=%lu rep2=%lu would2=%lu dfhit=%lu sd=%d/%lu/%lu/%lu",
                   g_dry ? "dry" : "armed", g_attached, g_segv, g_repaired, g_passed,
                   g_suppressed, g_abuse, g_loop, g_would, g_near, g_near_insn,
-                  g_rep2, g_would2, g_deref_hit);
+                  g_rep2, g_would2, g_deref_hit,
+                  (int)g_slotdrop, g_sd_drops, g_sd_skips, g_sd_scans);
             /* v1.9: PID 1 coverage must not depend on the first attach winning --
              * attach_pid gives up after 3s on a busy boot.  Retry every 60s. */
             if (!traced(1)) { attach_pid(1); logev("PID1RETRY", 1, "attached=%lu", g_attached); }
             /* v1.9: full /proc rescan every 10 minutes (traced() gates the cost). */
             if (++g_ticks % 10 == 0) scan_proc();
         }
+        g_main_sp = (unsigned long)g_spmark;      /* v2.1: live main-thread frame */
         if (g_usr1) {
             g_usr1 = 0;
+            if (!g_slotdrop) {
+                g_slotdrop = 1;
+                if (!g_sd_started &&
+                    pthread_create(&g_sd_tid, NULL, slotdrop_thread, NULL) == 0)
+                    g_sd_started = 1;
+                logev("MODE", 0, "slotdrop=1 by=SIGUSR1");
+            }
+        }
+        if (g_usr2) {
+            g_usr2 = 0;
             g_dry = g_dry ? 0 : 1;
-            logev("MODE", 0, "dry=%d by=SIGUSR1", (int)g_dry);
+            logev("MODE", 0, "dry=%d by=SIGUSR2", (int)g_dry);
         }
         if (g_term) {
+            g_sd_stop = 1;
+            if (g_sd_started) pthread_join(g_sd_tid, NULL);
             logev("EXIT", 0, "signal attached=%lu segv=%lu repaired=%lu passed=%lu suppressed=%lu",
                   g_attached, g_segv, g_repaired, g_passed, g_suppressed);
             return 0;

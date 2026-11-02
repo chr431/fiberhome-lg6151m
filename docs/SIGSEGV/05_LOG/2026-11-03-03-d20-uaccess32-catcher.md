@@ -104,14 +104,74 @@
 4. 03:45 硬停线；04:00 定时重启若发生，重启后按需重装继续或收尾。
 5. 安全红线：不写 p25/p38/p39；不碰 bootctrl；misc 只读；一切设备写经 `deploy.py put`。
 
-## 8. 结果（实验后追加）
+## 8. 结果（实验后追加，§1–7 未改动）
 
-（待填）
+**仪器：通过（正向对照成立）。** 最终件 `uacatcher.ko` md5
+**92433a569c90cc112d03d3ed46df6013**（20480 B），`base=ffffffc000daf000`
+（mt_wifi .text）、`target=ffffffc00843b680`（__arch_copy_to_user）。
+dryrun 12/12 站点指令=`bl`、前三字签名逐字匹配、解码目标=target；
+live 安装 `INSTALLED 12/12 sites`，pool 12 项回读全一致，12/12 补丁读回一致。
+**正向对照**：`iwconfig ra0` → `site=3 ap_iw_handler` 记录
+`dst=0x7fe7345750 len=6 src=ffffffc011e16ff4 data="MyHome" fl=STACK|SMALL` ——
+ESSID 的 copy_to_user 落在用户栈 VA，与记录族落点同型，捕获链全程可用。
+
+**捕获窗（897 s，无 WiFi 客户端，轻量触发）**
+
+- 窗：epoch 1793644007 → 1793644904（897 s），180 次轮询（5 s）；boot_id
+  `acde1339` 全程不变，无 oops，TRY_A=0。
+- 调用计数（过滤前，每站点单调）：总 1 → 29（Δ28），**全部是 site3**；
+  site0/1/2/4/5/6/7/8/9/10/11 **Δ=0**。
+- 记录：去重后 **91 条，全部 site3，len=6**，dst 均为用户栈
+  （fl=STACK|SMALL），`data="MyHome …"`（ESSID 拷贝）。
+- 记录族命中：**0**（按 §5 的 32B 窗口扫描 `{w0,0,len∈族±8,ip=单播}` 全窗 0 条；
+  len/ip 形态窗口 0 条）。
+- 触发：`iwconfig ra0` 每 10 s 一次（90 次），只有其中 28 次到达 site3
+  （wext 缓存/路径差异，如实记录）。
+
+**与同夜 canary 的对照（关键）**
+
+| 量 | 值 |
+|---|---|
+| 10 min 无客户端 canary（02:15–02:25） | **6 条 inj=0 / 600 s = 0.60/min**，同族 `topva=0x4e0 spva=0xb0`；5×`len=1601 ip=192.168.9.1`、1×`len=321 ip=10.53.4.208` |
+| 有客户端中性窗（C-196，7.20/min） | 0.60/min = 8.3% |
+| catcher 窗（02:26–02:41，897 s） | 12 站点中 11 个 **0 调用**；site3 的 91 条记录无任何族内内容 |
+
+⇒ 在**无客户端态**，32B 写入者活跃（canary 0.60/min），而 12 个 mt_wifi
+`__arch_copy_to_user` 站点中 11 个一次都没被调用、唯一被调用的 site3 的源内容
+全是 ESSID —— **写入者不在 12 个站点之列**（限定：本窗与 canary 是两个相邻窗，
+写入率可能漂移；客户端流量态未测）。
 
 ## 9. 偏差与终态
 
-（待填）
+1. **两次仪器崩溃（均首触发即暴露，dieblx/ramoops 完整落盘）**：
+   - 缺陷 1：安装代码在 C 里直接写 `.text` 中的 pool（RO）→
+     `write to read-only memory at ffffffc001a410c0`，`pc=init_module+0x32c`，
+     panic 重启（boot 6a17ab58 → 25df1105）。
+   - 缺陷 2：pool 运行期地址与 C 符号不一致（回读读到 mt_wifi 的
+     `ZeroWaitDfsQuery…` 字符串），首次触发站点时 `blr` 到 0（`pc=0`,
+     `lr=uac_common+0x44`），重启（25df1105 → acde1339）。
+   - 修法见 `06_INSTRUMENT_FIXES.md` F-12（pool 改可写 `.data` + 安装期 12 项回读门禁）。
+   两次崩溃后 TRY_A 均为 0（boot_gate 自清），未写 misc。
+2. **vmlinux 单点钩不可行**：`ptwalk` 实测 __arch_copy_to_user
+   （ffffffc00843b680）为 **PMD leaf**（`pmd=00400000fdc00f81, pmd_leaf=1`），
+   现有 PTE 翻转原语拒绝 pmd_leaf；按 N2 指令改钩模块文本。
+3. **无 WiFi 客户端**：设备 AP 在播（ra0/rai0），`station dump`=0；未切换 PC 的
+   WiFi（PC 的 WiFi 是代理/模型连接主路径，切换风险不可接受；自关联 STA
+   apcli0→ra0 尝试失败：同 radio 扫描把 AP 信道从 8 推到 4，已停止并恢复）。
+   因此 11/12 站点在本窗 **NOT-EXERCISED**，不是“未命中”。
+4. **终态**：uacatcher 已 `rmmod`（12/12 站点还原）；设备中性（163 模块、
+   0 个我方模块、boot acde1339、TRY_A=0、WiFi 4 接口 up）；p25/p38/p39/misc 未写。
 
 ## 10. 判决
 
-（待填）
+- **H1（点名站点）：不成立**——全窗 0 条记录族内容。
+- **H0（≥6/12 站点 EXERCISED 且无命中）：不成立**——只有 1/12 站点被调用，
+  按 §5 判据为 **INVALID/不确定**。
+- **有界排除（超出预注册的探索性结论，标 E1）**：在**无 WiFi 客户端**态，
+  32B 写入者活跃（canary 0.60/min）而 12 个 mt_wifi copy_to_user 站点中 11 个
+  零调用、site3 源内容全为 ESSID ⇒ **写入者不是这 12 个站点**（本窗与 canary
+  相邻但非同一窗；客户端流量态未测）。
+- **对 N3 的输入**：剩余 11 个站点需要 (a) WiFi 客户端数据面流量，或 (b) 厂商
+  ATE/私有 ioctl/proc 入口才能触发；无客户端态应把搜索面移到其他模块
+  （mt_wifi_cmn / mt7992 / connac_if / hw_nat / ccmni）的 copy_to_user 路径。
+

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
-"""deploy.py v2.42 -- single source of truth for PC<->CPE deployment + drift guard.
+"""deploy.py v2.43 -- single source of truth for PC<->CPE deployment + drift guard.
 
+v2.43 (B4 消融轮): MANIFEST +gw/mod_mask.sh(boot 期模块加载遮罩 enabler; 由 babysit
+  v3.1 于 preinit 阶段调用, 读 /data/gw/ablation.mask 决定遮罩集; 遮罩文件本身为
+  运行态实验变量走 put 通道不入库)。
 v2.42 (A1 far-infra 轮): MANIFEST +gw/bin/coreaddr(ELF core note 头 FAR/PC 解析件,
   core_meta.sh v1.13+ 的运行时依赖, 助手失败回退空列) +gw/bin/kmsglog(/dev/kmsg
   持久镜像守护: 写前水位守卫/8MBx2 轮转/写失败游标回卷; rc.extend v3.8+ 自启)。
@@ -138,6 +141,7 @@ MANIFEST = [
     # /data/gw/babysit_v2.sh was never executed, so babysitter fixes could not
     # reach the device through deploy.py at all.
     ("gw/v3_babysit_v2.sh", "/data/rescue/babysit.sh"),   # boot babysitter (preinit)
+    ("gw/mod_mask.sh", "/data/gw/mod_mask.sh"),      # B4 module-load mask enabler (babysit v3.1 hook)
     ("gw/boot_gate.sh", "/data/gw/boot_gate.sh"),      # boot health gate (P0-2; boot.done/healthy/TRY_A)
     ("gw/core_meta.sh", "/data/gw/core_meta.sh"),      # core_pattern metadata wrapper (P1-2/P1-5)
     ("gw/wifi_guard.sh", "/data/gw/wifi_guard.sh"),   # BA-stall auto-recovery

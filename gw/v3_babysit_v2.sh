@@ -1,5 +1,5 @@
 #!/bin/sh
-# Boot Babysitter v3.0 -- progress-aware last resort for a boot that never
+# Boot Babysitter v3.1 -- progress-aware last resort for a boot that never
 # proves itself.
 #
 # v3.0 (2026-10-20 stability P0-2):
@@ -34,6 +34,13 @@ bb_log() {
 }
 btime() { awk '/^btime/{print $2; exit}' /proc/stat 2>/dev/null; }
 uptime_s() { cut -d. -f1 /proc/uptime; }
+
+# v3.1 (B4 ablation): gated module-mask enabler. Runs pre-kmodloader
+# (preinit context). No-op unless /data/gw/mod_mask.sh exists; mask file
+# /data/gw/ablation.mask absent/empty => normal boot unchanged.
+if [ -f /data/gw/mod_mask.sh ]; then
+    sh /data/gw/mod_mask.sh
+fi
 
 # --- this boot starts here: any existing marker/progress is stale ----------
 rm -f $DONE $PROG 2>/dev/null

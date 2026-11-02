@@ -166,8 +166,8 @@ tools/devop.py	2.0	tool	-	设备变更唯一入口: 锁+演练窗一步到位, �
 gw/bin/coreaddr	1.0	manifest	/data/gw/bin/coreaddr	ELF core note 头解析件: NT_SIGINFO si_addr(far)+NT_PRSTATUS pc(pr_reg 基址 112/pc 索引 32, 真实设备 .hdr 实证=与 oneoff/sigsegv/core_scan.py 一致); 输出 far=/pc= 两行, 缺啥打啥, 全缺 exit 1; 输入可为 4KB/8KB 截断头, 解析不到即失败(core_meta 回退空列); core_meta.sh v1.13+ 运行时依赖(A1 far-infra)
 gw/src/coreaddr.c	1.0	src	gw/bin/coreaddr	coreaddr 源码(随产物)
 tools/build_coreaddr.sh	1.0	tool	-	coreaddr 构建(zig cc aarch64-linux-musl 静态; 同 stackdump 链)
-gw/bin/kmsglog	1.3	manifest	/data/gw/bin/kmsglog	/dev/kmsg 持久镜像守护(A1 far-infra): 只收新记录(SEEK_END 起); 写前水位守卫(每次 write 前 statvfs /data, <100MB 先轮转再写, 2026-11-01 满盘 60s 教训的落地); 8MBx2 轮转; 写失败游标回卷重试(SEEK_SET0+按 seq 前跳, 不丢不推进不重复); /tmp/kmsglog.pid 单实例+心跳 /tmp/kmsglog.hb; --selftest 验证按 seq 回卷原语; rc.extend v3.8+ 自启
-gw/src/kmsglog.c	1.3	src	gw/bin/kmsglog	kmsglog 源码(随产物; v1.1 游标回卷改 SEEK_SET0+按 seq 前跳, 设备实测按 seq lseek=EINVAL; v1.3 修 rec_seq 两处解析缺陷: 缺 i++ 的死循环 + seq 实为首个逗号后字段, 主机单测覆盖)
+gw/bin/kmsglog	1.4	manifest	/data/gw/bin/kmsglog	v1.4(selftest 挂死收口轮): S0 遗留 3 个 --selftest 进程 40+min 挂死, 根因定位为 v1.2 rec_seq 数字循环缺 i++ 的纯用户态死循环(任何真实记录含数字 seq 即中; v1.3 已修), 'lseek EINVAL 自旋' 疑点被 5.15.134 源码证伪(devkmsg_llseek 仅非零 offset 返回 ESPIPE, SEEK_SET0 只置 seq, 无循环; O_NONBLOCK 下 devkmsg_read 返回 EAGAIN 不进 wait_event) —— 本轮加硬超时: 整个 selftest 置于 alarm(30)+SIGALRM 处理器(打印 FAIL 后 _exit(3))之下, 任何未来回归不可能再存活过一个看门狗窗口; /dev/kmsg 持久镜像守护(A1 far-infra): 只收新记录(SEEK_END 起); 写前水位守卫(每次 write 前 statvfs /data, <100MB 先轮转再写, 2026-11-01 满盘 60s 教训的落地); 8MBx2 轮转; 写失败游标回卷重试(SEEK_SET0+按 seq 前跳, 不丢不推进不重复); /tmp/kmsglog.pid 单实例+心跳 /tmp/kmsglog.hb; --selftest 验证按 seq 回卷原语; rc.extend v3.8+ 自启
+gw/src/kmsglog.c	1.4	src	gw/bin/kmsglog	kmsglog 源码(随产物); v1.4 selftest 硬超时 alarm(30)+SIGALRM(根因=v1.2 rec_seq 缺 i++ 死循环, v1.3 已修, lseek 路径经内核源码证伪); v1.1 游标回卷改 SEEK_SET0+按 seq 前跳
 tools/build_kmsglog.sh	1.0	tool	-	kmsglog 构建(zig cc aarch64-linux-musl 静态)
 tools/labkernel/scripts/build_labkernel.sh	1.0	tool	-	labkernel 一键重建入口(WSL 备树内跑 v3 全管线: config 增量->Image/模块->组包->签名->自检电池)
 tools/labkernel/scripts/initramfs_skel.sh	1.0	tool	-	initramfs 骨架构建(目录+busybox applets+/dev/console 节点+init+helpers; 载荷 md5 钉死见套件 README)

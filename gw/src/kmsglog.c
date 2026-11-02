@@ -1,4 +1,19 @@
-/* kmsglog.c v1.3 -- persistent /dev/kmsg mirror (A1 far-infra).
+/* kmsglog.c v1.4 -- persistent /dev/kmsg mirror (A1 far-infra).
+ *
+ * v1.4: SELFTEST HANG POST-MORTEM + HARD TIMEOUT.  S0 left 3 `kmsglog
+ *   --selftest` processes spinning for 40+ min.  Root cause was located
+ *   statically in v1.2's rec_seq(): the digit loop was missing i++, a pure
+ *   userspace infinite loop the moment a real record (any record: the seq
+ *   field is numeric) was parsed -- selftest calls rec_seq() twice on live
+ *   records, so it spun in R state with no syscall to be woken from.  The
+ *   "/dev/kmsg lseek EINVAL path" suspicion is FALSIFIED by the 5.15.134
+ *   source: devkmsg_llseek() returns -ESPIPE only for a nonzero offset and
+ *   SEEK_SET+0 merely sets seq=first_valid (a few atomics, no loop); with
+ *   O_NONBLOCK devkmsg_read() returns -EAGAIN instead of wait_event().  The
+ *   parser fix landed in v1.3; v1.4 adds the belt-and-braces: the whole
+ *   selftest now runs under alarm(KMSGLOG_ST_TIMEOUT_S) and a SIGALRM
+ *   handler that prints a FAIL line and _exit(3), so no future regression
+ *   (parser, ring, statvfs) can ever outlive its watchdog window again.
  *
  * v1.3: two parser bugs found by measurement/unit test: (a) v1.2's digit
  *   loop was missing i++ -> pure userspace infinite loop the moment rec_seq()
@@ -58,7 +73,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define KMSGLOG_VER "1.3"
+#define KMSGLOG_VER "1.4"
 #define DEV_KMSG    "/dev/kmsg"
 #define PIDFILE     "/tmp/kmsglog.pid"
 #define HBFILE      "/tmp/kmsglog.hb"
@@ -69,6 +84,7 @@
 #define POLL_MS     1000
 #define HB_EVERY_S  60
 #define RETRY_MS    500
+#define ST_TIMEOUT_S 30          /* hard selftest deadline (v1.4) */
 
 static const char *g_log = LOGDIR "/kmsg.log";
 static long g_max_kb = 8192;
@@ -179,6 +195,16 @@ static int open_log_append(void)
     return open(g_log, O_WRONLY | O_CREAT | O_APPEND, 0644);
 }
 
+/* v1.4: hard selftest deadline.  Async-signal-safe: one write + _exit. */
+static void st_alarm(int sig)
+{
+    static const char msg[] =
+        "FAIL selftest hard timeout (v1.4 watchdog) -- aborted\n";
+    (void)sig;
+    (void)!write(STDOUT_FILENO, msg, sizeof(msg) - 1);
+    _exit(3);
+}
+
 static int selftest(void)
 {
     char rec[REC_MAX];
@@ -186,15 +212,27 @@ static int selftest(void)
     ssize_t n;
     int fd, fail = 0;
     long free_kb;
+    struct sigaction sa;
+
+    /* v1.4 hard deadline: SIGALRM must be able to interrupt EVERY loop in
+     * this function (the v1.2 runaway was a pure userspace spin; a signal
+     * is delivered at instruction boundaries even there). */
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = st_alarm;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGALRM, &sa, NULL);
+    alarm(ST_TIMEOUT_S);
 
     fd = open(DEV_KMSG, O_RDONLY | O_NONBLOCK);
     if (fd < 0) {
         printf("FAIL open %s: %s\n", DEV_KMSG, strerror(errno));
+        alarm(0);
         return 1;
     }
     if (lseek(fd, 0, SEEK_SET) < 0) {
         printf("FAIL rewind %s: %s\n", DEV_KMSG, strerror(errno));
         close(fd);
+        alarm(0);
         return 1;
     }
     do {
@@ -204,6 +242,7 @@ static int selftest(void)
         printf("FAIL read %s (ring empty?): rc=%zd errno=%s\n",
                DEV_KMSG, n, n < 0 ? strerror(errno) : "0");
         close(fd);
+        alarm(0);
         return 1;
     }
     rec[n] = 0;
@@ -213,6 +252,7 @@ static int selftest(void)
     if (lseek(fd, 0, SEEK_SET) < 0) {
         printf("FAIL rewind-0 %s: %s\n", DEV_KMSG, strerror(errno));
         close(fd);
+        alarm(0);
         return 1;
     }
     {
@@ -224,6 +264,7 @@ static int selftest(void)
             if (n <= 0) {
                 printf("FAIL scan-forward after rewind: rc=%zd\n", n);
                 close(fd);
+                alarm(0);
                 return 1;
             }
             rec[n] = 0;
@@ -233,6 +274,7 @@ static int selftest(void)
             if (++guard > 200000) {
                 printf("FAIL scan-forward: no seq>=%llu within bound\n", s1);
                 close(fd);
+                alarm(0);
                 return 1;
             }
         }
@@ -253,6 +295,7 @@ static int selftest(void)
         printf("PASS statvfs /data free_kb=%ld low_kb=%ld\n", free_kb, g_low_kb);
     }
     printf("%s\n", fail ? "SELFTEST FAIL" : "SELFTEST PASS");
+    alarm(0);
     return fail ? 1 : 0;
 }
 

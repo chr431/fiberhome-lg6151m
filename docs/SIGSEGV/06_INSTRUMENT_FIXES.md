@@ -139,3 +139,25 @@ md5 `f29debff…`（proc_lseek）与 `994cb266…`（IABT））。
 **遗留**：`/proc/tuphook` 的 banner 仍打印 `v1.1`（版本字符串未同步 bump）——二进制以
 md5 识别，不以 banner 识别；下一轮顺手改。两次 oops 都走 panic 路径重启，`/data` 无损，
 但**每次重试 = 一次非自愿重启**，这类仪器改动必须先离线自检（本次第 4 项即由自检兜住）。
+
+## F-12 `uacatcher`（D20 uaccess32 catcher，2026-11-03 设备线；两个缺陷、两次重启）
+
+> 背景：N2 静态线把 32B 记录的写入面收敛到 mt_wifi 的 12 个 `__arch_copy_to_user`
+> 调用点。`uacatcher` 把每条 `bl` 换成 `b stub_i`，stub 进公共跳板：保存 x0–x7 →
+> 调 `uac_probe`（过滤 + 环形记录）→ 恢复参数 → 用保存的绝对地址 `blr` 调
+> `__arch_copy_to_user` → `br site+4`。vmlinux 单点钩被 `ptwalk` 实测否掉
+> （`__arch_copy_to_user` 是 PMD leaf，`pmd=00400000fdc00f81`），故走模块文本。
+
+| # | 缺陷 | 设备症状（实证） | 修法 |
+|---|---|---|---|
+| 1 | 安装代码在 C 里直接写 `.text` 中的 pool（RO） | live insmod：`Unable to handle kernel write to read-only memory at ffffffc001a410c0`，`pc=init_module+0x32c`；dieblx 记录，panic 重启 | pool 只能经 PTE 窗口写；改为先构造局部 `u64 pv[]`，再用 `uac_patch_words` 写 |
+| 2 | pool 运行期地址与 C 符号不一致：回读读到 mt_wifi 的字符串（`ZeroWaitDfsQuery…`），pool 实为 0 | 首次触发站点时 `pc=0`，`lr=uac_common+0x44`（blr 到 0）→ 重启 | 放弃 `.text` pool：改为**可写 .data 数组** `u64 uac_pool[24]`，C 直接赋值；安装时回读 12 项，任一不符即拒绝 |
+
+**正向对照（v1.0 最终件）**：`iwconfig ra0` → `site=3 ap_iw_handler` 记录
+`dst=0x7fe7345750 len=6 src=ffffffc011e16ff4 data="MyHome" fl=STACK|SMALL` ——
+ESSID 的 copy_to_user 落在用户栈 VA 上，与记录族落点同型，证明捕获链（站点补丁→
+跳板→probe→环→/proc）全程可用。`/proc/uacatcher` 每站点 calls[] 单调计数（过滤前）。
+
+**教训**：模块 `.text` 里的“数据池”既不能直接写，也不能假定符号地址与运行期一致；
+凡跳板要读的可写数据一律放 `.data`，并加安装期回读门禁。两次崩溃都在首次触发时
+暴露，且都由 dieblx 完整落盘（ramoops 可复盘）。

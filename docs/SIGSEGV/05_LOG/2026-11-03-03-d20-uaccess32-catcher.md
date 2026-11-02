@@ -176,3 +176,37 @@ ESSID 的 copy_to_user 落在用户栈 VA，与记录族落点同型，捕获链
   ATE/私有 ioctl/proc 入口才能触发；无客户端态应把搜索面移到其他模块
   （mt_wifi_cmn / mt7992 / connac_if / hw_nat / ccmni）的 copy_to_user 路径。
 
+
+## 11. 后续追加 · 有流量窗（E4，2026-11-03 04:05–04:20，N3-exec）
+
+> 本节为追加记录（§1–§10 未改动）。仪器同 §4/§6；这次是**WiFi 客户端数据面满载**的窗。
+
+- **前置突破**：设备 AP 此前根本没在发信标（`hostapd_cli state=ENABLED` 但 PC 扫不到）。
+  `mwctl dev ra0/rai0 set no_bcn 0` 后独立接收者（PC）看到 `MyHome`（2.4G ch8 /
+  5G ch36），PC 以 WPA2-PSK 关联（口令 = `GW_PASS`，device WPAPSK 的 sha256 与本地
+  一致；`WIFI_PASS` 是上游 WiFi 口令，不是 AP 口令），IP 192.168.9.145。
+- **窗内流量**：PC 每 2 s 拉取设备静态 `app.js`（103,350 B，≈50 KB/s，900 s ≈ 450 次，
+  全部 `200/103350`）+ 1/s source-bound ICMP；PC 的会话流量本身也经设备蜂窝上行
+  （ccmni3，10.5.47.39）。
+- **仪器**：`dieblx.ko` 在载；`uacatcher.ko` md5 92433a56…，`base=0xffffffc000dc2000`
+  （本 boot 的新基址）、`target=0xffffffc00843b680`；dryrun 12/12 站点 `bl`+签名+目标
+  解码全过；live `INSTALLED 12/12 sites`、`/proc/uacatcher` 头 `PATCHED`；
+  正对照 30×`iwconfig ra0` + `iwpriv ra0 stat` + `iwinfo ra0 info` → **site3
+  calls 7/17/0/9（合计 33）**，记录 33 条全 site3、len=6、`data=4d79486f6d65`
+  （"MyHome"），与 §8 同型 —— 捕获链可用。
+- **窗（900 s，boot `4a22850e…`，uptime 289→1160，88 个 10 s 快照）**：
+  12 站点 calls **全程不变**（7/17/0/9；site0-2/4-11 整窗 **0 调用**）；
+  快照内记录行 2937 条 = 上述 33 条正对照记录在 88 个快照中的重复，
+  **len 直方图 {6: 2937}，记录族命中 0**。
+- **判读（E4）**：在有 WiFi 客户端数据面满载的热窗里，mt_wifi 的 12 个调用式
+  `__arch_copy_to_user` 站点**没有一个在数据面上被行使**（唯一被行使的 site3 是
+  ESSID/wext 控制路径）。结合 §8 的无客户端窗（11/12 零调用）⇒ **两种客户端态下，
+  记录族写入者都不在这 12 个站点里**。
+- **对 D22 的直接影响**：wdone 的 4 个内联站点所在函数（`RTMP_COM_IoctlHandle`、
+  `AP_E2PROM_IOCTL_PostCtrl`、`ZeroWaitDfsQueryCmdHandler`、`ate_cmd_proc`）对应的
+  拷贝站点（`0x2976d8/0x1f9864/0x33bc64/0x5b7e0`）整窗 **零调用** ⇒ D22 的正对照
+  不可能成立（§5.1.3），窗必 INVALID，故本轮 D22 不执行（见 05-d22 §10）。
+- **下一步**：写者不在 mt_wifi 调用式 c2u 面。N2c 的剩余候选 = hw_nat 单站点
+  （per-call arg 栈槽，非陈旧路径）、vmlinux 的 `_copy_to_user` 克隆（97 个，
+  91 个网络相关）与**内联 `sttr` 形态**。下一轮应转向 vmlinux/内联面，而不是继续
+  在 mt_wifi 上做杀开关。

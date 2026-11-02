@@ -20,7 +20,8 @@
 
 - 设备态：WiFi AP 在（ra0/rai0 up，SSID 在播），**无关联客户端**（`station dump`=0），
   上行 eth0 在；scanary_c2 v1.4（md5 17376b74…）固定调用 600 s。
-- 结果：**4 条 inj=0 真命中 / 600 s = 0.40/min**（同族 `topva=0x4e0 spva=0xb0`；
+- 结果（终值）：**6 条 inj=0 真命中 / 600 s = 0.60/min**（本预注册写作时为中途读数
+  4 条/0.40；终值见 §8 与 EXIT 行）（同族 `topva=0x4e0 spva=0xb0`；
   内容 `len=321 ip=10.53.4.208` 与 `len=1601 ip=192.168.9.1`），7 条 inj=1 自注入；
   `probe_bad=0 overflow=0 selfcrash=0`；boot_id 不变、TRY_A=0。
 - 判读：**写入不严格要求 WiFi 数据流量**；无客户端时速率约为同夜有客户端中性窗

@@ -95,12 +95,34 @@
 
 ## 10. 结果
 
-(实验后追加)
+(2026-11-02 晚会话追加;boot 222ae7d8 全程无重启。)
+
+- **前置正对照链全部通过**:rxcount v2 insmod 后 dmesg 依次出现
+  `live bind at entry1 (entry0 unbound)` → `ring count 1504 implausible, ring sampling disabled`
+  → `base=… upd=wo_rxcnt_update_handle+0x0/0x8a8 [mtk_warp] ringcnt=0 entry=0`;
+  /proc/rxcount 采样器空转(samples 递增,events 恒 0)。
+- **环采样被设计闸门关闭**:entry1+0xA150 槽数字段实测 **1504**,超出 REVIEW-rxcount §1
+  预写安全域 1..64 ⇒ 模块按设计只保留定位声明、关闭环采样。**未在运行中放宽闸门**
+  (放宽 = 把未知区域当 rxcnt 环采样,噪声事件会伪装成"≥30 次事件"进而把噪声-命中零相关
+  误读为 FAIL/H0——见 §12)。
+- ⇒ **900 s 同窗未开**(无 rxcnt 事件序列,主终点不可算)。
+- 旁产情报(已入 05_LOG/2026-11-02-03 与 01_CLAIMS C-190):同一 entry-walk 在 tuphook
+  dryrun#2 下解析出 ops 链,三个 fill 回调全部落在 mtk_wed 文本区(详见该文件 §10)。
 
 ## 11. 判决
 
-(实验后追加)
+- **INVALID(§4"0/0 类":两侧任一为 0 ⇒ 不可判)**——rxcnt 事件侧恒 0(仪器闸门),非阴性。
+- 01_CLAIMS:无 D18 结论行;仪器事实入 C-190 notes。
+- 重跑前置:离线复核 mtk_warp 反汇编中环槽数字段的语义(entry1+0xA150=1504 是真槽数
+  还是字段偏移错位),再审 1..64 闸门;两者都定案前不得重跑。
 
 ## 12. 偏差与教训
 
-(实验后追加)
+1. **两处 oneoff 模块设计假设被实测打破**(同族教训:设计期 objdump 推断必须上机复验):
+   ① bind 检查只看 entry0——实测 count=3 而 entry0 key=0(活 bind 在 entry1),v1 会把
+   环采样静默关闭;② 环槽数安全域 1..64 是猜的——实测 1504。两者都是"模块按设计安全
+   拒绝",设备零风险,但说明 REVIEW 文档的"实测"栏在首机上机前其实全是推断。
+2. **不放宽闸门的决定**:当晚本可改 1..64 → 1..2048 强行开窗,但那会把"未知内存区域"
+   当观测对象,事件的语义不可守,主终点会被系统性噪声污染—— INVALID 比脏数据便宜。
+3. lgssh 文本通道在 Windows 侧引入 CRLF + 尾换行(证据回拉必须做字节级重建 + md5 复核,
+   见本地 evening-observational.md §证据)。

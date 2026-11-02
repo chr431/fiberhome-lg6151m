@@ -82,7 +82,11 @@
 |---|---|
 | 设备态 | v4.1 正常态,boot 222ae7d8(会话起点 uptime ≈1232 s 核验),5.15.134,163 模块 |
 | 黑匣子 | dieblx.ko(md5 2ab6b5e8…)insmod 于 uptime 1582.81,60 s 健康观察通过后开窗 |
-| rxcount | /data/repro/rxcount.ko md5 6371ada2…(零 patch;1 Hz per-CPU;hash 变化=事件) |
+| rxcount | /data/repro/rxcount.ko md5 cce2040a442a9b25b50e9ca5284dad3b(零 patch;1 Hz per-CPU;hash 变化=事件)。
+  **开窗前修订(v2)**:首版(md5 6371ada2…)只检查 warp entry0;实测设备 count=3 而 entry0
+  key=0(活 bind 在 entry1),首版会把环采样错误关闭 ⇒ 窗 INVALID。v2 = entry0..cnt-1 遍历
+  (步长 0xb1a8,nofault 只读语义不变,无新增外部调用);修订发生在 D18 开窗之前,tuphook
+  dryrun#2 已用同款遍历实测定位 entry1(见 §10)。 |
 | scanary | /data/repro/scanary_c2 md5 17376b74…(B4/D9/C2 同件,观测主仪器) |
 | 固定观测调用 | `/data/repro/scanary_c2 --victim main --duration 900 --epoch-sec 0 --probe-sec 120 --hold-us 10000 --period-us 5000 --stride 16 --writeback safe --log /data/repro/d18_rxcnt.log` |
 | rxcount 轮询 | 窗内每 30 s:`cat /proc/uptime; cat /proc/rxcount`(head 至 totals 行),记录于 PC 侧时间轴文件 |

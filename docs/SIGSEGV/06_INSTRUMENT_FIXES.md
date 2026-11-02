@@ -113,3 +113,29 @@
 - `attrib.py`/`h3table.py`/`corescan*.py` 已加 DEPRECATED 头。
 - 旧 `docs/SIGSEGV_*.md` 已加历史/已撤回头；当前状态见 `00_STATE.md`。
 - 下一步：把 `docs/SIGSEGV/` 纳入 `VERSIONS.tsv` 的 doc 行（或至少让 `vercheck` 知道它是豁免区），防止再次漂移。
+
+## F-11 `tuphook` live 通道（2026-11-03 设备验证通过；四个缺陷、两次真 oops）
+
+> 背景：C-195 记录 live insmod 被 v1.0 的 32 位 percpu 门拒绝（零补丁零 oops）。本次按
+> 「64 位 per-cpu 寻址」修复上机，修复过程逐层暴露四个缺陷，前三个各挡住后面一个。
+
+| # | 缺陷 | 设备症状（实证） | 修法 |
+|---|---|---|---|
+| 1 | percpu 池只写低 32 位（`items[2].insn = (u32)P`），而 `alloc_percpu` 偏移实测 `0x3d79487000` | v1.0：`percpu offset 3d79487000 too large` → -34（零补丁） | 池按两个 32 位半字写入（items 2/3），上限从 4 提到 8 |
+| 2 | 跳板用 `mrs x9, tpidr_el1`，但本内核 VHE 生效、per-cpu base 在 **tpidr_el2**（tpidr_el1 读回 0） | v1.2 身份自检：`P+0 != per_cpu_ptr`（`P=3d79487000 off=0 per_cpu_ptr=fffffffdeff70000`）→ -22（零补丁） | 安装时把 `P + tpidr_elX` 与内核自己的 `per_cpu_ptr()` 比对，选中的寄存器（`0xd538d089`/`0xd53cd049`）写进跳板第 2 字；VHE 判断用 `ID_AA64MMFR1_EL1.VH`（读 tpidr_el2 仅在 E2H=1 下合法） |
+| 3 | `struct proc_ops` 缺 `.proc_lseek`，而 5.15.134 的 `proc_reg_llseek()` **无 NULL 兜底**（直接 `pde->proc_ops->proc_lseek(...)`） | v1.3：`head(1) /proc/tuphook` → **pc=0, lr=proc_reg_llseek+0x74**，NULL 取指 oops → 重启 | `.proc_lseek = default_llseek`（已 EXPORT_SYMBOL） |
+| 4 | 入口分支的位移算成「入口 − 跳板槽」（复用跳板槽的 delta），方向反了 | v1.3：首个真实 rx 调用 → **pc=far=0xffffffbfffbd4454**（ESR 0x86000005，IABT level-1 取指中止），`comm=swapper/2`、`lr=warp_wlan_rx+0x24` | 入口位移改为「跳板 − 入口」；并加 4 路分支反解自检（入口 tx/rx → 跳板，跳板 back tx/rx → 入口+4），任一不符即零补丁拒绝 |
+
+**设备验证（v1.4，tuphook.ko md5 `ddf78595b870aae066a97c85e6c92fda`）**：
+`percpu … reg=tpidr_el2/VHE (identity ok)` → `INSTALLED tx_b=143d3f34 rx_b=143d3f76
+back_tx=17c2c0be back_rx=17c2c07c`（两条方向相反，符合预期）→ 捕获 **7409 次入口调用**
+（cpu0 4290 / cpu1 3119，~11.5 min）→ `rmmod` 输出 `entries restored to paciasp`、
+`unloaded`；本 boot oops 计数 0。
+
+**证据**：`_local/evidence/b4b/tuphook-live/`（snapshot md5 `3cf83c6c…` 与设备
+`/tmp/tup_snap.txt` 一致；dmesg md5 `d075f612…` 一致；两次 oops 的 console-ramoops
+md5 `f29debff…`（proc_lseek）与 `994cb266…`（IABT））。
+
+**遗留**：`/proc/tuphook` 的 banner 仍打印 `v1.1`（版本字符串未同步 bump）——二进制以
+md5 识别，不以 banner 识别；下一轮顺手改。两次 oops 都走 panic 路径重启，`/data` 无损，
+但**每次重试 = 一次非自愿重启**，这类仪器改动必须先离线自检（本次第 4 项即由自检兜住）。

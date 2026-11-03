@@ -176,3 +176,22 @@
 4. 先确认观测者效应（栈/PTE/pin/dump_stack），再报“差异”。
 5. 先确认日志完整性（时间戳/丢行/截断），再报“速率”。
 6. 任何仪器改动 → 更新本表 + 重新正对照；旧数据不得与新仪器混算。
+
+## 4. 本轮（2026-11-02/03）仪器增补（收束登记）
+
+> 补记原则：只登记"其结果已被 `01_CLAIMS.tsv` 引用"的仪器；细节/正对照/缺陷史见各自 review 与 claims 证据列。
+> 本表不改变 §3 纪律：引用阴性必须同时引用覆盖边界。
+
+| ID | 探针 | 测什么 | 窗口规模 | 正对照 | 状态 | claims/复核 |
+|---|---|---|---|---|---|---|
+| P-20 | `funnelcatcher`（v1；`__arch_copy_to_user` 入口漏斗 + 族内容判据） | CPU uaccess 是否携带记录族 | 热窗 1230 s（191 MB 客户端流量） | 2/2（lr=copyout+0x3c，fp 链完整） | OK（退役） | C-206；阴性=已测未发现 |
+| P-21 | `funnelv2` **v2.1**（漏斗 + 嵌入大拷贝宽扫描；ko `7943ded5…`） | 同上 + 大拷贝内嵌路径 | 1358 s / 20.2M 调用 / 2.77M 扫描 / 735.8 MB 源 | 窗内 7/7 | OK | C-214；**宽扫描形状代理 ≈148/s 误报 ⇒ 特异性失效（判据须加 lr 黑名单/族统计门）** |
+| P-22 | `tuphook` **v1.6**（mtk_warp/wed tuple fill 入口 + 栈目标采集） | fill 链路 store 目标 | live 7409 调用 / 4 CPU；v1.6 106 s / 21 样本 / 3047 fill | dryrun + 站点读回原字 | OK | C-197/211/212；4 缺陷 2 oops 的修复史 = C-198 |
+| P-23 | `dmahook`（`dma_map_page_attrs`/`dma_map_sg_attrs` 入口 + 伪页过滤） | DMA map 是否含受害页 | 1825 s 背景窗（+900 s 站点窗） | dryrun + selftest（PAGE/SG 各 1） | OK | C-207；**边界=只两变体、非热态** |
+| P-24 | `dieblx`（die/panic notifier 黑匣子） | 仪器事故全事件落盘 | 全事故现场 | 多次实弹 | OK | 仪器事故取证依赖（C-198 等） |
+| P-25 | `wdkill`/`wdone`（mt_wifi copy_to_user 站点 stub 杀开关/一次性恢复） | 站点级行为消融 | 三窗 900 s | 站点读回原字 | OK | C-202/203 |
+| P-26 | `uacatcher`（D20；mt_wifi 12 站点捕获） | 站点调用观测 | 热窗 900 s | 12/12 站点验证 | OK | C-200/C-203（E4 级观测） |
+| P-27 | `auditwatch`（audit netlink 客户端 + `vmpoke` 正对照） | 用户态 `process_vm_*` 跨进程写 | 30 min 窗 | 3/3 | OK（on-device） | C-189；**边界：只覆盖 audit-on 后 fork 的进程；不含 ptrace=117** |
+| P-28 | `scanary`/`vsurv4`/`vsurv5`（自扫描金丝雀） | 记录写入探测（崩不崩都记） | 多臂（900 s 深度臂等） | 自检注入 + 诱饵区 0 | OK | C-137/171/191/199/209 |
+| P-29 | `sampler2`（用户态槽采样，无模块） | 写入活性（单位时间内容变化） | 600 s / 25 进程 / 43 槽 | 内容恒定/变化自证 | OK | C-175 系 / C-199 / C-204 基线 |
+| P-30 | `patrace`/`pascan2`/`rxcount`/`arrwatch`/`rangescan` | VA→PA / 按值搜 / 环位 / 数组 / 范围 | 各自窗口 | 各自（部分自带；见历史 P-15/P-16/P-17 缺口） | COND/有限 | 见各自 review 与 claims |

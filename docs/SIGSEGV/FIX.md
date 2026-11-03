@@ -26,13 +26,13 @@
 
 | 防线 | 状态 | 一句话 |
 |---|---|---|
-| **nerepair**（ptrace 监督者） | **v2.1 已交付、待 lab 部署**（`gw/bin/nerepair` 79,840 B，md5 `9ae78c4a52f108ecccc6fd69b5ea3394`）；设备**现役仍是 v1.7**，`rc.extend v3.3` + `nerepair_launch.sh` 拉起 | 两条判据路径：**pop 型**（故障指令 `ldr Xt,[Xt]` 且 `si_addr==Xt` 且 x2 处是本家族记录）与 **deref 型**（记录值被当指针继续用）。**其余形态一律放行**（进程照死） |
+| **nerepair**（ptrace 监督者） | **v2.2 已上机在役**（`811b3e19…`，83,800 B，2026-11-03 观察模式；XFORM 普查在、X1/X2/X3 默认关），`rc.extend v3.9` + `nerepair_launch.sh` 拉起（svc 监督零重启） | 两条判据路径：**pop 型**（故障指令 `ldr Xt,[Xt]` 且 `si_addr==Xt` 且 x2 处是本家族记录）与 **deref 型**（记录值被当指针继续用）。**其余形态一律放行**（进程照死） |
 | **本轮新增** | v2.0 / v2.1 | **deref 型覆盖**（记录证据是硬门槛，判据函数 17 项 host 断言全过）+ **slotdrop 诊断模式**（默认关，见 §9.7/§9.8） |
 | **观测：core_meta v1.9 + .stack** | 已部署 | 每次真死进程落 `.stack`（65,592 B = 48 B 头 + 位图 + 16 页）+ `ne_events.tsv` 台账 |
 | **观测：NEAR 计量器** | **已构建、未部署**（v1.9.2） | 记录在 x2 但指令形态不在射程内时记 `NEAR reason=insn` —— 把「已知不覆盖」量化的唯一手段 |
 | **补偿控制：pageguard** | **已构建、未上机** | 「RX 环缓冲页永不给用户匿名页」。**其前提（按 PA 写）正在被重审**（§2/§3） |
 | **验收指标：槽重写速率** | **已有工具**（lab 的 sampler2） | 对 daemon 栈上的固定 32 B 槽测「单位时间内容变化次数」＝**写入活性**；不依赖崩溃，是 §4 的**主判据**（E1 待复核） |
-| **slotguard**（热槽主动消毒，v1.0） | **已构建、未部署**（出厂 observe-only；`gw/bin/slotguard` 76,088 B，md5 `eec51be427f3b03f9eba167228d57a4f`） | sampler2 式周期读白名单槽，strict 记录命中且 11 道危险面门全过时写回 `{槽地址,0,0,0}`（把 nerepair 的「指向栈」提前施加）；**双钥匙**（config `mode=sanitize` + `/data/gw/slotguard.arm`）。设计/危险面/回滚见 [SLOTGUARD_DESIGN.md](SLOTGUARD_DESIGN.md)，自审见 [REVIEW_SLOTGUARD.md](REVIEW_SLOTGUARD.md) |
+| **slotguard**（热槽主动消毒，v1.0） | **已上机·观察模式在役**（`eec51be427f3b03f9eba167228d57a4f`，76,088 B，2026-11-03；三槽 `observe`、`slotguard.arm` 未建 ⇒ **零写**；实测 0 SANITIZE / 0 MISMATCH / 0 PERM、4 CANDIDATE；观察窗 ≥24 h 后按门禁评估布防） | sampler2 式周期读白名单槽，strict 记录命中且 11 道危险面门全过时写回 `{槽地址,0,0,0}`（把 nerepair 的「指向栈」提前施加）；**双钥匙**（config `mode=sanitize` + `/data/gw/slotguard.arm`）。设计/危险面/回滚见 [SLOTGUARD_DESIGN.md](SLOTGUARD_DESIGN.md)，自审见 [REVIEW_SLOTGUARD.md](REVIEW_SLOTGUARD.md) |
 
 ### 0.2 nerepair 的覆盖边界（必须逐字理解）
 

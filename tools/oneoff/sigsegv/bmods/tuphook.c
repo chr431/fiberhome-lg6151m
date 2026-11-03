@@ -265,9 +265,9 @@ struct tup_ring {
 static struct tup_ring __percpu *rings;
 
 /* ---- v1.6 fill-callback records ------------------------------------ */
-#define TUP_FNREC	256
+#define TUP_FNREC	128	/* 128*128+8 = 0x4008 < PCPU_MIN_UNIT_SIZE */
 #define TUP_FRECSZ	128
-#define TUP_FHEAD_OFF	(TUP_FNREC * TUP_FRECSZ)	/* 0x8000 */
+#define TUP_FHEAD_OFF	(TUP_FNREC * TUP_FRECSZ)	/* 0x4000 */
 
 /* probe meta bits (fill) */
 #define TUP_F_M_RX	0x00000001
@@ -447,10 +447,10 @@ asm(
 "tuphook_fmrs_tx:\n"
 "	mrs	x9, tpidr_el1\n"
 "	add	x9, x17, x9\n"
-"	mov	x11, #0x8000\n"
+"	mov	x11, #0x4000\n"
 "	ldr	x17, [x9, x11]\n"
 "	tbnz	x17, #0, 2f\n"
-"	ubfx	x10, x17, #1, #8\n"
+"	ubfx	x10, x17, #1, #7\n"
 "	add	x10, x9, x10, lsl #7\n"
 "	orr	x17, x17, #1\n"
 "	str	x17, [x9, x11]\n"
@@ -465,7 +465,7 @@ asm(
 "	ldr	x4, [sp, #40]\n"
 "	bl	tuphook_fill_probe\n"
 "	ldr	x9, [sp, #64]\n"
-"	mov	x11, #0x8000\n"
+"	mov	x11, #0x4000\n"
 "	ldr	x17, [x9, x11]\n"
 "	add	x17, x17, #1\n"
 "	str	x17, [x9, x11]\n"
@@ -491,10 +491,10 @@ asm(
 "tuphook_fmrs_rx:\n"
 "	mrs	x9, tpidr_el1\n"
 "	add	x9, x17, x9\n"
-"	mov	x11, #0x8000\n"
+"	mov	x11, #0x4000\n"
 "	ldr	x17, [x9, x11]\n"
 "	tbnz	x17, #0, 2f\n"
-"	ubfx	x10, x17, #1, #8\n"
+"	ubfx	x10, x17, #1, #7\n"
 "	add	x10, x9, x10, lsl #7\n"
 "	orr	x17, x17, #1\n"
 "	str	x17, [x9, x11]\n"
@@ -509,7 +509,7 @@ asm(
 "	ldr	x4, [sp, #40]\n"
 "	bl	tuphook_fill_probe\n"
 "	ldr	x9, [sp, #64]\n"
-"	mov	x11, #0x8000\n"
+"	mov	x11, #0x4000\n"
 "	ldr	x17, [x9, x11]\n"
 "	add	x17, x17, #1\n"
 "	str	x17, [x9, x11]\n"
@@ -1011,13 +1011,19 @@ static int tup_resolve_fill(void)
 		       itx, irx, INS_TXFILL0, INS_RXFILL0);
 		return -EINVAL;
 	}
-	if (!strstr(g_txcbn, "mtk_wed") || !strstr(g_rxcbn, "mtk_wed")) {
-		pr_err("tuphook: fill cb names not mtk_wed: '%s' / '%s'\n",
-		       g_txcbn, g_rxcbn);
+	/* The device kernel's sprint_symbol() does not resolve mtk_wed's
+	 * stripped module symbols (it returns a bare address), so the positive
+	 * control is the static ops-table geometry instead: ops lives at
+	 * mtk_wed+0x3130 and the callbacks at +0xf8 / +0x374, i.e. exactly
+	 * ops-0x3038 / ops-0x2dbc.  Both first instructions were verified
+	 * above. */
+	if (g_txcb != g_ops - 0x3038UL || g_rxcb != g_ops - 0x2dbcUL) {
+		pr_err("tuphook: fill cb offsets from ops mismatch tx=%016lx rx=%016lx ops=%016lx (want -0x3038/-0x2dbc)\n",
+		       g_txcb, g_rxcb, g_ops);
 		return -EINVAL;
 	}
-	pr_info("tuphook: fill cb ok tx=%016lx(%s) rx=%016lx(%s) page=%lx\n",
-		g_txcb, g_txcbn, g_rxcb, g_rxcbn, g_txcb & PAGE_MASK);
+	pr_info("tuphook: fill cb ok tx=%016lx(%s) rx=%016lx(%s) ops=%016lx page=%lx\n",
+		g_txcb, g_txcbn, g_rxcb, g_rxcbn, g_ops, g_txcb & PAGE_MASK);
 	return 0;
 }
 
@@ -1572,6 +1578,8 @@ static int tup_show(struct seq_file *m, void *v)
 		unsigned int show = cnt < k ? (unsigned int)cnt : k;
 		unsigned int i;
 
+		if (show > TUP_FNREC)
+			show = TUP_FNREC;
 		seq_printf(m, "fcpu%d: recorded=%llu guard=%llu\n", cpu,
 			   cnt, head & 1);
 		for (i = 0; i < show; i++) {

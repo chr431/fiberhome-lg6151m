@@ -14,7 +14,7 @@ mkdir -p "$OUTDIR"
 # tuphook needs the inline-asm trampoline (mrs tpidr_el1 / tlbi / dc / ic are
 # armv8.0; paciasp is emitted as a raw .inst word) -- build_bmods keeps the
 # proven flag set and only names the modules
-MODS="dieblx romap ioprobe tuphook rxcount wdkill wdone funnelcatcher dmahook"
+MODS="dieblx romap ioprobe tuphook rxcount wdkill wdone funnelcatcher funnelv2 dmahook"
 
 for m in $MODS; do
     "$Z" cc -target aarch64-freestanding \
@@ -34,6 +34,11 @@ done
 # user-space positive control for funnelcatcher (static musl; 32B pipe read)
 "$Z" cc -target aarch64-linux-musl -static -O2     -o "$OUTDIR/funnel_selftest" tools/oneoff/sigsegv/bmods/funnel_selftest.c
 echo "built: $OUTDIR/funnel_selftest ($(stat -c%s "$OUTDIR/funnel_selftest") bytes)"
+
+# user-space positive control for funnelv2 (static musl; 32/64/128/0xc0/0xd0
+# embedded records + 16B core + 8B-misaligned dst)
+"$Z" cc -target aarch64-linux-musl -static -O2     -o "$OUTDIR/funnelv2_selftest" tools/oneoff/sigsegv/bmods/funnelv2_selftest.c
+echo "built: $OUTDIR/funnelv2_selftest ($(stat -c%s "$OUTDIR/funnelv2_selftest") bytes)"
 
 # modinfo equivalent (no host modinfo): dump .modinfo strings (NUL-separated)
 for m in $MODS; do

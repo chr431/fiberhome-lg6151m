@@ -1,0 +1,16 @@
+{
+ "tag": "B1",
+ "src": "192.168.9.223",
+ "dst": "192.168.9.1",
+ "dport": 47913,
+ "plen": 1200,
+ "frame_eth": 1242,
+ "pps_target": 1000,
+ "seconds_target": 180.0,
+ "sent": 179953,
+ "send_errors": 49,
+ "dur_s": 180.002,
+ "pps_achieved": 999.7,
+ "pc_epoch_start": 1793537419.043186,
+ "pc_epoch_end": 1793537599.0451977
+}

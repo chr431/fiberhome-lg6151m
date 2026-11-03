@@ -2,6 +2,7 @@ device_local.py
 __pycache__/
 *.log
 *.pyc
+*.pdb
 install/payload.tar.gz
 install/kit.tar.gz
 install/MANIFEST.md5

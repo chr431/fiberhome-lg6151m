@@ -152,10 +152,72 @@ t=3 s 执行的一次 `head -8` 快照；scanary 的 `emit()` 只写 `--log` 文
 - 原 v3（217ccd57…）**不实机飞行**，仅留档。
 - 本修订在**任何设备动作之前**写定并 commit；§1–§9 其余条款不变，§3 的镜像 md5 以本节为准。
 
-## 10. 结果（执行后追加）
+## 10. 结果（执行后追加，2026-11-03 14:50）
 
-（待填）
+### 10.1 刷写与 boot 证据
+
+| 项 | 实测 |
+|---|---|
+| LK misc 实读（刷写前） | `0f 00 01 00 00 0e 00 01 00 00`（A.pri 15 / TRY_A 0 / B.pri 14 / TRY_B 0） |
+| 镜像取件 | `/fhrom/bin/curl` 拉 `boot-lab31-signed.img`，md5 `9934cca26d2dda425eae406ca97fb865`（33,554,432 B）✓ |
+| dd p25 + 读回 | `32+0 records`，读回 md5 == `9934cca2…` ✓ |
+| lab v3.1 boot | `Linux (none) 6.18.44 #7`；BUILD_ID `labkernel-v3.1 … v2-fixes + TRY_A p1-offset fix + window-end log channel` |
+| boot card | console PRESENT；13 个热区；`/dev/watchdog` PRESENT（10s 喂狗）；netup eth0/eth1 carrier=1 |
+| TRY_A 自清（实弹） | before `0f 01 01 00 00 0e 00 01`（TRY_A=1，raw-shell boot 后）→ `TRYA_CLEARED: p1[2061] 0x01 -> 0x00` after `0f 00 01 00 00 0e 00 01` ✓ |
+| alive_check（修复后） | 每拍 `vsurv4=1 scanary=1`（旧 cmdline 判据的假 0 已消失） |
+| 热 | tmax 53.3°C → 39.3°C（13 区，无告警/关机） |
+
+### 10.2 两窗（窗长均为 1800 s；同一 boot；scanary md5 17376b74… 与厂商臂同源）
+
+| 窗 | 起（uptime） | EXIT（µs） | passes | appear | **inj=0** | inj=1 | probe_ok/bad | selftest_ok | rewrite/overflow/selfcrash | 日志 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| W1（/init 自动） | ~1 s | 1,800,022,750（1800.023 s） | 138,598 | 19 | **0** | 19 | 14 / 0 | 1 | 0/0/0 | 88 行 / 49,641 B / md5 `b1220cdbcdfc25cc98ff3965098934ed` |
+| W2（shell 手动） | 1927.67 s | 1,800,018,975（1800.019 s） | 136,921 | 19 | **0** | 19 | 14 / 0 | 1 | 0/0/0 | 88 行 / 49,643 B / md5 `f4b284cfa721f4b78a319ff586754c56` |
+
+- 形式要件（§4-3）全满足：START 参数逐字、`EXIT reason=duration`、`selftest_ok=1`、
+  `probe_bad=0`、`passes>0`、29 条 STAT/窗。
+- 正对照（§4-4）全满足：`SELFTEST_OK t1_decoy/t2_stack` + 3 条 `SELFTEST_SKIP` +
+  `SELFTEST_PASS` + 19 次 `HIT_APPEAR … inj=1` + 14 次 `PROBE ok=1`，均在日志内。
+- 信道（§4）：窗1 由 `/init` 窗末 `cat` 全文到 console（49,641 B，`D28_W1_LOG_END` 在场）；
+  窗2 由交互 shell `cat`/`tail`/`grep` 读取；两窗日志均 `cp` 到 p46 `/data/repro/d28/`，
+  设备侧与 PC 侧 md5 逐字节一致（PC 以 `cat` 原样拉回复核，88 行、inj=0 计数 0）。
+- **vsurv4 dump = 0**（/data/repro 仅 scanary 两日志，无 h5）；vsurv4 进程全程存活。
+- 仪器旁证（诚实记录）：**busybox awk 在 lab 6.18 上任何调用都 SIGSEGV**（`awk "BEGIN{print 1}"`
+  → RC=139；`awk /MemAvailable/ /proc/meminfo` → RC=139），故心跳 `MemAvail=` 恒空
+  （与 v1/v2 已知"MemAvail 空"同源，v3.1 的 shell 把信号死亡行显示出来了）。这是**厂商
+  busybox 与 6.18 的 userspace ABI 缺陷**，不是写入者活动：单进程、启动即崩、无外部输入；
+  同一内核里静态 musl 的 scanary/vsurv4 全程正常。
+
+### 10.3 回滚（软重启闭环，无第二次断电）
+
+| 项 | 实测 |
+|---|---|
+| 原厂件 | p46 `/data/gw/logs/p25.boot.c2.img` md5 `209f481cf1bf489dc04ce1b12a9851f8`（PC 双备份同值） |
+| dd p25 + 读回 | `32+0`，读回 md5 == `209f481c…` ✓ |
+| TRY_A（p1 偏移） | before/after 均 `0f 00 01 00 00 0e 00 01 00 00`（已 0；写入为幂等） |
+| p46 | `umount` RC=0（EXT4 clean unmount；此前 journal recovery 一次，属 `reboot -f` 未卸载所致） |
+| 回笼 | `reboot -f` → 厂商 `5.15.134`，boot_id `b1ea64f3-ba10-448e-bca3-fd0baeaf2acc` |
+| 终态 | p25 读回 `209f481c…`；misc `0f 00 … 0e 00 01`（TRY_A=0）；b4lab VARIANT=primary；dropbear×2/dnsmasq/hostapd×2/v3httpd/wan_agg/nerepair 全活；ra0+rai0 ESSID MyHome；br-lan 192.168.9.1/24；p26/p38/p39 未写 |
+| 持久化 | `/data/repro/d28/scanary_c2_w{1,2}.log` + meta，md5 与设备/PC 三端一致 |
 
 ## 11. 判决（执行后追加）
 
-（待填）
+**H 成立（厂商环境必要条件），H' 不成立。**
+
+- 两窗合计 **3600.04 s** 有效暴露、`inj=0` 真命中 **0**；正对照/形式要件/信道三重齐备，
+  C-187 的假阴性通道（`head -8` 快照、日志随 RAM 丢失、alive_check 假 0）已全部关闭：
+  窗末全文上 console + 交互 shell 读文件 + p46 持久化 + 双端 md5。
+- rule-of-three：0/3600 s ⇒ 95% 上界 **3/3600 s = 0.05/min**。厂商背景 0.36–0.60/min
+  （C-199 0.60、C-196 0.167–0.20、C-204 热态更高）在 3600 s 内期望 22–36 条；
+  若 lab 条件承载该背景，零结果的概率 e^-22…e^-36（≈3e-10…2e-16）⇒ **不是统计假阴性**。
+- 结论口径：**32B 记录写入者的产生/触发需要厂商内核态环境**（厂商内建/厂商 .ko/CCCI-MD/
+  其驱动供给的目标与载体）——厂商固件侧修补有理论依据；**不能**据此说"写入者是厂商代码"
+  （§9-1/§9-2 共线混杂仍在：lab 无 WiFi/CCI/客户端/长驻厂商进程，目标页资格不可消除）。
+- 若 H' 成立（lab 仍有写入）本应推翻厂商修补路线；实测未出现，故该兜底分支**不触发**。
+- 级别：**E2**（有效窗 E3 级；归因受 §9 边界限制）。
+
+**工程副产物（必须留档）**：
+1. lab v3 的 A3 TRY_A 自清按裸设备 offset 2061 写，实测该字节是 GPT 条目字节（p1@2060 才是
+   控制块）；原样飞行会破坏 GPT entries CRC。v3.1 改为 p1 偏移并实弹验证（0x01→0x00）。
+2. v3.1 增加窗末日志全文上 console（C-187 信道修复的强制项）+ alive_check 改 `/proc/<pid>/stat` comm。
+3. 仪器噪声：lab 6.18 上厂商 busybox awk 必崩（RC=139），心跳 MemAvail 空；判据未使用该字段。

@@ -131,6 +131,27 @@ t=3 s 执行的一次 `head -8` 快照；scanary 的 `emit()` 只写 `--log` 文
    判决只取两窗合并暴露，不做速率推断。
 6. 时间以设备 `/proc/uptime` 为准（lab 无 RTC，`date` 不可信）。
 
+
+## 9b. 开窗前修订（2026-11-03 13:5x，设备动作之前）
+
+**发现（离线静态 + 设备只读实测）**：lab v3 `/init` 的 A3 TRY_A 自清按**裸设备**
+`/dev/mmcblk0` offset 2061 读写；实测 A/B 控制块在 **p1 内 offset 2060**
+（设备只读：`p1@2060 = 0f 00 01 00 00 0e 00 01`，`raw@2060 = b7 26 99 c7 ...`
+即 GPT 分区表条目字节）。若 v3 原样启动，会把 raw 2061（0x26，GPT entry 字节）
+写成 0x00 并破坏 GPT entries CRC —— 属未授权闪存写 + 分区表完整性风险。
+
+**修订 = lab v3.1（同内核、同 scanary、仅 init 三处）**：
+1. TRY_A 自清改 **p1 offset 2061**，写前/写后打印 10 字节形（正确偏移、可复核）；
+2. **窗末把 scanary 日志全文 `cat` 到 console + `busybox md5sum` + 行数/字节数**
+   （除交互 shell 信道外的第二信道，彻底规避 C-187 的 `head -8` 缺陷）；
+3. `alive_check` 改读 `/proc/<pid>/stat` 的 comm（原 cmdline 读法有 NUL 缺陷）。
+判据、窗长、调用参数、scanary 二进制（md5 17376b74…）与内核 config 全部不变。
+
+- v3.1 镜像：`boot-lab31-signed.img`，**md5 `9934cca26d2dda425eae406ca97fb865`**，
+  33,554,432 B，mt2737/sec_level_0/hsm 测试密钥签名，cert1 嵌入 @0x9818112（校验 PASS）。
+- 原 v3（217ccd57…）**不实机飞行**，仅留档。
+- 本修订在**任何设备动作之前**写定并 commit；§1–§9 其余条款不变，§3 的镜像 md5 以本节为准。
+
 ## 10. 结果（执行后追加）
 
 （待填）

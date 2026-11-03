@@ -14,7 +14,7 @@ mkdir -p "$OUTDIR"
 # tuphook needs the inline-asm trampoline (mrs tpidr_el1 / tlbi / dc / ic are
 # armv8.0; paciasp is emitted as a raw .inst word) -- build_bmods keeps the
 # proven flag set and only names the modules
-MODS="dieblx romap ioprobe tuphook rxcount wdkill wdone funnelcatcher"
+MODS="dieblx romap ioprobe tuphook rxcount wdkill wdone funnelcatcher dmahook"
 
 for m in $MODS; do
     "$Z" cc -target aarch64-freestanding \

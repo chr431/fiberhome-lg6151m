@@ -1,5 +1,5 @@
 #!/bin/bash
-# build_labkernel.sh -- one-click lab-kernel rebuild (v3 recipe).
+# build_labkernel.sh -- one-click lab-kernel rebuild (v3.1 recipe).
 # Runs INSIDE the prepared WSL tree (~/lab-kernel): the kernel source tree
 # (6.18.44 + 535 OpenWrt patches + files overlay + lg6151m DTS), musl cross
 # toolchain, static busybox, payload binaries and the MTK python3.10 signer
@@ -10,8 +10,10 @@
 #   2. config additions (thermal + watchdog already in base; wifi modules)
 #   3. Image/dtbs build, module build, module staging into initramfs
 #   4. Android boot v2 pack + MTK mt2737 signature chain
-#   5. full self-check battery (v3_selfcheck.py; exit 1 on any FAIL)
-# Outputs (~/lab-kernel/out): boot-lab3-unsigned.img, boot-lab3-signed.img
+#   5. full self-check battery (v3_selfcheck.py; exit 1 on any FAIL, including
+#      the TRY_A write-target guard: p1@2061 only, raw-device 2061 forbidden)
+# Outputs (~/lab-kernel/out): boot-lab31-unsigned.img, boot-lab31-signed.img
+#   (pinned: boot-lab31-signed.img md5 9934cca26d2dda425eae406ca97fb865)
 set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"
 LK="$HOME/lab-kernel"

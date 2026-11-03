@@ -2,10 +2,14 @@
 
 > 构建套件:`tools/labkernel/`(环境/钉死/一键构建见其 README)。
 > 本文:能力矩阵、刷写与恢复 runbook、TRY_A 语义、观测窗与 shell 行为。
+>
+> **当前资产 = v3.1(`boot-lab31-signed.img`,md5 `9934cca26d2dda425eae406ca97fb865`)。
+> v3 原始镜像(`boot-lab3-signed.img`)已撤回:其 /init 以裸设备 offset 2061
+> 清 TRY_A,会写坏 GPT entries CRC,禁止实机飞行。**
 
 ## 1. 能力矩阵(lab 内核 vs 厂商栈)
 
-| 能力 | 厂商栈(5.15.134) | lab 内核 6.18.44(v3) | 说明 |
+| 能力 | 厂商栈(5.15.134) | lab 内核 6.18.44(v3.1) | 说明 |
 |---|---|---|---|
 | KPROBES/KPROBE_EVENTS | 部分 | **y** | |
 | DYNAMIC_FTRACE/FUNCTION(_GRAPH)_TRACER/FTRACE_SYSCALLS | 部分 | **y** | |
@@ -39,13 +43,14 @@
 3. **传输镜像**(raw shell,(fhrom curl,勿用 uclient-fetch):
    eth0/eth1 均可零配置 169.254/16(PHY 在 ifup 后 attach),
    `/fhrom/bin/curl` + `LD_LIBRARY_PATH=/fhrom/lib:/fhrom/usr/lib` 拉镜像,
-   **md5 与注册表 image 行核对**(损坏历史教训)。
+   **md5 与注册表 image 行核对**(损坏历史教训):v3.1 = `9934cca2…`;
+   v3(217ccd57…)已撤回,不得写入。
 4. **落盘**:`mknod /dev/mmcblk0p25 b 179 25`;
-   `dd if=boot-lab3-signed.img of=/dev/mmcblk0p25 bs=1M`;
+   `dd if=boot-lab31-signed.img of=/dev/mmcblk0p25 bs=1M`;
    读回 md5 二次确认(或 cmp)。备用路径:LK bio 段复制
    (`bio read mmc0pX <ram> off 0x100000` / `bio write mmc0p25 ...` 循环 + `bio dump` 校验)。
-5. **重启进入**:sysrq-b(或 LK 菜单)。首屏出现 `LG6151M LAB KERNEL V3` +
-   BOOT CARD 即成功。
+5. **重启进入**:sysrq-b(或 LK 菜单)。首屏出现 `LG6151M LAB KERNEL V3.1` +
+   BOOT CARD 即成功(BUILD_ID 含 `labkernel-v3.1`)。
 
 **rdinit=/bin/sh 模式**(v2 起可用):LK 下 `kcmdline append rdinit=/bin/sh`
 后正常 boot——内核直接把 console 交给裸 shell(cpio 自带 /dev/console)。
@@ -56,25 +61,35 @@
 
 ## 3. TRY_A 语义与自清(A3)
 
-- misc[2060]=A 优先级,[2061]=A.TRY 计数;LK 每次启动 A 槽 TRY+1,**>3 回退 B
-  槽官方**。厂商固件开机完成后清零(S99zmtk_boot_done);lab 内核没有厂商 S99。
-- v3 起 /init 开机即清 misc[2061](读回校验,醒目日志 `TRYA_CLEARED`),
+- A/B 控制块在 **misc 分区(p1)内 offset 2060**:[2060]=A 优先级,[2061]=A.TRY
+  计数,[2065]=B 优先级,[2066]=B.TRY;LK 每次启动 A 槽 TRY+1,**>3 回退 B 槽
+  官方**。厂商固件开机完成后清零(S99zmtk_boot_done);lab 内核没有厂商 S99。
+  **p1 start=64 扇区**,故控制块在裸设备上位于 offset 64×512+2060,不是 2060。
+- v3.1 起 /init 开机即清 **p1[2061]**(写前/写后打印控制块 10 字节形 + 读回
+  校验,醒目日志 `TRYA_CLEARED: p1[2061] 0x01 -> 0x00 ... after: ...`),
   彻底免疫该陷阱;`lab_trya=off`(内核 cmdline)可关。
-- 手工等价:`mknod /dev/mmcblk0 b 179 0; dd if=/dev/zero of=/dev/mmcblk0
-  bs=1 seek=2061 count=1`(读回 hexdump 确认)。
+- **禁止**按裸设备 `/dev/mmcblk0` offset 2061 写:该字节属 **GPT 分区表条目**,
+  写入会破坏 GPT entries CRC(v3 原始镜像即此缺陷,已撤回)。
+- 手工等价(正确偏移,先读形后写单字节):
+  `mknod /dev/mmcblk0p1 b 179 1; dd if=/dev/mmcblk0p1 bs=1 skip=2060 count=10 |
+  hexdump -C; dd if=/dev/zero of=/dev/mmcblk0p1 bs=1 seek=2061 count=1`;
+  再读回须为 `0f 00 01 00 00 0e 00 01`(A.pri/A.TRY/B.pri/B.TRY)。
 
-## 4. 观测窗与交互 shell 行为(v2/v3)
+## 4. 观测窗与交互 shell 行为(v2/v3.1)
 
-- 开机:BOOT CARD(能力一页)→ TRYA 清零 → 喂狗 → netup(后台)→
+- 开机:BOOT CARD(能力一页)→ TRYA 清零(p1@2061)→ 喂狗 → netup(后台)→
   vsurv4 + scanary w1(预注册调用,**参数勿改**,数据可比性)→ 心跳 10s
   (`[hb i] uptime= MemAvail= tmax= vsurv4= scanary=`)。
-- 观测窗 1800s 结束(或 scanary 退出连续 3 拍判死提前截断)→ console 交互
-  shell(setsid+cttyhack,exit 自动重拉);心跳转 60s `[hb-slow]`。
+- 观测窗 1800s 结束(或 scanary 退出连续 3 拍判死提前截断)→ **窗末日志信道**:
+  `W1_LOG_PATH/W1_LOG_BYTES/W1_LOG_LINES` + `busybox md5sum` +
+  `cat /data/repro/scanary_c2_w1.log` 全文 + `D28_W1_LOG_END`(v3.1 FIX-2),
+  然后 console 交互 shell(setsid+cttyhack,exit 自动重拉);心跳转 60s
+  `[hb-slow]`。判活按 `/proc/<pid>/stat` 的 comm(v3.1 FIX-3)。
 - 任何时刻证据:`/bin/scanary_report /data/repro/scanary_c2_w1.log`;
   转储在 /data/repro(initramfs RAM,**重启即失**;要持久化先 romount 或
   netup+httpd 拉走)。
 
-## 5. 热安全与看门狗(v3)
+## 5. 热安全与看门狗(v3.1)
 
 - 心跳 `tmax=` 为所有 thermal_zone 最大毫摄氏度;`lab_thermal_warn`(默认
   85000)以上每拍告警;`lab_thermal_off`(默认 95000,0=关)以上 sync 后
@@ -92,7 +107,8 @@
 ## 7. 已知边界(诚实清单)
 
 1. 首靴验证状态:v1(C2)已实机启动、观测窗完整跑通、scanary 采集到数据;
-   v2/v3 的增量(console/shell/热/狗/TRYA)构建级自检全绿,**实机行为待验**。
+   **v3.1 已实机验证**(D28:两窗各 1800 s、热/狗/TRYA p1 写、窗末日志信道、
+   scanary/交互 shell 全部实测,回滚闭环);v3 原始镜像因 GPT 缺陷**撤回未飞行**。
 2. 签名链为 LG6851F 同款 mt2737+sec_level_0+hsm 测试密钥;LK 接受性同代互证
    (v1 实机已签名启动成功——实证)。
 3. 无 RTC:date 不可信(心跳里 1970 属预期);跨源对齐用 uptime/锚点纪律。

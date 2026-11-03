@@ -170,7 +170,7 @@ tools/build_coreaddr.sh	1.0	tool	-	coreaddr 构建(zig cc aarch64-linux-musl 静
 gw/bin/kmsglog	1.4	manifest	/data/gw/bin/kmsglog	v1.4(selftest 挂死收口轮): S0 遗留 3 个 --selftest 进程 40+min 挂死, 根因定位为 v1.2 rec_seq 数字循环缺 i++ 的纯用户态死循环(任何真实记录含数字 seq 即中; v1.3 已修), 'lseek EINVAL 自旋' 疑点被 5.15.134 源码证伪(devkmsg_llseek 仅非零 offset 返回 ESPIPE, SEEK_SET0 只置 seq, 无循环; O_NONBLOCK 下 devkmsg_read 返回 EAGAIN 不进 wait_event) —— 本轮加硬超时: 整个 selftest 置于 alarm(30)+SIGALRM 处理器(打印 FAIL 后 _exit(3))之下, 任何未来回归不可能再存活过一个看门狗窗口; /dev/kmsg 持久镜像守护(A1 far-infra): 只收新记录(SEEK_END 起); 写前水位守卫(每次 write 前 statvfs /data, <100MB 先轮转再写, 2026-11-01 满盘 60s 教训的落地); 8MBx2 轮转; 写失败游标回卷重试(SEEK_SET0+按 seq 前跳, 不丢不推进不重复); /tmp/kmsglog.pid 单实例+心跳 /tmp/kmsglog.hb; --selftest 验证按 seq 回卷原语; rc.extend v3.8+ 自启
 gw/src/kmsglog.c	1.4	src	gw/bin/kmsglog	kmsglog 源码(随产物); v1.4 selftest 硬超时 alarm(30)+SIGALRM(根因=v1.2 rec_seq 缺 i++ 死循环, v1.3 已修, lseek 路径经内核源码证伪); v1.1 游标回卷改 SEEK_SET0+按 seq 前跳
 tools/build_kmsglog.sh	1.0	tool	-	kmsglog 构建(zig cc aarch64-linux-musl 静态)
-tools/labkernel/scripts/build_labkernel.sh	1.0	tool	-	labkernel 一键重建入口(WSL 备树内跑 v3 全管线: config 增量->Image/模块->组包->签名->自检电池)
+tools/labkernel/scripts/build_labkernel.sh	1.1	tool	-	labkernel 一键重建入口(WSL 备树内跑 v3.1 全管线: config 增量->Image/模块->组包->签名->自检电池; preflight 含 TRYA_GUARD 静态断言, 产物 boot-lab31-*)
 tools/labkernel/scripts/initramfs_skel.sh	1.0	tool	-	initramfs 骨架构建(目录+busybox applets+/dev/console 节点+init+helpers; 载荷 md5 钉死见套件 README)
 tools/labkernel/scripts/prep_tree.sh	1.0	tool	-	从零准备: 解包+535 补丁+files overlay+lg6151m DTS 入树+config 三层合并
 tools/labkernel/scripts/reconfig.sh	1.0	tool	-	config 组装(观测 26 符号+安全阀+initramfs; olddefconfig 后 26 项核对)
@@ -183,7 +183,7 @@ tools/labkernel/scripts/get_py310.sh	1.0	tool	-	uv 装 CPython 3.10.14(MTK 签�
 tools/labkernel/scripts/lab_init.sh	1.0	tool	-	/init C1 版(自检+心跳+vsurv4)
 tools/labkernel/scripts/lab_init_c2.sh	1.0	tool	-	/init C2 版(+scanary w1 预注册自启)
 tools/labkernel/scripts/lab_init_v2.sh	1.0	tool	-	/init v2(F1 console 修复+F2 观测窗后交互 shell+F3 netup)
-tools/labkernel/scripts/lab_init_v3.sh	1.0	tool	-	/init v3(+A1 热管理心跳带温告警保护关机+A2 看门狗喂狗+A3 TRY_A 自清+A4 boot card; shell/netup 承 v2)
+tools/labkernel/scripts/lab_init_v3.sh	1.1	tool	-	/init v3.1 — D28 三处修正: TRY_A 改 p1@2061 禁裸盘偏移 + 窗末 scanary 日志全文上 console 带 md5/字节/行数 + alive_check 改 /proc/<pid>/stat comm; A1 热管理/A2 喂狗/A4 boot card/shell/netup 承 v2; 与镜像 /init 逐字节一致
 tools/labkernel/scripts/netup.sh	1.0	tool	-	/bin/netup: eth* 零配置 169.254.9.n/16 应急传输通道
 tools/labkernel/scripts/romount.sh	1.0	tool	-	/bin/romount: 分区只读挂载助手(squashfs/ext4 自动尝试, 免网络取证)
 tools/labkernel/scripts/kjump.sh	1.0	tool	-	/bin/kjump: kexec 助手(内核侧就绪; 用户态 kexec 未内置时如实报缺)
@@ -194,19 +194,22 @@ tools/labkernel/scripts/v2_repack.sh	1.0	tool	-	v2 重建(F1 cpio 设备节点+F
 tools/labkernel/scripts/v2_assemble_boot.sh	1.0	tool	-	v2 组包签名(boot-lab2 产物名)
 tools/labkernel/scripts/v2_selfcheck.py	1.0	tool	-	v2 电池(C1 29 项继承+F1 解包验证 console 节点+F2 shell 通路静态断言+F3 netup, 共 46 项)
 tools/labkernel/scripts/v2_export.sh	1.0	tool	-	v2 产物导出+SUMS 再生
-tools/labkernel/scripts/v3_repack.sh	1.0	tool	-	v3 重建(A 热管理/看门狗/TRYA/boot card + B 模块只构建不加载; 26 观测符号冻结+config 只增不删门禁)
-tools/labkernel/scripts/v3_assemble_boot.sh	1.0	tool	-	v3 组包签名(boot-lab3 产物名)
-tools/labkernel/scripts/v3_selfcheck.py	1.0	tool	-	v3 电池(v2 46 项继承+A1/A2/A3/A4 标记+模块 ELF+不自动加载精确断言+26 符号 vs v2 逐项一致)
-tools/labkernel/scripts/v3_export.sh	1.0	tool	-	v3 产物导出+SUMS 再生(v1+v2+v3 全集)
-tools/labkernel/README.md	1.0	tool	-	套件文档: 环境记录/上游与载荷 md5 钉死/从零准备/一键构建/自检说明
+tools/labkernel/scripts/v3_repack.sh	1.1	tool	-	v3.1 重建(A 热管理/看门狗/TRYA p1@2061/boot card + B 模块只构建不加载; 26 观测符号冻结+config 只增不删门禁; preflight TRYA_GUARD: 禁止裸盘 offset 2061)
+tools/labkernel/scripts/v3_assemble_boot.sh	1.1	tool	-	v3.1 组包签名(boot-lab31 产物名; 钉死 md5 9934cca2; 注明 v3 镜像撤回原因)
+tools/labkernel/scripts/v3_selfcheck.py	1.1	tool	-	v3.1 电池(v2 46 项继承+A1/A2/A3/A4 标记+模块 ELF+不自动加载精确断言+26 符号 vs v2 逐项一致+GPT 安全四条+窗末日志信道+/proc stat 判活)
+tools/labkernel/scripts/v3_export.sh	1.1	tool	-	v3.1 产物导出+SUMS 再生(活资产 v1+v2+v3.1; 撤回件 boot-lab3 排除)
+tools/labkernel/README.md	1.1	tool	-	套件文档: v3.1 版本线与产物 md5(boot-lab31 9934cca2); v3 GPT 破坏缺陷显著警告; 环境/上游/载荷钉死/从零准备/构建自检清单与 TRYA_GUARD 断言位置
 tools/labkernel/REPOMETA.txt	1.0	tool	-	供应链钉死: 基座仓 HEAD/tarball sha256/内核 sha256/stock dtb md5
 tools/labkernel/dts/mt6990-fiberhome-lg6151m.dts	1.0	tool	-	lg6151m 板级 DTS(仓实机骨架+身份/chosen 替换; 与 stock DTB 逐节点互证)
 tools/labkernel/config/config-lab2-6.18.44	1.0	tool	-	v2 完整内核 config(与 C1/C2 逐字节一致=零漂移证明件)
 tools/labkernel/config/config-lab3-6.18.44	1.0	tool	-	v3 完整内核 config(=v2+34 新增: LVTS 热管理+cfg80211/mac80211/mt76 模块栈)
 _drill_backup/labkernel/boot-lab2-signed.img	1.0	image	c43db542a2a96f4054bd910d00268430	labkernel 32MiB 签名 boot 镜像; v2 实战缺陷修复版(console/shell/netup); 构建自检全绿; 见 docs/LABKERNEL.md runbook
-_drill_backup/labkernel/boot-lab3-signed.img	1.0	image	217ccd57c64cfe46e03e57d7a1a15c9f	labkernel 32MiB 签名 boot 镜像; v3 资产版(热管理/看门狗/TRYA 自清/boot card/模块储备); 构建自检全绿; 见 docs/LABKERNEL.md runbook
+_drill_backup/labkernel/boot-lab3-signed.img	1.0	image	217ccd57c64cfe46e03e57d7a1a15c9f	labkernel 32MiB 签名 boot 镜像; v3 原始资产(热管理/看门狗/TRYA/boot card/模块储备) — 已撤回: /init 以裸设备 offset 2061 清 TRY_A 破坏 GPT entries CRC, 禁止实机飞行, 仅留档; 当前资产见 boot-lab31
 gw/bin/slotguard	1.0	manifest	/data/gw/bin/slotguard	v1.0(2026-11-03 兜底加固轮): 热槽主动消毒器(新组件) —— sampler2 式 3s 周期读长驻 daemon 栈上白名单槽(dnsmasq start_stack-0x1b40, nerepair -0x3b0/-0x12d0), strict 记录判据命中且 11 道危险面门全过时, 经 /proc/pid/mem 写回 {槽地址,0,0,0}(nerepair"指向栈"语义的预先施加; 全零会让 pop 变 NULL 崩溃, 故不用); 双钥匙: config mode=sanitize + /data/gw/slotguard.arm; 硬门: 槽在 [stack] 内且严格位于当前 sp 之下 128B(实测 sp 在槽上方 0xe0..0x1890)、进程 S 态、写前重读内容/态/sp、写后回读、每小时预算、风暴 600s 退火、/proc/pid/mem 权限失败永久降观察、自学习 CANDIDATE 只记录不写; 台账 logs/slotguard.log(TSV,1MB 轮转)+/tmp/slotguard.hb+/tmp/slotguard.stats+/tmp/slotguard.alert(watchdog 2s 快路径); --once/--observe/--selftest; 内建 selftest 23 项 PASSED; 构建 md5 eec51be427f3b03f9eba167228d57a4f (76,088 B)
 gw/src/slotguard.c	1.0	src	gw/bin/slotguard	v1.0: 热槽消毒器源码(判据=记录形态严格匹配 + sg_should_write 纯决策函数; 危险面 11 门; 自学习只观察); 随产物; 内建 --selftest 23 项
 gw/slotguard_launch.sh	1.0	manifest	/data/gw/slotguard_launch.sh	v1.0: slotguard 单实例启动器(svc_lock settle+回读; 二进制缺失时 exit 1 并说明, 不伪装健康)
 gw/slotguard.conf	1.0	manifest	/data/gw/slotguard.conf	v1.0: 槽白名单(comm|offset|mode|max_writes_per_hour|scan_window); 出厂全部 observe, 布防需改 mode=sanitize 且放 /data/gw/slotguard.arm
 tools/build_slotguard.sh	1.0	tool	-	v1.0: slotguard 构建(zig cc aarch64-linux-musl 静态, 同 nerepair 链); host selftest 通道见脚本注释
+
+tools/labkernel/CHANGELOG.md	1.0	tool	-	套件变更记录: v3.1 记录 GPT 破坏缺陷(p1@2061 修复/撤回 v3 镜像)+窗末日志信道+/proc stat 判活+防回归断言位置
+_drill_backup/labkernel/boot-lab31-signed.img	1.0	image	9934cca26d2dda425eae406ca97fb865	labkernel 32MiB 签名 boot 镜像; v3.1 当前资产(D28 实机两窗验证): TRY_A p1@2061 + 窗末日志全文上 console + /proc stat 判活; 内核/scanary/config 同 v3; 见 docs/LABKERNEL.md runbook

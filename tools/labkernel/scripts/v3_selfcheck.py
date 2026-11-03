@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""v3_selfcheck.py -- V3 asset-build self-check battery.
+"""v3_selfcheck.py -- V3.1 asset-build self-check battery.
 
 Inherited from the C1/C2/v2 battery (all re-run):
   initramfs contents + gz twin, embedding chain into vmlinux/Image,
@@ -7,17 +7,28 @@ Inherited from the C1/C2/v2 battery (all re-run):
   (newc header + cpio -itv + full extraction), F2 shell path markers,
   F3 netup.
 
-New V3 checks:
+V3 checks (kept in V3.1):
   A1 thermal: config MTK_LVTS_THERMAL=y; init has tmax= heartbeat field,
      thermal limits (lab_thermal_warn/off), THERMAL_ALARM/SHUTDOWN guards.
   A2 watchdog: config MEDIATEK_WATCHDOG=y; init feeds /dev/watchdog,
      lab_wdt=off opt-out.
-  A3 TRY_A autoclear: init clears misc[2061] with readback verify,
-     lab_trya=off opt-out.
+  A3 TRY_A autoclear: init clears the p1 misc block byte 2061 with readback
+     verify, lab_trya=off opt-out.
   A4 boot card: one-page capability summary marker + BUILD_ID.
   B  reserves: /modules/*.ko present (cfg80211/mac80211/mt76/
      mt76-connac-lib/mt7996e, ELF aarch64, config =m), /bin/romount,
      /bin/kexec absent honestly documented in /bin/kjump.
+
+V3.1 checks (D28 revalidation; the v3 image is withdrawn):
+  FIX-1 TRY_A/GPT regression guard -- the A/B control block lives at p1
+     offset 2060..2069 (p1 starts at sector 64); raw /dev/mmcblk0 offset
+     2061 is a GPT partition-entry byte.  v3 wrote that raw byte and broke
+     the GPT entries CRC.  This battery FAILS if any 2061 access omits the
+     p1 device or if any raw /dev/mmcblk0 write appears in /init.
+  FIX-2 window-end full scanary log to console (bytes/lines/md5 + full cat
+     + D28_W1_LOG_END terminator) -- second channel beside the shell.
+  FIX-3 alive_check reads /proc/<pid>/stat comm (cmdline NUL bug fixed) and
+     no longer scans /proc/*/cmdline.
   Discipline: the 26 observation config symbols must be byte-identical
      to the C1/v2 config (verified against the exported v2 .config).
 Prints PASS/FAIL per check; exit 1 on any FAIL.
@@ -128,9 +139,9 @@ def cpio_entry(cpio, want):
 init_b = cpio_file(cpio, "init")
 scan_b = cpio_file(cpio, "scanary")
 rep_b = cpio_file(cpio, "bin/scanary_report")
-check("init carries V3 banner + BUILD_ID",
-      init_b is not None and b"LG6151M LAB KERNEL V3" in init_b
-      and b"BUILD_ID=" in init_b)
+check("init carries V3.1 banner + BUILD_ID",
+      init_b is not None and b"LG6151M LAB KERNEL V3.1" in init_b
+      and b'BUILD_ID="labkernel-v3.1' in init_b)
 check("init carries scanary w1 invocation (unchanged vs C2 arm)",
       init_b is not None and b"/scanary --victim main --duration 1800" in init_b)
 check("init vsurv4 still started", init_b is not None and b"/vsurv4" in init_b)
@@ -196,9 +207,30 @@ for app in ("bin/setsid", "bin/cttyhack"):
           e is not None and (e["mode"] & S_IFMT) == 0o120000
           and d is not None and d.rstrip(b"\x00") == b"busybox",
           f"mode={oct(e['mode']) if e else '?'} target={d!r}" if e else "absent")
-check("A3: init auto-clears TRY_A (misc[2061]) with readback + lab_trya=off opt-out",
+check("A3: init auto-clears TRY_A (p1 misc block, byte 2061) with readback + lab_trya=off opt-out",
       init_b is not None and b"TRYA_CLEARED" in init_b
       and b"TRYA_CLEAR_FAILED" in init_b and b"lab_trya=off" in init_b)
+
+# ---------- 1c-1. V3.1 FIX-1: TRY_A write-target / GPT safety assertion ----------
+# Requirement (D28 report sections 9b/11): the TRY_A write target MUST be
+# p1@2061.  Raw /dev/mmcblk0 offset 2061 belongs to the GPT partition entries
+# and writing it corrupts the GPT entries CRC.  This is the permanent
+# regression assertion for that defect: the battery refuses to pass a build
+# whose /init regresses to the raw-device form.
+init_lines = init_b.splitlines() if init_b else []
+off_lines = [ln for ln in init_lines if b"seek=2061" in ln or b"skip=2061" in ln]
+off_bad = [ln for ln in off_lines if (b"$P1" not in ln and b"mmcblk0p1" not in ln)]
+check("V3.1/GPT guard: every byte-2061 access goes through the p1 misc device",
+      init_b is not None and bool(off_lines) and not off_bad,
+      f"{len(off_lines)} offset lines" if not off_bad else repr(off_bad[:2]))
+check("V3.1/GPT guard: no raw /dev/mmcblk0 write in /init (forbidden: GPT entry bytes)",
+      init_b is not None and re.search(rb"of=/dev/mmcblk0(?!p)", init_b) is None)
+check("V3.1/GPT guard: TRY_A target is p1@2061, single byte, zero-filled",
+      init_b is not None and b"P1=/dev/mmcblk0p1" in init_b
+      and b'dd if=/dev/zero of="$P1" bs=1 seek=2061 count=1' in init_b)
+check("V3.1/GPT guard: A/B control block shape printed before and after",
+      init_b is not None and b"skip=2060 count=10" in init_b
+      and b"p1[2060..2069] before:" in init_b)
 check("A2: init feeds /dev/watchdog every 10s + lab_wdt=off opt-out",
       init_b is not None and b"WDT: feeder armed" in init_b and b"lab_wdt=off" in init_b)
 check("A1: heartbeat carries tmax + thermal limits cmdline-overridable",
@@ -208,6 +240,18 @@ check("A1: thermal guards present (alarm + protective shutdown)",
       init_b is not None and b"THERMAL_ALARM" in init_b and b"THERMAL_SHUTDOWN" in init_b)
 check("A4: boot card present",
       init_b is not None and b"BOOT CARD -- capability summary" in init_b)
+check("V3.1/FIX-2: window-1 end ships the full scanary log to console",
+      init_b is not None and b"WINDOW-1 END" in init_b
+      and b"W1_LOG_BYTES=" in init_b and b"W1_LOG_LINES=" in init_b
+      and b"cat /data/repro/scanary_c2_w1.log" in init_b
+      and b"D28_W1_LOG_END" in init_b)
+check("V3.1/FIX-2: window-end log carries an on-device md5",
+      init_b is not None and b"busybox md5sum /data/repro/scanary_c2_w1.log" in init_b)
+check("V3.1/FIX-3: alive_check reads /proc/<pid>/stat comm",
+      init_b is not None and b"/proc/[0-9]*/stat" in init_b
+      and b"comm=${s#*(}" in init_b)
+check("V3.1/FIX-3: alive_check no longer scans /proc/*/cmdline",
+      init_b is not None and b"/proc/[0-9]*/cmdline" not in init_b)
 check("F3: init auto-runs /bin/netup",
       init_b is not None and b"/bin/netup > /dev/console 2>&1 &" in init_b)
 
@@ -285,8 +329,8 @@ img = open(f"{TREE}/arch/arm64/boot/Image", "rb").read()
 check("Image contains cpio.gz at a stable offset", img.find(gz) >= 0,
       f"Image offset {hex(img.find(gz))} len {len(img)}")
 
-# ---------- 3. boot v2 header (inherited, reads boot-lab3) ----------
-boot = open(f"{OUT}/boot-lab3-unsigned.img", "rb").read()
+# ---------- 3. boot v2 header (inherited, reads boot-lab31) ----------
+boot = open(f"{OUT}/boot-lab31-unsigned.img", "rb").read()
 check("boot magic ANDROID!", boot[:8] == b"ANDROID!")
 kernel_size = struct.unpack("<I", boot[8:12])[0]
 page_size = struct.unpack("<I", boot[36:40])[0]
@@ -318,8 +362,8 @@ check("dtb chosen/bootargs carries serial console + init=/init",
       "console=ttyS0,921600" in bootargs and "init=/init" in bootargs,
       bootargs.strip()[:160])
 
-# ---------- 4. signed image (inherited, reads boot-lab3) ----------
-sgn = open(f"{OUT}/boot-lab3-signed.img", "rb").read()
+# ---------- 4. signed image (inherited, reads boot-lab31) ----------
+sgn = open(f"{OUT}/boot-lab31-signed.img", "rb").read()
 check("signed image is 32MiB", len(sgn) == 33554432, f"{len(sgn)}B")
 cert1 = open(CERT1, "rb").read()
 check("cert1 embedded in signed image", sgn.find(cert1) >= 0, f"offset {hex(sgn.find(cert1))}")

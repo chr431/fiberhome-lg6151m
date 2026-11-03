@@ -24,7 +24,7 @@
 # /proc/*/cmdline, excluding self and parent (no pgrep -f substring traps).
 
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin
-BUILD_ID="labkernel-v3 2026-11-02 base=6.18.44(repo a40df9a5) v2-fixes-included"
+BUILD_ID="labkernel-v3.1 2026-11-03 base=6.18.44 v2-fixes + TRY_A p1-offset fix + window-end log channel"
 
 mount -t proc proc /proc
 mount -t sysfs sysfs /sys
@@ -57,19 +57,26 @@ trya_clear()
     case " $(cat /proc/cmdline 2>/dev/null) " in
         *" lab_trya=off "*) echo "TRYA: autoclear disabled by lab_trya=off" > /dev/console; return;;
     esac
-    [ -b /dev/mmcblk0 ] || mknod /dev/mmcblk0 b 179 0 2>/dev/null || true
-    if [ ! -b /dev/mmcblk0 ]; then echo "TRYA: no /dev/mmcblk0 -- SKIP" > /dev/console; return; fi
-    cur=$(dd if=/dev/mmcblk0 bs=1 skip=2061 count=1 2>/dev/null | hexdump -e '1/1 "%02x"')
-    if [ -z "$cur" ]; then echo "TRYA: misc[2061] read failed -- SKIP (state unknown)" > /dev/console; return; fi
+    # v3.1 FIX: the A/B control block lives at p1 offset 2060 (p1 starts at
+    # sector 64), NOT at raw /dev/mmcblk0 offset 2060.  v3 wrote raw offset
+    # 2061 (a GPT entry byte) -- never do that.  Use the misc partition.
+    P1=/dev/mmcblk0p1
+    [ -b "$P1" ] || mknod "$P1" b 179 1 2>/dev/null || true
+    if [ ! -b "$P1" ]; then echo "TRYA: no $P1 -- SKIP (state unknown)" > /dev/console; return; fi
+    before=$(dd if="$P1" bs=1 skip=2060 count=10 2>/dev/null | hexdump -e '10/1 "%02x "')
+    echo "TRYA: p1[2060..2069] before: $before" > /dev/console
+    cur=$(dd if="$P1" bs=1 skip=2061 count=1 2>/dev/null | hexdump -e '1/1 "%02x"')
+    if [ -z "$cur" ]; then echo "TRYA: p1[2061] read failed -- SKIP (state unknown)" > /dev/console; return; fi
     if [ "$cur" = "00" ]; then
-        echo "TRYA: misc[2061]=0x00 already clear" > /dev/console; return
+        echo "TRYA: p1[2061]=0x00 already clear (TRY_A=0)" > /dev/console; return
     fi
-    dd if=/dev/zero of=/dev/mmcblk0 bs=1 seek=2061 count=1 2>/dev/null
-    now=$(dd if=/dev/mmcblk0 bs=1 skip=2061 count=1 2>/dev/null | hexdump -e '1/1 "%02x"')
+    dd if=/dev/zero of="$P1" bs=1 seek=2061 count=1 2>/dev/null
+    now=$(dd if="$P1" bs=1 skip=2061 count=1 2>/dev/null | hexdump -e '1/1 "%02x"')
+    after=$(dd if="$P1" bs=1 skip=2060 count=10 2>/dev/null | hexdump -e '10/1 "%02x "')
     if [ "$now" = "00" ]; then
-        echo "TRYA_CLEARED: misc[2061] 0x${cur} -> 0x00 (slot-B rollback trap immunized)" > /dev/console
+        echo "TRYA_CLEARED: p1[2061] 0x${cur} -> 0x00 (slot-B rollback trap immunized) after: $after" > /dev/console
     else
-        echo "TRYA_CLEAR_FAILED: readback 0x${now} -- clear manually NOW: dd if=/dev/zero of=/dev/mmcblk0 bs=1 seek=2061 count=1" > /dev/console
+        echo "TRYA_CLEAR_FAILED: readback 0x${now} -- clear manually: dd if=/dev/mmcblk0p1 bs=1 seek=2061 count=1 (zero)" > /dev/console
     fi
 }
 
@@ -126,7 +133,7 @@ TH_WARN=$(cmd_val lab_thermal_warn); TH_WARN=${TH_WARN:-85000}
 TH_OFF=$(cmd_val lab_thermal_off);  TH_OFF=${TH_OFF:-95000}
 echo "thermal limits: warn=${TH_WARN}mC off=${TH_OFF}mC (cmdline-overridable)" > /dev/console
 
-b "LG6151M LAB KERNEL V3 -- initramfs userspace reached (asset build)"
+b "LG6151M LAB KERNEL V3.1 -- initramfs userspace reached (D28 revalidation build)"
 uname -a > /dev/console
 echo "$BUILD_ID" > /dev/console
 
@@ -190,14 +197,18 @@ echo "summarize with: /bin/scanary_report /data/repro/scanary_c2_w1.log" > /dev/
 
 alive_check()
 {
-    # $1 = exact argv[0] token; excludes self($$) and parent($PPID)
+    # v3.1 FIX: read /proc/<pid>/stat comm instead of cmdline (cmdline has NULs;
+    # a whole-line read never equals the argv[0] token -> false negatives).
+    # $1 = exact comm token; excludes self($$) and parent($PPID).
     role="$1"; hit=0
-    for c in /proc/[0-9]*/cmdline; do
-        pid=${c#/proc/}; pid=${pid%/cmdline}
+    for c in /proc/[0-9]*/stat; do
+        pid=${c#/proc/}; pid=${pid%/stat}
         [ "$pid" = "$$" ] && continue
         [ "$pid" = "$PPID" ] && continue
-        IFS= read -r argv0 < "$c" 2>/dev/null || continue
-        [ "$argv0" = "$role" ] && hit=$((hit+1))
+        s=$(cat "$c" 2>/dev/null) || continue
+        comm=${s#*(}
+        comm=${comm%%)*}
+        [ "$comm" = "$role" ] && hit=$((hit+1))
     done
     echo $hit
 }
@@ -208,9 +219,9 @@ while :; do
     i=$((i+1))
     up=$(cut -d. -f1 /proc/uptime)
     ma=$(awk '/MemAvailable/{print $2}' /proc/meminfo)
-    sc=$(alive_check /scanary)
+    sc=$(alive_check scanary)
     tm=$(tz_max)
-    echo "[hb $i] uptime=${up}s MemAvail=${ma}kB tmax=${tm:-na}mC vsurv4=$(alive_check /vsurv4) scanary=${sc} date=$(date 2>/dev/null)" > /dev/console
+    echo "[hb $i] uptime=${up}s MemAvail=${ma}kB tmax=${tm:-na}mC vsurv4=$(alive_check vsurv4) scanary=${sc} date=$(date 2>/dev/null)" > /dev/console
     thermal_guard "$tm"
     [ "$up" -ge "$win_end" ] && break
     if [ "$sc" = "0" ]; then
@@ -224,6 +235,14 @@ while :; do
     fi
     sleep 10
 done
+
+b "WINDOW-1 END -- full scanary log to console (C-187 channel fix)"
+echo "W1_LOG_PATH=/data/repro/scanary_c2_w1.log" > /dev/console
+echo "W1_LOG_BYTES=$(wc -c < /data/repro/scanary_c2_w1.log 2>/dev/null)" > /dev/console
+echo "W1_LOG_LINES=$(wc -l < /data/repro/scanary_c2_w1.log 2>/dev/null)" > /dev/console
+/bin/busybox md5sum /data/repro/scanary_c2_w1.log > /dev/console 2>&1
+cat /data/repro/scanary_c2_w1.log > /dev/console 2>&1
+echo "D28_W1_LOG_END" > /dev/console
 
 b "observation window complete -- interactive shell on this console"
 echo "type commands; exit (or Ctrl-D) respawns the shell; heartbeat continues at 60s as [hb-slow]" > /dev/console

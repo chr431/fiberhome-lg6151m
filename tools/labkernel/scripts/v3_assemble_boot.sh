@@ -1,5 +1,8 @@
 #!/bin/bash
-# v3_assemble_boot.sh -- V3 pack + sign (same recipe as v2, output boot-lab3-*).
+# v3_assemble_boot.sh -- V3.1 pack + sign (same recipe as v2, output boot-lab31-*).
+# Pinned image for the v3.1 asset: boot-lab31-signed.img md5 9934cca26d2dda425eae406ca97fb865.
+# The withdrawn v3 image (boot-lab3-signed.img, 217ccd57...) must NOT be flown: its
+# /init wrote the raw-device offset 2061 (a GPT entry byte) when clearing TRY_A.
 set -eu
 LK="$HOME/lab-kernel"
 REPO="$LK/openwrt-mt6990-lg6851f"
@@ -12,8 +15,8 @@ BOOT_PART_SIZE=33554432
 
 KERNEL="$TREE/arch/arm64/boot/Image"
 DTB="$TREE/arch/arm64/boot/dts/mediatek/mt6990-fiberhome-lg6151m.dtb"
-UNSIGNED="$LK/out/boot-lab3-unsigned.img"
-SIGNED="$LK/out/boot-lab3-signed.img"
+UNSIGNED="$LK/out/boot-lab31-unsigned.img"
+SIGNED="$LK/out/boot-lab31-signed.img"
 
 [ -f "$KERNEL" ] || { echo "missing $KERNEL"; exit 1; }
 [ -f "$DTB" ] || { echo "missing $DTB"; exit 1; }
@@ -41,7 +44,7 @@ BOARD_AVB_ENABLE= \
   hsm=1 \
   root_key_path="$ROOT_KEY" \
   oem_key_path="$IMAGE_KEY" \
-  root_key_padding=pss 2>&1 | tee "$LK/out/sign_boot_v3.log" | tail -6
+  root_key_padding=pss 2>&1 | tee "$LK/out/sign_boot_v31.log" | tail -6
 cd "$LK"
 [ -f "$WORK/in/boot-verified.img" ] || { echo "signing produced no boot-verified.img"; exit 1; }
 cp -f "$WORK/in/boot-verified.img" "$SIGNED"
@@ -61,7 +64,7 @@ PY
 
 echo "== 4. checksums =="
 cd "$LK/out"
-sha256sum boot-lab3-unsigned.img boot-lab3-signed.img | tee SHA256SUMS_v3.txt
-md5sum boot-lab3-unsigned.img boot-lab3-signed.img | tee MD5SUMS_v3.txt
-ls -la boot-lab3-unsigned.img boot-lab3-signed.img
-echo V3_ASSEMBLE_DONE
+sha256sum boot-lab31-unsigned.img boot-lab31-signed.img | tee SHA256SUMS_v31.txt
+md5sum boot-lab31-unsigned.img boot-lab31-signed.img | tee MD5SUMS_v31.txt
+ls -la boot-lab31-unsigned.img boot-lab31-signed.img
+echo V31_ASSEMBLE_DONE

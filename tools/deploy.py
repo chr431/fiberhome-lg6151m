@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
-"""deploy.py v2.43 -- single source of truth for PC<->CPE deployment + drift guard.
+"""deploy.py v2.45 -- single source of truth for PC<->CPE deployment + drift guard.
 
+v2.45 (2026-11-03 收束轮): EXTRA_KEEP +slotguard.arm +nerepair.xrep —— 双钥匙布防的
+  运行期标记(设备侧创建, 非部署件)。rc.extend v3.9 注释引用 slotguard.arm, 未收录时
+  doctor 报 dispatcher UNKNOWN => DRIFT(1) 误报; 本行修复。PC 侧工具, 无设备部署。
+v2.44 (2026-11-03 兜底加固轮; 注记追平): MANIFEST +gw/bin/slotguard +gw/slotguard_launch.sh
+  +gw/slotguard.conf(热槽消毒器; 部署顺序=二进制→launcher/conf→svc_lib/rc.extend)。
 v2.43 (B4 消融轮): MANIFEST +gw/mod_mask.sh(boot 期模块加载遮罩 enabler; 由 babysit
   v3.1 于 preinit 阶段调用, 读 /data/gw/ablation.mask 决定遮罩集; 遮罩文件本身为
   运行态实验变量走 put 通道不入库)。
@@ -220,6 +225,8 @@ EXTRA_KEEP = ["DEPLOY_MANIFEST", "ppe_reg",
               "DO_UBUS_CAP", "MODE.fh",  # rc.extend.sh 运行时模式标记(dispatcher引用, 非脚本)
               "boot_attempts.tsv",       # rc.extend v2.6 boot 尝试台账(运行时追加)
               "healthdog.forensic",      # v2.6 healthdog FORENSIC 打印 opt-in marker
+              "slotguard.arm",   # v2.45: slotguard 布防第二钥匙(设备侧创建; rc.extend v3.9 注释引用)
+              "nerepair.xrep",   # v2.45: nerepair X1/X2/X3 布防钥匙(设备侧创建)
               "logs"]                    # /data/gw/logs 目录(rc.extend/watchdog 台账落点, dispatcher 引用)
 MD5_LINE = re.compile(r"^([0-9a-f]{32})  (.*)$", re.M)
 

@@ -179,7 +179,7 @@ v3httpd ── 静态 /data/gw/www + /api/* → api.sh(35+ JSON 端点)
 | `tools/build_v3fix.sh` | **v1.1** | tool | `-` | v3_fix.ko构建; v1.1: 路径修正当前布局 + uapi/asm junction 失效改就地复制 + 记录产物错位事故 |
 | `tools/build_v3httpd.sh` | **v1.2** | tool | `-` | v1.2(vaguard 退役轮): 去 vaguard.o; v3httpd构建(zig cc aarch64-linux-musl全静态, 同mipc_cellular链); v1.1(SIGSEGV §18): 链接 vaguard.o(va_list 闸门) |
 | `tools/cfg_heal_drill.py` | **v1.0** | tool | `-` | cfg_heal 演练/验收装置(M4 G2/R4.1): 每用例 = 注入前断言配置本来正确 -> 注入 -> 1s 轮询断言 <=60s 重建 -> PC 侧客户端连通性(TCP22/80 + DNS) -> 断言台账有行; 每用例带独立安全网(restore + D4 设备侧 100s deadman, 自愈器失效也不会把设备留在坏态); --baseline 正常态静默观测断言 0 次重建(不误伤的正面证据); 证据落 _local/evidence/cfg_heal/<ts>_drill.tsv; 设备写操作强制检查 device_lock owner |
-| `tools/deploy.py` | **v2.44** | tool | `-` | v2.44(2026-11-03 兜底加固轮): MANIFEST +gw/bin/slotguard +gw/slotguard_launch.sh +gw/slotguard.conf(热槽消毒器; 部署顺序=二进制→launcher/conf→svc_lib/rc.extend); v2.43(B4 消融轮): +mod_mask.sh; v2.42(A1): +coreaddr; 历史见 git |
+| `tools/deploy.py` | **v2.45** | tool | `-` | v2.45(2026-11-03 收束轮): EXTRA_KEEP +slotguard.arm +nerepair.xrep(双钥匙运行期标记; rc.extend v3.9 注释引用 slotguard.arm 致 doctor dispatcher UNKNOWN 误报修复); v2.44(2026-11-03 兜底加固轮): MANIFEST +gw/bin/slotguard +gw/slotguard_launch.sh +gw/slotguard.conf(热槽消毒器; 部署顺序=二进制→launcher/conf→svc_lib/rc.extend); v2.43(B4 消融轮): +mod_mask.sh; v2.42(A1): +coreaddr; 历史见 git |
 | `tools/device_local.py.example` | **v1.0** | tool | `-` | 凭证模板(真件gitignored) |
 | `tools/device_lock.py` | **v2.0** | tool | `-` | 单设备互斥锁: 心跳式陈旧判定(30min)/run 自动持锁执行/hold 前台持锁; 2026-11-01 从 _local 迁入仓库(运行态仍写 _local/device.lock) |
 | `tools/devop.py` | **v2.0** | tool | `-` | 设备变更唯一入口: 锁+演练窗一步到位, 默认排队 120s, 任一步失败命令不执行; 2026-11-01 迁入仓库 |

@@ -2,6 +2,13 @@
 
 > 本页只写“现在该信什么、下一步做什么”。每条结论的 ID 指向 [01_CLAIMS.tsv](01_CLAIMS.tsv)。
 > 旧的 67%/32%、两个写入者、PIT 表项等结论已撤回，见 [ARCHIVE_MAP.md](ARCHIVE_MAP.md)。
+>
+> **2026-11-03 兜底部署（观察模式）**：nerepair **v2.2**（`811b3e19…`，xrep 未布防 / XFORM 普查在）与
+> slotguard **v1.0**（`eec51be4…`，三槽 `observe`、arm 未建）已上机并随冷启动自启
+> （rc.extend v3.9 / svc_lib v1.12 / watchdog v1.53 监督零重启）；9 件落盘 md5 全等于设计 §8，
+> `--selftest` 无 FAIL、`--once` 零副作用。观察窗起点 **2026-11-03 17:45:32 +0800**
+> （boot `9129c459…`），24 h 复盘 ≈ 11-04 17:46，布防门禁未达 ⇒ 未布防。
+> 详录见 [SLOTGUARD_DESIGN.md](SLOTGUARD_DESIGN.md) §7 与 [REVIEW_SLOTGUARD.md](REVIEW_SLOTGUARD.md)。
 
 ## 1. 一句话
 

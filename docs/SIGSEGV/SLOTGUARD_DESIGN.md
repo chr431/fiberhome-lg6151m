@@ -1,4 +1,4 @@
-# SLOTGUARD · 兜底加固设计（v1.0，2026-11-03，离线完成、未上机）
+# SLOTGUARD · 兜底加固设计（v1.0，2026-11-03；同日已上机，观察模式）
 
 > 目标：即使家族记录的生产者**永远找不到 / 不可修改**，也要有一条不依赖生产者的可靠兜底。
 > 本轮交付 = **nerepair v2.2（覆盖普查 + 三条受门控的扩展修复）** + **slotguard v1.0（热槽主动消毒）**。
@@ -12,7 +12,7 @@
 2. **v2.0 自身还有一处判据错位**：deref 的 q0 分支用 `len_band(lo0)` 校验 **A 值**（长度带），实测自然 NE **7 条里 6 条** A>0x20000 会被拒。v2.2 以 `shape_ok` 硬门修正，**默认只记录**。
 3. **slotguard 用「槽」把修复提前到消费之前**：3 s 周期读白名单槽，strict 记录判据命中且 **11 道危险面门全过**才写；写回值是**槽自身地址**（不是全零 —— 全零会把下一次 pop 变成 NULL 崩溃）。
 4. **双钥匙布防**：出厂 config 全部 `observe`；写需要 `mode=sanitize` **且** `/data/gw/slotguard.arm` 存在。任何不确定性只记录、不写。
-5. **离线验证**：nerepair 扩展判据 host **22/22 PASSED**；slotguard 内建 selftest **23/23 PASSED**；两产物静态 aarch64 构建 md5 见 §8。**未部署、未上机**。
+5. **离线验证**：nerepair 扩展判据 host **22/22 PASSED**；slotguard 内建 selftest **23/23 PASSED**；两产物静态 aarch64 构建 md5 见 §8。**2026-11-03 已上机部署（观察模式、未布防）**：9 件落盘 md5 全等于 §8、`--selftest` 无 FAIL、`--once` 零副作用、冷启动后自启正常（实绩与观察窗见 §7）。
 
 ---
 
@@ -172,17 +172,22 @@ B0A2: 0 < w2 < 2^24 ∧ w0 = {len, ip} ∧ 同上
 
 ---
 
-## §7 部署前置清单（**本轮不部署**）
+## §7 部署前置清单（**2026-11-03 已部署，观察模式**；条目标注实绩）
 
-1. **同一批次、按顺序**：`gw/bin/slotguard`（二进制）→ `gw/slotguard_launch.sh` → `gw/slotguard.conf`
-   → `gw/svc_lib.sh` → `gw/watchdog.sh` → `gw/rc.extend.sh` → `gw/bin/nerepair`（v2.2）。
+1. **同一批次、按顺序**（✅ 2026-11-03 已执行）：`gw/bin/slotguard`（二进制）→ `gw/slotguard_launch.sh` → `gw/slotguard.conf`
+   → `gw/svc_lib.sh` → `gw/watchdog.sh` → `gw/rc.extend.sh` → `gw/bin/nerepair`（v2.2）→ `gw/bin/kmsglog`（收遗留）。
    SVC_TABLE 行先于二进制落地会让 watchdog 反复拉起失败（launcher 明确 exit 1）。
+   实绩：9 件全部落盘 md5 = §8 钉值（`nerepair_launch.sh` 内容一致 SKIP）；冷启动后 re-assert 仍全部一致。
 2. 落盘 md5 必须等于 §8；`chmod 755` 两个二进制（`put` 不保留权限位）。
-3. **先跑零副作用自检**：`/data/gw/bin/slotguard --selftest`（必须 23 项 PASSED）
+3. **先跑零副作用自检**（✅ 2026-11-03）：`/data/gw/bin/slotguard --selftest`（必须 23 项 PASSED）
    与 `/data/gw/bin/slotguard --once`（一次扫描、stdout、不写任何文件）。
-4. 观察窗口 ≥24 h：`grep -c WOULD_SANITIZE`、`grep CANDIDATE`、`grep -E "SKIP|PERM|MISMATCH"`。
+   实绩：`--selftest` 无 FAIL（源码 23 条断言，设备端打印 `SELFTEST PASSED (0 failures)`）；
+   `--once` 前后 `ls /data/gw/logs/` diff 为空、stdout 空。
+4. 观察窗口 ≥24 h（⏳ 2026-11-03 起）：`grep -c WOULD_SANITIZE`、`grep CANDIDATE`、`grep -E "SKIP|PERM|MISMATCH"`。
    **布防门禁**：CANDIDATE 逐条研判为真家族 ∧ `WRITE_MISMATCH=0` ∧ `PERM=0` ∧
    至少一个槽稳定命中（≥2 连续采样）∧ 该槽在 sp 之下。
+   实绩：观察窗起点 **2026-11-03 17:45:32 +0800**（boot `9129c459-4dc4-4837-ac36-f4bbb2efc9f0`），
+   24 h 复盘点 ≈ 11-04 17:46；布防门禁未达 ⇒ **未布防**（arm 文件未建）。
 5. 布防：把目标槽改为 `mode=sanitize` → `touch /data/gw/slotguard.arm` → 观察首条 `SANITIZE` 的
    `post=` 与 `state=S`。
 6. nerepair XREP 单独评估：先看 24 h 的 `WOULD_XREP path=x1|x2|x3` 计数与逐条 `SEGV` 对照，

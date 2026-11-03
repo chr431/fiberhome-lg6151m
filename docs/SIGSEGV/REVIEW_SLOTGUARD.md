@@ -1,6 +1,8 @@
 # REVIEW · 兜底加固（nerepair v2.2 / slotguard v1.0）— 自审与故障路径
 
-> 状态：**离线完成，未上机**。本文是上机前必须逐条打勾的自审清单；
+> 状态：**2026-11-03 已上机（观察模式，未布防）**。本文上机自审清单已逐条对照（§1–§4）；
+> 上机实绩：9 件落盘 md5 全等于设计 §8、内建 selftest 无 FAIL、`--once` 零副作用、冷启动后
+> slotguard/nerepair 随 rc.extend 自启且零重启；观察窗起点 2026-11-03 17:45:32 +0800。
 > 设计细节见 [SLOTGUARD_DESIGN.md](SLOTGUARD_DESIGN.md)。
 
 ---

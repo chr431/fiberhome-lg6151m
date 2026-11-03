@@ -953,7 +953,7 @@ EOF
 
 # ---- main ----
 case "${1:-}" in
---version) echo "watchdog v1.42"; exit 0 ;;
+--version) echo "watchdog v1.53"; exit 0 ;;
 esac
 touch $LOG $STATE
 # v1.20: 看门狗单实例 — 双实例会重复自愈/告警(现场曾出现 2 个).
@@ -964,7 +964,7 @@ if [ "$_rc" != 0 ]; then
     exit 0
 fi
 # v1.42: 启动横幅改用 VER 单一来源(此前字面量停在 v1.38, 识别/syslog 断言被骗)
-VER=1.52
+VER=1.53
 log "===== watchdog v$VER start (svc_lib primitives + minimal parsers + batch3 metrics; avail keys + outcome probes + bearer-follow dp; alert LED 5G orange) ====="
 logger -t watchdog "watchdog v$VER start"
 # initialize state to current (suppress initial alarms)
@@ -1023,6 +1023,27 @@ _fastpass() {
     port_listen 80 || _fp_restart v3httpd v3httpd
     port_listen 53 || _fp_restart dnsmasq dnsmasq
     _fp_disk
+    _fp_slotguard
+}
+# v1.53 (fallback-hardening round): slotguard sanitize-rate alert on the 2s path.
+#   The producer (gw/src/slotguard.c) creates /tmp/slotguard.alert only while the
+#   sanitize rate is >= 30/min; a high rate means the writer is re-filling the
+#   slot as fast as we clean it (a fight with no benefit) or a false-positive
+#   slot.  Crossings only: one line on enter, one on leave -- no 2s spam.
+#   Why the fast path: the rate can rise and fall inside one 30s cycle, and the
+#   low-disk lesson (2026-11-01) is exactly "a check on a slow tick is not a
+#   response capability".
+_fp_sg=${_fp_sg:-ok}
+_fp_slotguard() {
+    if [ -f /tmp/slotguard.alert ]; then
+        if [ "$_fp_sg" != "alert" ]; then
+            _fp_sg=alert
+            log "WARN  slotguard sanitize rate high: $(cat /tmp/slotguard.alert 2>/dev/null)"
+        fi
+    elif [ "$_fp_sg" = "alert" ]; then
+        _fp_sg=ok
+        log "OK    slotguard sanitize rate back to normal"
+    fi
 }
 _kickwait() {
     _kw=0

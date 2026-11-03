@@ -32,6 +32,7 @@
 | **观测：NEAR 计量器** | **已构建、未部署**（v1.9.2） | 记录在 x2 但指令形态不在射程内时记 `NEAR reason=insn` —— 把「已知不覆盖」量化的唯一手段 |
 | **补偿控制：pageguard** | **已构建、未上机** | 「RX 环缓冲页永不给用户匿名页」。**其前提（按 PA 写）正在被重审**（§2/§3） |
 | **验收指标：槽重写速率** | **已有工具**（lab 的 sampler2） | 对 daemon 栈上的固定 32 B 槽测「单位时间内容变化次数」＝**写入活性**；不依赖崩溃，是 §4 的**主判据**（E1 待复核） |
+| **slotguard**（热槽主动消毒，v1.0） | **已构建、未部署**（出厂 observe-only；`gw/bin/slotguard` 76,088 B，md5 `eec51be427f3b03f9eba167228d57a4f`） | sampler2 式周期读白名单槽，strict 记录命中且 11 道危险面门全过时写回 `{槽地址,0,0,0}`（把 nerepair 的「指向栈」提前施加）；**双钥匙**（config `mode=sanitize` + `/data/gw/slotguard.arm`）。设计/危险面/回滚见 [SLOTGUARD_DESIGN.md](SLOTGUARD_DESIGN.md)，自审见 [REVIEW_SLOTGUARD.md](REVIEW_SLOTGUARD.md) |
 
 ### 0.2 nerepair 的覆盖边界（必须逐字理解）
 
@@ -118,6 +119,11 @@ v1.7 **不查 `w3`、不查长度带**（加固见 §1.3）。
 | **NEAR 计量器** | v1.9.2 新增：三个 PASS 分支里照样读 x2 做形状检查，命中记 `NEAR reason=insn rt= rn= insn= addr=` | 源码 `_local/work/crash-root/fix/nerepair_v192.c`；解析 `ne_sites.py` |
 
 > **陷阱**：arm64 fault 行是 `pr_info` 级，console-ramoops 与持久 syslog **都不收**；权威 = `/data/gw/logs/ne_events.tsv` + `aee_exp` 目录 mtime。
+
+> **v2.2 增补（2026-11-03）**：nerepair 新增覆盖普查 `XFORM`（store / 寄存器偏移 load / LDP / FP / 第二副本 / NULL 样）与三条**默认关闭**的扩展修复
+> `X1`（第二副本 `x2-0x240`）、`X2`（B0A2 复合故障地址，语料 36/150）、`X3`（q0 分支改 `shape_ok` 硬门；旧
+> `len_band(lo0)` 把 A 值当长度带，自然 NE 6/7 落此缺口）。布防 = `/data/gw/nerepair.xrep`；未布防时只打 `WOULD_XREP`。
+> 判据回归 22/22 与缺口数字的复现命令见 [SLOTGUARD_DESIGN.md](SLOTGUARD_DESIGN.md) §1/§10。
 
 ### 1.3 已构建、未部署的 nerepair 版本（均在 `_local/work/crash-root/fix/`，**不在 gw/**）
 

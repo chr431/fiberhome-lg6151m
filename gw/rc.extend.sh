@@ -1,5 +1,7 @@
 #!/bin/sh
-# rc.extend.sh v3.8 -- slot-aware dispatcher (shared /data between v2/v3)
+# rc.extend.sh v3.9 -- slot-aware dispatcher (shared /data between v2/v3)
+# v3.9 (fallback-hardening round): +slotguard 开机自启(热槽主动消毒; 二进制缺失
+#   时不启动, 单实例由 slotguard_launch.sh 的 svc_lock 负责)。
 # v3.8 (A1 far-infra 轮): +kmsglog 开机自启(/dev/kmsg 持久镜像, 8MBx2 轮转 +
 #   写前水位守卫 + 写失败游标回卷) 与 arm64 用户态 fault 行武装 —— 本内核
 #   (5.15 arm64) 的 show_unhandled_signals 实际暴露为 /proc/sys/debug/
@@ -218,6 +220,15 @@ case "$slot" in
      # v3.6: 改经 nerepair_launch.sh(svc_lock 单实例) — 原直启绕过 launcher,
      #   开机态无 /tmp/nerepair.lock, watchdog alive() 只能落到 pgrep 回退分支。
      pgrep -f '/data/gw/bin/nerepair' >/dev/null 2>&1 ||          nohup sh /data/gw/nerepair_launch.sh >>/data/gw/logs/nerepair.out 2>&1 &
+     # v3.9 (fallback-hardening round): slotguard -- proactive hot-slot sanitizer.
+     #   Reads the whitelisted record slots on long-lived daemons and (only when
+     #   BOTH the config says mode=sanitize AND /data/gw/slotguard.arm exists)
+     #   rewrites a matching record with a mapped stack address.  Ships observe-
+     #   only; see docs/SIGSEGV/SLOTGUARD_DESIGN.md.
+     #   Guard: the binary must exist -- deploying the script without the binary
+     #   must not spawn a failing service on every boot.  Single instance is
+     #   owned by slotguard_launch.sh (svc_lock), so no pgrep substring check.
+     [ -x /data/gw/bin/slotguard ] && nohup sh /data/gw/slotguard_launch.sh >>/data/gw/logs/slotguard.out 2>&1 &
      # v3.0 (SIGSEGV Phase 1): 改回内核默认 0。该设置原本只为"锁内深遍历 +
      #   旧栈"组合兜底, 叠加源已随旧栈退役消失(§8.13); 保留 1 会把任何真实 RCU 停顿
      #   升级成重启, 既丢现场又会打断刚修好的 NE 台账。

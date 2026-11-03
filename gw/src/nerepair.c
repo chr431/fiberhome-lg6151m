@@ -1,6 +1,28 @@
 /*
- * nerepair.c v1.4 -- ptrace supervisor: repair the 32B-record va_list fault
+ * nerepair.c v2.2 -- ptrace supervisor: repair the 32B-record va_list fault
  * in place, cover every user process on the device.
+ *
+ * v2.2 (2026-11-03 fallback-hardening round): COVERAGE CENSUS + GATED EXTENSION.
+ *   The 150-record corpus splits 114 A0B2 / 36 B0A2 (76%/24%); path 2's 16 MiB
+ *   address gate therefore excludes every B0A2 fault by construction (its fault
+ *   address IS the {len,ip} composite, always >= 16 MiB).  Natural-NE records
+ *   also appear at x2-0x240 (a second copy in 66/82 canary samples).  v2.2:
+ *     (a) XFORM observation of every fault shape that carries a family record but
+ *         was outside the repair criteria: store/ldp/fp/register-offset loads,
+ *         NULL-like fault addresses, and records at the second copy.  Observation
+ *         only -- no register is touched, no signal is swallowed.
+ *     (b) two GATED repair paths, off unless /data/gw/nerepair.xrep exists (or
+ *         NEREPAIR_XREP=1):
+ *           X1 pop-type at the second record copy x2-0x240 (same hard gates);
+ *           X2 deref-type whose fault address is the B0A2 composite (>=16 MiB),
+ *              gated by shape_ok() on a record inside [sp, sp+16K) whose q0 is
+ *              exactly si_addr (tag-masked).
+ *         Without the gate both log WOULD_XREP and the process dies exactly as
+ *         before -- i.e. the pre-v2.2 behaviour, so the natural-NE census stays
+ *         valid while the new forms are counted.
+ *   Rationale for the order (observation first): a wrong repair hides a real
+ *   defect; a missed repair only restores the baseline.  XREP is a second key on
+ *   top of that, for exactly the two forms the corpus already proves.
  *
  * Role in the SIGSEGV fix (docs/SIGSEGV/FIX.md): vaguard protects the static
  * binaries we build; nerepair is the runtime safety net for everything else
@@ -88,7 +110,7 @@
 #endif
 #define NT_PRSTATUS 1
 #define LOGPATH "/data/gw/logs/nerepair.log"
-#define NEREPAIR_VER "2.1"
+#define NEREPAIR_VER "2.2"
 
 struct regs64 { unsigned long regs[31]; unsigned long sp, pc, pstate; };
 static pid_t self_pid;
@@ -98,6 +120,12 @@ static unsigned long g_attached, g_segv, g_repaired, g_passed, g_suppressed, g_a
 static unsigned long g_would, g_near, g_loop, g_near_insn;
 /* v2.0 counters: dereference-type path (see deref_attempt) */
 static unsigned long g_rep2, g_would2, g_deref_scan, g_deref_hit;
+/* v2.2: coverage-census counters.  g_xw = WOULD_XREP, g_xr = XREPAIR,
+ * g_xform[] = observed-but-unrepaired shapes (index by xf_idx()).
+ * The array order is the STAT field order and must not be reordered (grep
+ * contracts in docs/SIGSEGV/SLOTGUARD_DESIGN.md). */
+static unsigned long g_xw, g_xr, g_xform[8];
+static int g_xrep;                          /* v2.2: extension repair armed */
 static time_t g_rate_win;
 static int g_rate_cnt;
 /* v1.9: dry-run.  Enabled by env NEREPAIR_DRY=1, by the marker file
@@ -291,6 +319,17 @@ static int shape_ok(unsigned long *w, unsigned long fault)
     if (small0 && big2) return lo2 >= NR_LEN_MIN && lo2 <= NR_LEN_MAX;
     if (big0 && small2) return lo0 >= NR_LEN_MIN && lo0 <= NR_LEN_MAX;
     return 0;
+}
+/* v2.2: read 32 B at an explicit address and apply the hard family gate.
+ * Used for the second record copy (x2-0x240) and by the gated extension paths;
+ * the caller still has to verify the fault address against the record. */
+static int record_at(pid_t pid, unsigned long va, unsigned long fault)
+{
+    unsigned long w[4];
+
+    if (read_mem(pid, va, w, 32) < 0)
+        return 0;
+    return shape_ok(w, fault);
 }
 /* v1.9 canary exemption -- project 定律二 (exact token, never a substring).
  * The authoritative source is the *inode* of /proc/<pid>/exe, resolved once at
@@ -513,6 +552,45 @@ static int is_load_insn(unsigned int insn)
     return 0;
 }
 
+/* v2.2: full shape classification for the XFORM census.  NEVER used to decide a
+ * repair outside the gated paths.  Kinds:
+ *   xf_popcopy  record at x2-0x240 (second copy) -- X1 candidate
+ *   xf_bigderef load whose fault address is the B0A2 composite -- X2 candidate
+ *   xf_regload  LDR (register offset), any size -- observation only
+ *   xf_ldp      LDP/LDNP/LDPSW (pair load)     -- observation only
+ *   xf_store    any store form                 -- observation only
+ *   xf_fp       FP/SIMD load-store             -- observation only
+ *   xf_null     si_addr == 0 with a record at x2 (cannot be distinguished from a
+ *               genuine NULL bug)              -- observation only
+ *   xf_other    anything else                  -- observation only */
+enum { xf_popcopy, xf_bigderef, xf_regload, xf_ldp, xf_store, xf_fp, xf_null, xf_other, xf_N };
+static const char *xf_name(int i)
+{
+    static const char *n[xf_N] = { "popcopy", "bigderef", "regload", "ldp", "store", "fp", "null", "other" };
+
+    return (i >= 0 && i < xf_N) ? n[i] : "?";
+}
+/* instruction class for the census; rt/rn/rm out-params are filled when meaningful */
+static int xf_class(unsigned int insn, int *rt, int *rn, int *rm)
+{
+    *rt = insn & 0x1F;
+    *rn = (insn >> 5) & 0x1F;
+    *rm = (insn >> 16) & 0x1F;
+    if ((insn >> 26) & 1u)
+        return xf_fp;                                   /* V=1 */
+    if ((insn & 0x3B200C00u) == 0x38200800u)            /* register offset */
+        return (((insn >> 22) & 3u) != 0) ? xf_regload : xf_store;
+    if ((insn & 0x3A000000u) == 0x28000000u && ((insn >> 22) & 1u))
+        return xf_ldp;                                  /* L=1, integer pair */
+    if (is_load_insn(insn))
+        return xf_other;                                /* imm-form load (path 2) */
+    if ((insn & 0x3B000000u) == 0x39000000u ||
+        (insn & 0x3B200C00u) == 0x38000000u ||
+        (insn & 0x3A000000u) == 0x28000000u)
+        return xf_store;                                /* imm/unscaled/pair store */
+    return xf_other;
+}
+
 /* coarse class label for the NEAR read-out (never used to decide a repair) */
 static const char *classify_insn(unsigned int insn)
 {
@@ -538,10 +616,17 @@ static int len_band(unsigned long v)
 
 /* search [sp, sp+16K) of the faulting task for a 32 B family record that carries
  * si_addr in q0 or low32(q2).  Page-by-page so an unmapped hole does not abort
- * the whole scan.  Returns 1 and fills the out-params on a hit. */
+ * the whole scan.  Returns 1 and fills the out-params on a hit.
+ * v2.2: mode 1 (big) is the B0A2 form -- the fault address IS the {len,ip}
+ * composite, so only an exact q0 match (tag-masked) plus the full shape_ok()
+ * gate is accepted.  mode 2 (X3) is the q0-match branch of the small-address
+ * form, gated by shape_ok() instead of the v2.0 len_band(lo0) check: that check
+ * compares the A word itself against the LENGTH band, so it structurally rejects
+ * A values > 0x20000 (6 of the 7 natural-NE records carry A in 0x20085..0x23648).
+ * mode 0 keeps the v2.0 semantics byte for byte. */
 static int find_record_near_stack(pid_t pid, unsigned long sp, unsigned long addr,
                                   unsigned long *out_va, unsigned long *out_q0,
-                                  unsigned long *out_q2, int *out_which)
+                                  unsigned long *out_q2, int *out_which, int mode)
 {
     static unsigned char buf[4096];
     unsigned long base = sp & ~0xFFFUL;
@@ -570,6 +655,18 @@ static int find_record_near_stack(pid_t pid, unsigned long sp, unsigned long add
             q3 = *(unsigned long *)(buf + off + 24);
             if (q1 != 0 || q3 != 0)
                 continue;
+            if (mode) {
+                unsigned long w[4];
+
+                if ((q0 & NR_TAGMASK) != (addr & NR_TAGMASK) &&
+                    !(mode == 2 && (q0 & NR_TAGMASK) == ((addr + 8) & NR_TAGMASK)))
+                    continue;
+                w[0] = q0; w[1] = q1; w[2] = q2; w[3] = q3;
+                if (!shape_ok(w, addr))
+                    continue;
+                *out_va = va + off; *out_q0 = q0; *out_q2 = q2; *out_which = 0;
+                return 1;
+            }
             lo0 = q0 & 0xFFFFFFFFUL;
             lo2 = q2 & 0xFFFFFFFFUL;
             if (lo2 == addr || lo2 == addr + 8 || lo2 == addr - 8) {
@@ -591,27 +688,60 @@ static int find_record_near_stack(pid_t pid, unsigned long sp, unsigned long add
     return 0;
 }
 
+/* v2.2: could this fault address have come from a family record?  Bounds the
+ * cost of the observation scan to faults that are worth the 16 KB walk. */
+static int addr_family_plausible(unsigned long a)
+{
+    if (a && a < DEREF_SMALL_MAX)
+        return 1;
+    return len_band(a & 0xFFFFFFFFUL) && (a >> 32) != 0;   /* B0A2 composite */
+}
+
 /* returns 1 if this fault was handled by the dereference-type path */
+static int xform_budget(void);           /* v2.2: defined with the XFORM census */
 static int deref_attempt(pid_t pid, struct regs64 *r, unsigned int insn, unsigned long addr)
 {
     unsigned long recva = 0, q0 = 0, q2 = 0;
     int which = -1, rn = (int)((insn >> 5) & 0x1F);
+    int ext = 0;                        /* 0 = v2.0 path 2, 1 = X2, 2 = X3 */
 
     if (!is_load_insn(insn))
         return 0;
-    if (addr == 0 || addr >= DEREF_SMALL_MAX)
+    if (addr == 0)
         return 0;
     if (rn == 31)                       /* base is already sp: nothing to redirect */
         return 0;
-    if (!find_record_near_stack(pid, r->sp, addr, &recva, &q0, &q2, &which))
+    if (addr < DEREF_SMALL_MAX) {
+        if (!find_record_near_stack(pid, r->sp, addr, &recva, &q0, &q2, &which, 0)) {
+            /* v2.2 X3: v2.0's q0 branch gates on len_band(lo0), i.e. it compares
+             * the A word against the LENGTH band; A values above 0x20000 are
+             * therefore rejected structurally (6/7 natural-NE records).  The
+             * correct hard gate is shape_ok() on the record, as everywhere else.
+             * Observe-only unless XREP is armed, and bounded by xform_budget(). */
+            if (!(g_xrep || xform_budget()) ||
+                !find_record_near_stack(pid, r->sp, addr, &recva, &q0, &q2, &which, 2))
+                return 0;
+            ext = 2;
+        }
+    } else if (addr_family_plausible(addr)) {
+        /* v2.2 X2: the fault address is the B0A2 composite ({len,ip}), which the
+         * v2.0 16 MiB gate excluded by construction (36/150 corpus records).
+         * Evidence gate is the stricter exact-q0 match plus the full shape. */
+        ext = 1;
+        if (!find_record_near_stack(pid, r->sp, addr, &recva, &q0, &q2, &which, 1))
+            return 0;
+    } else {
         return 0;
+    }
     g_deref_hit++;
-    if (g_dry) {
+    if (g_dry || (ext && !g_xrep)) {
         g_would2++;
+        if (ext) g_xw++;
         if (rate_ok_prio())
-            logev("WOULD_DREPAIR", pid, "pc=%#lx addr=%#lx rn=%d rec=0x%lx which=q%d q2=%#lx",
-                  r->pc, addr, rn, recva, which, q2);
-        return 0;                       /* dry run: never touch registers */
+            logev(ext ? "WOULD_XREP" : "WOULD_DREPAIR", pid,
+                  "path=%s pc=%#lx addr=%#lx rn=%d rec=0x%lx which=q%d q0=%#lx q2=%#lx",
+                  ext == 1 ? "x2" : ext == 2 ? "x3" : "p2", r->pc, addr, rn, recva, which, q0, q2);
+        return 0;                       /* dry run / extension not armed */
     }
     {
         int nth = 0;
@@ -628,12 +758,63 @@ static int deref_attempt(pid_t pid, struct regs64 *r, unsigned int insn, unsigne
         if (ptrace(PTRACE_SETREGSET, pid, NT_PRSTATUS, &iov) < 0)
             return 0;
     }
+    if (ext) {
+        g_xr++;
+        if (rate_ok_prio())
+            logev("XREPAIR", pid, "path=%s pc=%#lx addr=%#lx rn=%d rec=0x%lx q0=%#lx q2=%#lx",
+                  ext == 1 ? "x2" : "x3", r->pc - 4, addr, rn, recva, q0, q2);
+        return 1;
+    }
     g_rep2++;
     if (rate_ok_prio())
         logev("DREPAIR", pid, "pc=%#lx addr=%#lx rn=%d rec=0x%lx which=q%d q0=%#lx q2=%#lx",
               r->pc - 4, addr, rn, recva, which, q0, q2);
     return 1;
 }
+
+/* v2.2: XFORM census -- observation only, never a repair decision.
+ * Cost is bounded twice: only faults whose address could have come from a family
+ * record reach the 16 KB stack walk, and the walk itself runs at most 50x/s
+ * (a crash storm must not turn the supervisor into a scanner). */
+static int xform_budget(void)
+{
+    static time_t w; static int c; time_t now = time(NULL);
+
+    if (now != w) { w = now; c = 0; }
+    if (c >= 50) return 0;
+    c++;
+    return 1;
+}
+static void xform_observe(pid_t pid, struct regs64 *r, unsigned int insn, int cls,
+                          unsigned long addr, int have_x2)
+{
+    unsigned long recva = 0, q0 = 0, q2 = 0;
+    int which = -1;
+    int rt = insn & 0x1F, rn = (insn >> 5) & 0x1F, rm = (insn >> 16) & 0x1F;
+
+    if (have_x2) {
+        g_xform[cls]++;
+        if (rate_ok_prio())
+            logev("XFORM", pid, "form=%s sig=x2 rt=%d rn=%d rm=%d insn=%#x addr=%#lx",
+                  xf_name(cls), rt, rn, rm, insn, addr);
+        return;
+    }
+    if (cls != xf_store && cls != xf_regload && cls != xf_ldp && cls != xf_fp)
+        return;
+    if (!addr_family_plausible(addr) || !xform_budget())
+        return;
+    if (!find_record_near_stack(pid, r->sp, addr, &recva, &q0, &q2, &which, 0))
+        return;
+    g_xform[cls]++;
+    if (rate_ok_prio())
+        logev("XFORM", pid, "form=%s sig=stack rt=%d rn=%d insn=%#x addr=%#lx rec=0x%lx q0=%#lx q2=%#lx",
+              xf_name(cls), rt, rn, insn, addr, recva, q0, q2);
+}
+
+/* v2.2 X1: the canary census found a second copy of the record at x2-0x240 in
+ * 66/82 samples (00_STATE C-161).  Same hard gates as path 1; the copy offset is
+ * a measured constant, not a guess. */
+#define NR_COPY2_OFF 0x240UL
 
 static int handle_segv(pid_t pid)
 {
@@ -651,15 +832,22 @@ static int handle_segv(pid_t pid)
      * NEAR observation below can report rt/rn even when the shape test fails. */
     rt = insn & 0x1F; rn = (insn >> 5) & 0x1F;
     if (!is_ldr_same(insn, &rt, &rn)) {
+        unsigned long fa = (unsigned long)si.si_addr;
+        int crt, crn, crm;
+        int cls = xf_class(insn, &crt, &crn, &crm);
+        int have = record_probe(pid, &r, fa);
+
         g_passed++;
-        if (record_probe(pid, &r, (unsigned long)si.si_addr)) {
+        if (have) {
             g_near_insn++;
             if (rate_ok_prio()) logev("NEAR", pid, "reason=insn shape=%s rt=%d rn=%d insn=%#x addr=%#lx",
-                                      classify_insn(insn), rt, rn, insn, (unsigned long)si.si_addr);
+                                      classify_insn(insn), rt, rn, insn, fa);
         } else if (rate_ok()) {
             logev("PASS", pid, "reason=not-load");
         }
-        if (deref_attempt(pid, &r, insn, (unsigned long)si.si_addr)) return 1;
+        if (cls != xf_other)
+            xform_observe(pid, &r, insn, cls, fa, have);
+        if (deref_attempt(pid, &r, insn, fa)) return 1;
         return 0;
     }
     if (rt != rn) {
@@ -705,8 +893,49 @@ static int handle_segv(pid_t pid)
             if (rate_ok_prio())
                 logev("NEAR", pid, "pc=%#lx fault=%#lx code=%d w=%#lx,%#lx,%#lx,%#lx",
                       r.pc, fa, si.si_code, w[0], w[1], w[2], w[3]);
+        } else if (fa == 0 && w[0] == 0 && w[1] == 0 && w[3] == 0 && len_band(w[2] & 0xFFFFFFFFUL)) {
+            /* v2.2: a zero fault address in front of a record whose q0 is also
+             * zero cannot be separated from a genuine NULL dereference.  Count it,
+             * never repair it. */
+            g_xform[xf_null]++;
+            if (rate_ok_prio())
+                logev("XFORM", pid, "form=null sig=x2 pc=%#lx addr=0 q2=%#lx", r.pc, w[2]);
         } else if (rate_ok()) {
             logev("PASS", pid, "reason=shape-fail w=%#lx,%#lx,%#lx,%#lx", w[0], w[1], w[2], w[3]);
+        }
+        /* v2.2 X1: second record copy.  Only reachable for a pop-type fault
+         * (rt==rn, si_addr==Xt) whose x2 slot did not itself validate. */
+        if (r.regs[2] >= NR_COPY2_OFF) {
+            unsigned long va2 = r.regs[2] - NR_COPY2_OFF;
+            if (record_at(pid, va2, fa)) {
+                g_xform[xf_popcopy]++;
+                if (rate_ok_prio())
+                    logev("XFORM", pid, "form=popcopy sig=x2-0x240 pc=%#lx addr=%#lx rt=%d rec=0x%lx",
+                          r.pc, fa, rt, va2);
+                if (g_dry || !g_xrep) {
+                    g_xw++;
+                    if (rate_ok_prio())
+                        logev("WOULD_XREP", pid, "path=x1 pc=%#lx fault=%#lx rt=%d rec=0x%lx",
+                              r.pc, fa, rt, va2);
+                } else {
+                    int nth = 0;
+                    if (breaker_allow(pid, r.pc, &nth)) {
+                        r.regs[rt] = r.sp;
+                        r.pc += 4;
+                        iov.iov_base = &r; iov.iov_len = sizeof r;
+                        if (ptrace(PTRACE_SETREGSET, pid, NT_PRSTATUS, &iov) >= 0) {
+                            g_xr++;
+                            if (rate_ok_prio())
+                                logev("XREPAIR", pid, "path=x1 pc=%#lx fault=%#lx rt=%d rec=0x%lx",
+                                      r.pc - 4, fa, rt, va2);
+                            return 1;
+                        }
+                    } else {
+                        g_loop++;
+                        if (rate_ok()) logev("PASS", pid, "reason=repair-loop pc=%#lx n=%d", r.pc, nth);
+                    }
+                }
+            }
         }
         if (deref_attempt(pid, &r, insn, (unsigned long)si.si_addr)) return 1;
         return 0;
@@ -823,10 +1052,18 @@ int main(void)
         g_dry = 1;
     if (stat("/tmp/nerepair.slotdrop", &statb) == 0)      /* v2.1: marker file */
         g_slotdrop = 1;
+    /* v2.2: extension repair is a second key on top of dry-run.  Order:
+     * env NEREPAIR_XREP > marker file; unreadable marker = off (fail-closed). */
+    if (getenv("NEREPAIR_XREP") && *getenv("NEREPAIR_XREP") && strcmp(getenv("NEREPAIR_XREP"), "0"))
+        g_xrep = 1;
+    else if (stat("/data/gw/nerepair.xrep", &statb) == 0)
+        g_xrep = 1;
     canary_init();
     logfd = open(LOGPATH, O_WRONLY | O_CREAT | O_APPEND, 0644);
-    logev("START", 0, "pid=%d ver=%s dry=%d canary=%s resolved=%d",
-          self_pid, NEREPAIR_VER, (int)g_dry, g_can_ok ? g_can_path : "-", g_can_ok);
+    logev("START", 0, "pid=%d ver=%s dry=%d xrep=%d canary=%s resolved=%d",
+          self_pid, NEREPAIR_VER, (int)g_dry, (int)g_xrep, g_can_ok ? g_can_path : "-", g_can_ok);
+    if (g_xrep)
+        logev("MODE", 0, "xrep=1 source=%s", getenv("NEREPAIR_XREP") ? "env" : "marker");
     if (g_dry)
         logev("MODE", 0, "dry=1 source=%s", getenv("NEREPAIR_DRY") ? "env" : "marker");
     write_hb();
@@ -856,11 +1093,15 @@ int main(void)
          * 风暴解耦; EINTR 分支保留原逻辑作兜底。 */
         if (g_alarm) {
             g_alarm = 0; alarm(60); write_hb();
-            logev("STAT", 0, "mode=%s attached=%lu segv=%lu repaired=%lu passed=%lu suppressed=%lu abuse=%lu loop=%lu would=%lu near=%lu nearinsn=%lu rep2=%lu would2=%lu dfhit=%lu sd=%d/%lu/%lu/%lu",
+            logev("STAT", 0, "mode=%s attached=%lu segv=%lu repaired=%lu passed=%lu suppressed=%lu abuse=%lu loop=%lu would=%lu near=%lu nearinsn=%lu rep2=%lu would2=%lu dfhit=%lu sd=%d/%lu/%lu/%lu xrep=%d xw=%lu xr=%lu xform=%lu/%lu/%lu/%lu/%lu/%lu/%lu/%lu",
                   g_dry ? "dry" : "armed", g_attached, g_segv, g_repaired, g_passed,
                   g_suppressed, g_abuse, g_loop, g_would, g_near, g_near_insn,
                   g_rep2, g_would2, g_deref_hit,
-                  (int)g_slotdrop, g_sd_drops, g_sd_skips, g_sd_scans);
+                  (int)g_slotdrop, g_sd_drops, g_sd_skips, g_sd_scans,
+                  (int)g_xrep, g_xw, g_xr,
+                  g_xform[xf_popcopy], g_xform[xf_bigderef], g_xform[xf_regload],
+                  g_xform[xf_ldp], g_xform[xf_store], g_xform[xf_fp],
+                  g_xform[xf_null], g_xform[xf_other]);
             /* v1.9: PID 1 coverage must not depend on the first attach winning --
              * attach_pid gives up after 3s on a busy boot.  Retry every 60s. */
             if (!traced(1)) { attach_pid(1); logev("PID1RETRY", 1, "attached=%lu", g_attached); }

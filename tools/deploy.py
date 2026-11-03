@@ -189,6 +189,9 @@ MANIFEST = [
     ("gw/bin/coreaddr", "/data/gw/bin/coreaddr"),   # ELF core note-head FAR/PC parser (core_meta v1.13+ dep; A1 far-infra)
     ("gw/bin/kmsglog", "/data/gw/bin/kmsglog"),     # persistent /dev/kmsg mirror (8MBx2, write-guard, cursor-safe; rc.extend v3.8+ autostart)
     ("gw/nerepair_launch.sh", "/data/gw/nerepair_launch.sh"),
+    ("gw/bin/slotguard", "/data/gw/bin/slotguard"),        # hot-slot sanitizer (fallback-hardening round)
+    ("gw/slotguard_launch.sh", "/data/gw/slotguard_launch.sh"),  # svc_lock single-instance launcher
+    ("gw/slotguard.conf", "/data/gw/slotguard.conf"),      # slot whitelist; ships observe-only
     ("gw/bin/v3_fix.ko", "/data/gw/v3_fix.ko"),
     ("gw/bin/v3_steth.ko", "/data/gw/v3_steth.ko"),
     ("gw/defaults.conf", "/data/gw/defaults.conf"),

@@ -107,7 +107,7 @@ t=3 s 执行的一次 `head -8` 快照；scanary 的 `emit()` 只写 `--log` 文
 
 1. lab shell 内挂 p46（§4-2 同法），取原厂 p25 件
    `/data/gw/logs/p25.boot.c2.img`（md5 **209f481cf1bf489dc04ce1b12a9851f8**；
-   PC 侧 `prv-lg6151m/_drill_backup/p25.boot.c2.img` 同 md5 双备份）。
+   PC 侧 `<private-repo>/_drill_backup/p25.boot.c2.img`（私有仓，不入公开仓） 同 md5 双备份）。
 2. `md5sum` 门禁 → `dd of=/dev/mmcblk0p25 bs=1M` → 读回 md5 == 209f481c…
 3. **TRY_A 清零（正确偏移）**：先读 `dd if=/dev/mmcblk0p1 bs=1 skip=2060 count=10 | hexdump`
    记形；`dd if=/dev/zero of=/dev/mmcblk0p1 bs=1 seek=2061 count=1`；再读回

@@ -1,5 +1,9 @@
 #!/bin/sh
-# svc_lib.sh v1.7 -- shared supervision, lock, heartbeat and minimal-parser library.
+# svc_lib.sh v1.12 -- shared supervision, lock, heartbeat and minimal-parser library.
+# v1.12 (2026-11-03 fallback-hardening round): SVC_TABLE +slotguard (hot-slot
+#   sanitizer; hb /tmp/slotguard.hb, max-hb-age 180; recipe slotguard_launch.sh,
+#   which refuses when the binary is absent -- deploy binary first, then this row).
+# v1.7 -- prior header baseline (registry column carries the real version history).
 # v1.7 (2026-10-31 authd 首崩断网轮): +rl_refund() — rl_ok 是先记账后执行,
 #   坏配方时代 spawn 失败(进程未起)同样消耗 3/h 预算, 真修复被限流卡死
 #   (实弹 23:11 strike 已过而 budget exhausted 空转到窗过期)。失败回滚:
@@ -334,5 +338,6 @@ healthdog|healthdog[.]sh|healthdog.sh|sh /data/gw/healthdog.sh|/tmp/healthdog.hb
 dial_keeper|dial_keeper[.]sh|dial_keeper.sh|sh /data/gw/dial_keeper.sh|/tmp/dial_keeper.hb|90|LD_LIBRARY_PATH=/fhrom/lib:/usr/lib:/lib PATH=/data/gw/sbin:/data/gw/bin:/usr/sbin:/usr/bin:/sbin:/bin:/fhrom/bin:/fhrom/fhshell
 usb_mgr|usb_mgr[.]sh|usb_mgr.sh|sh /data/gw/usb_mgr.sh daemon|/tmp/usb_mgr.hb|180|
 nerepair|nerepair|bin/nerepair|sh /data/gw/nerepair_launch.sh|/tmp/nerepair.hb|180|
+slotguard|slotguard|bin/slotguard|sh /data/gw/slotguard_launch.sh|/tmp/slotguard.hb|180|
 fast_watch|fast_watch[.]sh|fast_watch.sh|sh /data/gw/fast_watch.sh|/tmp/fast_watch.hb|60|
 '

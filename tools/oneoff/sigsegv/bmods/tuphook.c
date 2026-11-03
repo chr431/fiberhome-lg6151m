@@ -1,6 +1,23 @@
 // SPDX-License-Identifier: GPL-2.0
-// tuphook.ko v1.5 -- narrow entry hook for mtk_warp's wifi_tx_tuple_add /
-// wifi_rx_tuple_add on LG6151M (5.15.134 aarch64, vendor mtk_warp.ko).
+// tuphook.ko v1.6 -- narrow entry hooks for mtk_warp's wifi_tx_tuple_add /
+// wifi_rx_tuple_add AND for mtk_wed's tx_fill / rx_fill on LG6151M
+// (5.15.134 aarch64, vendor mtk_warp.ko + mtk_wed.ko).
+//
+// v1.6 (T1/D28): the two tuple entries are recorded exactly as in v1.5, and
+// the two fill callbacks reached through ops+0x18 / ops+0x50 are hooked at
+// their FIRST instruction (tx_fill: ldr x2,[x0,#0x10]; rx_fill:
+// ldr x2,[x0,#8]).  For every fill call the probe records
+//     pkt_info, dest (=x1, the callback's own store target),
+//     lr, B, ring_ptr=[B+0xc0], ring_end=[B+0xc8], b8/bc, flag74,
+//     q0..q3 (the 32B currently at ring_ptr), cntvct_el0,
+//     src0..src2 (the values the fill will write), and address classes.
+// The question is whether the fill path's ring target is a linear-map alias
+// of a user (canary stack) page, i.e. a stale/polluted ring base, or a
+// direct user VA.  Static fact (N2 E3): the fill callbacks themselves write
+// the caller's kernel-stack scratch (tx: sp+0x40, rx: sp+0x20); the actual
+// ring RMW happens after the callback at [B+0xc0], where
+//     tx: B = [[pkt_info]+0x10]   rx: B = [pkt_info+8].
+// Both endpoints are recorded; ring_ptr is the primary hypothesis endpoint.
 //
 // v1.5 (D19): the two entry points are recorded exactly as in v1.4 (x0..x3),
 // and the entry's skb (x2) is dereferenced IN THE CAPTURE PATH through
@@ -154,7 +171,7 @@
 #include <asm/barrier.h>
 
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("tuphook: narrow entry recorder + skb deref for mtk_warp wifi_tx/rx_tuple_add (v1.5)");
+MODULE_DESCRIPTION("tuphook: entry recorder + skb deref for mtk_warp tuple_add and fill-target recorder for mtk_wed tx/rx_fill (v1.6)");
 MODULE_AUTHOR("chr431");
 
 /* ---- vendor mtk_warp.ko .text offsets (objdump of the shipped module) ---- */
@@ -171,6 +188,21 @@ MODULE_AUTHOR("chr431");
 #define TUP_OFF_UPDCB	0x60	/* ops+0x60 wo-rxcnt sink (wifi_chip_update) */
 #define TUP_BIND_KEY	0x10	/* bind entry: key pointer */
 #define TUP_ENTRY_SZ	0xb1a8	/* warp entry stride (warp_entry_get_by_idx objdump) */
+
+/* ---- mtk_wed fill callbacks (v1.6; N2 E3 byte-level disassembly) ---- */
+#define TUP_OFF_TXFILL	0xf8	/* mtk_wed .text tx_fill (ops+0x18) */
+#define TUP_OFF_RXFILL	0x374	/* mtk_wed .text rx_fill (ops+0x50) */
+#define INS_TXFILL0	0xf9400802u	/* ldr x2,[x0,#0x10] */
+#define INS_RXFILL0	0xf9400402u	/* ldr x2,[x0,#8] */
+/* ring target fields inside B (consumer writes at [B+0xc0]) */
+#define TUP_OFF_RCUR	0xc0	/* descriptor cursor / ring write target */
+#define TUP_OFF_REND	0xc8	/* descriptor end */
+#define TUP_OFF_ROFF2	0xb8	/* second RMW offset */
+#define TUP_OFF_ROFF	0xbc	/* first RMW offset */
+#define TUP_OFF_RFLAG	0x74	/* gate word checked by tx consumer */
+/* pkt_info -> B derivation */
+#define TUP_OFF_P_TX	0x10	/* tx: B = [[pkt_info]+0x10] */
+#define TUP_OFF_P_RX	0x8	/* rx: B = [pkt_info+8] */
 
 /* ---- struct sk_buff field offsets, pinned by BUILD_BUG_ON in init ----
  * (D19: verified against the device kernel Image, see header comment) */
@@ -231,6 +263,59 @@ struct tup_ring {
 };
 
 static struct tup_ring __percpu *rings;
+
+/* ---- v1.6 fill-callback records ------------------------------------ */
+#define TUP_FNREC	256
+#define TUP_FRECSZ	128
+#define TUP_FHEAD_OFF	(TUP_FNREC * TUP_FRECSZ)	/* 0x8000 */
+
+/* probe meta bits (fill) */
+#define TUP_F_M_RX	0x00000001
+#define TUP_F_PKT_BAD	0x00000002
+#define TUP_F_B_BAD	0x00000004
+#define TUP_F_RP_BAD	0x00000008
+#define TUP_F_RE_BAD	0x00000010
+#define TUP_F_RING_BAD	0x00000020
+#define TUP_F_RING_OK	0x00000040
+#define TUP_F_DEST_USER	0x00000100
+#define TUP_F_DEST_LIN	0x00000200
+#define TUP_F_DEST_VM	0x00000400
+#define TUP_F_DEST_GAP	0x00000800
+#define TUP_F_RP_USER	0x00001000
+#define TUP_F_RP_LIN	0x00002000
+#define TUP_F_RP_VM	0x00004000
+#define TUP_F_RP_NULL	0x00008000
+#define TUP_F_RP_GAP	0x00010000
+#define TUP_F_B_USER	0x00020000
+#define TUP_F_B_LIN	0x00040000
+#define TUP_F_B_VM	0x00080000
+#define TUP_F_DEST_NULL	0x00100000
+
+struct tup_frec {
+	u64 pkt_info;	/* x0 at callback entry */
+	u64 dest;	/* x1: the callback's own store target */
+	u64 lr;		/* x30: return address into the tuple consumer */
+	u64 bring;	/* B: tx [[pkt_info]+0x10], rx [pkt_info+8] */
+	u64 ring_ptr;	/* [B+0xc0]: ring RMW target */
+	u64 ring_end;	/* [B+0xc8] */
+	u64 b8_bc;	/* [B+0xb8] low32 | [B+0xbc] high32 */
+	u64 flag_meta;	/* [B+0x74] low32 | TUP_F_* meta high32 */
+	u64 q0;		/* 32B at ring_ptr (pre-consumer content) */
+	u64 q1;
+	u64 q2;
+	u64 q3;
+	u64 ts;		/* cntvct_el0 at capture */
+	u64 src0;	/* tx: [pkt_info]; rx: [pkt_info+8] (=B) */
+	u64 src1;	/* tx: [[pkt_info]+0x90]; rx: [pkt_info+0x16] u16 */
+	u64 src2;	/* tx: [[pkt_info]+0x94] u16 | [[pkt_info]+0x96] u8 <<16 */
+};
+
+struct tup_fring {
+	struct tup_frec recs[TUP_FNREC];
+	u64 head;	/* (idx<<1) | nested_guard; advanced only after write */
+};
+
+static struct tup_fring __percpu *frings;
 
 /* ---- trampoline: 160B per entry, straight line + one call, patch words
  *      marked with labels (no index arithmetic in the install path) ---- */
@@ -347,6 +432,109 @@ asm(
 ".popsection\n"
 );
 
+/* ---- v1.6 fill trampolines: their own 4KB page, own pool word F ----
+ * The displaced instruction is the FIRST word of the callback (a plain ldr,
+ * not paciasp), so the trampoline executes it after the probe and branches
+ * back to entry+4, where the original paciasp runs with the restored SP. */
+asm(
+".pushsection .text\n"
+".balign 4096\n"
+".globl tuphook_ftramp_tx\n"
+"tuphook_ftramp_tx:\n"
+"	adr	x16, tuphook_fpool\n"
+"	ldr	x17, [x16]\n"
+".globl tuphook_fmrs_tx\n"
+"tuphook_fmrs_tx:\n"
+"	mrs	x9, tpidr_el1\n"
+"	add	x9, x17, x9\n"
+"	mov	x11, #0x8000\n"
+"	ldr	x17, [x9, x11]\n"
+"	tbnz	x17, #0, 2f\n"
+"	ubfx	x10, x17, #1, #8\n"
+"	add	x10, x9, x10, lsl #7\n"
+"	orr	x17, x17, #1\n"
+"	str	x17, [x9, x11]\n"
+"	sub	sp, sp, #80\n"
+"	stp	x0, x1, [sp]\n"
+"	stp	x2, x3, [sp, #16]\n"
+"	stp	x8, x30, [sp, #32]\n"
+"	stp	x19, x20, [sp, #48]\n"
+"	str	x9, [sp, #64]\n"
+"	mov	x2, #0\n"
+"	mov	x3, x10\n"
+"	ldr	x4, [sp, #40]\n"
+"	bl	tuphook_fill_probe\n"
+"	ldr	x9, [sp, #64]\n"
+"	mov	x11, #0x8000\n"
+"	ldr	x17, [x9, x11]\n"
+"	add	x17, x17, #1\n"
+"	str	x17, [x9, x11]\n"
+"	ldp	x0, x1, [sp]\n"
+"	ldp	x2, x3, [sp, #16]\n"
+"	ldp	x8, x30, [sp, #32]\n"
+"	ldp	x19, x20, [sp, #48]\n"
+"	add	sp, sp, #80\n"
+"	.inst	0xf9400802\n"		/* ldr x2,[x0,#0x10] (displaced) */
+".globl tuphook_fback_tx\n"
+"tuphook_fback_tx:\n"
+"	b	.\n"			/* patched at init: b tx_fill+4 */
+"2:\n"
+"	.inst	0xf9400802\n"
+".globl tuphook_fbackn_tx\n"
+"tuphook_fbackn_tx:\n"
+"	b	.\n"			/* patched at init: b tx_fill+4 */
+".globl tuphook_ftramp_rx\n"
+"tuphook_ftramp_rx:\n"
+"	adr	x16, tuphook_fpool\n"
+"	ldr	x17, [x16]\n"
+".globl tuphook_fmrs_rx\n"
+"tuphook_fmrs_rx:\n"
+"	mrs	x9, tpidr_el1\n"
+"	add	x9, x17, x9\n"
+"	mov	x11, #0x8000\n"
+"	ldr	x17, [x9, x11]\n"
+"	tbnz	x17, #0, 2f\n"
+"	ubfx	x10, x17, #1, #8\n"
+"	add	x10, x9, x10, lsl #7\n"
+"	orr	x17, x17, #1\n"
+"	str	x17, [x9, x11]\n"
+"	sub	sp, sp, #80\n"
+"	stp	x0, x1, [sp]\n"
+"	stp	x2, x3, [sp, #16]\n"
+"	stp	x8, x30, [sp, #32]\n"
+"	stp	x19, x20, [sp, #48]\n"
+"	str	x9, [sp, #64]\n"
+"	mov	x2, #1\n"
+"	mov	x3, x10\n"
+"	ldr	x4, [sp, #40]\n"
+"	bl	tuphook_fill_probe\n"
+"	ldr	x9, [sp, #64]\n"
+"	mov	x11, #0x8000\n"
+"	ldr	x17, [x9, x11]\n"
+"	add	x17, x17, #1\n"
+"	str	x17, [x9, x11]\n"
+"	ldp	x0, x1, [sp]\n"
+"	ldp	x2, x3, [sp, #16]\n"
+"	ldp	x8, x30, [sp, #32]\n"
+"	ldp	x19, x20, [sp, #48]\n"
+"	add	sp, sp, #80\n"
+"	.inst	0xf9400402\n"		/* ldr x2,[x0,#8] (displaced) */
+".globl tuphook_fback_rx\n"
+"tuphook_fback_rx:\n"
+"	b	.\n"			/* patched at init: b rx_fill+4 */
+"2:\n"
+"	.inst	0xf9400402\n"
+".globl tuphook_fbackn_rx\n"
+"tuphook_fbackn_rx:\n"
+"	b	.\n"			/* patched at init: b rx_fill+4 */
+".balign 16\n"
+".globl tuphook_fpool\n"
+"tuphook_fpool:\n"
+"	.quad 0\n"			/* [0] = percpu offset F, patched at init */
+"	.quad 0\n"
+".popsection\n"
+);
+
 extern char tuphook_tramp_tx[];
 extern char tuphook_tramp_rx[];
 extern char tuphook_mrs_tx[];
@@ -356,6 +544,15 @@ extern char tuphook_back_rx[];
 extern char tuphook_backn_tx[];
 extern char tuphook_backn_rx[];
 extern unsigned long tuphook_pool[];
+extern char tuphook_ftramp_tx[];
+extern char tuphook_ftramp_rx[];
+extern char tuphook_fmrs_tx[];
+extern char tuphook_fmrs_rx[];
+extern char tuphook_fback_tx[];
+extern char tuphook_fback_rx[];
+extern char tuphook_fbackn_tx[];
+extern char tuphook_fbackn_rx[];
+extern unsigned long tuphook_fpool[];
 
 /* exported by mtk_warp.ko; the loader resolves it cross-module and pins the
  * vendor module for as long as we are loaded */
@@ -363,8 +560,10 @@ extern void warp_wlan_tx(void);
 
 static bool installed;
 static unsigned long g_base, g_tx, g_rx;
-static u32 g_bent_tx, g_bent_rx;
+static unsigned long g_ops, g_txcb, g_rxcb, g_updcb;
+static u32 g_bent_tx, g_bent_rx, g_fbent_tx, g_fbent_rx;
 static char g_txname[TUP_NM], g_rxname[TUP_NM];
+static char g_txcbn[TUP_NM], g_rxcbn[TUP_NM];
 static char g_opsline[1024];
 
 /* ------------------------------------------------------------------ */
@@ -432,6 +631,150 @@ noinline void tuphook_probe(u64 skb, u64 is_rx, struct tup_probe_out *out)
 	out->len_ip = lp;
 	out->proto = proto;
 	out->meta = meta | TUP_M_IP_OK;
+}
+
+/* ------------------------------------------------------------------ */
+/* v1.6 fill-callback probe                                            */
+/* ------------------------------------------------------------------ */
+/* Called from the fill trampolines BEFORE the displaced ldr.  x0 is the
+ * callback's pkt_info, x1 its destination (the caller's kernel-stack
+ * scratch), x30 the return address into wifi_tx/rx_tuple_add.  The probe
+ * derives the object B the tuple consumer will use and the ring RMW target
+ * [B+0xc0], then snapshots the 32B currently there.  Every dereference is
+ * copy_from_kernel_nofault: a polluted pointer can only make a read fail. */
+static u64 tup_va_class(u64 va)
+{
+	if (!va)
+		return 0;			/* null */
+	if (va < (1ULL << 39))
+		return 1;			/* user VA (VA_BITS=39) */
+	if (va >= 0xffffff8000000000ULL && va < 0xffffffc000000000ULL)
+		return 2;			/* linear map */
+	if (va >= 0xffffffc000000000ULL)
+		return 3;			/* vmalloc / module */
+	return 4;				/* gap */
+}
+
+__attribute__((used))
+noinline void tuphook_fill_probe(u64 p, u64 dest, u64 is_rx,
+				 struct tup_frec *out, u64 lr)
+{
+	u64 meta = is_rx ? TUP_F_M_RX : 0;
+	u64 ts = 0, b = 0, rp = 0, re = 0, b8bc = 0, f74 = 0;
+	u64 q0 = 0, q1 = 0, q2 = 0, q3 = 0;
+	u64 src0 = 0, src1 = 0, src2 = 0;
+	u64 p0 = 0, p8 = 0, p16 = 0;
+	u32 b8 = 0, bc = 0, f = 0;
+	u16 l16 = 0;
+	u8 b8v = 0;
+
+	asm volatile("mrs %0, cntvct_el0" : "=r"(ts));
+	out->pkt_info = p;
+	out->dest = dest;
+	out->lr = lr;
+	out->ts = ts;
+	out->bring = 0;
+	out->ring_ptr = 0;
+	out->ring_end = 0;
+	out->b8_bc = 0;
+	out->flag_meta = 0;
+	out->q0 = out->q1 = out->q2 = out->q3 = 0;
+	out->src0 = out->src1 = out->src2 = 0;
+
+	if (!p) {
+		meta |= TUP_F_PKT_BAD;
+		goto done;
+	}
+	if (copy_from_kernel_nofault(&p0, (const void *)p, 8))
+		meta |= TUP_F_PKT_BAD;
+	if (copy_from_kernel_nofault(&p8, (const void *)(p + 8), 8))
+		meta |= TUP_F_PKT_BAD;
+	if (copy_from_kernel_nofault(&p16, (const void *)(p + 0x10), 8))
+		meta |= TUP_F_PKT_BAD;
+
+	if (is_rx) {
+		b = p8;
+		src0 = p8;
+		if (!copy_from_kernel_nofault(&l16, (const void *)(p + 0x16), 2))
+			src1 = l16;
+		if (!copy_from_kernel_nofault(&b8v, (const void *)(p + 0x19), 1))
+			src2 = b8v;
+	} else {
+		u64 a = p0;		/* inner object */
+		u64 v90 = 0;
+		u16 v94 = 0;
+		u8 v96 = 0;
+
+		src0 = a;
+		if (a) {
+			copy_from_kernel_nofault(&b, (const void *)(a + 0x10), 8);
+			copy_from_kernel_nofault(&v90, (const void *)(a + 0x90), 8);
+			copy_from_kernel_nofault(&v94, (const void *)(a + 0x94), 2);
+			copy_from_kernel_nofault(&v96, (const void *)(a + 0x96), 1);
+			src1 = v90;
+			src2 = (u64)v94 | ((u64)v96 << 16);
+		}
+	}
+	out->bring = b;
+	if (b) {
+		if (copy_from_kernel_nofault(&rp, (const void *)(b + TUP_OFF_RCUR), 8))
+			meta |= TUP_F_RP_BAD;
+		if (copy_from_kernel_nofault(&re, (const void *)(b + TUP_OFF_REND), 8))
+			meta |= TUP_F_RE_BAD;
+		copy_from_kernel_nofault(&b8, (const void *)(b + TUP_OFF_ROFF2), 4);
+		copy_from_kernel_nofault(&bc, (const void *)(b + TUP_OFF_ROFF), 4);
+		copy_from_kernel_nofault(&f, (const void *)(b + TUP_OFF_RFLAG), 4);
+		b8bc = (u64)b8 | ((u64)bc << 32);
+		f74 = f;
+		out->ring_ptr = rp;
+		out->ring_end = re;
+		out->b8_bc = b8bc;
+		if (rp) {
+			if (copy_from_kernel_nofault(&q0, (const void *)rp, 8) ||
+			    copy_from_kernel_nofault(&q1, (const void *)(rp + 8), 8) ||
+			    copy_from_kernel_nofault(&q2, (const void *)(rp + 16), 8) ||
+			    copy_from_kernel_nofault(&q3, (const void *)(rp + 24), 8)) {
+				meta |= TUP_F_RING_BAD;
+			} else {
+				meta |= TUP_F_RING_OK;
+				out->q0 = q0;
+				out->q1 = q1;
+				out->q2 = q2;
+				out->q3 = q3;
+			}
+		} else {
+			if (!(meta & TUP_F_RP_BAD))
+				meta |= TUP_F_RP_NULL;
+		}
+	} else {
+		meta |= TUP_F_B_BAD;
+	}
+
+	switch (tup_va_class(dest)) {
+	case 0: meta |= TUP_F_DEST_NULL; break;
+	case 1: meta |= TUP_F_DEST_USER; break;
+	case 2: meta |= TUP_F_DEST_LIN; break;
+	case 3: meta |= TUP_F_DEST_VM; break;
+	default: meta |= TUP_F_DEST_GAP; break;
+	}
+	switch (tup_va_class(rp)) {
+	case 1: meta |= TUP_F_RP_USER; break;
+	case 2: meta |= TUP_F_RP_LIN; break;
+	case 3: meta |= TUP_F_RP_VM; break;
+	case 4: meta |= TUP_F_RP_GAP; break;
+	default: break;
+	}
+	switch (tup_va_class(b)) {
+	case 1: meta |= TUP_F_B_USER; break;
+	case 2: meta |= TUP_F_B_LIN; break;
+	case 3: meta |= TUP_F_B_VM; break;
+	default: break;
+	}
+done:
+	out->src0 = src0;
+	out->src1 = src1;
+	out->src2 = src2;
+	out->flag_meta = f74 | (meta << 32);
 }
 
 /* ------------------------------------------------------------------ */
@@ -639,6 +982,45 @@ static int tup_resolve(void)
 	return 0;
 }
 
+/* v1.6: the two fill callbacks resolved from the ops table must be the
+ * expected mtk_wed functions, with the expected first instructions and on
+ * one page (single writable window).  Any mismatch refuses install. */
+static int tup_resolve_fill(void)
+{
+	u32 itx, irx;
+
+	if (!g_ops || !g_txcb || !g_rxcb) {
+		pr_err("tuphook: ops/cb unresolved (ops=%lx tx=%lx rx=%lx)\n",
+		       g_ops, g_txcb, g_rxcb);
+		return -EINVAL;
+	}
+	if (g_txcb < 0xffffffc000000000UL || g_rxcb < 0xffffffc000000000UL) {
+		pr_err("tuphook: fill cb not in module range (tx=%lx rx=%lx)\n",
+		       g_txcb, g_rxcb);
+		return -EINVAL;
+	}
+	if ((g_txcb & PAGE_MASK) != (g_rxcb & PAGE_MASK)) {
+		pr_err("tuphook: fill cb not on one page (tx=%lx rx=%lx)\n",
+		       g_txcb, g_rxcb);
+		return -EINVAL;
+	}
+	itx = READ_ONCE(*(u32 *)g_txcb);
+	irx = READ_ONCE(*(u32 *)g_rxcb);
+	if (itx != INS_TXFILL0 || irx != INS_RXFILL0) {
+		pr_err("tuphook: fill entry insn mismatch tx=%08x rx=%08x (want %08x/%08x)\n",
+		       itx, irx, INS_TXFILL0, INS_RXFILL0);
+		return -EINVAL;
+	}
+	if (!strstr(g_txcbn, "mtk_wed") || !strstr(g_rxcbn, "mtk_wed")) {
+		pr_err("tuphook: fill cb names not mtk_wed: '%s' / '%s'\n",
+		       g_txcbn, g_rxcbn);
+		return -EINVAL;
+	}
+	pr_info("tuphook: fill cb ok tx=%016lx(%s) rx=%016lx(%s) page=%lx\n",
+		g_txcb, g_txcbn, g_rxcb, g_rxcbn, g_txcb & PAGE_MASK);
+	return 0;
+}
+
 /* decode ADRP + ADD imm pair -> absolute kernel VA */
 static int tup_decode_adr_pair(unsigned long pc, u32 adrp, u32 add,
 			       unsigned long *out)
@@ -698,10 +1080,13 @@ static int tup_find_bind_slot(unsigned long *slot_out)
 
 static void tup_report_bind_ops(void)
 {
-	unsigned long slot, entry, ctx, ops = 0, txcb = 0, rxcb = 0, updcb = 0;
+	unsigned long slot, entry, ctx;
 	u64 cnt = 0, arr = 0, key = 0;
 	char b1[TUP_NM] = "?", b2[TUP_NM] = "?", b3[TUP_NM] = "?";
 
+	g_ops = g_txcb = g_rxcb = g_updcb = 0;
+	g_txcbn[0] = '\0';
+	g_rxcbn[0] = '\0';
 	g_opsline[0] = '\0';
 	if (tup_find_bind_slot(&slot)) {
 		snprintf(g_opsline, sizeof(g_opsline),
@@ -741,28 +1126,34 @@ static void tup_report_bind_ops(void)
 			pr_info("tuphook: live bind at entry%u (entry0 unbound)\n", idx);
 	}
 	ctx = entry + 8;
-	if (tup_rd64(ctx + TUP_OFF_OPS, &ops) || !ops) {
+	if (tup_rd64(ctx + TUP_OFF_OPS, &g_ops) || !g_ops) {
 		snprintf(g_opsline, sizeof(g_opsline),
 			 "bind: count=%llu entry=%016lx key=%016llx ops unreadable\n",
 			 cnt, entry, key);
 		return;
 	}
-	tup_rd64(ops + TUP_OFF_TXCB, &txcb);
-	tup_rd64(ops + TUP_OFF_RXCB, &rxcb);
-	tup_rd64(ops + TUP_OFF_UPDCB, &updcb);
-	if (txcb)
-		sprint_symbol(b1, (unsigned long)txcb);
-	if (rxcb)
-		sprint_symbol(b2, (unsigned long)rxcb);
-	if (updcb)
-		sprint_symbol(b3, (unsigned long)updcb);
+	tup_rd64(g_ops + TUP_OFF_TXCB, &g_txcb);
+	tup_rd64(g_ops + TUP_OFF_RXCB, &g_rxcb);
+	tup_rd64(g_ops + TUP_OFF_UPDCB, &g_updcb);
+	if (g_txcb) {
+		sprint_symbol(b1, (unsigned long)g_txcb);
+		strncpy(g_txcbn, b1, TUP_NM - 1);
+		g_txcbn[TUP_NM - 1] = '\0';
+	}
+	if (g_rxcb) {
+		sprint_symbol(b2, (unsigned long)g_rxcb);
+		strncpy(g_rxcbn, b2, TUP_NM - 1);
+		g_rxcbn[TUP_NM - 1] = '\0';
+	}
+	if (g_updcb)
+		sprint_symbol(b3, (unsigned long)g_updcb);
 	snprintf(g_opsline, sizeof(g_opsline),
-		 "bind: count=%llu arr=%016llx entry=%016llx key=%016llx ctx=%016llx\n"
+		 "bind: count=%llu arr=%016lx entry=%016lx key=%016lx ctx=%016lx\n"
 		 "ops:  ctx+0x700=%016lx\n"
-		 "cb:   tx_fill(ops+0x18)=%s\n"
-		 "cb:   rx_fill(ops+0x50)=%s\n"
+		 "cb:   tx_fill(ops+0x18)=%s [%016lx]\n"
+		 "cb:   rx_fill(ops+0x50)=%s [%016lx]\n"
 		 "cb:   wo_rxcnt(ops+0x60)=%s\n",
-		 cnt, arr, entry, key, ctx, ops, b1, b2, b3);
+		 cnt, arr, entry, key, ctx, g_ops, b1, g_txcb, b2, g_rxcb, b3);
 }
 
 /* ------------------------------------------------------------------ */
@@ -821,13 +1212,18 @@ static u64 tup_id_aa64mmfr1(void)
 static int tup_install(void)
 {
 	unsigned long P = (unsigned long)rings;
-	unsigned long off, p_ptr;
+	unsigned long F = (unsigned long)frings;
+	unsigned long off, p_ptr, f_p_ptr;
 	u32 mrs_insn;
 	unsigned long tpage = (unsigned long)tuphook_tramp_tx & PAGE_MASK;
+	unsigned long ftpage = (unsigned long)tuphook_ftramp_tx & PAGE_MASK;
 	unsigned long epage = g_tx & PAGE_MASK;
+	unsigned long fpage = g_txcb & PAGE_MASK;
 	s64 dtx, drx, dback_tx, dback_rx, dbackn_tx, dbackn_rx;
+	s64 dftx, dfrx, dfback_tx, dfback_rx, dfbackn_tx, dfbackn_rx;
 	struct patch_item items[8];
 	u64 *pool = (u64 *)tuphook_pool;
+	u64 *fpool = (u64 *)tuphook_fpool;
 	int rc;
 
 	/* per_cpu_offset() is unsigned long and the dynamic percpu region sits
@@ -837,6 +1233,7 @@ static int tup_install(void)
 	 * per_cpu_ptr() result for this cpu; the register that matches is the
 	 * one patched in.  Any mismatch refuses install with zero patches. */
 	p_ptr = (unsigned long)per_cpu_ptr(rings, raw_smp_processor_id());
+	f_p_ptr = (unsigned long)per_cpu_ptr(frings, raw_smp_processor_id());
 	off = tup_my_cpu_off_el1();
 	if (P + off == p_ptr) {
 		mrs_insn = INS_MRS_TPIDR_EL1;
@@ -856,17 +1253,31 @@ static int tup_install(void)
 		       P, off, P + off, p_ptr);
 		return -EINVAL;
 	}
-	pr_info("tuphook: percpu P=%lx off=%lx reg=%s (64-bit pool, identity ok)\n",
-		P, off, mrs_insn == INS_MRS_TPIDR_EL2 ? "tpidr_el2/VHE" : "tpidr_el1");
+	if (F + off != f_p_ptr) {
+		pr_err("tuphook: fill percpu identity mismatch F=%lx off=%lx sum=%lx per_cpu_ptr=%lx\n",
+		       F, off, F + off, f_p_ptr);
+		return -EINVAL;
+	}
+	pr_info("tuphook: percpu P=%lx F=%lx off=%lx reg=%s (64-bit pools, identity ok)\n",
+		P, F, off, mrs_insn == INS_MRS_TPIDR_EL2 ? "tpidr_el2/VHE" : "tpidr_el1");
 	/* both trampolines and the pool must share one page for one window */
 	if (((unsigned long)tuphook_tramp_rx & PAGE_MASK) != tpage ||
 	    ((unsigned long)pool & PAGE_MASK) != tpage) {
 		pr_err("tuphook: trampoline block straddles a page\n");
 		return -EINVAL;
 	}
+	if (((unsigned long)tuphook_ftramp_rx & PAGE_MASK) != ftpage ||
+	    ((unsigned long)fpool & PAGE_MASK) != ftpage) {
+		pr_err("tuphook: fill trampoline block straddles a page\n");
+		return -EINVAL;
+	}
 	/* both entries must share one page for a single writable window */
 	if (((g_rx) & PAGE_MASK) != epage) {
 		pr_err("tuphook: entries not on one page -- refusing\n");
+		return -EINVAL;
+	}
+	if (((g_rxcb) & PAGE_MASK) != fpage) {
+		pr_err("tuphook: fill entries not on one page -- refusing\n");
 		return -EINVAL;
 	}
 	/* the entry branch is written AT g_tx and must land ON the trampoline,
@@ -880,17 +1291,32 @@ static int tup_install(void)
 	dback_rx = (s64)(g_rx + 4) - (s64)tuphook_back_rx;
 	dbackn_tx = (s64)(g_tx + 4) - (s64)tuphook_backn_tx;
 	dbackn_rx = (s64)(g_rx + 4) - (s64)tuphook_backn_rx;
+	dftx = (s64)(unsigned long)tuphook_ftramp_tx - (s64)g_txcb;
+	dfrx = (s64)(unsigned long)tuphook_ftramp_rx - (s64)g_rxcb;
+	dfback_tx = (s64)(g_txcb + 4) - (s64)tuphook_fback_tx;
+	dfback_rx = (s64)(g_rxcb + 4) - (s64)tuphook_fback_rx;
+	dfbackn_tx = (s64)(g_txcb + 4) - (s64)tuphook_fbackn_tx;
+	dfbackn_rx = (s64)(g_rxcb + 4) - (s64)tuphook_fbackn_rx;
 	if (dtx < -(1 << 27) || dtx >= (1 << 27) ||
 	    drx < -(1 << 27) || drx >= (1 << 27) ||
 	    dback_tx < -(1 << 27) || dback_tx >= (1 << 27) ||
 	    dback_rx < -(1 << 27) || dback_rx >= (1 << 27) ||
 	    dbackn_tx < -(1 << 27) || dbackn_tx >= (1 << 27) ||
-	    dbackn_rx < -(1 << 27) || dbackn_rx >= (1 << 27)) {
-		pr_err("tuphook: B out of range (tx=%lld rx=%lld)\n", dtx, drx);
+	    dbackn_rx < -(1 << 27) || dbackn_rx >= (1 << 27) ||
+	    dftx < -(1 << 27) || dftx >= (1 << 27) ||
+	    dfrx < -(1 << 27) || dfrx >= (1 << 27) ||
+	    dfback_tx < -(1 << 27) || dfback_tx >= (1 << 27) ||
+	    dfback_rx < -(1 << 27) || dfback_rx >= (1 << 27) ||
+	    dfbackn_tx < -(1 << 27) || dfbackn_tx >= (1 << 27) ||
+	    dfbackn_rx < -(1 << 27) || dfbackn_rx >= (1 << 27)) {
+		pr_err("tuphook: B out of range (tx=%lld rx=%lld ftx=%lld frx=%lld)\n",
+		       dtx, drx, dftx, dfrx);
 		return -ERANGE;
 	}
 	g_bent_tx = tup_mkb(dtx);
 	g_bent_rx = tup_mkb(drx);
+	g_fbent_tx = tup_mkb(dftx);
+	g_fbent_rx = tup_mkb(dfrx);
 	/* decode every branch back before writing a single word: a wrong sign
 	 * or a bad site must refuse here, never oops in softirq context */
 	if (tup_b_target(g_tx, g_bent_tx) != (unsigned long)tuphook_tramp_tx ||
@@ -898,11 +1324,16 @@ static int tup_install(void)
 	    tup_b_target((unsigned long)tuphook_back_tx, tup_mkb(dback_tx)) != g_tx + 4 ||
 	    tup_b_target((unsigned long)tuphook_back_rx, tup_mkb(dback_rx)) != g_rx + 4 ||
 	    tup_b_target((unsigned long)tuphook_backn_tx, tup_mkb(dbackn_tx)) != g_tx + 4 ||
-	    tup_b_target((unsigned long)tuphook_backn_rx, tup_mkb(dbackn_rx)) != g_rx + 4) {
-		pr_err("tuphook: branch self-check failed (tx->%lx rx->%lx want %lx/%lx)\n",
+	    tup_b_target((unsigned long)tuphook_backn_rx, tup_mkb(dbackn_rx)) != g_rx + 4 ||
+	    tup_b_target(g_txcb, g_fbent_tx) != (unsigned long)tuphook_ftramp_tx ||
+	    tup_b_target(g_rxcb, g_fbent_rx) != (unsigned long)tuphook_ftramp_rx ||
+	    tup_b_target((unsigned long)tuphook_fback_tx, tup_mkb(dfback_tx)) != g_txcb + 4 ||
+	    tup_b_target((unsigned long)tuphook_fback_rx, tup_mkb(dfback_rx)) != g_rxcb + 4 ||
+	    tup_b_target((unsigned long)tuphook_fbackn_tx, tup_mkb(dfbackn_tx)) != g_txcb + 4 ||
+	    tup_b_target((unsigned long)tuphook_fbackn_rx, tup_mkb(dfbackn_rx)) != g_rxcb + 4) {
+		pr_err("tuphook: branch self-check failed (tx->%lx rx->%lx ftx->%lx frx->%lx)\n",
 		       tup_b_target(g_tx, g_bent_tx), tup_b_target(g_rx, g_bent_rx),
-		       (unsigned long)tuphook_tramp_tx,
-		       (unsigned long)tuphook_tramp_rx);
+		       tup_b_target(g_txcb, g_fbent_tx), tup_b_target(g_rxcb, g_fbent_rx));
 		return -EINVAL;
 	}
 
@@ -931,6 +1362,29 @@ static int tup_install(void)
 		return rc;
 	}
 
+	/* one writable window for our fill trampoline page */
+	items[0].addr = tuphook_fback_tx;
+	items[0].insn = tup_mkb(dfback_tx);
+	items[1].addr = tuphook_fbackn_tx;
+	items[1].insn = tup_mkb(dfbackn_tx);
+	items[2].addr = tuphook_fback_rx;
+	items[2].insn = tup_mkb(dfback_rx);
+	items[3].addr = tuphook_fbackn_rx;
+	items[3].insn = tup_mkb(dfbackn_rx);
+	items[4].addr = (u32 *)fpool;		/* low  half of F */
+	items[4].insn = (u32)(F & 0xffffffffu);
+	items[5].addr = (u32 *)fpool + 1;	/* high half of F */
+	items[5].insn = (u32)(F >> 32);
+	items[6].addr = (u32 *)tuphook_fmrs_tx;
+	items[6].insn = mrs_insn;
+	items[7].addr = (u32 *)tuphook_fmrs_rx;
+	items[7].insn = mrs_insn;
+	rc = tup_patch_words(ftpage, items, 8);
+	if (rc) {
+		pr_err("tuphook: fill trampoline patch failed: %d\n", rc);
+		goto rollback_warp;
+	}
+
 	/* one writable window for the mtk_warp entry page */
 	items[0].addr = (void *)g_tx;
 	items[0].insn = g_bent_tx;
@@ -942,6 +1396,17 @@ static int tup_install(void)
 		return rc;
 	}
 
+	/* one writable window for the mtk_wed fill entry page */
+	items[0].addr = (void *)g_txcb;
+	items[0].insn = g_fbent_tx;
+	items[1].addr = (void *)g_rxcb;
+	items[1].insn = g_fbent_rx;
+	rc = tup_patch_words(fpage, items, 2);
+	if (rc) {
+		pr_err("tuphook: fill entry patch failed: %d\n", rc);
+		goto rollback_warp;
+	}
+
 	/* read back through the normal (RO) mapping */
 	if (READ_ONCE(*(u32 *)g_tx) != g_bent_tx ||
 	    READ_ONCE(*(u32 *)g_rx) != g_bent_rx ||
@@ -949,26 +1414,68 @@ static int tup_install(void)
 	    READ_ONCE(*(u32 *)tuphook_backn_tx) != tup_mkb(dbackn_tx) ||
 	    READ_ONCE(*(u32 *)tuphook_back_rx) != tup_mkb(dback_rx) ||
 	    READ_ONCE(*(u32 *)tuphook_backn_rx) != tup_mkb(dbackn_rx) ||
-	    READ_ONCE(pool[0]) != (u64)P) {
+	    READ_ONCE(pool[0]) != (u64)P ||
+	    READ_ONCE(*(u32 *)g_txcb) != g_fbent_tx ||
+	    READ_ONCE(*(u32 *)g_rxcb) != g_fbent_rx ||
+	    READ_ONCE(*(u32 *)tuphook_fback_tx) != tup_mkb(dfback_tx) ||
+	    READ_ONCE(*(u32 *)tuphook_fbackn_tx) != tup_mkb(dfbackn_tx) ||
+	    READ_ONCE(*(u32 *)tuphook_fback_rx) != tup_mkb(dfback_rx) ||
+	    READ_ONCE(*(u32 *)tuphook_fbackn_rx) != tup_mkb(dfbackn_rx) ||
+	    READ_ONCE(fpool[0]) != (u64)F) {
 		pr_err("tuphook: readback mismatch, rolling back\n");
-		items[0].addr = (void *)g_tx;
-		items[0].insn = INS_PACIASP;
-		items[1].addr = (void *)g_rx;
-		items[1].insn = INS_PACIASP;
-		tup_patch_words(epage, items, 2);
-		return -EIO;
+		goto rollback_all;
 	}
 	installed = true;
 	return 0;
+
+rollback_all:
+	/* restore the mtk_wed fill entries if they still hold our branch */
+	items[0].addr = (void *)g_txcb;
+	items[0].insn = INS_TXFILL0;
+	items[1].addr = (void *)g_rxcb;
+	items[1].insn = INS_RXFILL0;
+	if (READ_ONCE(*(u32 *)g_txcb) == g_fbent_tx &&
+	    READ_ONCE(*(u32 *)g_rxcb) == g_fbent_rx)
+		tup_patch_words(fpage, items, 2);
+rollback_warp:
+	/* restore the mtk_warp tuple entries if they still hold our branch */
+	items[0].addr = (void *)g_tx;
+	items[0].insn = INS_PACIASP;
+	items[1].addr = (void *)g_rx;
+	items[1].insn = INS_PACIASP;
+	if (READ_ONCE(*(u32 *)g_tx) == g_bent_tx &&
+	    READ_ONCE(*(u32 *)g_rx) == g_bent_rx)
+		tup_patch_words(epage, items, 2);
+	return -EIO;
 }
 
 static void tup_uninstall(void)
 {
 	struct patch_item items[2];
 	unsigned long epage = g_tx & PAGE_MASK;
+	unsigned long fpage = g_txcb & PAGE_MASK;
+	bool ok = true;
 
 	if (!installed)
 		return;
+	/* restore the mtk_wed fill entries first */
+	items[0].addr = (void *)g_txcb;
+	items[0].insn = INS_TXFILL0;
+	items[1].addr = (void *)g_rxcb;
+	items[1].insn = INS_RXFILL0;
+	if (READ_ONCE(*(u32 *)g_txcb) != g_fbent_tx ||
+	    READ_ONCE(*(u32 *)g_rxcb) != g_fbent_rx) {
+		pr_warn("tuphook: fill entries changed by someone else, skip restore\n");
+		ok = false;
+	} else if (tup_patch_words(fpage, items, 2)) {
+		pr_err("tuphook: fill restore failed (entries left patched!)\n");
+		ok = false;
+	} else if (READ_ONCE(*(u32 *)g_txcb) != INS_TXFILL0 ||
+		   READ_ONCE(*(u32 *)g_rxcb) != INS_RXFILL0) {
+		pr_err("tuphook: fill restore readback mismatch\n");
+		ok = false;
+	}
+	/* then the mtk_warp tuple entries */
 	items[0].addr = (void *)g_tx;
 	items[0].insn = INS_PACIASP;
 	items[1].addr = (void *)g_rx;
@@ -976,16 +1483,17 @@ static void tup_uninstall(void)
 	if (READ_ONCE(*(u32 *)g_tx) != g_bent_tx ||
 	    READ_ONCE(*(u32 *)g_rx) != g_bent_rx) {
 		pr_warn("tuphook: entries changed by someone else, skip restore\n");
-		installed = false;
-		return;
-	}
-	if (tup_patch_words(epage, items, 2))
+		ok = false;
+	} else if (tup_patch_words(epage, items, 2)) {
 		pr_err("tuphook: restore failed (entries left patched!)\n");
-	else if (READ_ONCE(*(u32 *)g_tx) != INS_PACIASP ||
-		 READ_ONCE(*(u32 *)g_rx) != INS_PACIASP)
+		ok = false;
+	} else if (READ_ONCE(*(u32 *)g_tx) != INS_PACIASP ||
+		   READ_ONCE(*(u32 *)g_rx) != INS_PACIASP) {
 		pr_err("tuphook: restore readback mismatch\n");
-	else
-		pr_info("tuphook: entries restored to paciasp\n");
+		ok = false;
+	}
+	if (ok)
+		pr_info("tuphook: entries restored to paciasp / fill originals\n");
 	installed = false;
 }
 
@@ -1013,11 +1521,13 @@ static int tup_show(struct seq_file *m, void *v)
 
 	asm volatile("mrs %0, cntfrq_el0" : "=r"(freq));
 	asm volatile("mrs %0, cntvct_el0" : "=r"(now));
-	seq_printf(m, "tuphook v1.5: %s base=%016lx\n",
+	seq_printf(m, "tuphook v1.6: %s base=%016lx\n",
 		   installed ? "PATCHED" : (dryrun ? "dryrun" : "locate-only"),
 		   g_base);
 	seq_printf(m, "target: tx=%016lx rx=%016lx\n", g_tx, g_rx);
 	seq_printf(m, "name:   %s | %s\n", g_txname, g_rxname);
+	seq_printf(m, "fill:   tx=%016lx(%s) rx=%016lx(%s) ops=%016lx\n",
+		   g_txcb, g_txcbn, g_rxcb, g_rxcbn, g_ops);
 	seq_printf(m, "offsets: len=0x%x nh=0x%x head=0x%x proto=0x%x\n",
 		   SKB_OFF_LEN, SKB_OFF_NH, SKB_OFF_HEAD, SKB_OFF_PROTO);
 	seq_printf(m, "clock: cntfrq=%llu now=%llu\n", freq, now);
@@ -1054,6 +1564,45 @@ static int tup_show(struct seq_file *m, void *v)
 				   meta, ts, proto & 0xffff);
 		}
 	}
+	/* v1.6 fill-callback records */
+	for_each_online_cpu(cpu) {
+		struct tup_fring *r = per_cpu_ptr(frings, cpu);
+		u64 head = READ_ONCE(r->head);
+		u64 cnt = head >> 1;
+		unsigned int show = cnt < k ? (unsigned int)cnt : k;
+		unsigned int i;
+
+		seq_printf(m, "fcpu%d: recorded=%llu guard=%llu\n", cpu,
+			   cnt, head & 1);
+		for (i = 0; i < show; i++) {
+			u64 seq = cnt - 1 - i;
+			struct tup_frec *rec = &r->recs[seq & (TUP_FNREC - 1)];
+			u64 p = READ_ONCE(rec->pkt_info);
+			u64 d = READ_ONCE(rec->dest);
+			u64 lr = READ_ONCE(rec->lr);
+			u64 br = READ_ONCE(rec->bring);
+			u64 rp = READ_ONCE(rec->ring_ptr);
+			u64 re = READ_ONCE(rec->ring_end);
+			u64 bb = READ_ONCE(rec->b8_bc);
+			u64 fm = READ_ONCE(rec->flag_meta);
+			u64 q0 = READ_ONCE(rec->q0);
+			u64 q1 = READ_ONCE(rec->q1);
+			u64 q2 = READ_ONCE(rec->q2);
+			u64 q3 = READ_ONCE(rec->q3);
+			u64 ts = READ_ONCE(rec->ts);
+			u64 s0 = READ_ONCE(rec->src0);
+			u64 s1 = READ_ONCE(rec->src1);
+			u64 s2 = READ_ONCE(rec->src2);
+			u32 meta = (u32)(fm >> 32);
+
+			seq_printf(m,
+				   "  F#%llu %s lr=%016llx p=%016llx d=%016llx br=%016llx rp=%016llx re=%016llx b8=%x bc=%x f=%x q=%016llx,%016llx,%016llx,%016llx t=%llu st=%08x s=%016llx,%016llx,%016llx\n",
+				   seq, (meta & TUP_F_M_RX) ? "rx" : "tx",
+				   lr, p, d, br, rp, re,
+				   (u32)bb, (u32)(bb >> 32), (u32)fm,
+				   q0, q1, q2, q3, ts, meta, s0, s1, s2);
+		}
+	}
 	return 0;
 }
 
@@ -1079,6 +1628,8 @@ static int __init tuphook_init(void)
 	BUILD_BUG_ON(sizeof(struct tup_rec) != TUP_RECSZ);
 	BUILD_BUG_ON(offsetof(struct tup_ring, head) != TUP_HEAD_OFF);
 	BUILD_BUG_ON(offsetof(struct tup_ring, scratch) != TUP_HEAD_OFF + 8);
+	BUILD_BUG_ON(sizeof(struct tup_frec) != TUP_FRECSZ);
+	BUILD_BUG_ON(offsetof(struct tup_fring, head) != TUP_FHEAD_OFF);
 	/* D19 offset gate: pinned against the device kernel Image (see header) */
 	BUILD_BUG_ON(offsetof(struct sk_buff, len) != SKB_OFF_LEN);
 	BUILD_BUG_ON(offsetof(struct sk_buff, network_header) != SKB_OFF_NH);
@@ -1090,8 +1641,16 @@ static int __init tuphook_init(void)
 	rings = alloc_percpu(struct tup_ring);
 	if (!rings)
 		return -ENOMEM;
-	for_each_possible_cpu(cpu)
+	frings = alloc_percpu(struct tup_fring);
+	if (!frings) {
+		free_percpu(rings);
+		rings = NULL;
+		return -ENOMEM;
+	}
+	for_each_possible_cpu(cpu) {
 		memset(per_cpu_ptr(rings, cpu), 0, sizeof(struct tup_ring));
+		memset(per_cpu_ptr(frings, cpu), 0, sizeof(struct tup_fring));
+	}
 
 	rc = tup_resolve();
 	if (rc) {
@@ -1107,19 +1666,26 @@ static int __init tuphook_init(void)
 
 	tup_report_bind_ops();
 	pr_info("tuphook: %s", g_opsline);
+	rc = tup_resolve_fill();
+	if (rc) {
+		pr_err("tuphook: fill resolve failed: %d\n", rc);
+		goto out_free;
+	}
 
 	if (!dryrun) {
 		rc = tup_install();
 		if (rc)
 			goto out_free;
-		pr_info("tuphook: INSTALLED tx_b=%08x rx_b=%08x back_tx=%08x back_rx=%08x backn_tx=%08x backn_rx=%08x\n",
+		pr_info("tuphook: INSTALLED tx_b=%08x rx_b=%08x back_tx=%08x back_rx=%08x backn_tx=%08x backn_rx=%08x ftx_b=%08x frx_b=%08x\n",
 			g_bent_tx, g_bent_rx,
 			READ_ONCE(*(u32 *)tuphook_back_tx),
 			READ_ONCE(*(u32 *)tuphook_back_rx),
 			READ_ONCE(*(u32 *)tuphook_backn_tx),
-			READ_ONCE(*(u32 *)tuphook_backn_rx));
+			READ_ONCE(*(u32 *)tuphook_backn_rx),
+			g_fbent_tx, g_fbent_rx);
 	} else {
-		pr_info("tuphook: DRYRUN positive control complete, nothing patched\n");
+		pr_info("tuphook: DRYRUN positive control complete, nothing patched (fill tx=%016lx rx=%016lx)\n",
+			g_txcb, g_rxcb);
 	}
 
 	tup_pe = proc_create("tuphook", 0444, NULL, &tup_pops);
@@ -1131,6 +1697,8 @@ static int __init tuphook_init(void)
 out_uninstall:
 	tup_uninstall();
 out_free:
+	free_percpu(frings);
+	frings = NULL;
 	free_percpu(rings);
 	rings = NULL;
 	return rc;
@@ -1141,6 +1709,10 @@ static void __exit tuphook_exit(void)
 	tup_uninstall();
 	if (tup_pe)
 		proc_remove(tup_pe);
+	if (frings) {
+		free_percpu(frings);
+		frings = NULL;
+	}
 	if (rings) {
 		free_percpu(rings);
 		rings = NULL;

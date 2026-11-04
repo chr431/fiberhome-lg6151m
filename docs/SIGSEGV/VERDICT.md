@@ -209,3 +209,28 @@ arm3（hw_nat）P ⇒ 690/1200 s；arm2 INVALID（mt7992 硬依赖 mtk_wed，运
 **残余空间收窄为**：B2'（手工内联页表走查 + kmap 别名 store，待 romap 修复版）、
 B4t（同上走查后喂其它 DMA 环，待环 PA 发现 + ringpoll 扩展）、B3 残余（EL0 非探测写者，
 待 DIS-2/CAM-P/CAM-W）、B5（终局 B 余项）。对外口径仍以本文件 §0 为基 + 本节增补。
+
+## §10 增补(2026-11-05 03:2x,CAM-W Tier B 仪器战役,U-G1)
+
+用户授权"内核取证深挖,允许多次崩溃"后的日班战役(报告
+[U-G1_RESULT_WWATCH_2026-11-05.md](../review/U-G1_RESULT_WWATCH_2026-11-05.md),
+claims C-221..C-227)。写者仍未点名,但拿到四件硬货:
+
+1. **K9(新钉死约束,E2)**:写者与受害者**活 va_list 内容**耦合——监控+跳过受害者
+   在目标槽的自写,λ 16/min→0~1.3/min;解除监控回弹 12.3/min;再监控再冻结
+   (可逆因果开关)。写者在其 store **上游**读/校验目标槽内容(K5 的细化:
+   不只需"深帧变参活动",需要该地址上正在进行时的 va_list 写入流)。
+2. **EL1 观察点 fire = 本固件平台级死亡**(E2,≥3 干净复现,panic_on_oops=0 亦无
+   oops,疑 MTK AEE/mrdump 拦截 EL1 debug 异常):对 EL1 写者的 watchpoint 点名
+   在本固件被结构性封死;EL0 tier 全链可用(PC-U2 34/34)。
+3. **漏网 5 落地零 fire(E1)**:监控期内完成写入不经 EL0/STTR 通道 ⇒ 写者 store
+   形态 ∈ {EL1-plain(PAN-open)、EL1-别名、DMA};结合 §9 的 GUP 族出局,
+   **B2′(别名 store)与 B4t/B5(DMA)为残余二强**,且 c5 崩溃签名(正确别名
+   监控 + 短窗即整机死)与"真写者别名 store 触发 EL1 fire→平台杀"假说一致。
+4. 平台事实入库:DBGPRCR 写致死(2 复现)、深睡态抹 WRP 寄存器(禁深睡后 drift=0)、
+   PAGE_OFFSET=0xffffff7f80000000(AT+/dev/mem 互证)、裸 -c 模块需手写
+   vermagic/__this_module(busybox 静默 rc255)。
+
+**下一步入口**(按预期收益):① AEE 拦截解除/绕过 → 解锁 EL1 tier → alias 槽
+fire 即终局 A;② 用 AEE 自己的 dump(mrdump/expdb)当"尸体证词"复检 c5;
+③ romap 修复版 B2 窗;④ B4t 环发现 + ringpoll 扩展。

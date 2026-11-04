@@ -1,6 +1,8 @@
 # 00 · 当前状态（2026-11-03 收束版）
 
 > 本页只写“现在该信什么、下一步做什么”。每条结论的 ID 指向 [01_CLAIMS.tsv](01_CLAIMS.tsv)。
+> **2026-11-04 夜五轮（U-A1..U-E1）后下一阶段入口 = [12_WRITER_ID_SUITE_DESIGN.md](12_WRITER_ID_SUITE_DESIGN.md)**
+> （写入者点名收口仪器组：终局 A 点名 / 终局 B 证明不可达；最新事实见 docs/review/U-E1_RESULT_*.md）。
 > 旧的 67%/32%、两个写入者、PIT 表项等结论已撤回，见 [ARCHIVE_MAP.md](ARCHIVE_MAP.md)。
 >
 > **2026-11-03 兜底部署（观察模式）**：nerepair **v2.2**（`811b3e19…`，xrep 未布防 / XFORM 普查在）与

@@ -67,6 +67,9 @@
 #define WCR_PAC_EL1 (1UL << 1)   /* AARCH64_BREAKPOINT_EL1 == 1, <<1 */
 #define WCR_PAC_EL0 (2UL << 1)   /* AARCH64_BREAKPOINT_EL0 == 2, <<1 */
 #define WCR_LSC_ST (2UL << 3)    /* ARM_BREAKPOINT_STORE */
+#define WCR_LSC_LD (1UL << 3)    /* ARM_BREAKPOINT_LOAD  */
+static u64 g_wcr_lsc = WCR_LSC_ST;
+static u64 g_wcr_arr[NSLOT];
 #define WCR_BAS8   (0xffUL << 5) /* 8 bytes */
 #define WW_WCR_EL1 (WCR_E | WCR_PAC_EL1 | WCR_LSC_ST | WCR_BAS8)
 #define WW_WCR_EL0 (WCR_E | WCR_PAC_EL0 | WCR_LSC_ST | WCR_BAS8)
@@ -346,7 +349,7 @@ static void ww_arm_one(void *x)
 	isb();
 	for (i = 0; i < g_nslot; i++) {
 		ww_wr_wvr(i, g_wvr_v[i]);
-		ww_wr_wcr(i, g_wcr_val);
+		ww_wr_wcr(i, g_wcr_arr[i]);
 	}
 	isb();
 	m = g_save[smp_processor_id()].mdscr | DBG_MDSCR_MDE | DBG_MDSCR_KDE;
@@ -358,7 +361,7 @@ static void ww_arm_one(void *x)
 	isb();
 	/* verify */
 	for (i = 0; i < g_nslot; i++)
-		if (ww_rd_wcr(i) != g_wcr_val)
+		if (ww_rd_wcr(i) != g_wcr_arr[i])
 			atomic_inc(&g_armfail);
 }
 
@@ -367,7 +370,7 @@ static void ww_recheck_one(void *x)
 	int i;
 
 	for (i = 0; i < g_nslot; i++) {
-		if (ww_rd_wcr(i) != g_wcr_val) {
+		if (ww_rd_wcr(i) != g_wcr_arr[i]) {
 			atomic_inc(&g_drift);
 			for (i = 0; i < g_nslot; i++) {
 				ww_wr_wvr(i, g_wvr_v[i]);
@@ -590,19 +593,39 @@ static ssize_t ww_proc_write(struct file *f, const char __user *ub, size_t n, lo
 		g_uva = a1; g_alias = a2; g_pa = a3; g_vtlo = a4; g_vthi = a5;
 		g_uva2 = a6; g_alias2 = a7;
 		g_wcr_val = strstr(buf, "el0") ? WW_WCR_EL0 : WW_WCR_EL1;
+		{
+			unsigned long lscv = 2;
+			if (strstr(buf, "lsc=1") || strstr(buf, "lsc=load")) lscv = 1;
+			else if (strstr(buf, "lsc=3") || strstr(buf, "lsc=both")) lscv = 3;
+			g_wcr_lsc = lscv << 3;
+			g_wcr_val = (g_wcr_val & ~(3UL << 3)) | g_wcr_lsc;
+		}
 		g_nslot = g_wrps < NSLOT ? g_wrps : NSLOT;
-		if (g_wcr_val == WW_WCR_EL0) {
-			/* EL0 layout: uva1, uva2, +8 partners. No EL1 slots:
-			 * any EL1 fire on this firmware is an instant reset. */
+		if (strstr(buf, "loadmix")) {
+			/* load-watch suicide set: alias(EL1) + uva(EL0, catches
+			 * kernel LDTR) on q0+q1 of the primary slot */
+			g_wvr_v[0] = g_alias;
+			g_wvr_v[1] = g_uva;
+			g_wvr_v[2] = g_alias + 8;
+			g_wvr_v[3] = g_uva + 8;
+			g_wcr_arr[0] = WCR_E | WCR_PAC_EL1 | WCR_LSC_LD | WCR_BAS8;
+			g_wcr_arr[1] = WCR_E | WCR_PAC_EL0 | WCR_LSC_LD | WCR_BAS8;
+			g_wcr_arr[2] = WCR_E | WCR_PAC_EL1 | WCR_LSC_LD | WCR_BAS8;
+			g_wcr_arr[3] = WCR_E | WCR_PAC_EL0 | WCR_LSC_LD | WCR_BAS8;
+		} else if (strstr(buf, "el0")) {
 			g_wvr_v[0] = g_uva;
 			g_wvr_v[1] = g_uva2;
 			g_wvr_v[2] = g_uva + 8;
 			g_wvr_v[3] = g_uva2 + 8;
+			g_wcr_arr[0] = g_wcr_arr[1] = g_wcr_val;
+			g_wcr_arr[2] = g_wcr_arr[3] = g_wcr_val;
 		} else {
 			g_wvr_v[0] = g_alias;
 			g_wvr_v[1] = g_uva;
 			g_wvr_v[2] = g_alias2;
 			g_wvr_v[3] = g_uva2;
+			g_wcr_arr[0] = g_wcr_arr[1] = g_wcr_val;
+			g_wcr_arr[2] = g_wcr_arr[3] = g_wcr_val;
 		}
 		/* take the dispatch slot first (regs not armed yet -> quiet) */
 		((struct fault_info_ *)p_dfi)[2].fn = ww_wp_fn;

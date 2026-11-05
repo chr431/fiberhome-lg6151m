@@ -335,3 +335,10 @@ B 臂 8 min 即 246 命中（P(0)=e^-246）→ **后续机制 A/B 只需 5–10 
 - **U-G9(2026-11-06 凌晨)· 自我关断实验**:DRM 页魔术写四次全被静默丢弃(NS 只读,厂商路径仅安全态);
   emicen 监视器写者活跃时本关(+0xf8=0,非写者),init 调用=总线挂死;两次复位自愈、dump 均捕获
   (C-276..C-279,VERDICT §18)——U-G9_RESULT_2026-11-06.md,证据 _local/evidence/b4b/ug9/)。
+
+- **2026-11-06 晨· 阻断路径离线普查**(纯分析,无新 claims):按"内容供给/目标捕获/注入通道"三环节
+  分解写入必要条件,枚举七条存活路径并排优先级——**T1 FE→MED hnat_info 通道断供**(medmcu 固件已见
+  STATUS/MSK 寄存器与 stop 路径,材料全在) > **T3 放逐窗**(ISU 8MB 保留 DRAM,引擎对保留窗可达性
+  从未测过) > T2 SIP/SMC 全表(tee_b 34K 指令在手) > T6 后果层布防(nerepair 仍 dry/slotguard 仍
+  observe) > T4 boot 链核查(SBC 运行时判定在,末位高风险) > T7 厂商;§2 附防翻案关闭清单。
+  入口=[13_BLOCK_PATHS.md](13_BLOCK_PATHS.md)。。

@@ -311,3 +311,7 @@ B 臂 8 min 即 246 命中（P(0)=e^-246）→ **后续机制 A/B 只需 5–10 
 > 身份=EMI/互连观测基础设施或 EL3 代理,下轮入口 ATF/bl31 读闪——U-G3_RESULT §3)。
 > 2026-11-05 18:4x 增补:U-G4 晚间续战闭环(协处理器 SRAM kHz 全零+MED 固件功能全图+
 > 7 固件分区拉齐,C-244..C-247,VERDICT §13;身份收至 GC-TCM/EMI-hw/EL3,下轮=MED 消融)。
+> 2026-11-05 20:5x 增补:U-G5 EMI 全面武器化闭环(EMI MPU 模型全解+A53 豁免+16 域穷尽消融
+> 全无崩塌 ⇒ 写者不发出互连级 DRAM 写;GC 核与全部总线 master 类排除,C-248..C-255,
+> VERDICT §14;身份收至 {EL3/ATF on A53, EMI/DRAMC 内部},下轮=tee_b(BL31)静态决胜
+> ——U-G5_RESULT)。

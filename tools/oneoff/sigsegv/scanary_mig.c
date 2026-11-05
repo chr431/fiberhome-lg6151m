@@ -237,8 +237,9 @@ static void logline(const char *fmt, ...)
  * memory bytes b0 b1 b2 b3 spell a.b.c.d.  Read as a little-endian u32 that is
  * 0xb3b2b1b0, so the FIRST octet is the LOW byte.  Getting this backwards
  * silently inverts every private/unicast verdict (lab 2026-11-01: the device's
- * own WAN address 110.65.xx.28 was printed as 28.40.65.110 and classified as
- * public even though it is the local endpoint). */
+ * own WAN address was printed octet-reversed and classified as public even
+ * though it is the local endpoint -- the stable "28.40.65.110" seen across
+ * U-G3 ambient records IS this device's own WAN endpoint, byte-swapped). */
 #define OCT1(x) ((unsigned)((x) & 0xffu))
 #define OCT2(x) ((unsigned)(((x) >> 8) & 0xffu))
 #define OCT3(x) ((unsigned)(((x) >> 16) & 0xffu))

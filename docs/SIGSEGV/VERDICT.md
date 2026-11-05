@@ -278,3 +278,39 @@ fire 即终局 A;② 用 AEE 自己的 dump(mrdump/expdb)当"尸体证词"复检
 - **C-250**:EMI ISU=在役总线采样单元(8MB 活缓冲、事务 PA 对),但其 con-reg 对 EL1 读写皆总线挂起(#17/#18,魔数 0xDECDDECD/0xDEC0DEC0)——**ISU 控制面 EL3 独占**,ISU=观测者而非(直接)记录写者(缓冲无 32B-record 族)。
 - **C-253**:crash #16..#21 六连全归因(region31 卫生/ISU con 读写/拒全风暴/违例积压/DDRPHY 地雷);MMIO 地雷册三类扩编。
 - **身份空间(U-G5 后)**:**{EL3/ATF 驻留代码(on A53), EMI/DRAMC 内部引擎}**。决胜件=tee_b(BL31 mt6990,本地)静态分析:DRM_DEBUG_CTL 处理器、ISU 编码路径、sspm_base 引用(唯一出现)。
+
+
+---
+
+## 15. U-G6 · 终局判决:写者 = EMI/DRAMC 内部硅引擎(post-MPU 注入)(2026-11-05 晚)
+
+> 决胜件=tee_b(BL31 mt6990,TF-A v1.6)静态全读 + 全固件词汇扫描 + 设备保留内存/DFD/ISU 复查;
+> 本轮零硬复位。报告=docs/review/U-G6_RESULT_2026-11-05.md;claims C-256..C-261。
+
+**判决:32B 记录写者不是任何软件,而是存储子系统内部的硅引擎(post-MPU 注入,EL3 门禁控制面),
+内容=本机硬件卸载流(MED hnat_info 族)。**
+
+| 层 | 出局证据 |
+|---|---|
+| EL0 用户态 | U-G1:非 STTR |
+| EL1 内核(含 linear-map 别名) | C-228:alias+uva 双 VA store watch,171 落点零触发 |
+| EL2 | 无 hypervisor(/dev/kvm 无、无 kvm 模块、CPE 内核 EL1)——C-257 |
+| EL3/BL31 | C-256:静态全读(34,221 指令/807 字串全 xref),无 32B-record 存储形状、无流/网络词汇、无每包触发;运行时服务全部枚举(DRAMC-ATF 调试访问器/音频 BANK 常量查询/EMI-MPU setter/connsys-GPS remap/固件装载/崩溃 dump/DFD 链) |
+| 全部协处理器+总线 master(GC×3/SSPM/MCUPM/SPM/DPM/MED/wocpu/PPE/EDMA/WED) | U-G5:16 域穷尽拒绝 λ 不塌(阳性对照 2400+ 违例);modem 管辖由内核专用 MD 违例机器佐证(C-259) |
+
+⇒ 写者的 DRAM 写端口**不带任何 EMI MPU 域**——同类只有 CPU 端口(全软件出局)与 MPU 之后的
+内部通路 ⇒ **存储子系统内部注入**。内容源唯一=medmcu(MED DL hnat_info/pit_nat 环,C-258),
+但其本体 MPU 管辖出局(C-259)⇒ 流数据经 EMI 内部观测面(与 ISU 同面)喂给注入引擎。C-239 的
+总线级活址跟随观察成立,机制归宿即该 post-MPU 层(窥探点注入)。
+
+**命名级嫌疑对(均 EL3 门禁、均有 DRAM 写能力,本轮均无法以名字排除)**:
+1. **EMI-ISU**(自有 0x80B 记录族在 8MB 保留 buf;无 32B 族;con 寄存器 EL1 读写皆致死 #17/#18)
+2. **DRAMC DRM_DEBUG 族**([DRAMC-ATF] 访问器在 BL31;AO/NAO 可见调试寄存器读=0;DDRPHY+0x1520 致死)
+
+窗口几何(C-260):历史命中 PA 全在可分配 RAM,与 ISU(0xbf000000+8M)/md 环(0x82–0x98 块)/
+DFD(0xffc00000)/wocpu(0xa1be–0xa3fa)全部保留窗口不相交;ISU buf 无 32B 族;DFD buf 为静态
+位图 ⇒ 写者无固定保留窗口、无已知缓冲含其记录(与每写解析一致)。
+
+**下一发点名弹(已具备,零地雷路径)**:内核导出的 SMC 控制路径(mtk_emiisu_control +
+emiisu_ctrl_store sysfs;DRAMC-ATF 访问器的 SMC 号待从 SIP 分发器提取)⇒ λ-vs-引擎关断对照:
+经 SMC 逐一关断 ISU/DRAMC-debug,λ 塌者为名。后果层修复(nerepair v2.2 + slotguard)维持现役。

@@ -315,3 +315,8 @@ B 臂 8 min 即 246 命中（P(0)=e^-246）→ **后续机制 A/B 只需 5–10 
 > 全无崩塌 ⇒ 写者不发出互连级 DRAM 写;GC 核与全部总线 master 类排除,C-248..C-255,
 > VERDICT §14;身份收至 {EL3/ATF on A53, EMI/DRAMC 内部},下轮=tee_b(BL31)静态决胜
 > ——U-G5_RESULT)。
+
+- **U-G6(2026-11-05 晚)· 终局判决**:写者=EMI/DRAMC 内部硅引擎(post-MPU 注入,EL3 门禁),
+  内容=MED 卸载流(hnat_info 族);EL3(BL31 全读)/EL2(无 hyp)/全部 master(U-G5)出局;
+  嫌疑对={EMI-ISU, DRAMC DRM_DEBUG};点名弹=SMC 关断对照(mtk_emiisu_control sysfs 路径在手)
+  ——U-G6_RESULT_2026-11-05.md,C-256..C-261,VERDICT §15)。

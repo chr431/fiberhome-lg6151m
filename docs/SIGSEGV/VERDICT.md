@@ -314,3 +314,25 @@ DFD(0xffc00000)/wocpu(0xa1be–0xa3fa)全部保留窗口不相交;ISU buf 无 32
 **下一发点名弹(已具备,零地雷路径)**:内核导出的 SMC 控制路径(mtk_emiisu_control +
 emiisu_ctrl_store sysfs;DRAMC-ATF 访问器的 SMC 号待从 SIP 分发器提取)⇒ λ-vs-引擎关断对照:
 经 SMC 逐一关断 ISU/DRAMC-debug,λ 塌者为名。后果层修复(nerepair v2.2 + slotguard)维持现役。
+
+
+---
+
+## 16. U-G7 · 终极点名弹:写者 = **无可达控制面的 post-MPU 固定功能注入(存储子系统内硅)**(2026-11-05 深夜)
+
+> 报告=docs/review/U-G7_RESULT_2026-11-05.md;claims C-262..C-266;本轮零硬复位。
+
+**主刀:EMI-ISU 可逆因果关断对照**(C-262):
+厂商 `mtk_emiisu_control(0/1)` 经 emiuctl.ko(kallsyms 定位)调用;关断经 **buf-md5 冻结**验证真实生效、
+重开经 **buf 恢复翻转**验证;λ 全程 48.0/47.9/48.6/51.4(min⁻¹,669 真命中,受害者活,2400pps 洪水)——
+**对 ISU 状态零响应 ⇒ ISU 出局**。附带修正 C-250(con 真址=0x11d810,EL1 可控;#17/#18 死于错地址)。
+
+**其余控制面同轮闭合**:DRAMC-ATF 访问器=崩溃路径专用、无 SMC 入口;DRM_DEBUG 可见寄存器=0(未武装);
+SPE 不存在;EMI 寄存器页/协处理器 SRAM 无环基址持址者;命中=栈顶两页多偏移记录阵列、冷 decoy 零真命中(C-265)。
+
+**终局身份(C-266)**:全部可命名代理(4 个 CPU 异常级、8 件固件、全部带域 master、ISU、DFD、DRAMC-debug、SPE)
+因果或状态出局 ⇒ 写者为**存储子系统内 post-MPU 固定功能注入引擎,位于一切可达控制面(软件/EL1 寄存器/SMC)之下**;
+唯一不可读的残余子位置=**DDRPHY DFX 族(DDRPHY_AO_CHx+0x1520,EL1 读即致死)**。
+
+**工程结论**:本机不存在可达的根除开关 ⇒ **后果层修复(nerepair v2.2 + slotguard,现役)即正解**;
+根除路径只存在于厂商文档/EL3 调试固件/LK 级 DFX 配置,非本机可控。判定战役到此收束。

@@ -320,3 +320,8 @@ B 臂 8 min 即 246 命中（P(0)=e^-246）→ **后续机制 A/B 只需 5–10 
   内容=MED 卸载流(hnat_info 族);EL3(BL31 全读)/EL2(无 hyp)/全部 master(U-G5)出局;
   嫌疑对={EMI-ISU, DRAMC DRM_DEBUG};点名弹=SMC 关断对照(mtk_emiisu_control sysfs 路径在手)
   ——U-G6_RESULT_2026-11-05.md,C-256..C-261,VERDICT §15)。
+
+- **U-G7(2026-11-05 深夜)· 身份判定收束**:ISU 可逆因果关断 λ 零响应 ⇒ ISU 出局(C-262);
+  DRAMC-debug 无控制面且未武装(C-264);SPE 无;持址者终扫空 ⇒ 终局=**无可达控制面的 post-MPU
+  固定功能注入(残余子位置 DDRPHY DFX 族)**(C-266);nerepair+slotguard 即正解
+  ——U-G7_RESULT_2026-11-05.md,VERDICT §16)。

@@ -259,3 +259,12 @@ fire 即终局 A;② 用 AEE 自己的 dump(mrdump/expdb)当"尸体证词"复检
 - **C-243**:SRAM 全量 readl 循环=硬复位×2(#12/#13,授权内);memcpy_fromio 小读幸存。
 - **身份归口**:EMI/互连级观测基础设施或 EL3 监视代理;**下一步=ATF/bl31(LK 链读闪)+EMI MPU 勘察+消融级联**(U-G3_RESULT §3)。
 
+
+## §13 · U-G4 晚间续战(2026-11-05):协处理器层全穿透;地址锁存收至 GC 核 TCM / EMI-hw / EL3
+
+- **C-244**:medmcu SRAM(128KB)、SSPM SRAM(160KB)kHz 级重扫×200k、MCUPM 可读区、MED DRAM(ms)——**全部零命中**(活受害者);单 memcpy_fromio 安全(致死模式=readl 循环/audio 块)。
+- **C-245**:medmcu 固件功能全曝光=MED 桥(FDMA_HNAT_INFO=eth 流信息入 MED 的机制通道、sw_map/bat 地址表、UL latch snapshot、GC×3 微码引擎、bus tracker 属主)——载体类完全吻合。
+- **C-246**:46 分区 GPT 全图;7 个 1MB 固件分区 Linux 直读已拉齐;dd/mmap 语义澄清(C-237 维持)。
+- **C-247**:audio SRAM 读致死第 2 复现(#15=#13);#14 自发未归因。
+- **剩余身份空间**:GC 核 TCM(medhw-gc0/1/2)/ EMI-DRAMC 硬件观测器 / EL3(tee/ATF)。下轮第一刀=**MED 消融**(λ 归零与否二分)——需 atci 协议或 poweroff 工具打通(U-G4_RESULT §2)。
+

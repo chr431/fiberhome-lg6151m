@@ -331,3 +331,7 @@ B 臂 8 min 即 246 命中（P(0)=e^-246）→ **后续机制 A/B 只需 5–10 
   12 个可读 DFX/DRAMC-debug 寄存器逐位相同 ⇒ 可见面零签名(C-267..C-271,VERDICT §17;
   C-254 修正:DRM_DEBUG_CTL 真址 0x10005030=0x8303)——U-G7_RESULT_2026-11-05.md,
   U-G8_RESULT_2026-11-05.md,证据 _local/evidence/b4b/ug8/)。
+
+- **U-G9(2026-11-06 凌晨)· 自我关断实验**:DRM 页魔术写四次全被静默丢弃(NS 只读,厂商路径仅安全态);
+  emicen 监视器写者活跃时本关(+0xf8=0,非写者),init 调用=总线挂死;两次复位自愈、dump 均捕获
+  (C-276..C-279,VERDICT §18)——U-G9_RESULT_2026-11-06.md,证据 _local/evidence/b4b/ug9/)。

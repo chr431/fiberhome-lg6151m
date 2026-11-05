@@ -325,3 +325,9 @@ B 臂 8 min 即 246 命中（P(0)=e^-246）→ **后续机制 A/B 只需 5–10 
   DRAMC-debug 无控制面且未武装(C-264);SPE 无;持址者终扫空 ⇒ 终局=**无可达控制面的 post-MPU
   固定功能注入(残余子位置 DDRPHY DFX 族)**(C-266);nerepair+slotguard 即正解
   ——U-G7_RESULT_2026-11-05.md,VERDICT §16)。
+
+- **U-G8(2026-11-05 深夜)· DFX 正面读出**:BL31 复位路径 dump 武器化(sysrq-b 4/4,
+  ~20ms,含 EL1 致死 DDRPHY+0x1520);四窗矩阵:匹配生命周期相位时写者活跃与空闲在全部
+  12 个可读 DFX/DRAMC-debug 寄存器逐位相同 ⇒ 可见面零签名(C-267..C-271,VERDICT §17;
+  C-254 修正:DRM_DEBUG_CTL 真址 0x10005030=0x8303)——U-G7_RESULT_2026-11-05.md,
+  U-G8_RESULT_2026-11-05.md,证据 _local/evidence/b4b/ug8/)。

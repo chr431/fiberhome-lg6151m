@@ -1,5 +1,5 @@
 #!/bin/sh
-# rc19.sh v2 (=local v3_rc10.extend.sh) v2.41 -- Frankenstein v3.1: br-lan world + WiFi.
+# rc19.sh v2 (=local v3_rc10.extend.sh) v2.46 -- Frankenstein v3.1: br-lan world + WiFi.
 # v2.36 (SIGSEGV Phase 0): 停用 core_trap 每日文件模式窗口(窗口内 core_meta 元
 #        数据链整条被绕过 = 观测盲窗, 且从未抓到家族 core); 调度点摘除, 脚本
 #        保留。core_pattern 保持 rc.extend v2.6 的管道形态 |/data/gw/core_meta.sh。
@@ -49,6 +49,16 @@ case ":$PATH:" in
 *) PATH=/data/gw/sbin:/data/gw/bin:$PATH ;;
 esac
 
+# v2.46 (2026-11-06 U-R, SIGSEGV T5 coverage completion): p11 = p8 197 站点 +
+#   31 条 v7 扫描器漏掉的 q2..q7（五个完整块：ioctl_or_perror_and_die /
+#   zbc_posix_error_fmt / fmtstr / out1fmt / ash_msg_and_raise_error，各 6 条，
+#   另 ioctl 第二块补 q7）。漏因：pre-index 帧分配（stp xN,xM,[sp,#-imm]! 无
+#   sub sp 标记，且 x19/x30 组合不被 v7 接受）与 va_start 在保存块之后
+#   （-0x80 初始化晚于 q 存，甚至晚于首个 bl）；varpro_patch_v11.py 修正。
+#   全镜像 objdump 普查：未补的升序 q 块 = 0；仍保留 q0/q1（浮点实参通道），
+#   162 条残余 q 存为 q0/q1 对、数据 spill 与 va_list 拷贝。qemu 402 applet --help 全等 +
+#   34 项功能电池一致 + 14 项错误/浮点路径一致；设备 stock→p11 差分 44 项仅
+#   df 8KB 环境差，9 类 ×30 双栏 0 信号。第四挂载换 busybox_static_p11。
 # v2.45 (2026-11-06 U-Q, SIGSEGV T5 full-coverage r2): p7 实测仍有长驻 shell/awk
 #   击杀（boot t=107s svc_lib、t=1378s wan_agg、t=1752s incident awk；pc 落在
 #   malloc a_crash/awk 内部 ⇒ 仍有完整 8×q 保存突发在未覆盖的变参函数里）。
@@ -80,7 +90,7 @@ esac
 #   回滚：逐条 umount（/lib/libc.so,/bin/busybox,/usr/sbin/wpad,/data/gw/bin/busybox）。
 if [ -x /data/stealth/libc_p4.so ] && [ ! -e /data/stealth/DISABLE ]; then
     if ST=$(/data/stealth/libc_p4.so /data/stealth/stock/busybox echo st 2>/dev/null) && [ "$ST" = "st" ]; then
-        for pair in             /data/stealth/libc_p4.so:/lib/libc.so             /data/stealth/busybox_dyn_p6s:/bin/busybox             /data/stealth/wpad_p5:/usr/sbin/wpad             /data/stealth/busybox_static_p8:/data/gw/bin/busybox ; do
+        for pair in             /data/stealth/libc_p4.so:/lib/libc.so             /data/stealth/busybox_dyn_p6s:/bin/busybox             /data/stealth/wpad_p5:/usr/sbin/wpad             /data/stealth/busybox_static_p11:/data/gw/bin/busybox ; do
             src=${pair%%:*}; dst=${pair#*:}
             [ -x "$src" ] || continue
             /bin/busybox grep -q " $dst " /proc/mounts || /bin/busybox mount --bind "$src" "$dst" 2>/dev/null

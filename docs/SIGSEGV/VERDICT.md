@@ -551,3 +551,40 @@ T1 保持"一轮可判"待下轮钉归属。
 
 对外口径：T5 从"libc 面"扩展到"libc+三大动态应用（busybox/wpad/ip）+ 类级覆盖
 （dnsmasq/logread/aee 经 libc）"；24h 后一次性验收（acc_report v3）。
+
+## §27 U-P 轮（2026-11-06 夜）：busybox 稳定性判决与 v5→v6 交集修复
+
+报告=[U-P_RESULT_2026-11-06.md](../review/U-P_RESULT_2026-11-06.md)；claims C-318..C-324。
+零 Oops/WDT；两次计划内重启（rc19 v2.42 挂载验证 + v2.43 持久 boot.log 验证）。
+
+1. **C-318（判决）**：p5 补丁 busybox **不稳定且可确定复现**——`ls/cat/tar` 对缺失文件
+   4/4 SIGSEGV（far=0x48，pc=libc+0x51ffc），同命令 stock 0/6 干净；NE 4 行 exe=P/busybox。
+2. **C-319（根因）**：v5 shape-B 把错误函数的 3 条 `stp q0,q1` **va_list 拷贝**
+   （0x408c68..70）当保存区 nop；vsnprintf 读到未初始化 va_list（`__stack=0x48`）。
+   漏判原因：copy-pattern 只看紧邻 2 条（`ldp q0,q1,[x24]` 在 6 条前），且 shape-B 无
+   vr_offs 签名要求。核心寄存器/帧链/反汇编三重一致。
+3. **C-320（ip-full 同轮）**：v5 把 2 条 `stp q0,q0`（memset 类）误补（0x449e88/90）
+   → **静态无效**；p5 期 `ip neigh` 反复 SIGSEGV（pc=far=0x1001200000028，NE 6+ 行）。
+   该命令台账有 **40 条部署前（stock）历史**（最早 1793689702），回滚后 21:34 仍见
+   stock 行（far=0x32e52）⇒ 崩溃是**既有 vendor 家族**，不单一归因 p5；拒绝 p5 的依据
+   是两处确定性误补（v6 交集=0）。
+4. **C-321（v6+交集）**：v6 严格校验（prologue 内 + vr_offs + 首 call 前 + 已加载 q 拷贝
+   排除 + ≥4 q 升序）后取 **v5∩v6**：busybox **58**、libc **140**（与 p4 逐字节相同）、
+   wpad **24**（与 p5 相同）、ip-full **0**（与 stock 相同）。**命中数不是覆盖指标。**
+5. **C-322（p6s 验证/部署）**：13 组功能输出逐字节一致（含 `awk %.3f`=3.142、
+   `printf %f`）；8 类错误路径 ×30 双栏 **0 信号**；重启后 ×20 复验 0；20 分钟生产
+   soak 4 worker × ~1192 次，全部 `SOAK_END sig=0`；rc19 **v2.43** 三挂载
+   （libc_p4/busybox_dyn_p6s/wpad_p5）+ 持久 boot 标记（t=25s
+   `1793973483 25 libc=1 bb=1 wpad=1`）；ip-full 不再挂载；T0=1793973483。
+6. **C-323（残余）**：开机 149s 一条 vendor 管道 `grep PSE_OQ_STA3` SIGSEGV
+   （far=0x1520d，pc=libc+0x4680c）；同输入 200× + 30 随机 + 10 构造差分全 0 ⇒
+   判为瞬时输入/写者事件，**不归因 p6s**，保留开放未知。gw 静态 busybox 仍未覆盖
+   （21:30–31 awk/led_mgr NE 行即证）。
+7. **C-324（既有 vendor 家族，验收口径）**：`ip neigh` 40 条部署前历史；`cat
+   /proc/mtketh/phy_info` 3 条（2 条部署前，far=0x2b059/0x2e435/0x31f3）；gw 静态
+   busybox 的 led_mgr/awk 持续被杀（far=0x130b7/0x4/0x1，pc 静态件）。均
+   origin=vendor-tree/our-tree，与 T5 补丁无关；24h 验收按家族单列/剔除。
+
+对外口径：busybox 面从"106 站点但确定性崩溃"修成"**58 站点验证子集且功能等价**"；
+ip-full 回滚 stock（p5 的两条误补不可接受）；24h 验收改用 acc_report **v5**（3 挂载 +
+boot.log），既有 vendor 家族单列。

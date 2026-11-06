@@ -12,6 +12,15 @@
 > （boot `9129c459…`），24 h 复盘 ≈ 11-04 17:46，布防门禁未达 ⇒ 未布防。
 > 详录见 [SLOTGUARD_DESIGN.md](SLOTGUARD_DESIGN.md) §7 与 [REVIEW_SLOTGUARD.md](REVIEW_SLOTGUARD.md)。
 
+> **2026-11-06 U-P（busybox 稳定性判决/修复）**：p5 补丁 busybox **不稳定**（缺失文件错误
+> 路径 4/4 SIGSEGV；根因 v5 shape-B 误补 3 条 va_list 拷贝 0x408c68..70）；ip-full p5 的
+> `stp q0,q0` 误补**静态无效**（该命令的 `ip neigh` 崩溃为既有 vendor 家族：40 条部署前
+> stock 历史）。修复 = **v5∩v6 验证子集**：busybox 58 站点（p6s，功能等价、错误路径 0 信号、
+> 20min soak 4×1192 次 0 信号）、libc 140（=p4）、wpad 24（=p5）、ip-full 0（=stock）。
+> rc19 **v2.43** 三挂载（libc/busybox/wpad）+ 持久 boot 标记
+> `1793973483 25 libc=1 bb=1 wpad=1`；**T0=1793973483**（T0_UP_p6s_boot）。
+> 详见 [U-P_RESULT](../review/U-P_RESULT_2026-11-06.md)；claims C-318..C-324。
+
 ## 0. 2026-11-03 收束（本轮最终态）
 
 **本轮结题：写入者未点名；四条核心约束钉死；后果层兜底已上机观察。** 证据：C-186..C-214、

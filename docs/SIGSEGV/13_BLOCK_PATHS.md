@@ -242,6 +242,15 @@ BL31 替换砖风险；boot0/tee 分区**不在现有刷机管线内**（管线�
 > （同洪水 λ 83–161/min→复位后 6.8/min，C-288）——跨 boot 比较必须同 boot 配对。详见
 > [U-I_RESULT](../review/U-I_RESULT_2026-11-06.md) §2/§3。
 
+> **判决注记（2026-11-06，U-P 轮）**：**补丁命中数 ≠ 覆盖**——v5 busybox 106 站点在错误
+> 路径 4/4 SIGSEGV（3 条 va_list 拷贝被误补 0x408c68..70），ip-full 2 站点静态无效
+> （`stp q0,q0` memset 类；`ip neigh` 崩溃为既有 vendor 家族：40 条部署前历史）。v6 语义
+> 校验（prologue+vr_offs+首 call 前+拷贝排除）后取 **v5∩v6**：busybox 58（p6s，功能等价+
+> 错误路径 0 信号+20min soak 0）、libc 140（=p4）、wpad 24（=p5）、ip 0（stock）。
+> **静态 gw busybox 仍未覆盖**（本轮 21:30–31 仍被写者击杀：led_mgr/awk NE）。
+> **验收口径**：ip neigh / phy_info / gw 静态 busybox 属既有家族，单列或剔除，不计入 p6s。
+> 详见 [U-P_RESULT](../review/U-P_RESULT_2026-11-06.md) §0/§3。
+
 ### T6 · 后果层布防完备（**不断写，只断 SIGSEGV 成形**；列为完整性）
 
 **当前事实（必须先摆正）**：nerepair v2.2 = **dry-run 不修**（V5_FEASIBILITY T-5 只读锚点，

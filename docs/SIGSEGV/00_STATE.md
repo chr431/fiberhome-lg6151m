@@ -379,6 +379,12 @@ B 臂 8 min 即 246 命中（P(0)=e^-246）→ **后续机制 A/B 只需 5–10 
   (t=27.4s dmesg 证据),reboot 后系统全绿(selftest 103/105);v4 补丁器(140 站点)+三态电池
   成规;grep -r 崩溃=既有缺陷平反;T0=1793967674,/data/stealth/acc_report.sh 一键验收;覆盖
   诚实=libc 面(busybox/wpad 自指纹待 v5+沙箱)。(C-310..C-313,VERDICT §25)——24h 后验收。
+- **U-O(2026-11-06 夜)· T5 覆盖面拉满**:v5(vr_offs 签名)重扫,libc140/busybox106/wpad24/
+  ip-full2 四件电池+压测全等后 bind-mount;rc19 v2.41 多挂载,reboot 实测 dmesg
+  'libc=1 bb=1 ip=1 wpad=1';新 hostapd 实例运行补丁 wpad(inode 证据);dnsmasq/logread/aee
+  零站点=经 libc 已覆盖;gw 静态 busybox 149 站点但分派坏→拒部署(v6 入口)。24h 验收窗
+  T0=1793970002,acc_report.sh v3。(C-314..C-317,VERDICT §26)
+
 
 
 

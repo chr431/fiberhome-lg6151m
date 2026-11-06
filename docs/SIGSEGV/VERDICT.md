@@ -536,3 +536,18 @@ T1 保持"一轮可判"待下轮钉归属。
 
 对外口径：T5 的"持久化"里程碑完成；覆盖面诚实定位为 libc 面；下一步（v5+沙箱→应用二进制）
 与验收结果挂钩。
+
+## §26 U-O 轮（2026-11-06 夜）：T5 覆盖面拉满——四件套上线，24h 验收窗 T0=1793970002
+
+报告=[U-O_RESULT_2026-11-06.md](../review/U-O_RESULT_2026-11-06.md)；claims C-314..C-317。
+
+1. **C-314（部署）**：libc 140 / busybox 动态 106 / wpad 24 / ip-full 2 站点，四态电池与
+   60×10 压测全等 → 四件 bind-mount；rc19 v2.41 自检后逐件挂载；**reboot 实测四挂载全在**
+   （dmesg 26.4s）；新 hostapd 实例已运行补丁 wpad（inode 证据）。
+2. **C-315（无需补丁的类）**：dnsmasq/logread/aee_aed 零站点 → printf 全走 libc → libc 面
+   已覆盖。
+3. **C-316（拒绝项）**：gw 静态 busybox 149 站点但 applet 分派坏 → 拒部署原文件保真；留 v6。
+4. **C-317（方法）**：虚拟 digest 漂移平反 = 参照物过期；每轮必须重验 stock 对照。
+
+对外口径：T5 从"libc 面"扩展到"libc+三大动态应用（busybox/wpad/ip）+ 类级覆盖
+（dnsmasq/logread/aee 经 libc）"；24h 后一次性验收（acc_report v3）。

@@ -36,6 +36,21 @@
 > （vr_offs=0）破坏整数变参，均拒用。下一步 = 引擎侧 T1/T2/T3 或 va_list 结构体直瞄假设。
 > 详见 [U-Q_RESULT](../review/U-Q_RESULT_2026-11-06.md)；claims C-325..C-330。
 
+> **2026-11-07 U-R（覆盖补全 + T1/T3 范围复核）**：U-Q 的 p9 不是零签名对照——静态 busybox
+> 有 **399** 条 q→[sp] 存储，v7 只补 255；未补 144 中 **40 条 = 5 个完整 q0..q7 块**
+> （ioctl_or_perror_and_die / zbc_posix_error_fmt / fmtstr / out1fmt / ash_msg_and_raise_error），
+> 漏因 pre-index 帧与 va_start-after-save。v11 修正后 **p11 = p8 197 + 31 = 228 站点**，
+> 未补升序 q 块 = 0，q0/q1 保留；qemu 402 help/34 电池/14 定向全等，设备 44 项仅 df 8KB、
+> 9×30 零信号。rc19 **v2.46** 第四挂载换 `busybox_static_p11`，重启 boot.log
+> `1793980462 25 libc=1 bb=1 wpad=1 gw=1`，static md5 **eedfbe41**，**T0=1793980462**
+> （T0_UR_p11）；首 NE=T0+322s vendor iptables（非 gw busybox），稳定性观察中。
+> **T1/T3 范围复核**：T3 的 C-280 只覆盖 pfn_valid 子区窗 0x9c200000；ISU 顶层保留窗
+> 0xbf000000/8MB 从未测，`exilewin.c` 因 `pgprot_cached` 不存在从未编译——U-R 修复后
+> `exilewin.ko` 可构建（md5 c9c80e1c），`scanary_exile --win-dev` 已支持 ⇒ ISU 分支待上机。
+> T1 的 C-300 只关闭内容馈源；厂商 MED IPI 任务停止（`mtk_ipi_send`/`med_stop_ack_ipi_handler`/
+> 0xa5a5a5a5）在 C-298 头树重建后可构建但从未上机，预期值低。详见
+> [U-R_RESULT](../review/U-R_RESULT_2026-11-07.md)；claims C-331..C-334。
+
 
 ## 0. 2026-11-03 收束（本轮最终态）
 

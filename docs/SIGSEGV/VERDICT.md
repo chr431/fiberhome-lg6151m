@@ -631,3 +631,34 @@ boot.log），既有 vendor 家族单列。
 wpad 24 / static bb 197）；**"稳定"未达成**——静态 busybox 既有 434 条崩溃家族
 （pop_arg 61/hash_clear 58/get_meta 34/vgetopt32 29…）不因保存掩蔽改变；用户空间
 缓解封顶，下一轮转引擎侧。
+
+## §29 U-R（2026-11-07 凌晨）：p9 对照范围修正；p11 覆盖补全上线；T1/T3 残余路径复核
+
+**触发**：U-Q 的 p9 阴性判决需要复核（用户问"隐身为何无法完全骗过写入者"）。
+
+**新证据（离线 census）**：静态 busybox 有 399 条 q→[sp] 存储（390 `str q` + 9 `stp q`），
+v7 只补 255；未补 144 中 **40 条组成五个完整 q0..q7 升序块**（ioctl_or_perror_and_die /
+zbc_posix_error_fmt / fmtstr / out1fmt / ash_msg_and_raise_error）。漏因：pre-index 帧
+（`stp xN,xM,[sp,#-imm]!` 无 `sub sp`）+ va_start 在保存块之后（`-0x80` 可晚于首个
+`bl`）+ 跨函数 q 加载护栏。⇒ p9 **不是零签名对照**，"保存突发封顶"的强命题不成立。
+
+1. **C-331（p9 范围）**：p9 = 255/399，未补 5 个完整块 ⇒ 强命题不成立；U-Q 的"封顶"
+   应降级为"255 条匹配站点掩蔽不足"。
+2. **C-332（p11 上线）**：p11 = p8 197 + 30（5 块 q2..q7）+ 1（ioctl 第二块 q7）=
+   **228**；q0/q1 保留（浮点）；普查未补升序 q 块 = 0；qemu 402 help/34 电池/14 定向
+   全等；设备 44 项仅 `df` 8KB、9×30 零信号；rc19 v2.46 上线，boot.log `1793980462 25
+   libc=1 bb=1 wpad=1 gw=1`，md5 eedfbe41，T0=1793980462；首 NE=T0+322s vendor
+   iptables（非 gw busybox）。
+3. **C-333（T3 范围）**：C-280 只测 pfn_valid 子区窗 0x9c200000/2MB；**ISU 顶层保留窗
+   0xbf000000/8MB 从未测**（/dev/mem pfn_valid=0 非缓存，未对齐 SIGBUS）；U-H 的
+   `exilewin.c` 因 `pgprot_cached` 在 5.15 不存在**从未编译**；U-R 保留 VMA 默认
+   PAGE_SHARED 后可构建（`exilewin.ko` 123800B, md5 c9c80e1c），`scanary_exile` 已支持
+   `--win-dev /proc/exilewin` ⇒ ISU 分支是待测路径，不是负结果。
+4. **C-334（T1 范围）**：C-300 关闭的是内容馈源；厂商 MED IPI 任务停止
+   （`mtk_ipi_send` 0xffffffc0084b9ab8 / `med_stop_ack_ipi_handler` 0xffffffc0085a3c14 /
+   0xa5a5a5a5 邮箱）在 C-298 头树重建后可构建，但从未上机；emiuctl 单参不够，需多参
+   kmod + IPI 通道/消息 RE；预期值低，作为任务层收口。廉价未测项：4 CPU 亲和性、
+   纯 CPU 负载、非缓存栈、栈偏移。
+
+**对外口径**：p11 是"功能等价 + 覆盖补全"的可部署件（T0=1793980462，观察中）；
+T3 的 ISU 窗与 T1 的 IPI 停止是两条尚未上机的可行路径；下一步优先 T3b（exilewin）。

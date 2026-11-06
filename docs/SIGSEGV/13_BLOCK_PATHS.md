@@ -122,6 +122,15 @@ hw_nat.ko**（分析推断：由 FE 硬件 / MED 固件 / mtk_eth 侧维持—�
 > /dev/mem cacheable）被同率涂画（RR 1.096/0.939 双窗，C-280）；顶层 removed 段连承载栈的
 > 映射属性都没有。放逐思路整体出局，详见 [U-H_RESULT](../review/U-H_RESULT_2026-11-06.md) §2。
 
+> **复核注记（2026-11-07 U-R 轮）**：**T3 的关闭只覆盖 pfn_valid 子区窗**。ISU 顶层保留窗
+> 0xbf000000/8MB 从未被测试：/dev/mem 映射为 pfn_valid=0 → 非缓存 → 未对齐 SIGBUS，U-H
+> 因此改用 9c200000。U-H 写下的 `exilewin.c`（/proc/exilewin + `remap_pfn_range` 缓存映射）
+> 因使用 5.15 不存在的 `pgprot_cached()` **从未编译**；U-R 改为保留 VMA 默认 PAGE_SHARED
+> 后可构建（`exilewin.ko` 123800B, md5 c9c80e1c），`scanary_exile` 已支持
+> `--win-dev /proc/exilewin`，`wmd5` 亦支持。⇒ 引擎对顶层 reserved carveout 的可达性
+> 仍是空白，**T3 的 ISU 分支是待上机路径，不是负结果**。设计：ISU off（C-262）→ insmod →
+> 缓存自检 → 栈放窗 → 洪水 ABAB，RR 预注册 [0.7,1.4]。
+
 > **进度注记（2026-11-06，U-I 轮）**：离线位图已成——MED 固件（tinysys-medmcu-RV33_A，VA=文件
 > 偏移）的 hnat_info 配置块 = **MED 视图 0x38013000**（STATUS/MSK 对 +0x30/34/38/3c 等，C-289）；
 > 停止路径 = `med_ipi_stop_rx_handler` 任务（0xa5a5a5a5 邮箱魔法）+ AP 内核 `mtk_ipi_send`/
@@ -148,6 +157,13 @@ hw_nat.ko**（分析推断：由 FE 硬件 / MED 固件 / mtk_eth 侧维持—�
 > 空间**——写者注入调度跟随活动模式，靶标捕获跟随 store 形态（W1 签名），二者拼成完整机制
 > 图景。供给杠杆 `dpmaif_stop_rx_sw()`（环冻结 ≥8min，start 不逆转，复位恢复，C-299）保留
 > 为 MED 面实验工具。详见 [U-K_RESULT](../review/U-K_RESULT_2026-11-06.md)。
+
+> **复核注记（2026-11-07 U-R 轮）**：**C-300 关闭的是内容馈源，不是任务层**。厂商 AP→MED
+> 的 IPI 停止协议仍在：`med_stop_ack_ipi_handler` 0xffffffc0085a3c14、`mtk_ipi_send`
+> 0xffffffc0084b9ab8、MED 侧 `med_ipi_stop_rx_handler` 轮询 0xa5a5a5a5×4 邮箱；C-298 已
+> 重建头树，kmod 可构建，但 `emiuctl` 只支持单参 `call <addr> <int>`，需多参 kmod + IPI
+> 通道/消息布局提取。预期 λ 效果低（内容非必要），作为任务层收口。另有三个廉价未测项：
+> 4 CPU 的 per-CPU λ/亲和性、纯 CPU（无网络）负载臂、非缓存栈/栈偏移 padding。
 
 ### T2 · ATF 既有服务全表：SIP 分发器 + DFD 链装载
 
@@ -258,6 +274,17 @@ BL31 替换砖风险；boot0/tee 分区**不在现有刷机管线内**（管线�
 > 直瞄 32B va_list 结构体本身/页属性写）。p9 破坏浮点、p10（vr_offs=0）破坏整数变参，
 > 均拒用。覆盖面（四件）已补齐，稳定性未达成；下一步必须动引擎侧。详见
 > [U-Q_RESULT](../review/U-Q_RESULT_2026-11-06.md) §4/§5。
+
+> **复核注记（2026-11-07 U-R 轮）**：**p9 不是零签名对照**——静态 busybox 有 399 条
+> q→[sp] 存储（390 `str q` + 9 `stp q`），v7 只补 255；未补 144 中 **40 条 = 5 个完整
+> q0..q7 升序块**（`ioctl_or_perror_and_die`/`zbc_posix_error_fmt`/`fmtstr`/`out1fmt`/
+> `ash_msg_and_raise_error`），漏因 **pre-index 帧分配**（`stp xN,xM,[sp,#-imm]!` 无
+> `sub sp`）与 **va_start-after-save**（`-0x80` 在保存块之后，甚至晚于首个 `bl`）。
+> ⇒ "该家族不由 FP 保存突发驱动"的强命题不成立，只能降级为"255 条匹配站点掩蔽不足"。
+> v11 修正后 **p11 = p8 197 + 30（5 块 q2..q7）+ 1（ioctl 第二块 q7）= 228**，q0/q1
+> 保留（浮点）；全镜像普查未补升序 q 块 = 0；qemu 402 help/34 电池/14 定向全等；设备
+> 44 项仅 `df` 8KB、9×30 零信号；rc19 v2.46 上线（T0=1793980462，首 NE 为 vendor
+> iptables，非 gw busybox）。详见 [U-R_RESULT](../review/U-R_RESULT_2026-11-07.md) §1-3。
 
 
 ### T6 · 后果层布防完备（**不断写，只断 SIGSEGV 成形**；列为完整性）

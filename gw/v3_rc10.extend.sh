@@ -1,5 +1,5 @@
 #!/bin/sh
-# rc19.sh v2 (=local v3_rc10.extend.sh) v2.37 -- Frankenstein v3.1: br-lan world + WiFi.
+# rc19.sh v2 (=local v3_rc10.extend.sh) v2.40 -- Frankenstein v3.1: br-lan world + WiFi.
 # v2.36 (SIGSEGV Phase 0): 停用 core_trap 每日文件模式窗口(窗口内 core_meta 元
 #        数据链整条被绕过 = 观测盲窗, 且从未抓到家族 core); 调度点摘除, 脚本
 #        保留。core_pattern 保持 rc.extend v2.6 的管道形态 |/data/gw/core_meta.sh。
@@ -48,6 +48,19 @@ case ":$PATH:" in
 *:/data/gw/sbin:*) ;;
 *) PATH=/data/gw/sbin:/data/gw/bin:$PATH ;;
 esac
+
+# v2.40 (2026-11-06 U-N, SIGSEGV T5): 隐身 libc 启动挂载。
+#   自检（补丁 libc 作 loader 跑 busybox echo）通过且 /data/stealth/DISABLE 缺席
+#   时才 bind-mount；失败只记日志、不阻塞任何后续启动。回滚：删 DISABLE 无济于事，
+#   手动 `umount /lib/libc.so` 即恢复原始库（新进程即刻恢复旧行为）。
+if [ -x /data/stealth/libc_p4.so ] && [ ! -e /data/stealth/DISABLE ]; then
+    if ST=$(/data/stealth/libc_p4.so /bin/busybox echo st 2>/dev/null) && [ "$ST" = "st" ]; then
+        /bin/busybox grep -q ' /lib/libc.so ' /proc/mounts ||             /bin/busybox mount --bind /data/stealth/libc_p4.so /lib/libc.so
+        KLOG "stealth: libc mount state $(/bin/busybox grep -c ' /lib/libc.so ' /proc/mounts)"
+    else
+        KLOG "stealth: self-test FAILED -> skip mount"
+    fi
+fi
 export PATH
 [ -z "${TZ:-}" ] && [ -r /etc/TZ ] && TZ=$(cat /etc/TZ 2>/dev/null) && export TZ
 

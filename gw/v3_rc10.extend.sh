@@ -49,10 +49,18 @@ case ":$PATH:" in
 *) PATH=/data/gw/sbin:/data/gw/bin:$PATH ;;
 esac
 
+# v2.44 (2026-11-06 U-Q, SIGSEGV T5 full-coverage): 第四件挂载 = gw 静态 busybox
+#   （/data/stealth/busybox_static_p7 → /data/gw/bin/busybox）。U-O 曾以 "sh applet
+#   无法分派" 拒绝静态版；U-Q 复核证明那是**测试命名假象**（busybox 按 argv[0] 匹配
+#   applet：二进制不叫 busybox 时 `./x sh -c` 必然报 applet not found）。qemu 全量
+#   402 applet --help 逐字节一致 + 34 项功能电池一致 + 8 个 FP 实参 printf/awk 正确；
+#   站点集 = v5∩v6 137 + v5 独有 12（bb_error_msg/msg_and_die_if_script 的 q2..q7
+#   真保存块；v6 旧 prologue 扫描在函数前驱是尾调用 bl 时误拒，v7 修正）。该件是
+#   当前 NE 台账里最活跃的受害者（sh/awk/grep，pc 落在 pop_arg/awk 内部）。
 # v2.43 (2026-11-06 U-P, SIGSEGV T5 fix): 持久 boot 标记 —— vendor 日志会冲掉
 #   dmesg ring（实测 26min 后 'RC19: stealth' 行已不可见），24h 验收不能依赖 dmesg。
 #   挂载块后把 epoch/uptime/mount 计数追加到 /data/stealth/boot.log（只追加，日增长
-#   1 行；验收脚本读最后一行判定本次 boot 的三件挂载）。
+#   1 行；验收脚本读最后一行判定本次 boot 的四件挂载）。
 # v2.42 (2026-11-06 U-P, SIGSEGV T5 fix): 隐身件启动挂载（三件）。
 #   busybox 换 p6s（v5∩v6 验证子集 58 站点；剔除 v5 误补的三份 va_list 拷贝，
 #   保留错误函数 q2..q7；不碰 awk/printf 引擎以保住 %f）。去掉 ip-full：
@@ -60,10 +68,10 @@ esac
 #   libc_p4（140 站点）与 wpad_p5（24 站点）经 v6 复核为验证子集，不变。
 #   自检（补丁 libc 作 loader 跑 stock busybox echo）通过且 /data/stealth/DISABLE
 #   缺席时逐件 bind-mount（不存在/不可执行则跳过）；失败只记日志不阻塞启动。
-#   回滚：逐条 umount（/lib/libc.so,/bin/busybox,/usr/sbin/wpad）。
+#   回滚：逐条 umount（/lib/libc.so,/bin/busybox,/usr/sbin/wpad,/data/gw/bin/busybox）。
 if [ -x /data/stealth/libc_p4.so ] && [ ! -e /data/stealth/DISABLE ]; then
     if ST=$(/data/stealth/libc_p4.so /data/stealth/stock/busybox echo st 2>/dev/null) && [ "$ST" = "st" ]; then
-        for pair in             /data/stealth/libc_p4.so:/lib/libc.so             /data/stealth/busybox_dyn_p6s:/bin/busybox             /data/stealth/wpad_p5:/usr/sbin/wpad ; do
+        for pair in             /data/stealth/libc_p4.so:/lib/libc.so             /data/stealth/busybox_dyn_p6s:/bin/busybox             /data/stealth/wpad_p5:/usr/sbin/wpad             /data/stealth/busybox_static_p7:/data/gw/bin/busybox ; do
             src=${pair%%:*}; dst=${pair#*:}
             [ -x "$src" ] || continue
             /bin/busybox grep -q " $dst " /proc/mounts || /bin/busybox mount --bind "$src" "$dst" 2>/dev/null
@@ -71,8 +79,9 @@ if [ -x /data/stealth/libc_p4.so ] && [ ! -e /data/stealth/DISABLE ]; then
         _lc=$(/bin/busybox grep -c ' /lib/libc.so ' /proc/mounts)
         _bb=$(/bin/busybox grep -c ' /bin/busybox ' /proc/mounts)
         _wp=$(/bin/busybox grep -c ' /usr/sbin/wpad ' /proc/mounts)
-        KLOG "stealth: mounts libc=$_lc bb=$_bb wpad=$_wp"
-        echo "$(date +%s) $(cut -d. -f1 /proc/uptime) libc=$_lc bb=$_bb wpad=$_wp" >> /data/stealth/boot.log 2>/dev/null
+        _gw=$(/bin/busybox grep -c ' /data/gw/bin/busybox ' /proc/mounts)
+        KLOG "stealth: mounts libc=$_lc bb=$_bb wpad=$_wp gw=$_gw"
+        echo "$(date +%s) $(cut -d. -f1 /proc/uptime) libc=$_lc bb=$_bb wpad=$_wp gw=$_gw" >> /data/stealth/boot.log 2>/dev/null
     else
         KLOG "stealth: self-test FAILED -> skip mounts"
     fi

@@ -49,6 +49,15 @@ case ":$PATH:" in
 *) PATH=/data/gw/sbin:/data/gw/bin:$PATH ;;
 esac
 
+# v2.45 (2026-11-06 U-Q, SIGSEGV T5 full-coverage r2): p7 实测仍有长驻 shell/awk
+#   击杀（boot t=107s svc_lib、t=1378s wan_agg、t=1752s incident awk；pc 落在
+#   malloc a_crash/awk 内部 ⇒ 仍有完整 8×q 保存突发在未覆盖的变参函数里）。
+#   p8 = p7 149 站点 + v6 独有 48 个 q2..q7 站点（bb_perror_msg、bb_error_msg_and_die、
+#   bb_perror_msg_and_die、bb_herror_msg_and_die、ioctl_or_perror、status_line_bold、
+#   message、log*/printf 族等此前 v5 形状漏掉的变参 prologue；全部保留 q0/q1，
+#   因 v6 全集把 q0/q1 也 nop 后 awk print/%.3f 输出 3.47e-310/0.000——q0/q1 是
+#   浮点实参通道，必须保留）。qemu 402 applet --help 全等 + 34 项功能一致 +
+#   printf/awk 9 个 FP 实参逐位正确；设备 p7→p8 差分 34 项一致 + 7 类 ×30 双栏 0 信号。
 # v2.44 (2026-11-06 U-Q, SIGSEGV T5 full-coverage): 第四件挂载 = gw 静态 busybox
 #   （/data/stealth/busybox_static_p7 → /data/gw/bin/busybox）。U-O 曾以 "sh applet
 #   无法分派" 拒绝静态版；U-Q 复核证明那是**测试命名假象**（busybox 按 argv[0] 匹配
@@ -71,7 +80,7 @@ esac
 #   回滚：逐条 umount（/lib/libc.so,/bin/busybox,/usr/sbin/wpad,/data/gw/bin/busybox）。
 if [ -x /data/stealth/libc_p4.so ] && [ ! -e /data/stealth/DISABLE ]; then
     if ST=$(/data/stealth/libc_p4.so /data/stealth/stock/busybox echo st 2>/dev/null) && [ "$ST" = "st" ]; then
-        for pair in             /data/stealth/libc_p4.so:/lib/libc.so             /data/stealth/busybox_dyn_p6s:/bin/busybox             /data/stealth/wpad_p5:/usr/sbin/wpad             /data/stealth/busybox_static_p7:/data/gw/bin/busybox ; do
+        for pair in             /data/stealth/libc_p4.so:/lib/libc.so             /data/stealth/busybox_dyn_p6s:/bin/busybox             /data/stealth/wpad_p5:/usr/sbin/wpad             /data/stealth/busybox_static_p8:/data/gw/bin/busybox ; do
             src=${pair%%:*}; dst=${pair#*:}
             [ -x "$src" ] || continue
             /bin/busybox grep -q " $dst " /proc/mounts || /bin/busybox mount --bind "$src" "$dst" 2>/dev/null

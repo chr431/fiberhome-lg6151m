@@ -21,6 +21,22 @@
 > `1793973483 25 libc=1 bb=1 wpad=1`；**T0=1793973483**（T0_UP_p6s_boot）。
 > 详见 [U-P_RESULT](../review/U-P_RESULT_2026-11-06.md)；claims C-318..C-324。
 
+> **2026-11-06 U-Q（全覆盖落地/稳定性判决）**：gw 静态 busybox 的 U-O 拒绝是**测试命名
+> 假象**（busybox 按 argv[0] 选 applet；非 `busybox` 名执行必报 applet not found）。静态版
+> 站点 v5 **149** = v6 137 + 12（v6 prologue 扫描在函数前驱是尾调用 `bl` 时误拒，v7 修正），
+> **p8 = 197**（+48 个 v6 独有 q2..q7，补 `bb_perror_msg`/`bb_error_msg_and_die`/
+> `ioctl_or_perror` 等漏检变参 prologue）；**q0/q1 必须保留**（v7 全集 255 会把
+> `awk print 3.14` 打成 3.47e-310、`%f`→0）。rc19 **v2.45** 四挂载
+> （+`/data/stealth/busybox_static_p8 → /data/gw/bin/busybox`），boot.log
+> `1793978317 25 libc=1 bb=1 wpad=1 gw=1`；四件 md5 libc dc38797e / dyn bb af5f1d75 /
+> wpad ad381d37 / **static bb 36e3b4df**；**T0=1793978317**（T0_UQ_p8_final）。
+> **稳定性未达成**：p7/p8 窗口静态 busybox 仍死（svc_lib/wan_agg/incident awk/sed）；
+> 决定性对照 **p9（255 个 q0..q7 保存全 nop）挂载后 276s 仍死 `cut`，pc=0x4c8728
+> (vgetopt32) = 台账 29 条既有同族** ⇒ **FP 保存突发掩蔽封顶**；p9 破坏浮点、p10
+> （vr_offs=0）破坏整数变参，均拒用。下一步 = 引擎侧 T1/T2/T3 或 va_list 结构体直瞄假设。
+> 详见 [U-Q_RESULT](../review/U-Q_RESULT_2026-11-06.md)；claims C-325..C-330。
+
+
 ## 0. 2026-11-03 收束（本轮最终态）
 
 **本轮结题：写入者未点名；四条核心约束钉死；后果层兜底已上机观察。** 证据：C-186..C-214、

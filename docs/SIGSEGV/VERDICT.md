@@ -588,3 +588,46 @@ T1 保持"一轮可判"待下轮钉归属。
 对外口径：busybox 面从"106 站点但确定性崩溃"修成"**58 站点验证子集且功能等价**"；
 ip-full 回滚 stock（p5 的两条误补不可接受）；24h 验收改用 acc_report **v5**（3 挂载 +
 boot.log），既有 vendor 家族单列。
+
+
+## §28 U-Q（2026-11-06 深夜）：静态 busybox p8 上线；保存突发掩蔽封顶
+
+**结论**：覆盖面补齐（libc/dyn busybox/wpad/static busybox 四件全部验证子集在役），
+但**稳定性未达成**——p9（255 个 q0..q7 保存全去）对照仍在挂载后 276s 被同 pc 家族击杀，
+证明该受害者类不由 FP 保存突发驱动。下一步必须动引擎侧（T1/T2/T3）或验证
+"32B va_list 结构体直瞄"假设。
+
+1. **C-325（U-O 拒绝再判）**：gw 静态 busybox 的"sh applet 无法分派"是**测试命名假象**：
+   busybox 按 argv[0] 选 applet，二进制不叫 `busybox` 时 `./x sh -c` 必报 applet not
+   found。改名 `busybox` 后，v5/v7/p8/p9 全量 **402 applet `--help` 输出+退出码逐字节
+   一致**；34 项功能电池（含 8/9 个 FP 实参、`awk %.3f`）一致；设备原生 p8 的
+   `printf %f`/`awk print` 逐位正确。
+2. **C-326（v6 prologue 误拒 + v7 修正）**：静态 busybox v5 **149** = v6 **137** +
+   v5 独有 **12**（`bb_error_msg` 0x408e3c..50、`msg_and_die_if_script` 0x4719bc..d0 的
+   q2..q7 真保存块）。v6 `find_prologue` 在向后扫描时把函数**前驱**的尾调用 `bl` 当成
+   "call-before-save" 而拒绝；v7 改为先找标记再拒绝标记与保存之间的 call。p8 = 149 +
+   48 个 v6 独有 q2..q7（`bb_perror_msg`/`bb_error_msg_and_die`/`bb_perror_msg_and_die`/
+   `bb_herror_msg_and_die`/`ioctl_or_perror`/`status_line_bold`/`message`/`log*`）= **197**。
+3. **C-327（q0/q1 必须保留）**：v7 全集 255（含 q0/q1）使 `awk print 3.14159` →
+   `3.47668e-310`、`awk %.3f`→`0.000`、`busybox printf '%f'`→`0.000000` ⇒ q0/q1 是前
+   两个 FP 实参通道；p8 只补 q2..q7，浮点输出逐位正确。
+4. **C-328（p8 部署）**：rc19 **v2.45** 第四挂载
+   `/data/stealth/busybox_static_p8 → /data/gw/bin/busybox`；boot.log
+   `1793977510 25 libc=1 bb=1 wpad=1 gw=1`、`1793978317 25 ... gw=1`；四件 md5
+   `dc38797e/af5f1d75/ad381d37/36e3b4df`；gw 脚本 `sh` 经 `/data/gw/sbin/sh` 解析，
+   重启后长驻脚本 inode=17387（p8 源）在役；**T0=1793978317**。
+5. **C-329（阴性判决）**：p7 窗口 ~30 min 内 3 死（`svc_lib` t=107s pc=0x466eec；
+   `wan_agg` t=1378s pc=0x4d5474；incident `awk` t=1752s pc=0x4b31cc）；p8 窗口 `sed`
+   t=203s 死 pc=**0x4c8728 (vgetopt32)**；**p9 = 255 个 q0..q7 保存全 nop**，挂载后
+   276s `cut` 仍死，pc=**0x4c8728**，far=0x1daf8——与台账 **29 条既有同 pc** 完全同族。
+   ⇒ 对静态 busybox 家族，FP 保存突发掩蔽已到顶；候选解释：引擎直瞄 32B va_list
+   结构体本身（musl va_list 恰 32B，与记录同宽）或按页属性写。
+6. **C-330（p9/p10 拒用 + 终态）**：p9 破坏浮点；p10（32 个 `mov w?,#-0x80`→`#0`）
+   在 qemu 上 `printf "%d %s"` 直接 SIGSEGV ⇒ 整数变参也依赖 vr_offs=-128。终态保留
+   **p8**（最大验证覆盖 + 功能等价），rc19 v2.45 + 四挂载 + T0=1793978317；selftest
+   **104/105**（唯一红 = wan_agg 不变量，源于 t=1378s shell 死亡，随后自愈）。
+
+对外口径：**"全覆盖"= 四类观察受害者的验证子集全部在役**（libc 140 / dyn bb 58 /
+wpad 24 / static bb 197）；**"稳定"未达成**——静态 busybox 既有 434 条崩溃家族
+（pop_arg 61/hash_clear 58/get_meta 34/vgetopt32 29…）不因保存掩蔽改变；用户空间
+缓解封顶，下一轮转引擎侧。

@@ -68,7 +68,9 @@
 > 语义正确（reb_test rc=6）但真实编译器变参 basereb 114 vs base 121 events/300s（RR=0.94）
 > （C-341）。**per-CPU pin 是仪器放大器**：scanary unpinned 26–68/60s vs pinned 0（CPU0-3 全零，
 > 随 CPU 集大小单调），但无扫描线程的被动 mini/mini2 pinned/unpinned 均 ~1 记录/60s、迁移 60 次
-> 不变 ⇒ scanary 高 λ 由其扫描线程跨 CPU 读栈放大，pin 不是真实服务缓解（C-342）。隐身天花板 =
+> 不变 ⇒ scanary 高 λ 由其扫描线程跨 CPU 读栈放大，pin 不是真实服务缓解（C-342）。放大器排除：
+迭代数两端一致、wb=none 仍 15–26 APPEAR/60s（哨兵写回只加 REWRITE）、独立进程 reader 无效
+（1 vs 1）⇒ 最可能是**同进程（同 ASID）跨 CPU 栈访问**，真实单线程速率需停顿采样（C-346）。隐身天花板 =
 > bb_p11 残余 9 条 stp q→[sp] + 363 条 stp q→非 sp（va_list 拷贝），拆宽需 trampoline/编译器级
 > 改造（C-343）。根修复：**T1b 关闭**（stop=停 RX→必复位 MED，<1s 窗；0xa5a5a5a5 不存在于 MED
 > 固件，C-344）、**T2 关闭**（58/58 SMC FID 无写者/DRM/DFX 手柄；DFD 链服务与写者无关且受阶段

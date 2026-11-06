@@ -341,4 +341,9 @@ B 臂 8 min 即 246 命中（P(0)=e^-246）→ **后续机制 A/B 只需 5–10 
   STATUS/MSK 寄存器与 stop 路径,材料全在) > **T3 放逐窗**(ISU 8MB 保留 DRAM,引擎对保留窗可达性
   从未测过) > T2 SIP/SMC 全表(tee_b 34K 指令在手) > T6 后果层布防(nerepair 仍 dry/slotguard 仍
   observe) > T4 boot 链核查(SBC 运行时判定在,末位高风险) > T7 厂商;§2 附防翻案关闭清单。
-  入口=[13_BLOCK_PATHS.md](13_BLOCK_PATHS.md)。。
+  入口=[13_BLOCK_PATHS.md](13_BLOCK_PATHS.md)。
+- **U-H(2026-11-06 日间)· 阻断路径首批上机判决**:T3 放逐窗正面关闭(保留子区窗照画不误,
+  C-280);T5 谓词钉死 **32B FP 保存事务=目标捕获签名**(四形态臂全 0 vs natfp 0.86,C-282/C-283,
+  浮出"变参 prologue 改形=自研二进制隐身"缓解候选);T6 门禁量化否决布防(nerepair 覆盖 23%、
+  slotguard 槽漂移,C-284)。零复位,设备干净——U-H_RESULT_2026-11-06.md,VERDICT §19,
+  证据 _local/evidence/b4b/uh/)。。

@@ -178,6 +178,14 @@ hw_nat.ko**（分析推断：由 FE 硬件 / MED 固件 / mtk_eth 侧维持—�
 > 功效。λ 跟**真实设备面向客户端流量**走（C-297/C-288）。下轮需在真实高 λ 窗内、同
 > 进程/同页设计（A 匿名 / E 同页不同偏移）；T1b 未做。
 
+> **判决注记（2026-11-07 U-T 轮）**：**T1b 关闭**。MED stop IPI 不是暂停开关：ACK 处理器
+> `med_stop_ack_ipi_handler`（0xffffffc0085a3c14）除非 `ccci_fsm_get_md_force_stop_state()==1`，
+> 否则置 `scp_reset_by_md_excep=1` 并发 `RESET_TYPE_MD_EXCEP`——等 core0 halt（≤1s）→ RSTN_SET →
+> `scp_sys_full_reset()` → RSTN_CLR，即 MED 真断电重启。"MED 已停"窗口 **<1s**，分钟级 λ 抓不到；
+> `0xa5a5a5a5` 在 medmcu_b.bin 全镜像 **0 命中**（是 CCCI tail_pattern）。唯一"只停不复位"分支
+> （RESET_TYPE_MD_FORCE_STOP）需 AP 侧置 FSM 状态，子代理两次卡住未交付。详见
+> [U-T_RESULT](../review/U-T_RESULT_2026-11-07.md) §6。
+
 ### T2 · ATF 既有服务全表：SIP 分发器 + DFD 链装载
 
 **依据**：U-G6 §4 明记未竟——"MTK_SIP SMC 号表未提取（分发器在 0x125cc+）"；运行时服务清单含
@@ -196,6 +204,16 @@ ATF 专属 mmap 窗口的**主人识别**（全镜像唯一出现，U-G6/U-G7 �
 **上机（若出候选）**：emiuctl.ko 直调 SMC 模式已验证（C-262 用过）；λ 对照同 T1。风险：SMC 参数错
 →复位（授权内，U-G6 已示警）。若全表提取后确认无手柄 → T2 关闭，同样收口（"ATF 无路"从枚举级
 升级为全表级）。
+
+> **判决注记（2026-11-07 U-T 轮）**：**T2 关闭（全表级负结果）**。从 tee_b.bin 提取 MTK SIP
+> 分发器全表：**58/58 unique FID**（表 A 14、B 24、C 12、D 5、3 个前置柜）。DRM/DFX 寄存器
+> （0x10005030/34/40/44、0x10005500…）只有崩溃 dump 只读与早期启动魔术写（SMC 0x506 + 硬件
+> 状态 0x1200f290[29] 门控），**没有"EL1 关 DRM/DFX/写者"的 SMC**；唯一引擎邻接服务
+> 0x8200040E/0xC200040E 只能改 DFD 崩溃捕获链 SRAM（0xc53e040，arg2≤0x200），受
+> `[0x2c008]==1` 阶段门控且与 post-MPU 写者（C-266）无因果；三个 ATF mmap 窗口
+> 0x1f003000/0x1f028000/0x1f005000 只出现在 identity mmap 表（0x264e0 第 19-21 项），
+> **全镜像零代码引用 = 无软件主人**。详见 [U-T_RESULT](../review/U-T_RESULT_2026-11-07.md) §6
+> 与 `tmpfiles/repro/t2_smc_table.md`。
 
 ### T3 · 放逐窗：受害栈迁入保留 DRAM 窗（ISU 8MB @0xbf000000）
 
@@ -305,6 +323,20 @@ BL31 替换砖风险；boot0/tee 分区**不在现有刷机管线内**（管线�
 > 死亡在实验负载窗内（ISU primer + 洪水），率不可当基线，但 PC/家族精确。下一步：q0/q1
 > 对照（p9 式，破浮点）或 va_list 结构体直瞄/页层判别。详见
 > [U-S_RESULT](../review/U-S_RESULT_2026-11-07.md) §3。
+
+> **判决注记（2026-11-07 U-T 轮）**：**p13（va_list 值重基）关闭；隐身天花板量化**。
+> ① p13：vr_top+16/vr_offs-16 重基语义正确（C 级 reb_test rc=6；GCC+clang 两种惯用法补丁；
+> 静态 busybox 37 站点、scanary 4 站点功能全等），但真实编译器变参+重基 basereb
+> **114 vs base 121 events/300s（RR=0.94）** ⇒ 写者活内容校验不依赖规范字面值；
+> 合成长臂同向（natfp 180/600s vs rebv 69/248s）。
+> ② 天花板：bb_p11 残余 `str q→[sp]` 162、`stp q→[sp]` 9、**`stp q→非 sp` 363（va_list
+> 拷贝）**；U-H/U-I 证明 32B q 事务是指纹（natfp 加 4×stp q→0.86；nat/strb/split 全 0；
+> 8×str q=0.55）⇒ 真隐身须把这 363+9 条 32B 事务拆成 16B/8B，1→2 指令需 **trampoline
+> （bl+2×str+ret）** 或编译器级 va_start/copy 改造。
+> ③ per-CPU pin 的**放大器警告**：scanary unpinned 26–68/60s vs pinned CPU0-3 全 0（随
+> CPU 集大小单调），但无扫描线程的 mini/mini2 被动受害者 pinned/unpinned 均 ~1 记录/60s
+> （迁移 60 次亦然）⇒ scanary 高 λ 由其扫描线程跨 CPU 读栈放大；pin 不能当服务缓解。
+> 详见 [U-T_RESULT](../review/U-T_RESULT_2026-11-07.md) §3-5。
 
 
 ### T6 · 后果层布防完备（**不断写，只断 SIGSEGV 成形**；列为完整性）

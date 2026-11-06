@@ -61,6 +61,19 @@
 > 仅 12–18/min，分进程 per-CPU arm 欠功效。设备已清：模块 0、ISU ON、p11 挂载、服务 3。
 > 详见 [U-S_RESULT](../review/U-S_RESULT_2026-11-07.md)；claims C-335..C-338。
 
+> **2026-11-07 U-T（夜间轮）**：**洪水是可靠 λ 放大器**——无洪水 1.5–2.8/min，U-H 原版 ug1
+> （PC→192.168.9.1:37777，3×800pps）拉到 **7–68/min**，记录载荷=洪水包 {len,ip}（C-339）。
+> 真实 p11 受害者首次闭环：`grep` 死亡（pc=0x4c8728、far=0x263cd）栈内 0xf3c8 精确 32B 记录
+> `{0x263cd,0,{0x141,192.168.9.1},0}`，0xf3e8 紧邻完好 va_list（C-340）。**p13 值重基关闭**：
+> 语义正确（reb_test rc=6）但真实编译器变参 basereb 114 vs base 121 events/300s（RR=0.94）
+> （C-341）。**per-CPU pin 是仪器放大器**：scanary unpinned 26–68/60s vs pinned 0（CPU0-3 全零，
+> 随 CPU 集大小单调），但无扫描线程的被动 mini/mini2 pinned/unpinned 均 ~1 记录/60s、迁移 60 次
+> 不变 ⇒ scanary 高 λ 由其扫描线程跨 CPU 读栈放大，pin 不是真实服务缓解（C-342）。隐身天花板 =
+> bb_p11 残余 9 条 stp q→[sp] + 363 条 stp q→非 sp（va_list 拷贝），拆宽需 trampoline/编译器级
+> 改造（C-343）。根修复：**T1b 关闭**（stop=停 RX→必复位 MED，<1s 窗；0xa5a5a5a5 不存在于 MED
+> 固件，C-344）、**T2 关闭**（58/58 SMC FID 无写者/DRM/DFX 手柄；DFD 链服务与写者无关且受阶段
+> 门控；三个 ATF mmap 窗口零引用，C-345）；T4/force_stop 子代理两次卡住未交付。详见
+> [U-T_RESULT](../review/U-T_RESULT_2026-11-07.md)；claims C-339..C-345。
 
 ## 0. 2026-11-03 收束（本轮最终态）
 

@@ -687,3 +687,36 @@ T3 的 ISU 窗与 T1 的 IPI 停止是两条尚未上机的可行路径；下一
 补全不解决静态 busybox 家族**（hash_clear 0x4b31cc 仍在）；写者受 boot/真实流量相位
 门控。下一步：引擎侧 T1b（MED IPI 任务停止）/T2（SMC 全表）/T4（安全态），或 va_list
 结构体直瞄/页层判别。
+
+## §31 U-T（2026-11-07 夜）：洪水杠杆；p13 关闭；per-CPU 放大器；根修复收口
+
+1. **C-339（洪水 λ 杠杆）**：无洪水基线 1.5–2.8/min；U-H 原版 ug1（PC→192.168.9.1:37777，
+   3×800pps）把 λ 拉到 **7–68/min**（lam3 18/104s；unpinned 24+24/240s；ABAB unpinned
+   26/68/35/40 events/60s），且每条记录载荷=洪水包 `{len 321/1601, ip 192.168.9.1}`。
+   C-338 的"合成洪水无效"限定为该低相位 boot/条件；跨 boot 比较仍守 C-288。
+2. **C-340（真实受害者记录闭环）**：gw 静态 busybox `grep` 在 1793985809 死亡
+   （pc=0x4c8728 vgetopt32、far=0x263cd，与 U-Q p9 同 PC）；stack dump 0xf3c8 精确
+   32B 记录 `{0x263cd,0,{0x141,192.168.9.1},0}`，0xf3e8 紧邻**完好 va_list**
+   （stack=gr_top=0x7fc0b5d480、vr_top=0x7fc0b5d450、gr_offs=-0x28、vr_offs=-0x80）
+   ⇒ 记录=洪水包、精确替换一条活 va_list、p11 挡不住、逐槽命中。
+3. **C-341（p13 关闭）**：vr_top+16/vr_offs-16 重基语义正确（reb_test rc=6；busybox 37
+   站点/scanary 4 站点功能全等），但真实编译器变参+重基 basereb **114 vs base 121
+   events/300s（RR=0.94）**；合成长臂同向 ⇒ 写者活内容校验不依赖规范字面值。**p13 关闭**。
+4. **C-342（per-CPU pin 是仪器放大器）**：scanary 洪水下 unpinned 26–68 events/60s vs
+   pinned CPU0/1/2/3 全 **0**；可见性随 CPU 集大小单调（2-CPU=2、3-CPU=12、全 CPU=13–68）。
+   但无扫描线程的被动单线程 mini/mini2（真实编译器变参，10ms sleep 稳定栈）pinned/
+   unpinned 均 **~1 记录/60s**，迁移 60 次也不变 ⇒ scanary 的高 λ 被其**扫描线程跨 CPU
+   读栈**放大，pin 抑制放大器而非真实攻击面。**pin 不得作为服务缓解宣传**。
+5. **C-343（隐身天花板）**：bb_p11 残余 `str q→[sp]` 162、`stp q→[sp]` 9、`stp q→非 sp`
+   **363**（va_list 拷贝）；U-H/U-I 证明 32B q 事务是写者指纹 ⇒ 真隐身须拆宽（1→2 指令
+   扩展：trampoline 或编译器级改造），非本轮可交付。
+6. **C-344（T1b 关闭）**：MED stop IPI = 停 RX read-agent→必复位 MED（`RESET_TYPE_MD_EXCEP`，
+   core0 halt ≤1s），停止窗 <1s；0xa5a5a5a5 不存在于 medmcu_b.bin（CCCI tail pattern）。
+7. **C-345（T2 关闭）**：BL31 SIP 全表 **58/58 FID**；DRM/DFX 仅崩溃 dump 只读 + 早期启动
+   魔术写（SMC 0x506 门控）；唯一引擎邻接服务 0x8200040E 只能改 DFD 崩溃链 SRAM 且受
+   `[0x2c008]==1` 门控、与写者无关；三个 ATF mmap 窗口零代码引用。**无写者关断手柄**。
+
+**对外口径**：**本机根修复无手柄**（T1/T1b/T2/T3 全关；T4 未交付，SBC 状态未定，若 SBC
+开启则不可做）；p13 关闭；p11 封顶于 363 条 32B va_list 拷贝；洪水是可靠 λ 放大器；scanary
+的 per-CPU 隐身是仪器放大器效应，不是真实缓解。下轮：独立 reader 直证放大器、真实多线程
+服务 pin 实验、32B 拆宽 trampoline 工程、T4 SBC 确认。

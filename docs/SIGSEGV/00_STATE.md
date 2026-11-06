@@ -375,6 +375,11 @@ B 臂 8 min 即 246 命中（P(0)=e^-246）→ **后续机制 A/B 只需 5–10 
   (C-307);gw 静态 busybox 过匹配事故已恢复(C-308);覆盖边界:wpad 仅 libc 面、静态未覆盖、
   击杀率下降未证(弱阳性)(C-309)。下轮:持久化+wpad/其余补丁+24h A/B。(VERDICT §24)
   ——U-M_RESULT_2026-11-06.md,证据 _local/evidence/b4b/um/。
+- **U-N(2026-11-06 夜)· T5 持久化+24h 验收窗**:rc19 v2.40 boot 自检挂载隐身 libc
+  (t=27.4s dmesg 证据),reboot 后系统全绿(selftest 103/105);v4 补丁器(140 站点)+三态电池
+  成规;grep -r 崩溃=既有缺陷平反;T0=1793967674,/data/stealth/acc_report.sh 一键验收;覆盖
+  诚实=libc 面(busybox/wpad 自指纹待 v5+沙箱)。(C-310..C-313,VERDICT §25)——24h 后验收。
+
 
 
 

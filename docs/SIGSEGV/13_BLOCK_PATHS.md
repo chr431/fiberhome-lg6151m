@@ -131,6 +131,12 @@ hw_nat.ko**（分析推断：由 FE 硬件 / MED 固件 / mtk_eth 侧维持—�
 > 仍是空白，**T3 的 ISU 分支是待上机路径，不是负结果**。设计：ISU off（C-262）→ insmod →
 > 缓存自检 → 栈放窗 → 洪水 ABAB，RR 预注册 [0.7,1.4]。
 
+> **判决注记（2026-11-07 U-S 轮）**：**T3 全面关闭**。ISU 顶层窗 0xbf000000/8MB 缓存
+> 映射（pfn_valid=1、unaligned RW ok、1MiB 419µs）下，587s 同进程双 victim：stackA
+> **1147** / stackE **1075** 次 inj=0 外写，**RR=0.937**（[0.7,1.4]），冷窗/诱饵 0
+> ⇒ 引擎照画 ISU 窗。C-280（pfn_valid 子区窗）+ 本轮（顶层保留窗）两种 DRAM 窗型都测过，
+> **放逐到保留窗不能阻断注入**。详见 [U-S_RESULT](../review/U-S_RESULT_2026-11-07.md) §1-2。
+
 > **进度注记（2026-11-06，U-I 轮）**：离线位图已成——MED 固件（tinysys-medmcu-RV33_A，VA=文件
 > 偏移）的 hnat_info 配置块 = **MED 视图 0x38013000**（STATUS/MSK 对 +0x30/34/38/3c 等，C-289）；
 > 停止路径 = `med_ipi_stop_rx_handler` 任务（0xa5a5a5a5 邮箱魔法）+ AP 内核 `mtk_ipi_send`/
@@ -164,6 +170,13 @@ hw_nat.ko**（分析推断：由 FE 硬件 / MED 固件 / mtk_eth 侧维持—�
 > 重建头树，kmod 可构建，但 `emiuctl` 只支持单参 `call <addr> <int>`，需多参 kmod + IPI
 > 通道/消息布局提取。预期 λ 效果低（内容非必要），作为任务层收口。另有三个廉价未测项：
 > 4 CPU 的 per-CPU λ/亲和性、纯 CPU（无网络）负载臂、非缓存栈/栈偏移 padding。
+
+> **进度注记（2026-11-07 U-S 轮）**：per-CPU/纯 CPU 判别**被写者相位门挡住**。p11 boot
+> （T0=1793980462）uptime 18–28min 高 λ ~100/min；计划重启后（T0=1793982485）低 λ
+> 0–2/min，port 9 与 U-H ug1 192.168.9.1:37777 合成洪水均拉不起来；ISU 窗 primer 仅
+> 12–18/min，且分进程 per-CPU arm 不继承注意力（CPU0 窗口 arm 2/1 per 60s）⇒ 矩阵欠
+> 功效。λ 跟**真实设备面向客户端流量**走（C-297/C-288）。下轮需在真实高 λ 窗内、同
+> 进程/同页设计（A 匿名 / E 同页不同偏移）；T1b 未做。
 
 ### T2 · ATF 既有服务全表：SIP 分发器 + DFD 链装载
 
@@ -285,6 +298,13 @@ BL31 替换砖风险；boot0/tee 分区**不在现有刷机管线内**（管线�
 > 保留（浮点）；全镜像普查未补升序 q 块 = 0；qemu 402 help/34 电池/14 定向全等；设备
 > 44 项仅 `df` 8KB、9×30 零信号；rc19 v2.46 上线（T0=1793980462，首 NE 为 vendor
 > iptables，非 gw busybox）。详见 [U-R_RESULT](../review/U-R_RESULT_2026-11-07.md) §1-3。
+
+> **判决注记（2026-11-07 U-S 轮）**：**p11 完整 q2..q7 覆盖仍死**。p11 228 站点、未补
+> 升序 q 块=0，仍出现 gw 静态 busybox `awk` 击杀（1793983563，**pc=0x4b31cc hash_clear**，
+> far=0x4，与 U-Q p7/台账 58 条同族）⇒ q2..q7 掩蔽不足，**FP 保存突发不是该家族机制**。
+> 死亡在实验负载窗内（ISU primer + 洪水），率不可当基线，但 PC/家族精确。下一步：q0/q1
+> 对照（p9 式，破浮点）或 va_list 结构体直瞄/页层判别。详见
+> [U-S_RESULT](../review/U-S_RESULT_2026-11-07.md) §3。
 
 
 ### T6 · 后果层布防完备（**不断写，只断 SIGSEGV 成形**；列为完整性）

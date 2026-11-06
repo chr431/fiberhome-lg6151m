@@ -662,3 +662,28 @@ zbc_posix_error_fmt / fmtstr / out1fmt / ash_msg_and_raise_error）。漏因：p
 
 **对外口径**：p11 是"功能等价 + 覆盖补全"的可部署件（T0=1793980462，观察中）；
 T3 的 ISU 窗与 T1 的 IPI 停止是两条尚未上机的可行路径；下一步优先 T3b（exilewin）。
+
+## §30 U-S（2026-11-07 凌晨）：T3 ISU 顶层窗上机（阴性）；p11 覆盖补全仍死；写者相位门
+
+1. **C-335（T3 关闭）**：ISU 顶层保留窗 0xbf000000/8MB 在缓存映射（pfn_valid=1、
+   unaligned RW ok、1MiB store 419µs）下，587s 同进程双 victim：stackA **1147** /
+   stackE **1075** 次 inj=0 外写，**RR=0.937**（预注册 [0.7,1.4]），冷窗/诱饵 0
+   ⇒ 引擎照画 ISU 窗。C-280（pfn_valid 子区窗）+ 本轮（顶层窗）⇒ **T3 全面关闭**，
+   放逐到 DRAM 保留窗不再有主张空间。
+2. **C-336（p11 判决）**：p11 228 站点、未补升序 q 块=0，仍出现 gw 静态 busybox
+   `awk` 击杀（1793983563，**pc=0x4b31cc hash_clear**，far=0x4，与 U-Q p7/台账 58 条
+   同族）⇒ q2..q7 全覆盖不足；**FP 保存掩蔽不是该家族机制**。死亡在实验负载窗内，
+   率不可当基线，但 PC/家族精确。
+3. **C-337（仪器修正）**：U-H 的 exilewin 因 `pgprot_cached()` 在 5.15 不存在**从未
+   编译**；保留 VMA 默认 PAGE_SHARED 后可构建（c9c80e1c）；`/proc/exilewin` 报
+   **pfn_valid=1**（U-H 注释写 0 是错的；/dev/mem SIGBUS 是非缓存映射）；wmd5 增
+   `snapvia`（RO mmap 被 EINVAL，RW 映射可用）。
+4. **C-338（相位门）**：p11 boot 高 λ ~100/min（uptime 18–28min）；计划重启后低 λ
+   **0–2/min**（port 9 与 U-H ug1 37777 合成洪水均拉不起来）；ISU 窗 primer 仅
+   12–18/min；分进程 per-CPU arm 不继承注意力（CPU0 窗口 arm 2/1 per 60s）⇒
+   per-CPU/纯 CPU 判别**欠功效**，需真实客户端高 λ 窗、同进程/同页设计。
+
+**对外口径**：**T3 彻底关闭**（pfn_valid 子区窗 + ISU 顶层窗两种都测过）；**p11 覆盖
+补全不解决静态 busybox 家族**（hash_clear 0x4b31cc 仍在）；写者受 boot/真实流量相位
+门控。下一步：引擎侧 T1b（MED IPI 任务停止）/T2（SMC 全表）/T4（安全态），或 va_list
+结构体直瞄/页层判别。

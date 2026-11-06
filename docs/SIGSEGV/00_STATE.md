@@ -51,6 +51,16 @@
 > 0xa5a5a5a5）在 C-298 头树重建后可构建但从未上机，预期值低。详见
 > [U-R_RESULT](../review/U-R_RESULT_2026-11-07.md)；claims C-331..C-334。
 
+> **2026-11-07 U-S（T3 ISU 顶层窗上机 + p11 判决）**：ISU 顶层保留窗 **0xbf000000/8MB**
+> 用缓存映射（pfn_valid=1、unaligned RW ok、1MiB 419µs）首次实测：587s 同进程双 victim
+> stackA **1147** / stackE **1075** 次 inj=0 外写，**RR=0.937**（[0.7,1.4]），冷窗/诱饵 0
+> ⇒ **引擎照画 ISU 窗，T3 全面关闭**（C-280 子区窗 + 本轮顶层窗）。p11 上线后首例 gw 静态
+> busybox 击杀：`awk` 1793983563 **pc=0x4b31cc（hash_clear）** far=0x4——p11 228 站点、
+> 未补升序 q 块=0 仍死 ⇒ **q2..q7 覆盖不足，FP 掩蔽不是该家族机制**。写者有相位门：p11
+> boot 高 λ ~100/min；计划重启后低 λ 0–2/min，合成洪水（port 9/37777）无效，ISU primer
+> 仅 12–18/min，分进程 per-CPU arm 欠功效。设备已清：模块 0、ISU ON、p11 挂载、服务 3。
+> 详见 [U-S_RESULT](../review/U-S_RESULT_2026-11-07.md)；claims C-335..C-338。
+
 
 ## 0. 2026-11-03 收束（本轮最终态）
 

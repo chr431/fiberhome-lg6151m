@@ -347,3 +347,9 @@ B 臂 8 min 即 246 命中（P(0)=e^-246）→ **后续机制 A/B 只需 5–10 
   浮出"变参 prologue 改形=自研二进制隐身"缓解候选);T6 门禁量化否决布防(nerepair 覆盖 23%、
   slotguard 槽漂移,C-284)。零复位,设备干净——U-H_RESULT_2026-11-06.md,VERDICT §19,
   证据 _local/evidence/b4b/uh/)。。
+- **U-I(2026-11-06 下午)· T5 隐身落地+子因矩阵+T1 位图**:真实二进制去 FP 保存 prologue
+  =600s 零外写(对照 68,P=e^-68,方案 A 前提 3/6 清);签名钉死=连续 FP 源保存区写入突发
+  (nat2q 1.04/qoff 1.00/nat8s 0.55);写者强度 boot 依赖(λ 塌 12–24×);MED 位图
+  0x38013000+停止 IPI 路径+AP 活体面 0x15104xxx(T1 断供两路成形);自伤复位 #24(seq
+  十六进制陷阱,E0 恢复)。(C-285..C-291,VERDICT §20)——U-I_RESULT_2026-11-06.md,证据
+  _local/evidence/b4b/ui/。

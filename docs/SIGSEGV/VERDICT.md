@@ -740,3 +740,30 @@ T3 的 ISU 窗与 T1 的 IPI 停止是两条尚未上机的可行路径；下一
 拷贝；洪水是可靠 λ 放大器；scanary 的 per-CPU 隐身是仪器放大器效应（wb/跨进程 reader/同进程
 跨 CPU reader 均不能复现），pin 不得作为服务缓解。下轮：放大器机制收口（停采样/被动连续检测器）、
 32B 拆宽 trampoline 工程、T4 载荷位定义/DDRPHY 读法、T7 位定义。
+
+## §32 U-V（2026-11-07 凌晨）：官方固件静态分析——零引擎邻域变更；PIT_NAT 第一候选消费者；官方无指纹规避
+
+对象：RP0102（BUILDNUM 476，2025-12-25）与 RP0103（92249，2026-09-09）官方固件双备份
+离线 diff + 记录消费者搜索 + 官方组件 32B 事务普查（全程未触碰设备）。
+
+1. **C-350（内核 diff 零内存子系统变更）**：20.2MB Image 全 delta 仅 72B，分解为分段重链接
+   位移（0/+576/+592/+56/−512/+72）；kallsyms names 流对齐 diff = **全内核仅 +2 符号**
+   （`__refcount_sub_and_test.constprop.0`、`dev_put`，插入点 ccmi_open 前=CCCI/conninfro
+   dev_put refcount 硬化），0 删除 0 改名；新字符串仅 `ccmni_start_xmit`/`port_mirror`；
+   mm/EMI/MPU/DFX/mrdump 符号两版零变更。⇒ 厂商同产品线 8.5 个月未触碰写者邻域任何代码，
+   **不存在"厂商已修复版本"可跟**（T7 仍是唯一外路）。
+2. **C-351（B 家族记录第一候选合法消费者 = DPMAIF PIT/PIT_NAT）**：内核内建全套 PIT_NAT
+   函数与 dump 串（`dpmaif_dump_partial_pit_nat`、`rel_rx_med_pit_entry`、
+   `PitNat: phy/virt/size`、`pit_nat_idx` 等）；PIT_NAT 条目=modem 写/AP dpmaif 驱动读的
+   包摘要描述符（bat/ptr+len+IPv4），与记录 `{A,0,{len,ip},0}` 同形（A=0x263cd 为 index 量级）。
+   mrdump=后果层、emimpu=MPU 层，均不读该格式。⇒ **用户态不存在合法消费者**；写者产出
+   PIT_NAT 形状的事务但投放到错地址。闭环需设备实测：dump PIT_NAT 环对照故障记录（下轮）。
+3. **C-352（官方组件无 32B 指纹规避）**：exec 节 32B q 事务普查 libc 1872 / wpad 642 /
+   busybox 290 / dropbear 122 / dnsmasq 75 / … / ccci_rpcd_com 0；RP102==RP103 逐项全等。
+   官方核心组件事务密度远超 p11 残余（363+9）而历史受害者仍集中 busybox ⇒ 命中率随
+   **活 va_list 使用面/进程形态**（K9）走，不随二进制指纹密度走；"官方原版即安全"被否；
+   32B 拆宽（C-343）仍是唯一代码级隐身增强。
+
+一句话：**官方在内存子系统上零动作（无可跟修复）；记录的"合法家"在 DPMAIF PIT_NAT 环
+（待设备闭环）；官方组件与自改组件同带 32B 指纹——隐身只能靠改造自身代码（拆宽），不靠
+"回到官方"。**

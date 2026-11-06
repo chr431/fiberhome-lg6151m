@@ -81,6 +81,19 @@
 > BL31 可重签，但关引擎载荷未知——bit15 盲写/DDRPHY+0x1520 不可读/p24/p37 无回滚——不推荐
 > 上机，C-348）。详见 [U-T_RESULT](../review/U-T_RESULT_2026-11-07.md)；claims C-339..C-349。
 
+> **2026-11-07 U-V（静态分析轮）**：RP102/RP103 官方固件离线 diff（未触碰设备）——内核
+> 8.5 个月迭代**零内存子系统变更**（全 delta 72B = 分段重链接位移；kallsyms 仅 +2 符号 =
+> ccmi/conninfro dev_put refcount 硬化 + `ccmni_start_xmit`/`port_mirror` 字符串；mm/EMI/MPU/
+> DFX/mrdump 零变更 ⇒ 无厂商修复可跟，C-350）。B 家族记录 `{A,0,{len,ip},0}` 第一候选
+> 合法消费者 = **DPMAIF PIT/PIT_NAT 环描述符**（内核全套 pit_nat 函数/dump 串；modem 写、
+> AP dpmaif 驱动从保留内存环读；条目=bat/ptr+len+IPv4 包摘要，与记录同形；mrdump=后果层、
+> emimpu=MPU 层均不读该格式 ⇒ 用户态无合法消费者；设备闭环待做：dump PIT_NAT 环对照
+> 故障记录，C-351）。官方组件 32B q 事务普查**无指纹规避**：libc 1872 / wpad 642 /
+> busybox 290 / dropbear 122 / dnsmasq 75 / … / ccci_rpcd_com 0，RP102==RP103 逐项全等 ⇒
+> 命中率随活 va_list 使用面走（K9），非二进制密度；"官方原版即安全"被否，32B 拆宽仍是
+> 唯一代码级隐身增强（C-352）。详见 [U-V_RESULT](../review/U-V_RESULT_2026-11-07.md)；
+> claims C-350..C-352。
+
 ## 0. 2026-11-03 收束（本轮最终态）
 
 **本轮结题：写入者未点名；四条核心约束钉死；后果层兜底已上机观察。** 证据：C-186..C-214、

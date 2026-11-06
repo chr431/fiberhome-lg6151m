@@ -716,13 +716,27 @@ T3 的 ISU 窗与 T1 的 IPI 停止是两条尚未上机的可行路径；下一
 5. **C-343（隐身天花板）**：bb_p11 残余 `str q→[sp]` 162、`stp q→[sp]` 9、`stp q→非 sp`
    **363**（va_list 拷贝）；U-H/U-I 证明 32B q 事务是写者指纹 ⇒ 真隐身须拆宽（1→2 指令
    扩展：trampoline 或编译器级改造），非本轮可交付。
-6. **C-344（T1b 关闭）**：MED stop IPI = 停 RX read-agent→必复位 MED（`RESET_TYPE_MD_EXCEP`，
-   core0 halt ≤1s），停止窗 <1s；0xa5a5a5a5 不存在于 medmcu_b.bin（CCCI tail pattern）。
+6. **C-344/C-349（T1b）**：MED stop IPI 主路径 = 停 RX read-agent→必复位 MED
+   （`RESET_TYPE_MD_EXCEP`，core0 halt ≤1s），0xa5a5a5a5 不存在于 medmcu_b.bin（CCCI tail
+   pattern）。**force_stop 分支反而可达**：`needforcestop` @0xffffffc009221a18 的唯一置 1 写者
+   `force_md_stop` 经 `dev_char_close`（open+close /dev/ccci_monitor）触发，或由 EL1 kmod 写 1
+   并在同一回调内发 chan13；`RESET_TYPE_MD_FORCE_STOP` 只 notify、不置 scp_ready=0、不跑
+   scp_reset_flow ⇒ **窗口 >1s 且可任意长**。但停 MED RX = 数据面停摆，λ 与流量耦合不可归因
+   ⇒ 只能作任务级实验，不是干净根修复。
 7. **C-345（T2 关闭）**：BL31 SIP 全表 **58/58 FID**；DRM/DFX 仅崩溃 dump 只读 + 早期启动
    魔术写（SMC 0x506 门控）；唯一引擎邻接服务 0x8200040E 只能改 DFD 崩溃链 SRAM 且受
-   `[0x2c008]==1` 门控、与写者无关；三个 ATF mmap 窗口零代码引用。**无写者关断手柄**。
+   `[0x2c008]==1` 门控、与写者无关；三个 ATF mmap 窗口（0x264e0 表第 19-21 项）零代码引用。
+   **无写者关断手柄**。
+8. **C-348（T4）**：**SBC 实测为关**（2026-11-01 LK 日志 `SBC_EN = 0, SEC_LEVEL: 0`；自建签名
+   镜像被接受 `boot_a cert chain vfy pass`）；现役 tee_b 内嵌 cert1 与 SDK 一致、ROOT/IMAGE
+   私钥在手 ⇒ **BL31 重签技术可行**。但关引擎载荷未知：preloader DRM_DEBUG_CTL（VA 0x2055c0）
+   是常驻前代码、BL31 无此码无 SMC；每次启动清 bits12-14 而运行时本就为 0（厂商关法=no-op）；
+   唯一未清 bit15 只有置位路径、无清位代码；DDRPHY+0x1520 不可读；p24/p37 无回滚。**技术开放、
+   载荷未知、不推荐上机**（盲写 bit15 有 DRAM 校准/变砖风险）。
 
-**对外口径**：**本机根修复无手柄**（T1/T1b/T2/T3 全关；T4 未交付，SBC 状态未定，若 SBC
-开启则不可做）；p13 关闭；p11 封顶于 363 条 32B va_list 拷贝；洪水是可靠 λ 放大器；scanary
-的 per-CPU 隐身是仪器放大器效应，不是真实缓解。下轮：独立 reader 直证放大器、真实多线程
-服务 pin 实验、32B 拆宽 trampoline 工程、T4 SBC 确认。
+**对外口径**：**本机无可用根修复手柄**——T1/T3 关闭；T1b 主路径关闭（force_stop 分支窗口
+>1s 但停数据面、不可归因）；T2 全表关闭；T4 技术前提已具备（SBC 关、BL31 可重签）但**关引擎
+载荷未知**，按目标判不推荐上机，只余 T7（厂商）。p13 关闭；p11 封顶于 363 条 32B va_list
+拷贝；洪水是可靠 λ 放大器；scanary 的 per-CPU 隐身是仪器放大器效应（wb/跨进程 reader/同进程
+跨 CPU reader 均不能复现），pin 不得作为服务缓解。下轮：放大器机制收口（停采样/被动连续检测器）、
+32B 拆宽 trampoline 工程、T4 载荷位定义/DDRPHY 读法、T7 位定义。

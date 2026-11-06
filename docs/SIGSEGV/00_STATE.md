@@ -74,10 +74,12 @@
 （候选：printf 重负载 32B 密度/pthread 栈布局/扫描时序），pin 不可外推（C-346/C-347）；
 真实单线程速率需停顿采样。隐身天花板 =
 > bb_p11 残余 9 条 stp q→[sp] + 363 条 stp q→非 sp（va_list 拷贝），拆宽需 trampoline/编译器级
-> 改造（C-343）。根修复：**T1b 关闭**（stop=停 RX→必复位 MED，<1s 窗；0xa5a5a5a5 不存在于 MED
-> 固件，C-344）、**T2 关闭**（58/58 SMC FID 无写者/DRM/DFX 手柄；DFD 链服务与写者无关且受阶段
-> 门控；三个 ATF mmap 窗口零引用，C-345）；T4/force_stop 子代理两次卡住未交付。详见
-> [U-T_RESULT](../review/U-T_RESULT_2026-11-07.md)；claims C-339..C-345。
+> 改造（C-343）。根修复：**T1b 主路径关闭**（stop=停 RX→必复位 MED；0xa5a5a5a5 不存在于 MED 固件，
+> C-344），**force_stop 分支可达**（needforcestop@0x9221a18 置 1 + chan13 同回调；窗口 >1s
+> 但停数据面、不可归因，C-349）、**T2 关闭**（58/58 SMC FID 无写者/DRM/DFX 手柄；DFD 链服务
+> 与写者无关且受阶段门控；三个 ATF mmap 窗口零引用，C-345）；**T4 技术开放**（SBC_EN=0、
+> BL31 可重签，但关引擎载荷未知——bit15 盲写/DDRPHY+0x1520 不可读/p24/p37 无回滚——不推荐
+> 上机，C-348）。详见 [U-T_RESULT](../review/U-T_RESULT_2026-11-07.md)；claims C-339..C-349。
 
 ## 0. 2026-11-03 收束（本轮最终态）
 

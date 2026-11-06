@@ -49,6 +49,10 @@ case ":$PATH:" in
 *) PATH=/data/gw/sbin:/data/gw/bin:$PATH ;;
 esac
 
+# v2.43 (2026-11-06 U-P, SIGSEGV T5 fix): 持久 boot 标记 —— vendor 日志会冲掉
+#   dmesg ring（实测 26min 后 'RC19: stealth' 行已不可见），24h 验收不能依赖 dmesg。
+#   挂载块后把 epoch/uptime/mount 计数追加到 /data/stealth/boot.log（只追加，日增长
+#   1 行；验收脚本读最后一行判定本次 boot 的三件挂载）。
 # v2.42 (2026-11-06 U-P, SIGSEGV T5 fix): 隐身件启动挂载（三件）。
 #   busybox 换 p6s（v5∩v6 验证子集 58 站点；剔除 v5 误补的三份 va_list 拷贝，
 #   保留错误函数 q2..q7；不碰 awk/printf 引擎以保住 %f）。去掉 ip-full：
@@ -64,7 +68,11 @@ if [ -x /data/stealth/libc_p4.so ] && [ ! -e /data/stealth/DISABLE ]; then
             [ -x "$src" ] || continue
             /bin/busybox grep -q " $dst " /proc/mounts || /bin/busybox mount --bind "$src" "$dst" 2>/dev/null
         done
-        KLOG "stealth: mounts libc=$(/bin/busybox grep -c ' /lib/libc.so ' /proc/mounts) bb=$(/bin/busybox grep -c ' /bin/busybox ' /proc/mounts) wpad=$(/bin/busybox grep -c ' /usr/sbin/wpad ' /proc/mounts)"
+        _lc=$(/bin/busybox grep -c ' /lib/libc.so ' /proc/mounts)
+        _bb=$(/bin/busybox grep -c ' /bin/busybox ' /proc/mounts)
+        _wp=$(/bin/busybox grep -c ' /usr/sbin/wpad ' /proc/mounts)
+        KLOG "stealth: mounts libc=$_lc bb=$_bb wpad=$_wp"
+        echo "$(date +%s) $(cut -d. -f1 /proc/uptime) libc=$_lc bb=$_bb wpad=$_wp" >> /data/stealth/boot.log 2>/dev/null
     else
         KLOG "stealth: self-test FAILED -> skip mounts"
     fi

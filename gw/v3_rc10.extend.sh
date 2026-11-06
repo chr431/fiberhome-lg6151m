@@ -49,18 +49,22 @@ case ":$PATH:" in
 *) PATH=/data/gw/sbin:/data/gw/bin:$PATH ;;
 esac
 
-# v2.41 (2026-11-06 U-O, SIGSEGV T5): 隐身件启动挂载（多件）。
+# v2.42 (2026-11-06 U-P, SIGSEGV T5 fix): 隐身件启动挂载（三件）。
+#   busybox 换 p6s（v5∩v6 验证子集 58 站点；剔除 v5 误补的三份 va_list 拷贝，
+#   保留错误函数 q2..q7；不碰 awk/printf 引擎以保住 %f）。去掉 ip-full：
+#   p5 的两处 stp q0,q0 误补使 ip neigh 周期性 SIGSEGV（已回滚为 stock）。
+#   libc_p4（140 站点）与 wpad_p5（24 站点）经 v6 复核为验证子集，不变。
 #   自检（补丁 libc 作 loader 跑 stock busybox echo）通过且 /data/stealth/DISABLE
 #   缺席时逐件 bind-mount（不存在/不可执行则跳过）；失败只记日志不阻塞启动。
-#   回滚：逐条 umount（/lib/libc.so,/bin/busybox,/usr/libexec/ip-full,/usr/sbin/wpad）。
+#   回滚：逐条 umount（/lib/libc.so,/bin/busybox,/usr/sbin/wpad）。
 if [ -x /data/stealth/libc_p4.so ] && [ ! -e /data/stealth/DISABLE ]; then
     if ST=$(/data/stealth/libc_p4.so /data/stealth/stock/busybox echo st 2>/dev/null) && [ "$ST" = "st" ]; then
-        for pair in             /data/stealth/libc_p4.so:/lib/libc.so             /data/stealth/busybox_dyn_p5:/bin/busybox             /data/stealth/ipfull_p5:/usr/libexec/ip-full             /data/stealth/wpad_p5:/usr/sbin/wpad ; do
+        for pair in             /data/stealth/libc_p4.so:/lib/libc.so             /data/stealth/busybox_dyn_p6s:/bin/busybox             /data/stealth/wpad_p5:/usr/sbin/wpad ; do
             src=${pair%%:*}; dst=${pair#*:}
             [ -x "$src" ] || continue
             /bin/busybox grep -q " $dst " /proc/mounts || /bin/busybox mount --bind "$src" "$dst" 2>/dev/null
         done
-        KLOG "stealth: mounts libc=$(/bin/busybox grep -c ' /lib/libc.so ' /proc/mounts) bb=$(/bin/busybox grep -c ' /bin/busybox ' /proc/mounts) ip=$(/bin/busybox grep -c ' /usr/libexec/ip-full ' /proc/mounts) wpad=$(/bin/busybox grep -c ' /usr/sbin/wpad ' /proc/mounts)"
+        KLOG "stealth: mounts libc=$(/bin/busybox grep -c ' /lib/libc.so ' /proc/mounts) bb=$(/bin/busybox grep -c ' /bin/busybox ' /proc/mounts) wpad=$(/bin/busybox grep -c ' /usr/sbin/wpad ' /proc/mounts)"
     else
         KLOG "stealth: self-test FAILED -> skip mounts"
     fi

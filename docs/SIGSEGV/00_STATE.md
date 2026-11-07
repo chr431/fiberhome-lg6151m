@@ -94,6 +94,16 @@
 > 唯一代码级隐身增强（C-352）。详见 [U-V_RESULT](../review/U-V_RESULT_2026-11-07.md)；
 > claims C-350..C-352。
 
+> **2026-11-07 U-W（PIT_NAT + 32B 拆宽轮）**：PIT_NAT 环 live dump 解码（kmod 直读驱动 VA，
+> 524/5450 非空）条目 = `{hdr,len,bat_off,idx | bat_off2,DRAM_PA}`，**无 IPv4 字段**
+> （全环 c0a809xx 0 命中）⇒ 记录 ≠ PIT_NAT 条目，C-351 第一候选否定（C-353）。32B 拆宽
+> 全量交付：真 STP 站点 **362**（旧掩码误纳 142 条 LDP 是本轮全部假崩溃的根因，正确掩码
+> 0xFFC00000，C-354）；`b tramp`+2×str q+回跳，PT[0] 扩展，md5 7f4f4ee9，功能等价全绿
+> （qemu 10/10、真机 50 applet --help 逐字节、3500 次调用零塌，C-355）。但**效果阴性**：
+> v7 洪水窗内仍崩在历史同族 PC（wan_agg 0x4d5474、cfg_heal pop_arg far=0x1ddf6），与
+> C-329 p9 一致 ⇒ 32B 宽度非捕获键，拆宽不作隐身增强；生产回滚 p11（C-356）。详见
+> [U-W_RESULT](../review/U-W_RESULT_2026-11-07.md)；claims C-353..C-356。
+
 ## 0. 2026-11-03 收束（本轮最终态）
 
 **本轮结题：写入者未点名；四条核心约束钉死；后果层兜底已上机观察。** 证据：C-186..C-214、

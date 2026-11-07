@@ -94,6 +94,20 @@
 > 唯一代码级隐身增强（C-352）。详见 [U-V_RESULT](../review/U-V_RESULT_2026-11-07.md)；
 > claims C-350..C-352。
 
+> **2026-11-07 U-X（根治可能性勘测轮，只读+静态）**：**DRM 簇公开对码钉死语义域**——
+> preloader 的 0x10005030/34 写原语 = MTK 标准 **DDR Reserve Mode/DFD 锁存族**（MT7986/AX6000
+> 公开启动日志 `drm_update_reg` 序列逐字段同形：置 bit15 / 清 +0x34 bit8·9·21 / 清 bits12-14；
+> TF-A mt8188/8189/8195 DFD 驱动同偏移 LATCH_CTL 图 + 同款写 key）⇒ **T4「清 bit15」候选
+> 降级为大概率错靶，T4 维持搁置**（C-357）。**相位门全量表**：全部历史 boot 皆 warm 复位、
+> 断电冷启动数据为零、同型计划重启产出三种相位；重启方式/uptime/ISU/feed/补丁版本全排除
+> （C-358）⇒ 冷启动配对升格为决定性实验（DDR reserve 机制给 warm 态保留以具体载体）。
+> 自然 NE 每-boot：干净 04:00 boot 1–6 NE/h、11-04 boot 156/13.8h 唯一高发（流量未分离，
+> C-359）。**R 路径分级**：R1 相位门工程化（冷启动配对>流量台账>高相位自动重启）首选、
+> R4 后果层代码修复次选、T7 证据包 v2 并行、R0c 时钟门控归档（固件串扫零候选）。
+> 设备零写（快照：boot 1794020769、p11 四挂载、emiisu 0xdecddecd 待核、/data 90%）。
+> 详见 [14_ROOT_CURE_SURVEY.md](14_ROOT_CURE_SURVEY.md) 与
+> [U-X_RESULT](../review/U-X_RESULT_2026-11-07.md)；claims C-357..C-359。
+
 > **2026-11-07 U-W（PIT_NAT + 32B 拆宽轮）**：PIT_NAT 环 live dump 解码（kmod 直读驱动 VA，
 > 524/5450 非空）条目 = `{hdr,len,bat_off,idx | bat_off2,DRAM_PA}`，**无 IPv4 字段**
 > （全环 c0a809xx 0 命中）⇒ 记录 ≠ PIT_NAT 条目，C-351 第一候选否定（C-353）。32B 拆宽

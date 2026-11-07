@@ -110,7 +110,7 @@ gw/bin/tcpok	1.0	manifest	/data/gw/bin/tcpok	连接型活性探测件(avail_watc
 tools/build_tcpok.sh	1.0	tool	-	tcpok 构建(zig cc aarch64-linux-musl 静态)
 gw/src/fhstub.c	1.0	src	gw/bin/fhstub.so	FH符号桩库源码
 gw/defaults.conf	1.10	manifest	/data/gw/defaults.conf	统一配置只读出厂基线(444); v1.9(USB 轮): +USB_ENABLED/USB_ADB/USB_CONSOLE(USB-C 设备模式三开关); 消费方source叠加settings.conf稀疏覆盖; v1.10: +V6LAN(1=启用 LAN IPv6; 0=撤 ULA 停 radvd)
-tools/leak_check.py	2.4	tool	-	v2.4(巡检轮): scan_tree 对 Windows 保留设备名(nul 等 shell 重定向残渣)免疫 — relpath ValueError 曾令门禁整崩(fail-open); v2.3(质量轮): 模式逐条编译校验(非法正则 exit 1 不再零命中放行)/LG_SECRETS_DIR 显式指定而缺失时 fail-closed; 敏感词零命中门禁; v2.2: --history 全量扫提交正文(%B, 原仅扫标题%s可漏检消息体); v2.1: 修复 PAT_PARTS NameError; 历史见git
+tools/leak_check.py	2.5	tool	-	v2.5(U-X轮): scan_history 的 git grep 分批传 rev(全量一次传超 Windows 命令行长度 WinError 206, 2026-11-07 push 实证崩溃拒推; 语义不变); v2.4(巡检轮): scan_tree 对 Windows 保留设备名(nul 等 shell 重定向残渣)免疫 — relpath ValueError 曾令门禁整崩(fail-open); v2.3(质量轮): 模式逐条编译校验(非法正则 exit 1 不再零命中放行)/LG_SECRETS_DIR 显式指定而缺失时 fail-closed; 敏感词零命中门禁; v2.2: --history 全量扫提交正文(%B, 原仅扫标题%s可漏检消息体); v2.1: 修复 PAT_PARTS NameError; 历史见git
 docs/ARCHITECTURE.md	1.2	doc	-	架构+版本总表(本表生成; v1.1: 增GUI术语规范常设指针); v1.2: batch3 版本表刷新
 docs/GUI_TERMINOLOGY.md	1.2	doc	-	GUI文案基准; v1.2: bad_cmd文案更新+sse_busy码; 历史见git
 gw/watchdog.sh	1.53	manifest	/data/gw/watchdog.sh	v1.53(2026-11-03 兜底加固轮): 2s 快路径 +slotguard 消毒速率告警(只读 /tmp/slotguard.alert, 只报跨档, 不重启服务; 生产者阈值 30/min); v1.52: /data 低盘告警挪 2s 快路径 + 阈值环境变量; v1.51: 档分临界/高/警告; v1.50: 2s 子检查; v1.47: fast_watch kick 快车道; 历史见 git

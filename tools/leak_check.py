@@ -96,11 +96,14 @@ def scan_history(hits):
                   sh_out(["git", "log", "-1", "--format=%B", h]), hits)
     if revs:
         # v2.1: 修 v2.0 重构遗留 — PAT_PARTS 未定义(NameError), --history 实际从未跑通过
-        out = sh_out(["git", "grep", "-l", "-i", "-E",
-                      "|".join(PAT_GENERIC + PERSONAL)] + revs)
-        for line in out.splitlines():
-            if line.strip():
-                hits.append("HISTORY: " + line[:200])
+        # v2.5: rev 全量一次传 git grep 超 Windows 命令行长度(WinError 206, 2026-11-07
+        #       push 实证崩溃、fail-closed 拒推) — 分批 100 个 rev, 语义不变。
+        pat = "|".join(PAT_GENERIC + PERSONAL)
+        for i in range(0, len(revs), 100):
+            out = sh_out(["git", "grep", "-l", "-i", "-E", pat] + revs[i:i + 100])
+            for line in out.splitlines():
+                if line.strip():
+                    hits.append("HISTORY: " + line[:200])
 
 
 def main():

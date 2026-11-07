@@ -249,3 +249,11 @@ REPLACEMENT_FEASIBILITY 在档，终极兜底。
 | 本机 LK 串口档案（ddr reserve 行） | `_local/investigations/sigsegv-tools/phase-AB/c2-serial/console-s1-20261101-2303.log` | — |
 | 相位门全量表 | [U-X_RESULT](../review/U-X_RESULT_2026-11-07.md) §2 | — |
 | 公开来源 | openwrt.org/toh/xiaomi/redmi_ax6000（boot log）；gist soxrok2212 03e08ec（raw）；TF-A master `plat/mediatek/drivers/dfd/`（mt8188/mt8189 plat_dfd + dfd.c）；coreboot `src/soc/mediatek/common/dfd.c` | — |
+
+> **进度注记（2026-11-07 U-Y 轮，低风险上机）**：R1 获得首个受控输入（C-360）——同 boot
+> 7 臂 2.2h：基线 λ 慢漂降 12.31→6.33/min（≈2×/2.2h，**无快衰减**，U-A2 流量混杂解释
+> 加强）；洪水放大 ×2.4–2.7 三臂稳定；**真实 WAN ≈23 B/s 全程而基线 12+/min 持续** ⇒
+> λ = 相位分量（boot 级、流量无关）× 活动分量的因子模型首个受控支撑。R1b 检测窗可按
+> 小时计；新增备选臂「等待降档」（若慢漂降在多 boot 复现，高相位或有小时级自愈——
+> 免重启）。emiisu [B4] 解除（ISU 现值=ON，0xdecddecd=使能魔术，C-361）；bit19 逐指令
+> 定案入 C-357 注记。R1a 冷启动配对仍待用户断电配合。

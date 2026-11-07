@@ -108,6 +108,17 @@
 > 详见 [14_ROOT_CURE_SURVEY.md](14_ROOT_CURE_SURVEY.md) 与
 > [U-X_RESULT](../review/U-X_RESULT_2026-11-07.md)；claims C-357..C-359。
 
+> **2026-11-07 U-Y（低风险上机轮：受控 λ(t) 曲线）**：预注册 7 臂 ABAB（同 boot 1794020769、
+> 2.2h、零复位/零 kmod/零服务变更）——基线 λ **12.31→12.71→9.86→6.33/min 慢漂降**
+> （≈2×/2.2h，无快衰减：U-A2 的 5.6×/35min 受控不复现）；洪水放大 **×2.4–2.7 三臂稳定**；
+> **真实 WAN ≈23 B/s 全程而基线 12+/min 持续 ⇒ λ=相位分量(boot 级,流量无关)×活动分量**
+> 因子模型首个受控支撑（C-360）；自然 NE 与仪器 λ 解耦（2.2h 仅 +1 vs 1979 命中）。
+> emiisu 收口：0xdecddecd=使能魔术，**ISU 现 ON**，[B4] 解除（C-361）；bit19 逐指令定案
+> 入 C-357 注记（t4 解码无误，AX6000 bit17 为真实代差）。仪器教训：设备侧采样循环禁掺
+> netfilter/磁盘读（v1 do_wait 挂起）；scanary 日志块缓冲须全量重算。R1 输入：相位 boot 级
+> 稳定 ⇒ R1b 检测窗可小时计；新「慢漂降」若复现 ⇒ 高相位或有小时级自愈备选臂。
+> 详见 [U-Y_RESULT](../review/U-Y_RESULT_2026-11-07.md)；claims C-360/C-361。
+
 > **2026-11-07 U-W（PIT_NAT + 32B 拆宽轮）**：PIT_NAT 环 live dump 解码（kmod 直读驱动 VA，
 > 524/5450 非空）条目 = `{hdr,len,bat_off,idx | bat_off2,DRAM_PA}`，**无 IPv4 字段**
 > （全环 c0a809xx 0 命中）⇒ 记录 ≠ PIT_NAT 条目，C-351 第一候选否定（C-353）。32B 拆宽
